@@ -1,0 +1,43 @@
+# Ignore Python cache and environment
+__pycache__/
+*.pyc
+venv/
+.env
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+
+# Virtual env
+.venv/
+
+# Ignore OS specific files
+.DS_Store
+Thumbs.db
+
+# Generated workdirs / artifacts
+workdir*/
+
+# Ignore data folders (too large for GitHub)
+data/
+
+# Allow a small sample for the README
+!data/sample_output/
+
+# Ignore output directories (generated artifacts)
+output/
+*.jsonl
+
+# Ignore conda environment
+env/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Cache files
+.vision_cache.json

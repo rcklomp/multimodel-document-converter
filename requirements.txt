@@ -1,0 +1,55 @@
+# ============================================================================
+# MULTIMODAL RAG INGESTION ENGINE V2.0 - PINNED DEPENDENCIES
+# ============================================================================
+# ENGINE_USE: Docling v2.66.0 (Native Layout Analysis)
+# CONSTRAINT: NumPy <2.0.0 to avoid ABI incompatibility with torch/transformers
+# ============================================================================
+
+# === CORE COMPATIBILITY (PINNED - NON-NEGOTIABLE) ===
+numpy>=1.24.4,<2.0.0                  # PINNED: Avoids NumPy 2.0 ABI conflict
+transformers>=4.45.0                   # PINNED: Compatible with docling native engines
+
+# === DOCUMENT PROCESSING - DOCLING NATIVE STACK ===
+docling==2.66.0                        # PINNED per .clinerules - Primary structure engine
+docling-core>=2.0.0                    # Core docling utilities
+docling-ibm-models>=3.0.0              # IBM layout models (integrated with docling)
+# NOTE: Standalone surya-ocr REMOVED - using docling's integrated layout analysis
+
+# === OCR FALLBACK (REQ-PDF-03) ===
+pytesseract>=0.3.10                    # Hybrid OCR fallback
+Pillow>=10.0.0,<11.0.0                 # Image processing (pinned for stability)
+pymupdf>=1.24.0                        # PDF rendering fallback
+
+# === EPUB PIPELINE (REQ-EPUB) ===
+ebooklib>=0.18                         # EPUB parsing
+beautifulsoup4>=4.12.0                 # HTML parsing within EPUB
+lxml>=4.9.0                            # XML/HTML parser backend
+
+# === HTML PIPELINE (REQ-HTML) ===
+trafilatura>=1.6.0                     # Main content extraction
+
+# === CHUNKING & EMBEDDINGS (REQ-CHUNK-03) ===
+sentence-transformers>=3.0.0           # DSO implementation (all-MiniLM-L6-v2)
+
+# === IMAGE DEDUPLICATION (REQ-DEDUP-01) ===
+imagehash>=4.3.0                       # Perceptual hashing for duplicate detection
+
+# === VALIDATION & CLI ===
+pydantic>=2.0.0                        # Schema validation
+typer>=0.12.0                          # CLI framework
+rich>=13.0.0                           # CLI output formatting
+tqdm>=4.66.0                           # Progress bars
+
+# === VECTOR DATABASE (Phase 3) ===
+qdrant-client>=1.7.0                   # Qdrant vector store client
+openai>=1.0.0                          # OpenAI embeddings (optional)
+
+# === HYBRID OCR & RENDERING (REQ-SHADOW-FIRST) ===
+easyocr>=1.7.1
+pypdfium2>=4.28.0
+
+# === DEVELOPMENT (optional) ===
+# pytest>=7.4.0
+# pytest-cov>=4.1.0
+# black>=23.0.0
+# mypy>=1.5.0

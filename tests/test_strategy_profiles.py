@@ -1,0 +1,495 @@
+"""
+Strategy Profile Tests - Regression Prevention via Golden Files
+================================================================
+ENGINE_USE: pytest + Golden File comparison
+
+This module implements the "Golden File" test pattern to prevent regression
+when making optimizations. Each document type has a known-good baseline
+output that new code must match.
+
+TEST STRATEGY:
+1. Profile Selection Tests: Verify correct profile is selected for each document type
+2. Parameter Isolation Tests: Ensure digital profiles NEVER get scan hints
+3. Golden File Comparison: Compare output structure against known-good baseline
+
+REGRESSION PREVENTION:
+- Magazine flows must continue to work as before
+- Scan optimizations must NOT affect digital document processing
+- VLM prompts must be profile-appropriate
+
+Author: Claude (Architect)
+Date: 2025-01-03
+"""
+
+import pytest
+from pathlib import Path
+from typing import Dict, Any, Optional
+from unittest.mock import Mock, patch
+
+# Import the strategy profiles
+from mmrag_v2.orchestration.strategy_profiles import (
+    BaseProfile,
+    ProfileType,
+    ProfileParameters,
+    VLMPromptConfig,
+    VLMFreedom,
+    DigitalMagazineProfile,
+    ScannedDegradedProfile,
+    ProfileManager,
+)
+from mmrag_v2.orchestration.document_diagnostic import (
+    DiagnosticReport,
+    PhysicalCheckResult,
+    ConfidenceProfile,
+    DocumentModality,
+    DocumentEra,
+    ContentDomain,
+)
+
+
+# ============================================================================
+# FIXTURES
+# ============================================================================
+
+
+@pytest.fixture
+def digital_magazine_diagnostic() -> DiagnosticReport:
+    """Create a diagnostic report for a digital magazine (Combat Aircraft style)."""
+    return DiagnosticReport(
+        source_file="Combat_Aircraft_Magazine.pdf",
+        physical_check=PhysicalCheckResult(
+            file_size_mb=45.0,
+            total_pages=77,
+            avg_text_per_page=2500.0,  # High text content
+            avg_image_coverage=0.35,
+            is_likely_scan=False,  # NOT A SCAN
+            scan_confidence=0.1,
+            detected_modality=DocumentModality.NATIVE_DIGITAL,
+            reasoning="High text content, clean digital source",
+        ),
+        confidence_profile=ConfidenceProfile(
+            overall_confidence=0.92,  # High confidence
+            classification_confidence=0.95,
+            detected_features=["contains_tables", "image_heavy"],
+            detected_era=DocumentEra.MODERN,
+            detected_domain=ContentDomain.EDITORIAL,
+            warnings=[],
+        ),
+        page_diagnostics=[],
+        recommended_strategy="standard_digital",
+    )
+
+
+@pytest.fixture
+def scanned_firearms_diagnostic() -> DiagnosticReport:
+    """Create a diagnostic report for a scanned document (Firearms manual style)."""
+    return DiagnosticReport(
+        source_file="Firearms_Manual_1970.pdf",
+        physical_check=PhysicalCheckResult(
+            file_size_mb=85.0,
+            total_pages=120,
+            avg_text_per_page=50.0,  # Low text (scan with poor OCR)
+            avg_image_coverage=0.95,  # Full-page scans
+            is_likely_scan=True,  # IS A SCAN
+            scan_confidence=0.92,
+            detected_modality=DocumentModality.SCANNED_DEGRADED,
+            reasoning="Low text + large file + high image coverage = scanned document",
+        ),
+        confidence_profile=ConfidenceProfile(
+            overall_confidence=0.85,
+            classification_confidence=0.88,
+            detected_features=["scanned_document", "ocr_artifacts_present"],
+            detected_era=DocumentEra.VINTAGE,
+            detected_domain=ContentDomain.TECHNICAL,
+            warnings=["OCR quality may be poor - verify extracted text"],
+        ),
+        page_diagnostics=[],
+        recommended_strategy="scan_degraded_high_ocr",
+    )
+
+
+@pytest.fixture
+def low_confidence_diagnostic() -> DiagnosticReport:
+    """Create a diagnostic report with low confidence (should fallback to digital)."""
+    return DiagnosticReport(
+        source_file="Unknown_Document.pdf",
+        physical_check=PhysicalCheckResult(
+            file_size_mb=10.0,
+            total_pages=20,
+            avg_text_per_page=500.0,
+            avg_image_coverage=0.5,
+            is_likely_scan=False,
+            scan_confidence=0.3,
+            detected_modality=DocumentModality.UNKNOWN,
+            reasoning="Uncertain classification",
+        ),
+        confidence_profile=ConfidenceProfile(
+            overall_confidence=0.35,  # LOW confidence
+            classification_confidence=0.4,
+            detected_features=[],
+            detected_era=DocumentEra.UNKNOWN,
+            detected_domain=ContentDomain.UNKNOWN,
+            warnings=["Overall confidence is LOW - manual review recommended"],
+        ),
+        page_diagnostics=[],
+        recommended_strategy="low_confidence_conservative",
+    )
+
+
+# ============================================================================
+# PROFILE SELECTION TESTS
+# ============================================================================
+
+
+class TestProfileSelection:
+    """Test that ProfileManager selects correct profiles based on diagnostics."""
+
+    def test_digital_magazine_gets_digital_profile(
+        self, digital_magazine_diagnostic: DiagnosticReport
+    ):
+        """Digital magazines MUST get DigitalMagazineProfile - NEVER scan profile."""
+        profile = ProfileManager.select_profile(digital_magazine_diagnostic)
+
+        assert isinstance(profile, DigitalMagazineProfile)
+        assert profile.profile_type == ProfileType.DIGITAL_MAGAZINE
+        assert profile.name == "High-Fidelity Digital Magazine"
+
+    def test_scanned_document_gets_scan_profile(
+        self, scanned_firearms_diagnostic: DiagnosticReport
+    ):
+        """Scanned documents MUST get ScannedDegradedProfile."""
+        profile = ProfileManager.select_profile(scanned_firearms_diagnostic)
+
+        assert isinstance(profile, ScannedDegradedProfile)
+        assert profile.profile_type == ProfileType.SCANNED_DEGRADED
+        assert profile.name == "Legacy Scan Analyst"
+
+    def test_low_confidence_falls_back_to_digital(
+        self, low_confidence_diagnostic: DiagnosticReport
+    ):
+        """Low confidence MUST fallback to safe DigitalMagazineProfile."""
+        profile = ProfileManager.select_profile(low_confidence_diagnostic)
+
+        # SAFETY: When in doubt, use digital profile (no scan hints)
+        assert isinstance(profile, DigitalMagazineProfile)
+        assert profile.profile_type == ProfileType.DIGITAL_MAGAZINE
+
+    def test_no_diagnostic_defaults_to_digital(self):
+        """No diagnostics MUST default to DigitalMagazineProfile."""
+        profile = ProfileManager.select_profile(diagnostic_report=None)
+
+        assert isinstance(profile, DigitalMagazineProfile)
+
+    def test_force_profile_overrides_diagnostics(
+        self, digital_magazine_diagnostic: DiagnosticReport
+    ):
+        """Force profile MUST override diagnostic selection."""
+        # Even though diagnostics say digital, force scan profile
+        profile = ProfileManager.select_profile(
+            diagnostic_report=digital_magazine_diagnostic,
+            force_profile=ProfileType.SCANNED_DEGRADED,
+        )
+
+        assert isinstance(profile, ScannedDegradedProfile)
+
+
+# ============================================================================
+# PARAMETER ISOLATION TESTS
+# ============================================================================
+
+
+class TestParameterIsolation:
+    """Test that profile parameters are strictly isolated between document types."""
+
+    def test_digital_profile_never_has_scan_hints(self):
+        """DigitalMagazineProfile MUST NEVER inject scan hints."""
+        profile = DigitalMagazineProfile()
+        params = profile.get_parameters()
+        prompt_config = profile.get_vlm_prompt_config()
+
+        # CRITICAL: No scan hints for digital magazines
+        assert params.inject_scan_hints is False
+        assert params.inject_historical_hints is False
+        assert len(prompt_config.artifact_hints) == 0
+
+    def test_scan_profile_has_scan_hints(self):
+        """ScannedDegradedProfile MUST inject scan hints."""
+        profile = ScannedDegradedProfile()
+        params = profile.get_parameters()
+        prompt_config = profile.get_vlm_prompt_config()
+
+        # REQUIRED: Scan hints for degraded scans
+        assert params.inject_scan_hints is True
+        assert params.inject_historical_hints is True
+        assert len(prompt_config.artifact_hints) > 0
+
+        # Check specific hint content
+        artifact_text = " ".join(prompt_config.artifact_hints).lower()
+        assert "ignore" in artifact_text
+        assert "paper" in artifact_text or "texture" in artifact_text
+
+    def test_digital_uses_strict_vlm_freedom(self):
+        """Digital magazines use STRICT VLM freedom (no interpretation)."""
+        profile = DigitalMagazineProfile()
+        params = profile.get_parameters()
+
+        assert params.vlm_freedom == VLMFreedom.STRICT
+
+    def test_scan_uses_high_vlm_freedom(self):
+        """Scanned documents use HIGH VLM freedom (interpret through artifacts)."""
+        profile = ScannedDegradedProfile()
+        params = profile.get_parameters()
+
+        assert params.vlm_freedom == VLMFreedom.HIGH
+
+    def test_digital_has_higher_min_dimensions(self):
+        """Digital magazines filter small icons/ads with higher min dimensions."""
+        digital = DigitalMagazineProfile()
+        scan = ScannedDegradedProfile()
+
+        digital_params = digital.get_parameters()
+        scan_params = scan.get_parameters()
+
+        # Digital should have higher minimum dimensions
+        assert digital_params.min_image_width >= 100
+        assert digital_params.min_image_height >= 100
+
+        # Scan should have lower minimums to catch degraded content
+        assert scan_params.min_image_width <= 50
+        assert scan_params.min_image_height <= 50
+
+    def test_scan_has_higher_sensitivity(self):
+        """Scanned documents use higher sensitivity for better recall."""
+        digital = DigitalMagazineProfile()
+        scan = ScannedDegradedProfile()
+
+        digital_params = digital.get_parameters()
+        scan_params = scan.get_parameters()
+
+        # Scan needs higher sensitivity
+        assert scan_params.sensitivity > digital_params.sensitivity
+
+    def test_digital_has_higher_confidence_threshold(self):
+        """Digital magazines require higher VLM confidence (less hallucination)."""
+        digital = DigitalMagazineProfile()
+        scan = ScannedDegradedProfile()
+
+        digital_params = digital.get_parameters()
+        scan_params = scan.get_parameters()
+
+        # Digital is more strict
+        assert digital_params.confidence_threshold >= 0.8
+        # Scan allows more interpretation
+        assert scan_params.confidence_threshold <= 0.7
+
+
+# ============================================================================
+# DIAGNOSTIC CONTEXT TESTS
+# ============================================================================
+
+
+class TestDiagnosticContext:
+    """Test that diagnostic context is built correctly for VLM prompts."""
+
+    def test_digital_profile_skips_diagnostic_context(self):
+        """Digital profile should NOT use diagnostic context (prevent over-processing)."""
+        profile = DigitalMagazineProfile()
+
+        assert profile.should_use_diagnostic_context() is False
+
+    def test_scan_profile_uses_diagnostic_context(self):
+        """Scan profile should use full diagnostic context."""
+        profile = ScannedDegradedProfile()
+
+        assert profile.should_use_diagnostic_context() is True
+
+    def test_scan_diagnostic_context_includes_scan_hints(self):
+        """Scan profile diagnostic context must include scan hints."""
+        profile = ScannedDegradedProfile()
+        context = profile.get_diagnostic_context()
+
+        assert context["is_scan"] is True
+        assert len(context["scan_hints"]) > 0
+        assert context["classification"] == "scanned_degraded"
+
+    def test_digital_diagnostic_context_no_scan_hints(self):
+        """Digital profile diagnostic context must NOT include scan hints."""
+        profile = DigitalMagazineProfile()
+        context = profile.get_diagnostic_context()
+
+        assert context["is_scan"] is False
+        assert len(context["scan_hints"]) == 0
+        assert context["classification"] == "digital_magazine"
+
+
+# ============================================================================
+# VLM PROMPT CONFIG TESTS
+# ============================================================================
+
+
+class TestVLMPromptConfig:
+    """Test VLM prompt configuration for each profile."""
+
+    def test_digital_prompt_emphasizes_precision(self):
+        """Digital profile VLM prompt must emphasize precision over interpretation."""
+        profile = DigitalMagazineProfile()
+        config = profile.get_vlm_prompt_config()
+
+        prompt_hints = config.build_diagnostic_hints()
+
+        # Should mention strict/precise description
+        freedom_lower = config.freedom_instruction.lower()
+        assert "strict" in freedom_lower or "only" in freedom_lower
+
+    def test_scan_prompt_allows_interpretation(self):
+        """Scan profile VLM prompt must allow interpretation through artifacts."""
+        profile = ScannedDegradedProfile()
+        config = profile.get_vlm_prompt_config()
+
+        freedom_lower = config.freedom_instruction.lower()
+
+        # Should mention interpretation/inference
+        assert "interpret" in freedom_lower or "may" in freedom_lower
+
+    def test_scan_prompt_mentions_ignore_artifacts(self):
+        """Scan profile must tell VLM to ignore paper artifacts."""
+        profile = ScannedDegradedProfile()
+        config = profile.get_vlm_prompt_config()
+
+        prompt_hints = config.build_diagnostic_hints()
+
+        # Should mention ignoring artifacts
+        assert "IGNORE" in prompt_hints or "ignore" in prompt_hints.lower()
+
+
+# ============================================================================
+# GOLDEN FILE STRUCTURE TESTS
+# ============================================================================
+
+
+class TestGoldenFileStructure:
+    """Test that output structure matches expected golden file format."""
+
+    def test_profile_describe_format(self):
+        """Profile describe() must return consistent format for logging."""
+        digital = DigitalMagazineProfile()
+        scan = ScannedDegradedProfile()
+
+        digital_desc = digital.describe()
+        scan_desc = scan.describe()
+
+        # Both must contain key fields
+        for desc in [digital_desc, scan_desc]:
+            assert "Profile:" in desc
+            assert "Sensitivity:" in desc
+            assert "Min:" in desc
+            assert "VLM Freedom:" in desc
+            assert "Scan Hints:" in desc
+
+    def test_profile_parameters_are_complete(self):
+        """Profile parameters must include all required fields."""
+        digital = DigitalMagazineProfile()
+        scan = ScannedDegradedProfile()
+
+        for profile in [digital, scan]:
+            params = profile.get_parameters()
+
+            # All parameters must be defined
+            assert params.sensitivity is not None
+            assert params.min_image_width is not None
+            assert params.min_image_height is not None
+            assert params.extract_backgrounds is not None
+            assert params.enable_shadow_extraction is not None
+            assert params.vlm_freedom is not None
+            assert params.inject_scan_hints is not None
+            assert params.inject_historical_hints is not None
+            assert params.confidence_threshold is not None
+            assert params.strip_artifacts_from_text is not None
+            assert params.aggressive_deduplication is not None
+
+
+# ============================================================================
+# REGRESSION PREVENTION TESTS
+# ============================================================================
+
+
+class TestRegressionPrevention:
+    """
+    Critical regression tests - these MUST pass for any release.
+
+    These tests encode the "golden" behavior that must not change.
+    """
+
+    def test_magazine_baseline_sensitivity(self):
+        """Magazine sensitivity MUST be 0.5 (proven baseline)."""
+        profile = DigitalMagazineProfile()
+        params = profile.get_parameters()
+
+        # This is the proven value from Combat Aircraft runs
+        assert params.sensitivity == 0.5
+
+    def test_magazine_baseline_min_dimensions(self):
+        """Magazine min dimensions MUST be 100x100 (filter ads/icons)."""
+        profile = DigitalMagazineProfile()
+        params = profile.get_parameters()
+
+        # These values filter out small ads and icons
+        assert params.min_image_width == 100
+        assert params.min_image_height == 100
+
+    def test_scan_baseline_sensitivity(self):
+        """Scan sensitivity MUST be 0.8 (high recall for degraded content)."""
+        profile = ScannedDegradedProfile()
+        params = profile.get_parameters()
+
+        assert params.sensitivity == 0.8
+
+    def test_scan_baseline_min_dimensions(self):
+        """Scan min dimensions MUST be 30x30 (catch degraded content)."""
+        profile = ScannedDegradedProfile()
+        params = profile.get_parameters()
+
+        assert params.min_image_width == 30
+        assert params.min_image_height == 30
+
+    def test_profile_types_are_distinct(self):
+        """Profile types must be distinct - no cross-contamination."""
+        digital = DigitalMagazineProfile()
+        scan = ScannedDegradedProfile()
+
+        # They must have different types
+        assert digital.profile_type != scan.profile_type
+
+        # They must have different scan hint settings
+        assert digital.get_parameters().inject_scan_hints != scan.get_parameters().inject_scan_hints
+
+
+# ============================================================================
+# INTEGRATION SMOKE TESTS
+# ============================================================================
+
+
+class TestIntegrationSmoke:
+    """Quick smoke tests to verify the profile system integrates correctly."""
+
+    def test_profile_manager_available_profiles(self):
+        """ProfileManager must list available profiles."""
+        profiles = ProfileManager.list_available_profiles()
+
+        assert ProfileType.DIGITAL_MAGAZINE in profiles
+        assert ProfileType.SCANNED_DEGRADED in profiles
+
+    def test_get_profile_by_type(self):
+        """ProfileManager must return correct profile by type."""
+        digital = ProfileManager.get_profile_by_type(ProfileType.DIGITAL_MAGAZINE)
+        scan = ProfileManager.get_profile_by_type(ProfileType.SCANNED_DEGRADED)
+
+        assert isinstance(digital, DigitalMagazineProfile)
+        assert isinstance(scan, ScannedDegradedProfile)
+
+    def test_unknown_type_defaults_to_digital(self):
+        """Unknown profile type must default to DigitalMagazineProfile (safe)."""
+        profile = ProfileManager.get_profile_by_type(ProfileType.UNKNOWN)
+
+        # Should fallback to digital for safety
+        assert isinstance(profile, DigitalMagazineProfile)

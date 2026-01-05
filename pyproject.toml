@@ -1,0 +1,87 @@
+[build-system]
+requires = ["setuptools>=69.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multimodal-doc-converter"
+version = "2.0.0"
+description = "High-fidelity ETL pipeline for Multimodal RAG Ingestion - V2.0 Compliant"
+requires-python = ">=3.10,<3.11"
+authors = [
+  { name = "Ronald", email = "ronald@kurp.nl" }
+]
+readme = "README.md"
+license = { text = "MIT" }
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: Python :: 3.10",
+]
+
+dependencies = [
+    # === CORE COMPATIBILITY (The NumPy Shield) ===
+    # Docling en Torch zijn allergisch voor NumPy 2.x. Dit forceert de stabiele 1.x reeks.
+    "numpy>=1.24.4,<2.0.0",               
+    "transformers>=4.45.0",               
+    
+    # === CORE CLI & VALIDATION ===
+    "typer>=0.12.0",
+    "pydantic>=2.0",
+    
+    # === DOCLING ENGINE (De Kern) ===
+    # We installeren Docling met alle toeters en bellen (ocr en models)
+    "docling>=2.66.0",
+    "docling-core>=2.0.0",
+    
+    # === PDF & OCR (The Missing Engine Fix) ===
+    "pymupdf>=1.24.0",                    
+    "pytesseract>=0.3.10",                
+    "easyocr>=1.7.1",                     # CRUCIAAL voor hybrid VLM+OCR route (Browning/Sako detection)
+    "pypdfium2>=4.28.0",                  # Voor hogere DPI rendering (300 DPI voor scans)
+    "Pillow>=10.0.0",
+    
+    # === ENHANCED OCR (Phase 1A - Layout-First) ===
+    "opencv-python>=4.8.0",               # Image preprocessing (deskew, denoise, contrast)
+    "python-doctr[torch]>=0.8.0",         # Layer 3 OCR (transformer-based, for degraded scans)
+    
+    # === WEB & STRUCTURE ===
+    "trafilatura>=1.6.0",                 
+    "beautifulsoup4>=4.12.0",             
+    
+    # === CHUNKING & EMBEDDINGS ===
+    "sentence-transformers>=3.0.0",       
+    "scikit-learn>=1.4.0",                # Voor cosine similarity en clustering
+    
+    # === UI & UX ===
+    "rich>=13.0.0",                       
+    "tqdm>=4.66.0",                       
+    "python-dotenv>=1.0.0",               # Cruciaal voor je API keys straks!
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.5.0",
+]
+
+[project.scripts]
+# Let op: ik heb het pad aangepast naar je nieuwe structuur src/mmrag_v2
+mmrag-v2 = "mmrag_v2.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

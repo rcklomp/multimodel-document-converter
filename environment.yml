@@ -1,0 +1,13 @@
+name: mmrag-v2
+channels:
+  - apple
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - numpy
+  - pip:
+      - torch
+      - torchvision
+      - torchaudio
+      - -e .  # Dit installeert alles uit pyproject.toml

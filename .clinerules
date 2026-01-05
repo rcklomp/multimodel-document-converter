@@ -1,0 +1,28 @@
+# 🚨 EXECUTION LAW: V2.2.1 MM RAG CORPUS CONVERTER
+
+YOU are the Senior Architect. This is an Apple Silicon (M-series) environment. There is ZERO ROOM for error.
+
+## 💻 HARDWARE & ENVIRONMENT COMMANDMENTS
+1. **ARCHITECTURE**: Native ARM64 ONLY. If a process is slow, verify it is NOT running via Rosetta.
+2. **GPU/MPS**: PyTorch MUST use MPS (Metal Performance Shaders). Verification: `torch.backends.mps.is_available()` must be True.
+3. **CONDA**: Use the local environment in `./env`. NEVER create `.venv` or use system Python.
+4. **ACTIVATION**: Always ensure `conda activate ./env` is effective before execution.
+5. **INSTALLATION**: Use `environment.yml` for base dependencies. Use `pip install -e .` for the local package.
+6. **PYTHON**: Version 3.10 ONLY. Avoid 3.11+ specific syntax.
+
+## !! PROJECT REQUIREMENTS
+1. **SRS COMPLIANCE**: All code must meet requirements in `SRS_Multimodal_Ingestion_V2.2.md`.
+2. **PINNING**: `docling==2.66.0`. No exceptions.
+3. **CLI**: The command `mmrag-v2` is the primary entry point (linked to `mmrag_v2.cli:main`).
+4. **SCHEMA**: Every output MUST validate against the `ingestion.jsonl` Pydantic model.
+5. **NO PLACEHOLDERS**: Write full implementations. 'TODO' or '...' equals failure.
+
+## 🔍 PRE-FLIGHT & PROCESSING RULES
+- **LOGGING**: Always log "Using Docling v2.66.0" at start.
+- **INTEGRITY**: Verify SHA256 of any input file before processing.
+- **ASSETS**: Enforce 10px padding on all crops (REQ-MM-01). No full-page PNGs.
+- **DATA**: Test documents are in `data/raw/`. Do NOT move, modify, or delete them.
+
+## 🛠️ TROUBLESHOOTING
+- If library conflicts occur, prioritize `environment.yml` and the Apple-specific channels.
+- If `import torch` takes > 2 seconds, investigate environment corruption immediately.

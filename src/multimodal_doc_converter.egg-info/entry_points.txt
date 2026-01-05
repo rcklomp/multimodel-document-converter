@@ -1,0 +1,2 @@
+[console_scripts]
+mmrag-v2 = mmrag_v2.cli:main
