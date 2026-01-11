@@ -25,9 +25,12 @@ import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import fitz  # PyMuPDF
+
+if TYPE_CHECKING:
+    from .document_diagnostic import DiagnosticReport
 
 logger = logging.getLogger(__name__)
 
@@ -51,12 +54,19 @@ MIN_SAMPLE_PAGES: int = 5
 
 
 class DocumentType(str, Enum):
-    """Document type classification."""
+    """Document type classification.
+
+    V16 FIX (2026-01-10): Added LITERATURE and TECHNICAL types
+    to properly distinguish scanned books from magazines and
+    technical manuals from generic reports.
+    """
 
     MAGAZINE = "magazine"  # High image density, editorial photos
     ACADEMIC = "academic"  # Text-heavy, figures/diagrams
     REPORT = "report"  # Mixed content, charts/tables
     PRESENTATION = "presentation"  # Slide-based, high visual content
+    LITERATURE = "literature"  # V16: Scanned books, novels, fiction (long-form narrative)
+    TECHNICAL = "technical"  # V16: Technical manuals, handbooks, documentation
     UNKNOWN = "unknown"
 
 
@@ -151,16 +161,29 @@ class SmartConfigProvider:
         self.max_sample_pages = max_sample_pages
         logger.info(f"SmartConfigProvider initialized: sample={max_sample_pages} pages")
 
-    def analyze(self, pdf_path: Path | str) -> DocumentProfile:
+    def analyze(
+        self,
+        pdf_path: Path | str,
+        diagnostic_report: Optional["DiagnosticReport"] = None,
+    ) -> DocumentProfile:
         """
         Analyze a PDF document and return its profile.
 
         Args:
             pdf_path: Path to PDF file
+            diagnostic_report: Optional diagnostic report from DocumentDiagnosticEngine
 
         Returns:
             DocumentProfile with document characteristics
         """
+        return self._analyze_internal(pdf_path, diagnostic_report)
+
+    def _analyze_internal(
+        self,
+        pdf_path: Path | str,
+        diagnostic_report: Optional["DiagnosticReport"] = None,
+    ) -> DocumentProfile:
+        """Internal analyze method with diagnostic support."""
         pdf_path = Path(pdf_path).resolve()
 
         if not pdf_path.exists():
@@ -185,7 +208,8 @@ class SmartConfigProvider:
                 page = doc.load_page(page_num)
 
                 # Extract text
-                text = page.get_text()
+                text_result = page.get_text()
+                text = str(text_result) if text_result else ""
                 if text.strip():
                     pages_with_text += 1
                     total_text_length += len(text)
@@ -232,11 +256,13 @@ class SmartConfigProvider:
                 median_width = widths[mid]
                 median_height = heights[mid]
 
-            # Classify document type
+            # Classify document type - NOW WITH DIAGNOSTIC CONTEXT!
             doc_type = self._classify_document(
                 image_density=image_density,
                 avg_text=avg_text,
                 image_count=image_count,
+                total_pages=total_pages,
+                diagnostic_report=diagnostic_report,
             )
 
             profile = DocumentProfile(
@@ -269,38 +295,165 @@ class SmartConfigProvider:
         image_density: float,
         avg_text: float,
         image_count: int,
+        total_pages: int,
+        diagnostic_report: Optional["DiagnosticReport"] = None,
     ) -> DocumentType:
         """
         Classify document based on characteristics.
+
+        ARCHITECTURE: TEXT DENSITY IS KING (BUT SMART FOR SCANS & BOOKS)
+        ==================================================================
+        Academic papers have 3000-5000+ chars/page even with many figures/diagrams.
+        Magazines have 500-1500 chars/page with editorial photos.
+        TEXT DENSITY must override image density for academic detection.
+
+        FIX (2025-01-10): Harry Potter misclassification
+        -------------------------------------------------
+        For scanned books (low native text but high page count + editorial domain),
+        trust diagnostics over text density to avoid "presentation" trap.
 
         Args:
             image_density: Images per page ratio
             avg_text: Average text per page
             image_count: Total images found
+            total_pages: Total number of pages in document
+            diagnostic_report: Optional diagnostic context from DocumentDiagnosticEngine
 
         Returns:
             DocumentType classification
         """
-        # High image density with moderate text = Magazine
-        if image_density >= 0.5 and avg_text > 500:
-            return DocumentType.MAGAZINE
+        # ================================================================
+        # PRIORITY RULE 0: PAGE COUNT BIAS FOR LITERATURE/BOOKS
+        # ================================================================
+        # Documents with > 50 pages are NEVER presentations or magazines.
+        # This catches novels, textbooks, long-form fiction, etc.
+        if total_pages > 50:
+            # For scanned books with low native text, trust domain hints
+            if diagnostic_report:
+                domain = diagnostic_report.confidence_profile.detected_domain.value
+                is_scan = diagnostic_report.physical_check.is_likely_scan
 
-        # Very high image density = Presentation
+                # If it's a scan with "editorial" domain (book/fiction) and many pages
+                # → Force to ACADEMIC (which represents "long-form text")
+                if is_scan and domain == "editorial":
+                    logger.info(
+                        f"[SMART-DETECT] ACADEMIC (LITERATURE): {total_pages} pages + "
+                        f"editorial domain + scan → long-form book/fiction"
+                    )
+                    return DocumentType.ACADEMIC
+
+                # If domain is already academic, keep it
+                if domain == "academic":
+                    logger.info(f"[SMART-DETECT] ACADEMIC: {total_pages} pages + academic domain")
+                    return DocumentType.ACADEMIC
+
+            # Fallback: many pages + reasonable text = academic/report
+            if avg_text > 100:  # Even low OCR text indicates content
+                logger.info(
+                    f"[SMART-DETECT] ACADEMIC (LONG-FORM): {total_pages} pages, "
+                    f"forcing long-form classification (not presentation)"
+                )
+                return DocumentType.ACADEMIC
+
+        # ================================================================
+        # PRIORITY RULE 1: EDITORIAL DOMAIN = NEVER PRESENTATION
+        # ================================================================
+        # If diagnostics say "editorial" (books, magazines, articles),
+        # trust that over image density calculations
+        if diagnostic_report:
+            domain = diagnostic_report.confidence_profile.detected_domain.value
+            is_scan = diagnostic_report.physical_check.is_likely_scan
+
+            if domain == "editorial":
+                # Editorial content with scan = likely magazine or book
+                if is_scan and avg_text < 100:
+                    # Low OCR text but editorial → likely magazine or scanned book
+                    if total_pages > 20:
+                        logger.info(
+                            f"[SMART-DETECT] ACADEMIC (SCANNED BOOK): Editorial domain + "
+                            f"{total_pages} pages + scan"
+                        )
+                        return DocumentType.ACADEMIC
+                    else:
+                        logger.info(f"[SMART-DETECT] MAGAZINE: Editorial domain + scan + few pages")
+                        return DocumentType.MAGAZINE
+                elif not is_scan and image_density > 0.5:
+                    # Digital editorial with images = magazine
+                    logger.info(f"[SMART-DETECT] MAGAZINE: Editorial domain + high image density")
+                    return DocumentType.MAGAZINE
+
+            # If diagnostic says academic, trust it (even if low text due to scan)
+            if domain == "academic" and is_scan:
+                logger.info(
+                    f"[SMART-DETECT] ACADEMIC: Academic domain + scan "
+                    f"(trusting domain over low text density {avg_text:.0f})"
+                )
+                return DocumentType.ACADEMIC
+
+            # V2.6 FIX: If diagnostic says ACADEMIC, trust it for DIGITAL docs too!
+            # This catches academic papers with diagrams/figures that have moderate image density
+            if domain == "academic" and not is_scan:
+                logger.info(
+                    f"[SMART-DETECT] ACADEMIC: Academic domain detected "
+                    f"(text={avg_text:.0f}, density={image_density:.2f})"
+                )
+                return DocumentType.ACADEMIC
+
+        # ================================================================
+        # RULE 1: HIGH TEXT DENSITY = ACADEMIC (overrides all else)
+        # Academic papers: 3500+ chars/page (even with many figures)
+        # This catches: research papers, technical whitepapers, dissertations
+        if avg_text > 3500:
+            logger.info(
+                f"[SMART-DETECT] ACADEMIC: High text density {avg_text:.0f} chars/page "
+                f"(threshold: 3500+, image_density: {image_density:.2f})"
+            )
+            return DocumentType.ACADEMIC
+
+        # RULE 2: MODERATE-HIGH TEXT WITH FIGURES = ACADEMIC
+        # Papers with lots of diagrams still have 2500+ chars/page
+        if avg_text > 2500 and image_density < 0.8:
+            logger.info(
+                f"[SMART-DETECT] ACADEMIC: Moderate text {avg_text:.0f} chars/page "
+                f"with controlled image density {image_density:.2f}"
+            )
+            return DocumentType.ACADEMIC
+
+        # RULE 3: VERY HIGH IMAGE DENSITY = PRESENTATION
+        # Slides have >1 image per page
         if image_density >= 1.0:
+            logger.info(f"[SMART-DETECT] PRESENTATION: Very high image density {image_density:.2f}")
             return DocumentType.PRESENTATION
 
-        # High text, low images = Academic
-        if avg_text > 2000 and image_density < 0.2:
-            return DocumentType.ACADEMIC
+        # RULE 4: HIGH IMAGE DENSITY + LOW TEXT = MAGAZINE
+        # Magazines: 500-1500 chars/page with many editorial photos
+        # NOTE: avg_text < 2500 prevents academic papers from being misclassified
+        if image_density >= 0.5 and avg_text > 500 and avg_text < 2500:
+            logger.info(
+                f"[SMART-DETECT] MAGAZINE: High image density {image_density:.2f} "
+                f"with low-moderate text {avg_text:.0f} chars/page"
+            )
+            return DocumentType.MAGAZINE
 
-        # Moderate everything = Report
-        if image_count > 0:
+        # RULE 5: MODERATE EVERYTHING = REPORT
+        # Business reports: 1500-2500 chars/page with charts/tables
+        if image_count > 0 and avg_text > 1000:
+            logger.info(
+                f"[SMART-DETECT] REPORT: Moderate content "
+                f"({avg_text:.0f} chars/page, {image_count} images)"
+            )
             return DocumentType.REPORT
 
-        # Text-only
+        # RULE 6: TEXT-ONLY = ACADEMIC
+        # Pure text documents (books, essays)
         if avg_text > 500 and image_count == 0:
+            logger.info(f"[SMART-DETECT] ACADEMIC: Text-only document {avg_text:.0f} chars/page")
             return DocumentType.ACADEMIC
 
+        logger.warning(
+            f"[SMART-DETECT] UNKNOWN: Could not classify "
+            f"(text={avg_text:.0f}, density={image_density:.2f}, images={image_count})"
+        )
         return DocumentType.UNKNOWN
 
     def get_quick_stats(self, pdf_path: Path | str) -> Tuple[int, int]:

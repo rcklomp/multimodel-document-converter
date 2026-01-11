@@ -27,12 +27,15 @@ Updated: 2025-12-29 (Vision Enrichment Layer)
 from __future__ import annotations
 
 import hashlib
+import io
 import logging
 import re
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
+import fitz  # PyMuPDF for page rendering (OCR cascade)
+import numpy as np
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import (
     EasyOcrOptions,
@@ -40,6 +43,9 @@ from docling.datamodel.pipeline_options import (
 )
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from PIL import Image
+
+# V3.0.0: Import OCR cascade for scanned text regions
+from .ocr.enhanced_ocr_engine import EnhancedOCREngine, OCRResult, OCRLayer
 
 # Import ExtractionStrategy type for type hints (avoid circular import)
 from typing import TYPE_CHECKING
@@ -52,9 +58,13 @@ from .schema.ingestion_schema import (
     FileType,
     HierarchyMetadata,
     IngestionChunk,
+    SemanticContext,
     create_image_chunk,
     create_table_chunk,
     create_text_chunk,
+    get_ocr_confidence_level,
+    calculate_hierarchy_level,
+    COORD_SCALE,
 )
 from .state.context_state import ContextStateV2, create_context_state, is_valid_heading
 from .state.magazine_section_detector import (
@@ -70,10 +80,6 @@ from .utils.image_hash_registry import (
     ImageHashRegistry,
     create_image_hash_registry,
     DuplicateInfo,
-)
-from .chunking.shadow_content_splitter import (
-    ShadowContentSplitter,
-    create_shadow_splitter,
 )
 from .vision.vision_manager import VisionManager, create_vision_manager
 
@@ -185,6 +191,7 @@ class V2DocumentProcessor:
         vision_provider: str = "none",
         vision_api_key: Optional[str] = None,
         vision_cache_dir: Optional[Path] = None,
+        vision_base_url: Optional[str] = None,
         # Batch processing parameters
         external_vision_manager: Optional["VisionManager"] = None,
         initial_state: Optional[ContextStateV2] = None,
@@ -205,6 +212,7 @@ class V2DocumentProcessor:
             vision_provider: VLM provider ("ollama", "openai", "anthropic", "none")
             vision_api_key: API key for cloud vision providers
             vision_cache_dir: Directory for vision cache (None = use output_dir)
+            vision_base_url: Custom API base URL for OpenAI-compatible APIs (LM Studio)
             external_vision_manager: Pre-configured VisionManager (for batch processing)
             initial_state: Initial ContextStateV2 (for breadcrumb continuity)
             page_offset: Offset to add to page numbers (for batch processing)
@@ -215,9 +223,8 @@ class V2DocumentProcessor:
         # Store extraction strategy for dynamic thresholds
         self._extraction_strategy = extraction_strategy
 
-        # REQ-SHADOW-01: Profile parameters for shadow-first strategy
+        # V3.0.0: Profile parameters for OCR configuration (shadow-first mode REMOVED)
         self._profile_params: Optional["ProfileParameters"] = None
-        self._shadow_first_mode: bool = False  # Enable shadow preference for scanned profiles
 
         # Use strategy's min dimensions if provided, else defaults
         if extraction_strategy:
@@ -264,6 +271,7 @@ class V2DocumentProcessor:
                     provider=vision_provider,
                     api_key=vision_api_key,
                     cache_dir=cache_dir,
+                    base_url=vision_base_url,
                 )
                 logger.info(f"Vision enrichment enabled: {vision_provider}")
             except Exception as e:
@@ -281,15 +289,12 @@ class V2DocumentProcessor:
         # FIX #4: MagazineSectionDetector - Enriched breadcrumbs
         self._section_detector = create_section_detector()
 
-        # FIX #5: ShadowContentSplitter - Intelligent shadow chunking
-        self._shadow_splitter = create_shadow_splitter(enable_splitting=False)
-
         logger.info(
             f"ENGINE_USE: Docling v2.66.0 | V2DocumentProcessor initialized | "
             f"OCR: {ocr_engine if enable_ocr else 'disabled'} | "
             f"Vision: {vision_provider} | "
             f"Max pages: {max_pages if max_pages else 'ALL'} | "
-            f"Enhancements: SpatialPropagator, MagazineSectionDetector, ShadowSplitter"
+            f"Enhancements: SpatialPropagator, MagazineSectionDetector"
         )
 
     def _create_converter(self) -> DocumentConverter:
@@ -466,7 +471,7 @@ class V2DocumentProcessor:
         self,
         element: Any,
         asset_path: str,
-        bbox: Optional[List[float]],
+        bbox: Optional[List[int]],
         page_images: Dict[int, Image.Image],
         page_no: int,
     ) -> Optional[Image.Image]:
@@ -678,22 +683,21 @@ class V2DocumentProcessor:
 
     def set_profile_params(self, profile_params: "ProfileParameters") -> None:
         """
-        REQ-SHADOW-01: Set profile parameters for shadow-first strategy.
+        V3.0.0: Set profile parameters for OCR configuration.
 
-        When profile has enable_ocr_hints=True, we enable Shadow-First mode
-        which prioritizes full-page context over isolated figure crops.
+        Shadow-first mode is REMOVED per ARCHITECTURE.md V3.0.0.
+        Profile params are now used only for OCR hint configuration.
 
         Args:
-            profile_params: Profile parameters from ScannedDegradedProfile
+            profile_params: Profile parameters from profile
         """
         self._profile_params = profile_params
-        self._shadow_first_mode = profile_params.enable_ocr_hints
 
-        if self._shadow_first_mode:
+        if profile_params.enable_ocr_hints:
             logger.info(
-                "[SHADOW-FIRST] Enabled for scanned profile. "
-                "Full-page context will be prioritized over figure crops. "
-                f"OCR hints: enabled, DPI: {profile_params.render_dpi}"
+                f"[OCR-HINTS] Enabled for profile. "
+                f"DPI: {profile_params.render_dpi}, "
+                f"min_confidence: {profile_params.ocr_min_confidence}"
             )
 
     def get_vision_stats(self) -> Dict[str, Any]:
@@ -799,6 +803,11 @@ class V2DocumentProcessor:
                 height = getattr(page, "height", 792.0) or 792.0
                 page_dims[pg_no] = (width, height)
 
+        # V3.0.0: Pending context queue for IMAGE next_text_snippet
+        # IMAGE chunks are held until next TEXT chunk arrives, then their
+        # next_text_snippet is filled with the subsequent text content.
+        pending_image_chunks: List[IngestionChunk] = []
+
         for item_tuple in doc.iterate_items():
             element, _ = item_tuple
 
@@ -814,7 +823,40 @@ class V2DocumentProcessor:
                 page_dims=page_dims,
                 page_offset=self._page_offset,
             ):
-                yield chunk
+                # V3.0.0: Deferred yield for IMAGE chunks (pending context)
+                from .schema.ingestion_schema import Modality
+
+                if chunk.modality == Modality.IMAGE:
+                    # Hold IMAGE chunk until next TEXT arrives
+                    pending_image_chunks.append(chunk)
+                    logger.debug(f"[PENDING-CONTEXT] Holding IMAGE chunk for next_text_snippet")
+                elif chunk.modality == Modality.TEXT:
+                    # Flush all pending IMAGE chunks with this text as next_text_snippet
+                    if pending_image_chunks:
+                        next_snippet = chunk.content[:CONTEXT_SNIPPET_LENGTH]
+                        for pending in pending_image_chunks:
+                            # Update semantic context with next text
+                            if pending.semantic_context is None:
+                                pending.semantic_context = SemanticContext(
+                                    next_text_snippet=next_snippet
+                                )
+                            else:
+                                pending.semantic_context.next_text_snippet = next_snippet
+                            logger.debug(
+                                f"[PENDING-CONTEXT] Filled IMAGE next_text: '{next_snippet[:50]}...'"
+                            )
+                            yield pending
+                        pending_image_chunks.clear()
+                    # Now yield the TEXT chunk
+                    yield chunk
+                else:
+                    # TABLE or other modality - yield directly
+                    yield chunk
+
+        # Flush any remaining pending IMAGE chunks (no following text)
+        for pending in pending_image_chunks:
+            logger.debug(f"[PENDING-CONTEXT] Flushing IMAGE chunk without next_text")
+            yield pending
 
         # Store final state for batch processing (REQ-STATE: breadcrumb continuity)
         self._final_state = state.get_state_copy()
@@ -928,10 +970,25 @@ class V2DocumentProcessor:
                 heading_level = 1
             state.update_on_heading(text.strip(), heading_level)
 
+        # REQ-HIER-03: breadcrumb_path MUST contain at minimum [source_filename, "Page X"]
+        breadcrumbs = state.get_breadcrumb_path()
+        source_name = Path(source_file).stem if source_file else "Document"
+        page_marker = f"Page {page_no}"
+
+        if not breadcrumbs:
+            # No hierarchy detected - use minimum fallback
+            breadcrumbs = [source_name, page_marker]
+        elif len(breadcrumbs) == 1:
+            # Only document name - add page marker
+            breadcrumbs = [breadcrumbs[0], page_marker]
+        elif page_marker not in " ".join(breadcrumbs):
+            # Ensure page marker is present for navigation
+            breadcrumbs = [breadcrumbs[0], page_marker] + breadcrumbs[1:]
+
         hierarchy = HierarchyMetadata(
             parent_heading=state.get_parent_heading(),
-            breadcrumb_path=state.get_breadcrumb_path(),
-            level=state.current_header_level if state.current_header_level > 0 else None,
+            breadcrumb_path=breadcrumbs,
+            level=len(breadcrumbs) if breadcrumbs else None,
         )
 
         label_lower = label.lower()
@@ -1038,6 +1095,13 @@ class V2DocumentProcessor:
                     "ERROR: Description generation failed - [Manual Review Required]"
                 )
 
+            # REQ-COORD-01: bbox is REQUIRED for image modality
+            # Provide fallback full-page bbox if not available
+            image_bbox: List[int] = bbox if bbox is not None else [0, 0, COORD_SCALE, COORD_SCALE]
+
+            # REQ-COORD-02: Get page dimensions for UI overlay support
+            img_page_w, img_page_h = page_dims.get(batch_page_no, (612.0, 792.0))
+
             yield create_image_chunk(
                 doc_id=doc_hash,
                 content=content,
@@ -1045,10 +1109,12 @@ class V2DocumentProcessor:
                 file_type=file_type,
                 page_number=page_no,
                 asset_path=asset_path,
-                bbox=bbox,
+                bbox=image_bbox,
                 hierarchy=hierarchy,
                 prev_text=prev_text,
                 visual_description=visual_description,
+                page_width=int(img_page_w),
+                page_height=int(img_page_h),
             )
 
         elif "table" in label_lower:
@@ -1066,24 +1132,147 @@ class V2DocumentProcessor:
 
             table_content = text if text else f"[Table on page {page_no}]"
 
+            # REQ-COORD-01: bbox is REQUIRED for table modality
+            # Provide fallback full-page bbox if not available
+            table_bbox: List[int] = bbox if bbox is not None else [0, 0, COORD_SCALE, COORD_SCALE]
+
+            # REQ-COORD-02: Get page dimensions for UI overlay support
+            tbl_page_w, tbl_page_h = page_dims.get(batch_page_no, (612.0, 792.0))
+
             yield create_table_chunk(
                 doc_id=doc_hash,
                 content=table_content,
                 source_file=source_file,
                 file_type=file_type,
                 page_number=page_no,
-                bbox=bbox,
+                bbox=table_bbox,
                 hierarchy=hierarchy,
                 asset_path=asset_path,
+                page_width=int(tbl_page_w),
+                page_height=int(tbl_page_h),
             )
 
-        elif text.strip():
-            # REQ-META-02: Filter noise content BEFORE advertisement check
-            if self._is_noise_content(text.strip()):
-                logger.debug(f"[DENOISE] Filtered noise on page {page_no}: '{text.strip()[:50]}'")
+        # ========================================================================
+        # V3.0.0: TEXT ELEMENT PROCESSING WITH OCR CASCADE
+        # ========================================================================
+        # Per DECISION_OCR_CASCADE.md and ARCHITECTURE.md:
+        # - TEXT regions with content → use directly
+        # - TEXT regions with EMPTY content (scanned) → OCR cascade
+        # - "text", "paragraph", "section_header", "list_item" labels are TEXT
+        # ========================================================================
+        is_text_label = (
+            "text" in label_lower
+            or "paragraph" in label_lower
+            or "section" in label_lower
+            or "list" in label_lower
+            or "caption" in label_lower
+            or label_lower == ""  # Default label is text
+        )
+
+        # Handle TEXT elements (with or without content)
+        if is_text_label and not is_image_label and "table" not in label_lower:
+            # Get prev_text for semantic context BEFORE processing
+            prev_text_context = " ".join(text_buffer[-3:]) if text_buffer else None
+            if prev_text_context:
+                prev_text_context = prev_text_context[-CONTEXT_SNIPPET_LENGTH:]
+
+            # ================================================================
+            # V3.0.0 OCR CASCADE: If text is EMPTY, trigger OCR on the region
+            # Per DECISION_OCR_CASCADE.md: Scanned pages produce empty text
+            # ================================================================
+            final_text = text.strip()
+
+            if not final_text and bbox is not None:
+                # TEXT element has NO content but HAS bbox → likely scanned region
+                logger.info(
+                    f"[OCR-CASCADE] Page {page_no}: TEXT element has empty content, "
+                    f"triggering OCR cascade on bbox"
+                )
+                print(
+                    f"    🔬 [OCR] Page {page_no}: Empty TEXT region detected, running OCR...",
+                    flush=True,
+                )
+
+                # Render the region for OCR using PyMuPDF
+                # This requires the original PDF path which we need to get
+                try:
+                    # Initialize OCR engine if not done
+                    if not hasattr(self, "_ocr_engine"):
+                        self._ocr_engine = EnhancedOCREngine(
+                            confidence_threshold=0.7,
+                            enable_tesseract=True,
+                            enable_doctr=True,
+                        )
+
+                    # Get page image for OCR
+                    if batch_page_no in page_images:
+                        page_img = page_images[batch_page_no]
+                        # Convert PIL to numpy for OCR
+                        page_np = np.array(page_img.convert("RGB"))
+
+                        # Denormalize bbox for cropping (0-1000 → pixels)
+                        page_w, page_h = page_dims.get(batch_page_no, (612.0, 792.0))
+                        scale = 2.0  # Docling render scale
+
+                        # bbox is normalized 0-1000, convert to pixels
+                        x0 = int((bbox[0] / COORD_SCALE) * page_w * scale)
+                        y0 = int((bbox[1] / COORD_SCALE) * page_h * scale)
+                        x1 = int((bbox[2] / COORD_SCALE) * page_w * scale)
+                        y1 = int((bbox[3] / COORD_SCALE) * page_h * scale)
+
+                        # Ensure valid crop coordinates
+                        h, w = page_np.shape[:2]
+                        x0 = max(0, min(x0, w - 1))
+                        y0 = max(0, min(y0, h - 1))
+                        x1 = max(x0 + 1, min(x1, w))
+                        y1 = max(y0 + 1, min(y1, h))
+
+                        # Crop region
+                        region_crop = page_np[y0:y1, x0:x1]
+
+                        if region_crop.size > 0:
+                            # Run OCR cascade
+                            ocr_result = self._ocr_engine.process_page(region_crop)
+
+                            if ocr_result.text and len(ocr_result.text.strip()) > 5:
+                                final_text = ocr_result.text.strip()
+                                logger.info(
+                                    f"[OCR-CASCADE] Page {page_no}: OCR extracted "
+                                    f"{len(final_text)} chars via {ocr_result.layer_used.value} "
+                                    f"(confidence={ocr_result.confidence:.2f})"
+                                )
+                                print(
+                                    f"    ✓ [OCR] Extracted {len(final_text)} chars "
+                                    f"({ocr_result.layer_used.value}, conf={ocr_result.confidence:.2f})",
+                                    flush=True,
+                                )
+                            else:
+                                logger.warning(
+                                    f"[OCR-CASCADE] Page {page_no}: OCR returned no usable text"
+                                )
+                                print(
+                                    f"    ⚠️ [OCR] No text extracted from region",
+                                    flush=True,
+                                )
+                    else:
+                        logger.warning(
+                            f"[OCR-CASCADE] Page {page_no}: No page image available for OCR"
+                        )
+                except Exception as ocr_err:
+                    logger.error(f"[OCR-CASCADE] Page {page_no}: OCR failed: {ocr_err}")
+                    print(f"    ❌ [OCR] Error: {ocr_err}", flush=True)
+
+            # Skip if still no text after OCR attempt
+            if not final_text:
+                logger.debug(f"[TEXT] Page {page_no}: Skipping empty text element after OCR")
                 return
 
-            if self._is_advertisement(text.strip()):
+            # REQ-META-02: Filter noise content BEFORE advertisement check
+            if self._is_noise_content(final_text):
+                logger.debug(f"[DENOISE] Filtered noise on page {page_no}: '{final_text[:50]}'")
+                return
+
+            if self._is_advertisement(final_text):
                 logger.debug(f"Filtered advertisement on page {page_no}")
                 return
 
@@ -1093,7 +1282,7 @@ class V2DocumentProcessor:
             # Detect magazine section headers and update breadcrumbs
             is_first_text_on_page = state.current_page != page_no or not text_buffer
             section_result = self._section_detector.analyze(
-                text=text.strip(),
+                text=final_text,
                 page_number=page_no,
                 is_first_on_page=is_first_text_on_page,
             )
@@ -1117,7 +1306,8 @@ class V2DocumentProcessor:
                     level=state.current_header_level if state.current_header_level > 0 else None,
                 )
 
-            text_buffer.append(text.strip())
+            # Update text buffer for semantic context
+            text_buffer.append(final_text)
             if len(text_buffer) > 10:
                 text_buffer.pop(0)
 
@@ -1133,12 +1323,21 @@ class V2DocumentProcessor:
             )
             text_bbox = spatial_result.bbox_normalized if spatial_result.is_valid else None
 
-            text_chunks = self._chunk_text_with_overlap(text.strip())
+            text_chunks = self._chunk_text_with_overlap(final_text)
 
-            for chunk_text in text_chunks:
+            for i, chunk_text in enumerate(text_chunks):
                 if not self._is_noise_content(chunk_text) and not self._is_advertisement(
                     chunk_text
                 ):
+                    # ================================================================
+                    # V3.0.0: SEMANTIC CONTEXT - prev_text_snippet, next_text_snippet
+                    # ================================================================
+                    # prev_text: from text_buffer (text BEFORE this chunk)
+                    # next_text: next chunk in list (if available)
+                    next_text_context = None
+                    if i + 1 < len(text_chunks):
+                        next_text_context = text_chunks[i + 1][:CONTEXT_SNIPPET_LENGTH]
+
                     yield create_text_chunk(
                         doc_id=doc_hash,
                         content=chunk_text,
@@ -1147,6 +1346,8 @@ class V2DocumentProcessor:
                         page_number=page_no,
                         hierarchy=hierarchy,
                         bbox=text_bbox,  # FIX #2: Propagate spatial data
+                        prev_text=prev_text_context,
+                        next_text=next_text_context,
                     )
 
     def process_to_jsonl(
@@ -1168,12 +1369,13 @@ class V2DocumentProcessor:
                 chunk_dict = chunk.model_dump(mode="json")
 
                 # REQ-COORD-01: ASSERTION - Crash if unnormalized coordinates
+                # Per SRS Section 6.2: bbox MUST be integers in range [0, 1000]
                 spatial = chunk_dict.get("metadata", {}).get("spatial")
                 if spatial and spatial.get("bbox"):
                     bbox = spatial["bbox"]
-                    assert all(0 <= c <= 1 for c in bbox), (
-                        f"REQ-COORD-01 VIOLATION: Unnormalized bbox {bbox} in chunk "
-                        f"{chunk_dict['chunk_id'][:16]}. CRASH TO FORCE FIX."
+                    assert all(isinstance(c, int) and 0 <= c <= 1000 for c in bbox), (
+                        f"REQ-COORD-01 VIOLATION: Invalid bbox {bbox} in chunk "
+                        f"{chunk_dict['chunk_id'][:16]}. Must be integers 0-1000."
                     )
 
                 json_line = json.dumps(chunk_dict, ensure_ascii=False)
@@ -1182,6 +1384,69 @@ class V2DocumentProcessor:
 
         logger.info(
             f"ENGINE_USE: Docling v2.66.0 | " f"Written {chunk_count} chunks to {final_output_path}"
+        )
+
+        return str(final_output_path)
+
+    def process_to_jsonl_atomic(
+        self,
+        file_path: str,
+        output_path: Optional[str] = None,
+    ) -> str:
+        """
+        Process document and write to JSONL file with ATOMIC WRITES.
+
+        V3.0.0: Per task requirements - opens in append mode and flushes
+        after each chunk to prevent data loss on connection errors.
+
+        Args:
+            file_path: Path to input document
+            output_path: Optional output path (defaults to output_dir/ingestion.jsonl)
+
+        Returns:
+            Path to output JSONL file
+        """
+        import json
+
+        if output_path is None:
+            final_output_path = self.output_dir / "ingestion.jsonl"
+        else:
+            final_output_path = Path(output_path)
+
+        # Clear file if exists (we're starting fresh)
+        if final_output_path.exists():
+            final_output_path.unlink()
+
+        chunk_count = 0
+
+        # Open in APPEND mode for atomic writes
+        for chunk in self.process_document(file_path):
+            chunk_dict = chunk.model_dump(mode="json")
+
+            # REQ-COORD-01: ASSERTION - Crash if unnormalized coordinates
+            spatial = chunk_dict.get("metadata", {}).get("spatial")
+            if spatial and spatial.get("bbox"):
+                bbox = spatial["bbox"]
+                assert all(isinstance(c, int) and 0 <= c <= 1000 for c in bbox), (
+                    f"REQ-COORD-01 VIOLATION: Invalid bbox {bbox} in chunk "
+                    f"{chunk_dict['chunk_id'][:16]}. Must be integers 0-1000."
+                )
+
+            # ATOMIC WRITE: Open, write, flush, close for each chunk
+            with open(final_output_path, "a", encoding="utf-8") as f:
+                json_line = json.dumps(chunk_dict, ensure_ascii=False)
+                f.write(json_line + "\n")
+                f.flush()  # Force write to disk immediately
+
+            chunk_count += 1
+
+            # Log progress every 10 chunks
+            if chunk_count % 10 == 0:
+                logger.debug(f"[ATOMIC-WRITE] {chunk_count} chunks written to {final_output_path}")
+
+        logger.info(
+            f"ENGINE_USE: Docling v2.66.0 | "
+            f"Written {chunk_count} chunks ATOMICALLY to {final_output_path}"
         )
 
         return str(final_output_path)

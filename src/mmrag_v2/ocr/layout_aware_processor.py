@@ -49,6 +49,7 @@ PILImage.MAX_IMAGE_PIXELS = None
 
 from .enhanced_ocr_engine import EnhancedOCREngine, OCRResult, OCRLayer
 from .image_preprocessor import ImagePreprocessor
+from ..utils.coordinate_normalization import normalize_bbox
 
 logger = logging.getLogger(__name__)
 
@@ -70,18 +71,25 @@ class Region:
 
 @dataclass
 class ProcessedChunk:
-    """Processed chunk ready for ingestion."""
+    """
+    Processed chunk ready for ingestion.
+
+    V3.0.0: Added semantic_context fields per REQ-MM-03.
+    """
 
     chunk_id: str
     modality: str  # "text", "image", "table"
     content: str
-    bbox: List[int]
+    bbox: List[int]  # Normalized 0-1000 per REQ-COORD-01
     page_number: int
     extraction_method: str
     ocr_confidence: Optional[float] = None
     ocr_layer: Optional[str] = None
     visual_description: Optional[str] = None
     asset_ref: Optional[dict] = None
+    # REQ-MM-03: Contextual anchoring with prev/next text snippets
+    prev_text_snippet: Optional[str] = None
+    next_text_snippet: Optional[str] = None
 
 
 class LayoutAwareOCRProcessor:
@@ -133,6 +141,9 @@ class LayoutAwareOCRProcessor:
         # VLM manager for image descriptions (optional)
         self.vlm_manager = vlm_manager
 
+        # V3.0.0: Text buffer for semantic context (REQ-MM-03)
+        self._text_buffer: List[str] = []
+
         logger.info(
             f"[LAYOUT-OCR] Initialized with OCR threshold={ocr_confidence_threshold:.2f}, "
             f"Doctr={'enabled' if enable_doctr else 'disabled'}"
@@ -144,15 +155,19 @@ class LayoutAwareOCRProcessor:
         page_number: int,
         doc_id: str,
         docling_elements: Optional[List] = None,
+        render_dpi: int = 150,
     ) -> List[ProcessedChunk]:
         """
         Process a scanned page through layout-aware OCR pipeline.
+
+        V3.0.0: Added render_dpi parameter for coordinate conversion.
 
         Args:
             page_image: RGB numpy array of full page
             page_number: Page number (1-indexed)
             doc_id: Document identifier hash
             docling_elements: Optional pre-extracted Docling elements
+            render_dpi: DPI used to render the page image (for coordinate conversion)
 
         Returns:
             List of ProcessedChunk objects (TEXT, IMAGE, TABLE)
@@ -163,11 +178,13 @@ class LayoutAwareOCRProcessor:
         if page_image is None or page_image.size == 0:
             raise ValueError("Invalid page_image: empty or None")
 
-        logger.info(f"[LAYOUT-OCR] Processing page {page_number} ({page_image.shape})")
+        logger.info(
+            f"[LAYOUT-OCR] Processing page {page_number} ({page_image.shape}) at {render_dpi} DPI"
+        )
 
         # Step 1: Detect layout regions using Docling
         if docling_elements:
-            regions = self._convert_docling_elements(docling_elements, page_image.shape)
+            regions = self._convert_docling_elements(docling_elements, page_image.shape, render_dpi)
         else:
             regions = self._detect_regions_fallback(page_image, page_number)
 
@@ -181,7 +198,10 @@ class LayoutAwareOCRProcessor:
         )
 
         # Step 2: Process each region based on type
+        # V3.0.0: Track text chunks for semantic context and pending IMAGE chunks
         chunks = []
+        pending_image_chunks: List[ProcessedChunk] = []
+        page_h, page_w = page_image.shape[:2]
 
         for i, region in enumerate(regions):
             try:
@@ -189,35 +209,110 @@ class LayoutAwareOCRProcessor:
 
                 if region.type == "text":
                     chunk = self._process_text_region(page_image, region, page_number, doc_id, i)
+                    if chunk:
+                        # Normalize bbox to 0-1000 scale (REQ-COORD-01)
+                        chunk.bbox = self._normalize_bbox(chunk.bbox, page_w, page_h)
+
+                        # Fill prev_text from buffer
+                        if self._text_buffer:
+                            chunk.prev_text_snippet = " ".join(self._text_buffer[-3:])[-300:]
+
+                        # Flush pending IMAGE chunks with this text as next_text
+                        for pending in pending_image_chunks:
+                            pending.next_text_snippet = chunk.content[:300]
+                            chunks.append(pending)
+                        pending_image_chunks.clear()
+
+                        # Add to output and update buffer
+                        chunks.append(chunk)
+                        self._text_buffer.append(chunk.content)
+                        if len(self._text_buffer) > 10:
+                            self._text_buffer.pop(0)
+
                 elif region.type in ("image", "picture"):
                     chunk = self._process_image_region(page_image, region, page_number, doc_id, i)
+                    if chunk:
+                        # Normalize bbox to 0-1000 scale (REQ-COORD-01)
+                        chunk.bbox = self._normalize_bbox(chunk.bbox, page_w, page_h)
+
+                        # Fill prev_text from buffer
+                        if self._text_buffer:
+                            chunk.prev_text_snippet = " ".join(self._text_buffer[-3:])[-300:]
+
+                        # Hold IMAGE chunk until next TEXT arrives (pending context queue)
+                        pending_image_chunks.append(chunk)
+                        logger.debug(f"[PENDING-CONTEXT] Holding IMAGE chunk for next_text_snippet")
+
                 elif region.type == "table":
                     chunk = self._process_table_region(page_image, region, page_number, doc_id, i)
+                    if chunk:
+                        # Normalize bbox to 0-1000 scale (REQ-COORD-01)
+                        chunk.bbox = self._normalize_bbox(chunk.bbox, page_w, page_h)
+                        chunks.append(chunk)
                 else:
                     logger.warning(f"[LAYOUT-OCR] Unknown region type: {region.type}")
                     continue
-
-                if chunk:
-                    chunks.append(chunk)
 
             except Exception as e:
                 logger.error(f"[LAYOUT-OCR] Failed to process {region.type} region {i}: {e}")
                 continue
 
+        # Flush remaining pending IMAGE chunks (no following text)
+        for pending in pending_image_chunks:
+            logger.debug(f"[PENDING-CONTEXT] Flushing IMAGE chunk without next_text")
+            chunks.append(pending)
+
         logger.info(f"[LAYOUT-OCR] Page {page_number}: Generated {len(chunks)} chunks")
         return chunks
+
+    def _normalize_bbox(
+        self,
+        bbox_pixels: List[int],
+        page_width_px: int,
+        page_height_px: int,
+    ) -> List[int]:
+        """
+        Normalize pixel bbox to 0-1000 integer scale per REQ-COORD-01.
+
+        Args:
+            bbox_pixels: [x_min, y_min, x_max, y_max] in pixels
+            page_width_px: Page width in pixels
+            page_height_px: Page height in pixels
+
+        Returns:
+            Normalized [x_min, y_min, x_max, y_max] in 0-1000 range
+        """
+        if page_width_px == 0 or page_height_px == 0:
+            return [0, 0, 1000, 1000]
+
+        x_min = int((bbox_pixels[0] / page_width_px) * 1000)
+        y_min = int((bbox_pixels[1] / page_height_px) * 1000)
+        x_max = int((bbox_pixels[2] / page_width_px) * 1000)
+        y_max = int((bbox_pixels[3] / page_height_px) * 1000)
+
+        # Clamp to 0-1000 range
+        x_min = max(0, min(x_min, 1000))
+        y_min = max(0, min(y_min, 1000))
+        x_max = max(0, min(x_max, 1000))
+        y_max = max(0, min(y_max, 1000))
+
+        return [x_min, y_min, x_max, y_max]
 
     def _convert_docling_elements(
         self,
         elements: List,
         page_shape: Tuple[int, int, int],
+        render_dpi: int = 150,
     ) -> List[Region]:
         """
         Convert Docling document elements to Region objects.
 
+        V3.0.0: Added render_dpi parameter for coordinate conversion.
+
         Args:
             elements: List of Docling elements for this page
             page_shape: (height, width, channels) of page image
+            render_dpi: DPI used to render the page image (default 150)
 
         Returns:
             List of Region objects
@@ -248,29 +343,59 @@ class LayoutAwareOCRProcessor:
                 }
                 region_type = type_map.get(label.lower(), "text")
 
-                # Get bounding box
+                # Get bounding box from Docling
+                # Docling provides coordinates in PDF points (72 DPI) with BOTTOM-LEFT origin
+                # We must scale AND flip Y-axis to match rendered image (TOP-LEFT origin)
                 bbox = [0, 0, page_width, page_height]  # Default to full page
                 if hasattr(elem, "prov") and elem.prov:
                     prov = elem.prov[0] if isinstance(elem.prov, list) else elem.prov
                     if hasattr(prov, "bbox") and prov.bbox:
                         bbox_obj = prov.bbox
                         if hasattr(bbox_obj, "l"):
-                            # Convert normalized coords to pixels
-                            bbox = [
-                                int(bbox_obj.l * page_width),
-                                int(bbox_obj.t * page_height),
-                                int(bbox_obj.r * page_width),
-                                int(bbox_obj.b * page_height),
-                            ]
+                            # CRITICAL FIX: Docling bbox uses PDF coordinate system
+                            # 1. Scale from PDF points (72 DPI) to rendered pixels
+                            # 2. Flip Y-axis: PDF origin is BOTTOM-LEFT, numpy is TOP-LEFT
+                            scale_factor = render_dpi / 72.0
+
+                            # Get PDF page height to calculate Y-flip
+                            # PDF height in points = page_height / scale_factor
+                            pdf_height = page_height / scale_factor
+
+                            # Scale and flip Y coordinates
+                            # X coords are simple: just scale
+                            x_left = int(bbox_obj.l * scale_factor)
+                            x_right = int(bbox_obj.r * scale_factor)
+
+                            # Y coords need flip: numpy_y = pdf_height - pdf_y
+                            # In PDF: .t (top) has HIGHER y-value than .b (bottom)
+                            # In numpy: top has LOWER y-value than bottom
+                            # Therefore: numpy_top comes from PDF .t, numpy_bottom from PDF .b
+                            y_top = int((pdf_height - bbox_obj.t) * scale_factor)
+                            y_bottom = int((pdf_height - bbox_obj.b) * scale_factor)
+
+                            # Safety check: ensure valid bbox
+                            if y_bottom <= y_top:
+                                logger.warning(
+                                    f"[BBOX-ERROR] Invalid Y coords after flip: "
+                                    f"PDF t={bbox_obj.t:.1f} b={bbox_obj.b:.1f} → "
+                                    f"numpy top={y_top} bottom={y_bottom}"
+                                )
+                                # Skip this element
+                                continue
+
+                            bbox = [x_left, y_top, x_right, y_bottom]
 
                 # Get text if available
                 text = str(getattr(elem, "text", "")) if hasattr(elem, "text") else None
+
+                # Calculate real confidence based on extracted text quality
+                confidence = self._calculate_text_confidence(text, region_type)
 
                 regions.append(
                     Region(
                         type=region_type,
                         bbox=bbox,
-                        confidence=0.9,  # Docling doesn't provide confidence per element
+                        confidence=confidence,
                         text=text,
                     )
                 )
@@ -564,8 +689,8 @@ class LayoutAwareOCRProcessor:
         """
         Process a table region.
 
-        For now, treat tables as text regions and run OCR.
-        Future: Use specialized table structure detection.
+        CRITICAL FIX: QA-CHECK-05 requires tables to have asset_ref.
+        This method now saves the table crop to disk and includes asset_ref.
 
         Args:
             page_image: Full page image
@@ -575,9 +700,9 @@ class LayoutAwareOCRProcessor:
             region_idx: Region index on page
 
         Returns:
-            ProcessedChunk with modality="table"
+            ProcessedChunk with modality="table" including asset_ref
         """
-        # Crop table region with padding
+        # Crop table region with padding (REQ-MM-01: 10px padding)
         x1, y1, x2, y2 = region.bbox
         h, w = page_image.shape[:2]
 
@@ -593,7 +718,20 @@ class LayoutAwareOCRProcessor:
             logger.warning(f"[LAYOUT-OCR] Empty table crop at {region.bbox}")
             return None
 
-        # Run OCR on table
+        # CRITICAL FIX: Save table asset to disk (QA-CHECK-05 compliance)
+        # REQ-MM-02: Asset naming [DocHash]_[Page]_[Type]_[Index].png
+        asset_filename = f"{doc_id}_{page_number:03d}_table_{region_idx:02d}.png"
+        asset_path = self.output_dir / asset_filename
+
+        # Convert RGB to BGR for cv2.imwrite
+        try:
+            cv2.imwrite(str(asset_path), cv2.cvtColor(table_crop, cv2.COLOR_RGB2BGR))
+            logger.debug(f"[LAYOUT-OCR] Saved table asset: {asset_filename}")
+        except Exception as e:
+            logger.error(f"[LAYOUT-OCR] Failed to save table asset {asset_filename}: {e}")
+            # Continue without asset_ref - validation will catch this
+
+        # Run OCR on table to extract text content
         ocr_result = self.ocr_engine.process_page(table_crop)
 
         # Generate chunk ID
@@ -601,9 +739,11 @@ class LayoutAwareOCRProcessor:
 
         logger.debug(
             f"[LAYOUT-OCR] Table region {region_idx}: "
-            f"{ocr_result.layer_used.value} (conf={ocr_result.confidence:.2f})"
+            f"{ocr_result.layer_used.value} (conf={ocr_result.confidence:.2f}), "
+            f"saved to {asset_filename}"
         )
 
+        # Return chunk with asset_ref (QA-CHECK-05 requirement)
         return ProcessedChunk(
             chunk_id=chunk_id,
             modality="table",
@@ -613,7 +753,95 @@ class LayoutAwareOCRProcessor:
             extraction_method="layout_aware_ocr",
             ocr_confidence=ocr_result.confidence,
             ocr_layer=ocr_result.layer_used.value,
+            asset_ref={
+                "file_path": f"assets/{asset_filename}",
+                "mime_type": "image/png",
+                "width_px": table_crop.shape[1],
+                "height_px": table_crop.shape[0],
+            },
         )
+
+    def _calculate_text_confidence(self, text: Optional[str], region_type: str) -> float:
+        """
+        Calculate confidence score based on extracted text quality.
+
+        This heuristic prevents the hardcoded 0.9 bypass and ensures
+        the OCR cascade is properly triggered for low-quality extractions.
+
+        Args:
+            text: Extracted text from Docling
+            region_type: Type of region (text, image, table)
+
+        Returns:
+            Confidence score 0.0-1.0
+        """
+        # IMAGE regions get standard confidence (no text expected)
+        if region_type in ("image", "picture"):
+            return 0.85
+
+        # Empty or None text = very low confidence (trigger OCR)
+        if not text or len(text.strip()) == 0:
+            return 0.1  # Force OCR cascade
+
+        text_clean = text.strip()
+        text_len = len(text_clean)
+
+        # Very short text (< 5 chars) = suspicious, likely noise
+        if text_len < 5:
+            return 0.3
+
+        # Check for garbage characters (common in bad OCR)
+        garbage_chars = sum(1 for c in text if c in "@#$%^&*()_+=[]{}|\\<>~`")
+        garbage_ratio = garbage_chars / text_len if text_len > 0 else 1.0
+
+        if garbage_ratio > 0.3:  # >30% garbage = bad extraction
+            return 0.2
+        elif garbage_ratio > 0.15:  # >15% garbage = mediocre
+            return 0.5
+
+        # Check for excessive whitespace (indicates layout issues)
+        space_count = text.count(" ") + text.count("\n") + text.count("\t")
+        space_ratio = space_count / text_len if text_len > 0 else 1.0
+
+        if space_ratio > 0.5:  # >50% whitespace = suspicious
+            return 0.6
+
+        # Check alphanumeric ratio (real text should have letters/numbers)
+        alphanumeric = sum(1 for c in text if c.isalnum())
+        alpha_ratio = alphanumeric / text_len if text_len > 0 else 0.0
+
+        if alpha_ratio < 0.3:  # <30% alphanumeric = likely garbage
+            return 0.4
+        elif alpha_ratio < 0.5:  # <50% alphanumeric = mediocre
+            return 0.6
+
+        # Check for repeated characters (OCR artifacts)
+        max_repeat = 1
+        current_repeat = 1
+        prev_char = None
+        for c in text:
+            if c == prev_char:
+                current_repeat += 1
+                max_repeat = max(max_repeat, current_repeat)
+            else:
+                current_repeat = 1
+            prev_char = c
+
+        if max_repeat > 10:  # >10 repeated chars = OCR failure
+            return 0.3
+        elif max_repeat > 5:  # >5 repeated chars = suspicious
+            return 0.6
+
+        # Text length based scoring
+        # Very long text (>500 chars) with good quality = high confidence
+        if text_len > 500:
+            return 0.95
+        elif text_len > 200:
+            return 0.85
+        elif text_len > 50:
+            return 0.75
+        else:
+            return 0.65  # Short but valid text
 
     def _generate_chunk_id(
         self,

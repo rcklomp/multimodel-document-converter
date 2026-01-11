@@ -95,6 +95,7 @@ class OCREngine(str, Enum):
 
     TESSERACT = "tesseract"
     EASYOCR = "easyocr"
+    DOCTR = "doctr"
 
 
 class OCRMode(str, Enum):
@@ -208,7 +209,7 @@ def process_document(
         help="Pages per batch for large PDFs (0=disable batching)",
     ),
     vlm_timeout: int = typer.Option(
-        90,
+        180,  # Increased for large vision models like llama3.2-vision (10.7B)
         "--vlm-timeout",
         help="VLM read timeout in seconds (default: 90)",
     ),
@@ -459,16 +460,25 @@ def process_document(
             console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
             console.print()
 
+            # Step 1 (continued): Create extraction strategy
+            # Step 1: Analyze document to determine SmartConfig profile (for image stats)
+            # NOW WITH DIAGNOSTIC CONTEXT to prevent misclassification (Harry Potter fix)
+            console.print("[dim]🔍 Analyzing document profile...[/dim]")
+            analyzer = SmartConfigProvider()
+            smart_profile = analyzer.analyze(input_file, diagnostic_report=diagnostic_report)
+
             # ================================================================
-            # AUTO-PILOT: Select Strategy Profile based on diagnostics
+            # AUTO-PILOT V2.0: Multi-Dimensional Profile Selection
             # ================================================================
-            # This uses POLYMORPHISM instead of if/else chains
-            # Digital magazines → DigitalMagazineProfile (no scan hints)
-            # Scanned documents → ScannedDegradedProfile (with scan hints)
-            console.print("[dim]🎯 Selecting strategy profile...[/dim]")
+            # This uses the new ProfileClassifier for intelligent feature-based
+            # selection instead of hardcoded if/else chains
+            console.print(
+                "[dim]🎯 Selecting strategy profile (multi-dimensional classifier)...[/dim]"
+            )
             selected_profile = ProfileManager.select_profile(
                 diagnostic_report=diagnostic_report,
-                force_profile=None,  # Let diagnostics decide
+                force_profile=None,  # Let classifier decide
+                doc_profile=smart_profile,  # NEW: Pass for multi-dimensional classification
             )
             profile_params = selected_profile.get_parameters()
 
@@ -490,11 +500,6 @@ def process_document(
             console.print("[bold magenta]━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold magenta]")
             console.print()
 
-            # Step 1: Analyze document to determine SmartConfig profile (for image stats)
-            console.print("[dim]🔍 Analyzing document profile...[/dim]")
-            analyzer = SmartConfigProvider()
-            smart_profile = analyzer.analyze(input_file)
-
             # Step 2: Create extraction strategy - OVERRIDE sensitivity from profile
             # The profile parameters take precedence over CLI --sensitivity
             # This ensures digital magazines NEVER get scan settings
@@ -511,12 +516,13 @@ def process_document(
             else:
                 console.print(f"[dim]Using profile sensitivity: {effective_sensitivity}[/dim]")
 
-            extraction_strategy = orchestrator.create_strategy(smart_profile, effective_sensitivity)
-
-            # Override strategy parameters from profile for strict separation
-            extraction_strategy.min_image_width = profile_params.min_image_width
-            extraction_strategy.min_image_height = profile_params.min_image_height
-            extraction_strategy.enable_shadow_extraction = profile_params.enable_shadow_extraction
+            # Pass profile_params directly to orchestrator (no manual override needed)
+            extraction_strategy = orchestrator.create_strategy(
+                smart_profile,
+                effective_sensitivity,
+                profile_params=profile_params,
+                profile_type=selected_profile.profile_type.value,  # V2.2 FIX: Pass profile_type
+            )
 
             # GEMINI AUDIT FIX: Adjust strategy based on diagnostic results
             if diagnostic_report.should_force_scan_mode():

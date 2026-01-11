@@ -48,8 +48,8 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 MAX_DESCRIPTION_CHARS: int = 400
-# FIX: Increased timeout for 300 DPI shadow scans (2550x3300px images)
-DEFAULT_TIMEOUT: int = 180  # Seconds - was 90, increased for large scans
+# FIX: Increased timeout for large vision models and high-DPI scans
+DEFAULT_TIMEOUT: int = 180  # Seconds - increased for llama3.2-vision (10.7B) and 300 DPI scans
 DEFAULT_OPENAI_MODEL: str = "gpt-4o-mini"
 DEFAULT_ANTHROPIC_MODEL: str = "claude-3-haiku-20240307"
 # Ollama max tokens - prevents truncation
@@ -476,6 +476,7 @@ class OpenAIProvider(VisionProvider):
     OpenAI GPT-4 Vision provider.
 
     Uses gpt-4o-mini or gpt-4o for image description.
+    Supports custom base_url for LM Studio / Local API compatibility.
     """
 
     def __init__(
@@ -483,19 +484,32 @@ class OpenAIProvider(VisionProvider):
         api_key: str,
         model: str = DEFAULT_OPENAI_MODEL,
         timeout: int = DEFAULT_TIMEOUT,
+        base_url: Optional[str] = None,
     ) -> None:
-        """Initialize OpenAI provider."""
+        """Initialize OpenAI provider.
+
+        Args:
+            api_key: OpenAI API key (or dummy key for local APIs)
+            model: Model name (default: gpt-4o-mini)
+            timeout: Request timeout in seconds
+            base_url: Custom API base URL (e.g., http://192.168.10.11:1234/v1 for LM Studio)
+        """
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
-        logger.info(f"OpenAIProvider: model={model}")
+        self.base_url = base_url
+
+        if base_url:
+            logger.info(f"OpenAIProvider: model={model}, base_url={base_url}")
+        else:
+            logger.info(f"OpenAIProvider: model={model}")
 
     def describe_image(
         self,
         image: Image.Image,
         context: str,
     ) -> str:
-        """Generate description using OpenAI."""
+        """Generate description using OpenAI or OpenAI-compatible API (LM Studio, etc.)."""
         import requests
 
         # Convert image to base64
@@ -530,9 +544,16 @@ class OpenAIProvider(VisionProvider):
             "max_tokens": 200,
         }
 
+        # Use custom base_url if provided, otherwise default to OpenAI
+        api_url = (
+            f"{self.base_url.rstrip('/')}/chat/completions"
+            if self.base_url
+            else "https://api.openai.com/v1/chat/completions"
+        )
+
         try:
             response = requests.post(
-                "https://api.openai.com/v1/chat/completions",
+                api_url,
                 headers=headers,
                 json=payload,
                 timeout=self.timeout,
@@ -542,7 +563,7 @@ class OpenAIProvider(VisionProvider):
             description = result["choices"][0]["message"]["content"].strip()
             return description[:MAX_DESCRIPTION_CHARS]
         except Exception as e:
-            logger.error(f"OpenAI request failed: {e}")
+            logger.error(f"OpenAI request failed (url={api_url}): {e}")
             raise
 
 
@@ -1893,6 +1914,7 @@ def create_vision_manager(
     cache_dir: Optional[Path] = None,
     model: Optional[str] = None,
     timeout: int = DEFAULT_TIMEOUT,
+    base_url: Optional[str] = None,
 ) -> VisionManager:
     """
     Factory function to create a VisionManager.
@@ -1903,13 +1925,30 @@ def create_vision_manager(
         cache_dir: Directory for caching
         model: Model name (optional for Ollama - auto-detects if not specified)
         timeout: Request timeout in seconds
+        base_url: Custom API base URL for OpenAI-compatible APIs (e.g., LM Studio).
+                  Can also be set via OPENAI_BASE_URL environment variable.
 
     Returns:
         Configured VisionManager instance
 
     Raises:
         ValueError: If provider is unsupported or API key missing for cloud providers
+
+    Example:
+        # Use with LM Studio on a remote machine:
+        manager = create_vision_manager(
+            provider="openai",
+            api_key="lm-studio",  # LM Studio accepts any non-empty key
+            model="your-local-model",
+            base_url="http://192.168.10.11:1234/v1"
+        )
+
+        # Or set OPENAI_BASE_URL environment variable and call normally:
+        # export OPENAI_BASE_URL="http://192.168.10.11:1234/v1"
+        manager = create_vision_manager(provider="openai", api_key="lm-studio")
     """
+    import os
+
     provider_lower = provider.lower()
 
     if provider_lower == "ollama":
@@ -1922,10 +1961,21 @@ def create_vision_manager(
     elif provider_lower == "openai":
         if not api_key:
             raise ValueError("OpenAI provider requires API key")
+
+        # Resolve base_url: prefer explicit parameter, fallback to env var
+        effective_base_url = base_url or os.getenv("OPENAI_BASE_URL")
+
+        if effective_base_url:
+            logger.info(
+                f"[OPENAI-CONFIG] Using custom base_url: {effective_base_url} "
+                f"(source: {'parameter' if base_url else 'OPENAI_BASE_URL env'})"
+            )
+
         vision_provider = OpenAIProvider(
             api_key=api_key,
             model=model or DEFAULT_OPENAI_MODEL,
             timeout=timeout,
+            base_url=effective_base_url,
         )
 
     elif provider_lower in ("anthropic", "haiku"):

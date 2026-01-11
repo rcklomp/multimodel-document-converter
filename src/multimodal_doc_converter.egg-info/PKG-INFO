@@ -253,6 +253,9 @@ mmrag-v2 process [OPTIONS] INPUT_FILE
 |--------|---------|-------------|
 | `--enable-ocr` | `False` | Enable OCR for scanned pages |
 | `--ocr-engine` | `easyocr` | Engine: `tesseract` or `easyocr` |
+| `--ocr-mode` | `legacy` | OCR mode: `legacy` (shadow extraction) or `layout-aware` (3-layer cascade) |
+| `--ocr-confidence-threshold` | `0.7` | Minimum OCR confidence for layout-aware mode (0.0-1.0) |
+| `--enable-doctr/--no-doctr` | `True` | Enable Doctr Layer 3 for layout-aware OCR (slower but more accurate) |
 
 ### Examples
 
@@ -807,6 +810,186 @@ class TokenValidator:
         overlap_ratio: float = 0.15,
     ) -> TokenValidationResult:
         """Validate chunk tokens match source tokens."""
+```
+
+---
+
+## 🔬 Layout-Aware OCR (Phase 1B)
+
+### Overview
+
+For scanned documents, the standard pipeline produces VLM summaries instead of verbatim text. The **Layout-Aware OCR** module solves this by using a 3-layer confidence-based cascade:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              LAYOUT-AWARE OCR PIPELINE                       │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  Layer 1: Docling (existing)                                │
+│  • Fastest route (10-20s per page)                          │
+│  • Confidence threshold: >0.7 = accept                      │
+│           │                                                  │
+│           │ IF confidence < 0.7                             │
+│           ▼                                                  │
+│  Layer 2: Tesseract 5.x + Preprocessing                     │
+│  • Image enhancement (deskew, denoise, contrast)            │
+│  • Confidence threshold: >0.7 = accept                      │
+│           │                                                  │
+│           │ IF confidence still < 0.7                       │
+│           ▼                                                  │
+│  Layer 3: Doctr (transformer-based)                         │
+│  • State-of-the-art accuracy (db_resnet50 + CRNN)          │
+│  • Best for degraded vintage scans                          │
+│  • FINAL PASS - accept all results                          │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### When to Use
+
+| Document Type | Recommended Mode | Why |
+|---------------|-----------------|-----|
+| Digital PDF | `--ocr-mode legacy` | Docling handles native text perfectly |
+| Modern scan (clean) | `--ocr-mode legacy` | Tesseract within Docling is sufficient |
+| Vintage scan (1900s-1950s) | `--ocr-mode layout-aware` | Requires Doctr for degraded text |
+| Mixed content | `--ocr-mode layout-aware` | Separates TEXT from IMAGE regions cleanly |
+
+### Usage Examples
+
+```bash
+# Vintage firearms catalog with layout-aware OCR
+mmrag-v2 process vintage_catalog.pdf \
+  --ocr-mode layout-aware \
+  --ocr-confidence-threshold 0.7 \
+  --enable-doctr \
+  --batch-size 10 \
+  --output-dir ./vintage_output
+
+# Scanned document without Doctr (faster, less accurate)
+mmrag-v2 process scanned.pdf \
+  --ocr-mode layout-aware \
+  --no-doctr \
+  --batch-size 10
+
+# High-confidence threshold for cleaner output
+mmrag-v2 process clean_scan.pdf \
+  --ocr-mode layout-aware \
+  --ocr-confidence-threshold 0.85
+```
+
+### OCR Module Components
+
+Located in `src/mmrag_v2/ocr/`:
+
+| Module | Purpose |
+|--------|---------|
+| `image_preprocessor.py` | Deskew, denoise, CLAHE contrast, adaptive thresholding |
+| `enhanced_ocr_engine.py` | 3-layer OCR cascade with confidence routing |
+| `layout_aware_processor.py` | Integrates layout detection with OCR routing |
+
+### ImagePreprocessor
+
+Optimized for vintage scanned documents with age-related artifacts:
+
+```python
+from mmrag_v2.ocr import ImagePreprocessor
+
+preprocessor = ImagePreprocessor(
+    adaptive_block_size=11,
+    denoise_strength=10,
+    deskew_threshold=0.5,
+    clahe_clip_limit=2.0,
+)
+
+# Full enhancement pipeline
+enhanced = preprocessor.enhance_for_ocr(image)
+
+# Quality estimation (0.0-1.0)
+quality = preprocessor.estimate_quality(image)
+```
+
+**Pipeline Steps:**
+1. Grayscale conversion (RGB/RGBA → Gray)
+2. Deskewing (straighten rotated scans)
+3. CLAHE contrast enhancement
+4. Non-local means denoising
+5. Adaptive thresholding (binarization)
+
+### EnhancedOCREngine
+
+```python
+from mmrag_v2.ocr import EnhancedOCREngine, OCRResult
+
+engine = EnhancedOCREngine(
+    confidence_threshold=0.7,
+    enable_tesseract=True,
+    enable_doctr=True,
+)
+
+# Process full page
+result: OCRResult = engine.process_page(page_image)
+
+print(f"Text: {result.text[:100]}...")
+print(f"Confidence: {result.confidence:.2f}")
+print(f"Layer used: {result.layer_used.value}")
+print(f"Processing time: {result.processing_time_ms}ms")
+
+# Check layer availability
+status = engine.get_layer_status()
+# {'docling': True, 'tesseract': True, 'doctr': True}
+```
+
+### LayoutAwareOCRProcessor
+
+Combines layout detection with OCR cascade:
+
+```python
+from mmrag_v2.ocr import LayoutAwareOCRProcessor
+from pathlib import Path
+
+processor = LayoutAwareOCRProcessor(
+    ocr_confidence_threshold=0.7,
+    enable_doctr=True,
+    output_dir=Path("./output/assets"),
+    vlm_manager=vision_manager,  # Optional
+)
+
+# Process a page
+chunks = processor.process_page(
+    page_image=page_image,  # RGB numpy array
+    page_number=21,
+    doc_id="abc123",
+    docling_elements=docling_result.elements,  # Optional
+)
+
+for chunk in chunks:
+    print(f"{chunk.modality}: {chunk.content[:50]}...")
+    if chunk.asset_ref:
+        print(f"  Asset: {chunk.asset_ref['file_path']}")
+```
+
+**Output Types:**
+- `modality: "text"` - OCR-extracted verbatim text
+- `modality: "image"` - VLM-described image regions
+- `modality: "table"` - OCR-extracted table content
+
+### Dependencies
+
+Layout-aware OCR requires additional packages (automatically installed):
+
+```bash
+# Already in pyproject.toml
+opencv-python>=4.8.0
+python-doctr[torch]>=0.8.0
+
+# System dependency (installed via brew)
+tesseract  # Must be 5.x
+```
+
+Verify installation:
+```bash
+python -c "import cv2, pytesseract, doctr; print('✓')"
+tesseract --version  # Should show 5.x
 ```
 
 ---

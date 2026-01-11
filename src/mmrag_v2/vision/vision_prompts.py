@@ -265,30 +265,74 @@ def build_visual_prompt(
 
 def clean_vlm_response(raw_response: str) -> str:
     """
-    Clean VLM response to remove any remaining meta-language.
+    Clean VLM response to remove any remaining meta-language and VLM internal monologue.
 
-    This is a safety net in case the VLM still produces banned phrases.
+    This is a safety net in case the VLM still produces banned phrases or internal
+    thinking blocks (like <think>...</think> from DeepSeek-VL2, Qwen, etc.).
+    VLM descriptions should NEVER start with "An image of...", "Illustration of...",
+    "A photo of...", etc. They should describe the content directly.
 
     Args:
         raw_response: Raw VLM output
 
     Returns:
-        Cleaned response with meta-language removed
+        Cleaned response with meta-language removed, max 400 chars (SRS-compliant)
     """
     import re
 
-    # Remove common meta-language patterns
-    response = raw_response.strip()
+    if not raw_response:
+        return ""
 
-    # Remove leading meta-phrases
+    # =========================================================================
+    # PHASE 1: Remove VLM internal monologue (<think>...</think> blocks)
+    # =========================================================================
+    # Verwijder de interne monoloog (<think>...</think>)
+    response = re.sub(r"<think>.*?</think>", "", raw_response, flags=re.DOTALL)
+    # Verwijder een eventueel afgebroken <think> blok
+    response = re.sub(r"<think>.*", "", response, flags=re.DOTALL)
+
+    # Strip witruimte en haal onnodige aanhalingstekens weg
+    response = response.strip().replace('"', "").replace("'", "")
+
+    # =========================================================================
+    # PHASE 2: Remove common meta-language patterns
+    # =========================================================================
+
+    # Remove leading meta-phrases (ordered from most specific to least specific)
+    # These patterns match WITH or WITHOUT leading article (A/An/The)
     meta_patterns = [
-        r"^This image shows?\s+",
-        r"^The image (?:appears to be|is|depicts|displays|shows)\s+",
-        r"^The page contains?\s+",
-        r"^The document (?:shows|discusses|presents)\s+",
-        r"^A photograph of\s+",
-        r"^An? illustration of\s+",
-        r"^(?:This|The) (?:is|appears to be)\s+",
+        # "This image shows...", "The image depicts..."
+        r"^(?:This|The) image (?:shows?|appears to be|is|depicts|displays)\s+",
+        # "The page contains...", "This page shows..."
+        r"^(?:This|The) page (?:contains?|shows?|displays?)\s+",
+        # "The document shows...", "This document discusses..."
+        r"^(?:This|The) document (?:shows?|discusses?|presents?)\s+",
+        # "An image of...", "Image of...", "The image of..."
+        r"^(?:An? |The )?[Ii]mage of\s+",
+        # "A photograph of...", "Photograph of...", "The photograph of..."
+        r"^(?:An? |The )?[Pp]hotograph of\s+",
+        # "A photo of...", "Photo of...", "The photo of..."
+        r"^(?:An? |The )?[Pp]hoto of\s+",
+        # "An illustration of...", "Illustration of...", "The illustration of..."
+        r"^(?:An? |The )?[Ii]llustration of\s+",
+        # "A picture of...", "Picture of...", "The picture of..."
+        r"^(?:An? |The )?[Pp]icture of\s+",
+        # "A drawing of...", "Drawing of...", "The drawing of..."
+        r"^(?:An? |The )?[Dd]rawing of\s+",
+        # "A depiction of...", "Depiction of..."
+        r"^(?:An? |The )?[Dd]epiction of\s+",
+        # "A rendering of...", "Rendering of..."
+        r"^(?:An? |The )?[Rr]endering of\s+",
+        # "A graphic of...", "Graphic of..."
+        r"^(?:An? |The )?[Gg]raphic of\s+",
+        # "A figure showing...", "Figure showing..."
+        r"^(?:An? |The )?[Ff]igure (?:showing|depicting|illustrating|of)\s+",
+        # "A visual of...", "Visual of..."
+        r"^(?:An? |The )?[Vv]isual (?:representation )?of\s+",
+        # Generic "This is...", "This appears to be..."
+        r"^(?:This|It) (?:is|appears to be)\s+",
+        # "Here is...", "Here we see..."
+        r"^Here (?:is|we see)\s+",
     ]
 
     for pattern in meta_patterns:
@@ -302,8 +346,19 @@ def clean_vlm_response(raw_response: str) -> str:
         flags=re.IGNORECASE,
     )
 
+    # Remove trailing meta-commentary
+    response = re.sub(
+        r",?\s+(?:as shown|as seen|as depicted|as illustrated) (?:in|on) (?:the|this) (?:image|page|figure)\.?$",
+        "",
+        response,
+        flags=re.IGNORECASE,
+    )
+
     # Capitalize first letter after cleaning
     if response:
         response = response[0].upper() + response[1:]
 
-    return response.strip()
+    # =========================================================================
+    # PHASE 3: Apply hard character limit (SRS-compliant 400 chars)
+    # =========================================================================
+    return response.strip()[:400]

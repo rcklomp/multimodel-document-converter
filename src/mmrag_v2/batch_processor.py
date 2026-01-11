@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
-import fitz  # PyMuPDF for shadow extraction
+import fitz  # PyMuPDF for page rendering
 import numpy as np
 from PIL import Image
 
@@ -57,8 +57,16 @@ from .schema.ingestion_schema import (
     IngestionChunk,
     Modality,
     ChunkMetadata,
-    create_shadow_chunk,
+    SpatialMetadata,
+    SemanticContext,
+    COORD_SCALE,
+    create_image_chunk,
+    create_table_chunk,
+    create_text_chunk,
 )
+
+# V3.0.0: Shadow extraction is REMOVED per ARCHITECTURE.md
+# All extraction goes through UIR → ElementProcessor
 from .state.context_state import ContextStateV2, create_context_state
 from .utils.pdf_splitter import BatchInfo, PDFBatchSplitter, SplitResult
 from .utils.image_hash_registry import (
@@ -67,7 +75,6 @@ from .utils.image_hash_registry import (
     create_page1_validator,
 )
 from .vision.vision_manager import VisionManager, create_vision_manager
-from .orchestration.shadow_extractor import create_shadow_extractor
 from .validators.token_validator import TokenValidator, create_token_validator
 
 logger = logging.getLogger(__name__)
@@ -78,7 +85,9 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 DEFAULT_BATCH_SIZE: int = 10
-DEFAULT_VLM_TIMEOUT: int = 90  # Seconds, accounts for SSD swap lag on 16GB systems
+DEFAULT_VLM_TIMEOUT: int = (
+    180  # Seconds, increased for large vision models like llama3.2-vision (10.7B)
+)
 DEFAULT_VISION_PROVIDER: str = "ollama"
 
 
@@ -136,6 +145,7 @@ class BatchProcessor:
         vision_provider: str = DEFAULT_VISION_PROVIDER,
         vision_model: Optional[str] = None,
         vision_api_key: Optional[str] = None,
+        vision_base_url: Optional[str] = None,
         vlm_timeout: int = DEFAULT_VLM_TIMEOUT,
         enable_ocr: bool = True,
         ocr_engine: str = "easyocr",
@@ -160,7 +170,8 @@ class BatchProcessor:
             vision_provider: VLM provider ("ollama", "openai", "anthropic", "none")
             vision_model: VLM model name (optional for Ollama - auto-detects if not specified)
             vision_api_key: API key for cloud providers
-            vlm_timeout: VLM read timeout in seconds (default: 90)
+            vision_base_url: Custom API base URL for OpenAI-compatible APIs (LM Studio)
+            vlm_timeout: VLM read timeout in seconds (default: 180)
             enable_ocr: Whether to enable OCR for scanned pages
             ocr_engine: OCR engine ("tesseract" or "easyocr")
             extraction_strategy: Dynamic extraction strategy from StrategyOrchestrator
@@ -183,6 +194,7 @@ class BatchProcessor:
         self.vision_provider = vision_provider
         self.vision_model = vision_model
         self.vision_api_key = vision_api_key
+        self.vision_base_url = vision_base_url
         self.vlm_timeout = vlm_timeout
         self.enable_ocr = enable_ocr
         self.ocr_engine = ocr_engine
@@ -273,327 +285,30 @@ class BatchProcessor:
                 cache_dir=self.output_dir,
                 model=self.vision_model,
                 timeout=self.vlm_timeout,
+                base_url=self.vision_base_url,
             )
             logger.info(
                 f"Global VisionManager initialized: "
                 f"provider={self.vision_provider}, "
                 f"model={self.vision_model}, "
-                f"cache_dir={self.output_dir}"
+                f"cache_dir={self.output_dir}, "
+                f"base_url={self.vision_base_url}"
             )
             return manager
         except Exception as e:
             logger.warning(f"Failed to initialize VisionManager: {e}")
             return None
 
-    def _apply_fullpage_guard(
-        self,
-        asset_width: int,
-        asset_height: int,
-        page_width: float,
-        page_height: float,
-        image_path: Path,
-        page_number: int,
-        breadcrumbs: List[str],
-    ) -> bool:
-        """
-        REQ-MM-08/09/10: Apply Full-Page Guard to shadow assets.
-
-        Args:
-            asset_width: Asset width in pixels
-            asset_height: Asset height in pixels
-            page_width: Page width in pixels
-            page_height: Page height in pixels
-            image_path: Path to saved asset image
-            page_number: Page number
-            breadcrumbs: Document breadcrumbs
-
-        Returns:
-            True if asset should be kept, False if it should be discarded
-        """
-        # REQ-MM-08: Calculate area ratio
-        asset_area = asset_width * asset_height
-        page_area = page_width * page_height
-        area_ratio = asset_area / page_area if page_area > 0 else 0.0
-
-        # REQ-MM-09: Check if full-page threshold (>0.95) is exceeded
-        if area_ratio > 0.95:
-            logger.info(
-                f"[VLM-GUARD] Page {page_number}: Full-page asset detected "
-                f"(ratio={area_ratio:.2%}, {asset_width}x{asset_height}px)"
-            )
-
-            # REQ-MM-12: Check override flag
-            if self.allow_fullpage_shadow:
-                logger.warning(
-                    f"[VLM-GUARD] Page {page_number}: Full-page asset ALLOWED via override flag"
-                )
-                return True
-
-            # REQ-MM-10: Perform VLM verification
-            if not self._vision_manager:
-                logger.warning(
-                    f"[VLM-GUARD] Page {page_number}: No VLM available. "
-                    f"Defaulting to DISCARD (safety first)"
-                )
-                return False
-
-            try:
-                from PIL import Image
-
-                with Image.open(image_path) as img:
-                    result = self._vision_manager.verify_shadow_integrity(img, breadcrumbs)
-
-                    classification = result.get("classification", "error")
-                    confidence = result.get("confidence", 0.0)
-                    reason = result.get("reason", "")
-                    is_valid = result.get("valid", False)
-
-                    # REQ-MM-11: Log decision with full context
-                    logger.info(
-                        f"[VLM-GUARD] Asset Page {page_number} - Ratio {area_ratio:.2%} - "
-                        f"Result: {classification} - Confidence: {confidence:.2f} - Reason: {reason}"
-                    )
-
-                    if not is_valid:
-                        logger.info(
-                            f"[VLM-GUARD] REJECTED: Page {page_number} asset "
-                            f"({classification} at {confidence:.0%} confidence)"
-                        )
-                        return False
-
-                    logger.info(
-                        f"[VLM-GUARD] ACCEPTED: Page {page_number} asset "
-                        f"(editorial at {confidence:.0%} confidence)"
-                    )
-                    return True
-
-            except Exception as e:
-                logger.error(
-                    f"[VLM-GUARD] Page {page_number}: VLM verification failed: {e}. "
-                    f"Defaulting to DISCARD"
-                )
-                return False
-
-        # Asset is below full-page threshold - ALWAYS accept
-        return True
-
-    def _run_shadow_extraction(
-        self,
-        batch_info: BatchInfo,
-        docling_chunks: List[IngestionChunk],
-        source_file: str,
-    ) -> List[IngestionChunk]:
-        """
-        REQ-MM-05/06/07: Run Shadow Extraction on batch to find missed bitmaps.
-
-        This method performs a parallel raw PDF scan using PyMuPDF to detect
-        bitmap objects that were missed by Docling's AI layout analysis.
-
-        Args:
-            batch_info: Information about this batch
-            docling_chunks: Chunks extracted by Docling
-            source_file: Original source filename
-
-        Returns:
-            List of shadow chunks to add to the output
-        """
-        # Check if shadow extraction is enabled in strategy
-        if (
-            self.extraction_strategy is None
-            or not self.extraction_strategy.enable_shadow_extraction
-        ):
-            return []
-
-        shadow_chunks: List[IngestionChunk] = []
-        shadow_index = 0
-
-        # Open the batch PDF for shadow scanning
-        doc: Optional[fitz.Document] = None
-        try:
-            doc = fitz.open(batch_info.batch_path)
-
-            # Get ACTUAL page dimensions from PDF for proper normalization
-            page_dims_per_page: Dict[int, Tuple[float, float]] = {}
-            for batch_page_idx in range(len(doc)):
-                actual_page_no = batch_info.page_offset + batch_page_idx + 1
-                page = doc.load_page(batch_page_idx)
-                page_dims_per_page[actual_page_no] = (page.rect.width, page.rect.height)
-
-            # Count Docling IMAGE chunks per page (regardless of bbox)
-            # This is used to decide if shadow extraction should be conservative
-            docling_images_per_page: Dict[int, int] = {}
-
-            for chunk in docling_chunks:
-                if chunk.modality == Modality.IMAGE:
-                    page_no = chunk.metadata.page_number
-                    docling_images_per_page[page_no] = docling_images_per_page.get(page_no, 0) + 1
-
-            logger.info(f"Docling images per page: {dict(docling_images_per_page)}")
-
-            # For pages where Docling found images, we'll be conservative with shadow extraction
-            # by only keeping shadow assets if they don't significantly overlap
-
-            # Create shadow extractor with strategy parameters
-            with create_shadow_extractor(
-                sensitivity=self.extraction_strategy.sensitivity,
-                historical_median=self.extraction_strategy.historical_median,
-            ) as shadow_extractor:
-
-                # Scan each page in the batch
-                for batch_page_idx in range(len(doc)):
-                    # Actual page number (1-indexed)
-                    actual_page_no = batch_info.page_offset + batch_page_idx + 1
-
-                    # Get Docling image count for this page
-                    docling_image_count = docling_images_per_page.get(actual_page_no, 0)
-
-                    # Run shadow scan - pass empty bboxes since we can't get them
-                    # The Ghost Filter and page-level checks will handle deduplication
-                    # CRITICAL FIX: Use ABSOLUTE page number for metadata,
-                    # but batch_page_idx for loading pages from the batch PDF!
-                    # Ghost-Check validation: batch_page_idx vs actual_page_no
-                    logger.info(
-                        f"[VALIDATING] Absolute Page: {actual_page_no} | "
-                        f"Batch Index: {batch_page_idx} | "
-                        f"Page Offset: {batch_info.page_offset}"
-                    )
-                    scan_result = shadow_extractor.scan_page(
-                        doc=doc,
-                        page_number=actual_page_no,  # ABSOLUTE (for metadata)
-                        docling_bboxes=[],
-                        text_content="has_text",
-                        batch_page_index=batch_page_idx,  # BATCH-RELATIVE (for loading)
-                    )
-
-                    # DEDUP CHECK: If Docling found images on this page, skip shadow
-                    # This is the Page-Level Deduplication rule
-                    if docling_image_count > 0:
-                        logger.info(
-                            f"[SHADOW] Page {actual_page_no}: Docling found {docling_image_count} images. "
-                            f"Skipping shadow extraction (already covered)."
-                        )
-                        continue
-
-                    # Process unaccounted assets (only for pages where Docling missed everything)
-                    for asset in scan_result.unaccounted_assets:
-                        shadow_index += 1
-
-                        # Persist asset to disk with precision filters (Ghost Filter only)
-                        asset_path = shadow_extractor.persist_asset(
-                            doc=doc,
-                            asset=asset,
-                            output_dir=self.output_dir,
-                            doc_hash=self._doc_hash or "unknown",
-                            asset_index=shadow_index,
-                            docling_bboxes=None,  # No bboxes available
-                        )
-
-                        if asset_path:
-                            # REQ-STATE-04: Shadow chunks use DOCUMENT-LEVEL hierarchy only
-                            # We CANNOT use self._context_state because it contains headings
-                            # from FUTURE pages (the state advances during Docling processing).
-                            # Shadow extraction happens AFTER Docling, so the state is "polluted"
-                            # with headings from pages we haven't reached yet in shadow extraction.
-                            #
-                            # FIX: Use document title as the only safe breadcrumb for shadow assets.
-                            # This prevents "breadcrumb pollution" like seeing "Demoralizing the Ayatollahs"
-                            # on Page 4 when that heading is actually from Page 8.
-                            doc_title = Path(source_file).stem if source_file else "Document"
-                            hierarchy = HierarchyMetadata(
-                                parent_heading=None,  # No heading - shadow assets are orphans
-                                breadcrumb_path=[doc_title],  # Document title only
-                                level=None,
-                            )
-
-                            # Content placeholder - will be replaced by VLM description below
-                            semantic_context = asset.nearest_text or ""
-
-                            # VLM Enrichment for shadow assets
-                            visual_description = None
-                            if self._vision_manager and asset_path:
-                                try:
-                                    # Load the saved image for VLM enrichment
-                                    from PIL import Image
-
-                                    full_asset_path = self.output_dir / asset_path
-                                    if full_asset_path.exists():
-                                        with Image.open(full_asset_path) as img:
-                                            # Use VisionManager to get description
-                                            # Create a temporary state if none exists
-                                            temp_state = (
-                                                self._context_state
-                                                or create_context_state(
-                                                    doc_id=self._doc_hash or "unknown",
-                                                    source_file=source_file,
-                                                )
-                                            )
-                                            visual_description = self._vision_manager.enrich_image(
-                                                image=img,
-                                                state=temp_state,
-                                                page_number=actual_page_no,
-                                                anchor_text=asset.nearest_text,
-                                            )
-                                            logger.info(
-                                                f"[SHADOW] VLM enrichment successful for {asset_path}"
-                                            )
-                                except Exception as e:
-                                    logger.warning(f"[SHADOW] VLM enrichment failed: {e}")
-
-                            # RULE A & B: Enforce non-null visual descriptions
-                            # REQ-CONTENT-01: content MUST be visual_description, not placeholder
-                            if not visual_description or len(visual_description) < 20:
-                                if not self._vision_manager:
-                                    logger.warning(
-                                        "VLM_CONNECTION_ERROR: No vision manager for shadow asset"
-                                    )
-                                    # Fallback: use semantic context + dimension info
-                                    fallback = semantic_context[:100] if semantic_context else ""
-                                    visual_description = (
-                                        f"ERROR: VLM Offline | {fallback} | "
-                                        f"({asset.width}x{asset.height}px)"
-                                    )
-                                else:
-                                    vd_len = len(visual_description) if visual_description else 0
-                                    logger.warning(
-                                        f"Shadow VLM description too short ({vd_len} chars)"
-                                    )
-                                    visual_description = f"VLM_FALLBACK: {semantic_context[:200] if semantic_context else 'No context'}"
-
-                            # REQ-CONTENT-02: content = visual_description (NEVER placeholder)
-                            content = visual_description
-
-                            # Create shadow chunk
-                            # Convert bbox from float to int (normalize to 0-1000 scale)
-                            bbox_int = None
-                            if asset.bbox_normalized:
-                                bbox_int = [int(round(v)) for v in asset.bbox_normalized]
-
-                            chunk = create_shadow_chunk(
-                                doc_id=self._doc_hash or "unknown",
-                                content=content[:400],  # REQ-CHUNK-03: truncate to 400 chars
-                                source_file=source_file,
-                                file_type=FileType.PDF,
-                                page_number=actual_page_no,
-                                asset_path=asset_path,
-                                bbox=bbox_int,
-                                hierarchy=hierarchy,
-                                prev_text=asset.nearest_text,
-                                visual_description=visual_description,
-                            )
-                            shadow_chunks.append(chunk)
-
-                            print(
-                                f"    [SHADOW] Captured: Page {actual_page_no} "
-                                f"({asset.width}x{asset.height}px)",
-                                flush=True,
-                            )
-
-        finally:
-            if doc is not None:
-                doc.close()
-            gc.collect()
-
-        return shadow_chunks
+    # ========================================================================
+    # V3.0.0: SHADOW EXTRACTION REMOVED
+    # ========================================================================
+    # Per ARCHITECTURE.md V3.0.0:
+    # - Shadow extraction is REMOVED from the pipeline
+    # - All extraction goes through UIR → ElementProcessor
+    # - TEXT regions → OCR cascade → modality: "text"
+    # - IMAGE regions → VLM visual description → modality: "image"
+    # - Errors are logged via ElementProcessor, NO fallback to shadow
+    # ========================================================================
 
     # ========================================================================
     # LAYOUT-AWARE OCR INTEGRATION (Phase 1B)
@@ -668,6 +383,7 @@ class BatchProcessor:
         page_number: int,
         source_file: str,
         docling_elements: Optional[List] = None,
+        render_dpi: int = 150,
     ) -> List[IngestionChunk]:
         """
         Process a single page through Layout-Aware OCR pipeline.
@@ -683,6 +399,7 @@ class BatchProcessor:
             page_number: Page number (1-indexed)
             source_file: Source filename
             docling_elements: Optional pre-extracted Docling elements
+            render_dpi: DPI used to render the page (for coordinate conversion)
 
         Returns:
             List of IngestionChunk objects
@@ -708,6 +425,7 @@ class BatchProcessor:
             page_number=page_number,
             doc_id=self._doc_hash or "unknown",
             docling_elements=docling_elements,
+            render_dpi=render_dpi,
         )
 
         # Convert ProcessedChunk to IngestionChunk
@@ -715,11 +433,14 @@ class BatchProcessor:
         doc_title = Path(source_file).stem if source_file else "Document"
 
         for pc in processed_chunks:
+            # REQ-HIER-03: Breadcrumbs MUST contain minimum [filename, "Page X"]
+            breadcrumb_path = [doc_title, f"Page {pc.page_number}"]
+
             # Create hierarchy
             hierarchy = HierarchyMetadata(
                 parent_heading=None,
-                breadcrumb_path=[doc_title],
-                level=None,
+                breadcrumb_path=breadcrumb_path,
+                level=2,  # 2 items in breadcrumb_path
             )
 
             # Map modality
@@ -732,6 +453,15 @@ class BatchProcessor:
             else:
                 modality = Modality.TEXT  # Default
 
+            # REQ-COORD-01: IMAGE/TABLE modalities REQUIRE spatial.bbox
+            # V3.0.0: Use normalized bbox from ProcessedChunk (already 0-1000)
+            spatial = None
+            if pc.bbox:
+                spatial = SpatialMetadata(bbox=pc.bbox)
+            elif modality in (Modality.IMAGE, Modality.TABLE):
+                # Fallback only if bbox is missing
+                spatial = SpatialMetadata(bbox=[0, 0, COORD_SCALE, COORD_SCALE])
+
             # Create metadata with extraction_method and visual_description
             metadata = ChunkMetadata(
                 page_number=pc.page_number,
@@ -740,6 +470,7 @@ class BatchProcessor:
                 hierarchy=hierarchy,
                 extraction_method=pc.extraction_method,
                 visual_description=pc.visual_description,
+                spatial=spatial,
             )
 
             # Create asset reference if applicable
@@ -752,6 +483,14 @@ class BatchProcessor:
                     height_px=pc.asset_ref.get("height_px"),
                 )
 
+            # V3.0.0: REQ-MM-03 - Create semantic_context from ProcessedChunk
+            semantic_context = None
+            if pc.prev_text_snippet or pc.next_text_snippet:
+                semantic_context = SemanticContext(
+                    prev_text_snippet=pc.prev_text_snippet,
+                    next_text_snippet=pc.next_text_snippet,
+                )
+
             # Create IngestionChunk
             chunk = IngestionChunk(
                 chunk_id=pc.chunk_id,
@@ -760,6 +499,7 @@ class BatchProcessor:
                 modality=modality,
                 metadata=metadata,
                 asset_ref=asset_ref,
+                semantic_context=semantic_context,  # V3.0.0: Add semantic context
             )
 
             ingestion_chunks.append(chunk)
@@ -771,6 +511,71 @@ class BatchProcessor:
         )
 
         return ingestion_chunks
+
+    def _extract_docling_layout_elements(
+        self,
+        batch_path: Path,
+        page_offset: int,
+    ) -> Dict[int, List[Any]]:
+        """
+        Extract Docling layout elements grouped by page number.
+
+        This runs Docling's layout analysis to get proper TEXT/IMAGE/TABLE
+        regions instead of using the broken fallback detection.
+
+        Args:
+            batch_path: Path to the batch PDF file
+            page_offset: Offset to add to batch page numbers
+
+        Returns:
+            Dict mapping actual page numbers to list of Docling elements
+        """
+        from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.pipeline_options import PdfPipelineOptions
+        from docling.document_converter import DocumentConverter, PdfFormatOption
+
+        logger.info("[DOCLING-LAYOUT] Running Docling layout analysis on batch...")
+
+        # Configure Docling for layout detection
+        pipeline_options = PdfPipelineOptions()
+        pipeline_options.images_scale = 2.0
+        pipeline_options.generate_page_images = False
+        pipeline_options.generate_picture_images = True
+        pipeline_options.generate_table_images = True
+        pipeline_options.do_ocr = True
+
+        converter = DocumentConverter(
+            format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
+        )
+
+        result = converter.convert(str(batch_path))
+        doc = result.document
+
+        # Group elements by page
+        elements_per_page: Dict[int, List[Any]] = {}
+
+        for item_tuple in doc.iterate_items():
+            element, _ = item_tuple
+
+            # Get page number from provenance
+            batch_page_no = 1
+            if hasattr(element, "prov") and element.prov:
+                prov = element.prov[0] if isinstance(element.prov, list) else element.prov
+                if hasattr(prov, "page_no") and prov.page_no is not None:
+                    batch_page_no = prov.page_no
+
+            actual_page_no = batch_page_no + page_offset
+
+            if actual_page_no not in elements_per_page:
+                elements_per_page[actual_page_no] = []
+            elements_per_page[actual_page_no].append(element)
+
+        total = sum(len(e) for e in elements_per_page.values())
+        logger.info(
+            f"[DOCLING-LAYOUT] Extracted {total} elements across {len(elements_per_page)} pages"
+        )
+
+        return elements_per_page
 
     def _process_batch_layout_aware(
         self,
@@ -795,6 +600,25 @@ class BatchProcessor:
         all_chunks: List[IngestionChunk] = []
         dpi = self._profile_params.render_dpi if self._profile_params else 300
 
+        # ================================================================
+        # CRITICAL: Run Docling layout analysis FIRST to get real elements
+        # This prevents using the broken fallback detection
+        # ================================================================
+        print("    🔍 [DOCLING] Running layout analysis on batch...", flush=True)
+        try:
+            docling_elements_per_page = self._extract_docling_layout_elements(
+                batch_path=batch_info.batch_path,
+                page_offset=batch_info.page_offset,
+            )
+            print(
+                f"    ✓ [DOCLING] Found elements on {len(docling_elements_per_page)} pages",
+                flush=True,
+            )
+        except Exception as e:
+            logger.warning(f"[DOCLING-LAYOUT] Analysis failed: {e}. Using fallback.")
+            print(f"    ⚠️ [DOCLING] Layout analysis failed: {e}", flush=True)
+            docling_elements_per_page = {}
+
         doc: Optional[fitz.Document] = None
         try:
             doc = fitz.open(batch_info.batch_path)
@@ -811,10 +635,15 @@ class BatchProcessor:
             for batch_page_idx in range(len(doc)):
                 actual_page_no = batch_info.page_offset + batch_page_idx + 1
 
+                # Get Docling elements for this page
+                page_elements = docling_elements_per_page.get(actual_page_no)
+                elem_count = len(page_elements) if page_elements else 0
+
                 # Step 1: Classify page
                 classification, char_count = self._classify_page(doc, batch_page_idx, threshold=100)
+                elem_info = f"[Docling: {elem_count} elements]" if page_elements else "[fallback]"
                 print(
-                    f"      📄 Page {actual_page_no}: {classification} ({char_count} chars)",
+                    f"      📄 Page {actual_page_no}: {classification} ({char_count} chars) {elem_info}",
                     flush=True,
                 )
 
@@ -822,12 +651,13 @@ class BatchProcessor:
                 page_image = self._render_page_to_image(doc, batch_page_idx, dpi=dpi)
                 logger.info(f"[LAYOUT-OCR] Rendered page {actual_page_no}: {page_image.shape}")
 
-                # Step 3: Process through layout-aware pipeline
+                # Step 3: Process through layout-aware pipeline WITH Docling elements
                 page_chunks = self._process_page_layout_aware(
                     page_image=page_image,
                     page_number=actual_page_no,
                     source_file=source_file,
-                    docling_elements=None,  # TODO: Pass Docling elements when available
+                    docling_elements=page_elements,
+                    render_dpi=dpi,
                 )
 
                 all_chunks.extend(page_chunks)
@@ -851,154 +681,6 @@ class BatchProcessor:
 
         logger.info(f"[LAYOUT-OCR] Batch complete: {len(all_chunks)} chunks generated")
         return all_chunks
-
-    def _run_shadow_first_extraction(
-        self,
-        batch_info: BatchInfo,
-        source_file: str,
-    ) -> List[IngestionChunk]:
-        """
-        REQ-OCR-02: Shadow-First extraction for scanned documents.
-
-        Instead of using Docling figure crops (which lose text context),
-        this method renders FULL PAGES at high DPI and runs OCR hints
-        on the complete page. This allows OCR to see text labels like
-        "Browning" that appear NEXT TO images.
-
-        PAGE ISOLATION (REQ-OCR-ISOLATION):
-        ====================================
-        - Each page gets FRESH OCR hints - no accumulation between pages
-        - VisionManager creates new OCRHintEngine per page
-        - Explicit logging confirms isolation: [OCR-CLEANUP] at page boundary
-
-        Args:
-            batch_info: Information about this batch
-            source_file: Original source filename
-
-        Returns:
-            List of shadow chunks (one per page with full-page render)
-        """
-        from PIL import Image
-        import io
-
-        shadow_chunks: List[IngestionChunk] = []
-        dpi = self._profile_params.render_dpi if self._profile_params else 300
-
-        # Open the batch PDF
-        doc: Optional[fitz.Document] = None
-        try:
-            doc = fitz.open(batch_info.batch_path)
-
-            # REQ-OCR-ISOLATION: Track page processing for isolation verification
-            total_pages_in_batch = len(doc)
-            logger.info(
-                f"[SHADOW-FIRST] Starting batch with {total_pages_in_batch} pages. "
-                f"OCR hints will be ISOLATED per page (no accumulation)."
-            )
-
-            for batch_page_idx in range(len(doc)):
-                actual_page_no = batch_info.page_offset + batch_page_idx + 1
-
-                # REQ-OCR-ISOLATION: Explicit page boundary marker
-                logger.info(f"[PAGE-BOUNDARY] ========== PAGE {actual_page_no} START ==========")
-                logger.info(f"[SHADOW-FIRST] Rendering page {actual_page_no} at {dpi} DPI")
-
-                # Render page at high DPI
-                page = doc.load_page(batch_page_idx)
-                zoom = dpi / 72.0  # 72 DPI is base
-                mat = fitz.Matrix(zoom, zoom)
-                pix = page.get_pixmap(matrix=mat, alpha=False)
-
-                # Convert to PIL Image
-                img_data = pix.tobytes("ppm")
-                page_image = Image.open(io.BytesIO(img_data)).convert("RGB")
-
-                page_width, page_height = page_image.size
-                logger.info(
-                    f"[SHADOW-FIRST] Page {actual_page_no}: "
-                    f"{page_width}x{page_height}px at {dpi} DPI"
-                )
-
-                # Save the full-page asset
-                asset_name = f"{self._doc_hash}_{actual_page_no:03d}_shadow_01.png"
-                asset_path = f"assets/{asset_name}"
-                full_asset_path = self.assets_dir / asset_name
-                page_image.save(str(full_asset_path), "PNG")
-
-                print(
-                    f"      📸 Page {actual_page_no}: {page_width}x{page_height}px "
-                    f"→ {asset_name}",
-                    flush=True,
-                )
-
-                # Create hierarchy
-                doc_title = Path(source_file).stem if source_file else "Document"
-                hierarchy = HierarchyMetadata(
-                    parent_heading=None,
-                    breadcrumb_path=[doc_title],
-                    level=None,
-                )
-
-                # VLM Enrichment with OCR hints (the key difference!)
-                visual_description = None
-                if self._vision_manager:
-                    try:
-                        # Create temporary state
-                        temp_state = self._context_state or create_context_state(
-                            doc_id=self._doc_hash or "unknown",
-                            source_file=source_file,
-                        )
-                        temp_state.update_page(actual_page_no)
-
-                        # Use OCR-hint-aware enrichment (this is where OCR sees "Browning"!)
-                        visual_description = self._vision_manager.enrich_image_with_ocr_hints(
-                            image=page_image,
-                            state=temp_state,
-                            page_number=actual_page_no,
-                            anchor_text=None,  # Full page has its own context
-                            profile_params=self._profile_params,
-                        )
-
-                        logger.info(
-                            f"[SHADOW-FIRST] VLM+OCR enrichment for page {actual_page_no}: "
-                            f"{visual_description[:80] if visual_description else 'None'}..."
-                        )
-
-                    except Exception as e:
-                        logger.warning(f"[SHADOW-FIRST] VLM+OCR failed: {e}")
-
-                # Fallback if VLM failed
-                if not visual_description or len(visual_description) < 20:
-                    visual_description = (
-                        f"Full page scan from {source_file}, page {actual_page_no} "
-                        f"({page_width}x{page_height}px at {dpi} DPI)"
-                    )
-
-                # Create shadow chunk
-                chunk = create_shadow_chunk(
-                    doc_id=self._doc_hash or "unknown",
-                    content=visual_description[:400],
-                    source_file=source_file,
-                    file_type=FileType.PDF,
-                    page_number=actual_page_no,
-                    asset_path=asset_path,
-                    bbox=None,  # Full page = no bbox
-                    hierarchy=hierarchy,
-                    prev_text=None,
-                    visual_description=visual_description,
-                )
-                shadow_chunks.append(chunk)
-
-                # REQ-OCR-ISOLATION: Explicit page boundary end marker
-                logger.info(f"[PAGE-BOUNDARY] ========== PAGE {actual_page_no} END ==========")
-
-        finally:
-            if doc is not None:
-                doc.close()
-            gc.collect()
-
-        logger.info(f"[SHADOW-FIRST] Generated {len(shadow_chunks)} full-page shadow chunks")
-        return shadow_chunks
 
     def _process_single_batch(
         self,
@@ -1096,87 +778,45 @@ class BatchProcessor:
             )
 
         # ================================================================
-        # SHADOW-FIRST STRATEGY (REQ-OCR-02) - FORCED FOR SCANNED PROFILES
+        # V3.0.0: STANDARD DOCLING PIPELINE (Shadow extraction REMOVED)
         # ================================================================
-        # When enable_ocr_hints=True (scanned profiles), we COMPLETELY BYPASS
-        # Docling figure extraction and render full-page shadows at 300 DPI.
-        #
-        # WHY: Docling's figure crops only show the image WITHOUT text context.
-        # The full-page shadow shows image + surrounding text labels.
-        # This is the ONLY way OCR can see "Browning" next to the rifle.
-        #
-        # FORCED MODALITY SWITCH:
-        # - ScannedDegradedProfile → extraction_method: "shadow" (NEVER docling)
-        # - DigitalMagazineProfile → extraction_method: "docling" (standard)
+        # Per ARCHITECTURE.md V3.0.0:
+        # - All extraction goes through Docling → UIR → ElementProcessor
+        # - TEXT regions → OCR cascade → modality: "text"
+        # - IMAGE regions → VLM visual description → modality: "image"
+        # - NO fallback to shadow extraction - errors are logged
         # ================================================================
-        use_shadow_first = (
-            self._profile_params is not None and self._profile_params.enable_ocr_hints
-        )
 
-        if use_shadow_first:
-            # Type safety: use_shadow_first guarantees self._profile_params is not None
-            profile_dpi = self._profile_params.render_dpi  # type: ignore[union-attr]
+        # Standard flow: Docling extraction (V3.0.0 architecture)
+        chunks: List[IngestionChunk] = []
+        try:
+            for chunk in processor.process_document(str(batch_info.batch_path)):
+                chunks.append(chunk)
+        except IndexError as e:
+            import traceback
 
-            logger.info(
-                f"[SHADOW-FIRST] *** FORCED MODALITY SWITCH *** "
-                f"Batch {batch_info.batch_index + 1}: "
-                f"Docling figures SKIPPED, using full-page shadows at "
-                f"{profile_dpi} DPI"
+            logger.error(
+                f"[PHANTOM-BUG] IndexError in batch {batch_info.batch_index} during processing!\n"
+                f"Error: {e}\n"
+                f"Chunks collected so far: {len(chunks)}\n"
+                f"Batch path: {batch_info.batch_path}\n"
+                f"Full Traceback:\n{traceback.format_exc()}"
             )
-            print(
-                f"    🔬 [SHADOW-FIRST] *** DOCLING BYPASSED *** "
-                f"Rendering full pages at {profile_dpi} DPI...",
-                flush=True,
+            raise
+        except Exception as e:
+            import traceback
+
+            logger.error(
+                f"Error processing batch {batch_info.batch_index}: {e}\n"
+                f"Traceback:\n{traceback.format_exc()}"
             )
+            raise
 
-            # Generate SHADOW-ONLY chunks (full-page renders with OCR hints)
-            # NO DOCLING FIGURES - ONLY SHADOW EXTRACTION
-            chunks = self._run_shadow_first_extraction(
-                batch_info=batch_info,
-                source_file=source_file,
-            )
+        # CRITICAL: Capture state for next batch (breadcrumb continuity)
+        self._context_state = processor.get_final_state()
 
-            # NO additional shadow extraction needed - we already have full pages
-            # NO processor.get_final_state() - we didn't use the processor
-
-            logger.info(
-                f"[SHADOW-FIRST] Batch {batch_info.batch_index + 1}: "
-                f"Generated {len(chunks)} shadow-only chunks (Docling bypassed)"
-            )
-
-        else:
-            # Standard flow: Docling extraction + optional shadow extraction
-            # Process batch and collect chunks (Phase 1: Docling)
-            chunks: List[IngestionChunk] = []
-            try:
-                for chunk in processor.process_document(str(batch_info.batch_path)):
-                    chunks.append(chunk)
-            except Exception as e:
-                logger.error(f"Error processing batch {batch_info.batch_index}: {e}")
-                raise
-
-            # CRITICAL: Capture state for next batch (breadcrumb continuity)
-            # Only available when Docling was actually used
-            self._context_state = processor.get_final_state()
-
-            # Phase 2: Shadow Extraction (REQ-MM-05/06/07)
-            # Only for Docling flow - shadow-first already has full pages
-            shadow_chunks = self._run_shadow_extraction(
-                batch_info=batch_info,
-                docling_chunks=chunks,
-                source_file=source_file,
-            )
-
-            if shadow_chunks:
-                chunks.extend(shadow_chunks)
-                logger.info(f"Shadow extraction added {len(shadow_chunks)} assets")
-
-        # Log batch completion (guard against None context_state in shadow-first mode)
-        breadcrumbs = (
-            self._context_state.get_breadcrumb_path()
-            if self._context_state
-            else ["[shadow-first mode]"]
-        )
+        # Log batch completion
+        breadcrumbs = self._context_state.get_breadcrumb_path() if self._context_state else []
         logger.info(
             f"Batch {batch_info.batch_index + 1} complete: "
             f"{len(chunks)} chunks, "
@@ -1340,86 +980,137 @@ class BatchProcessor:
         self._image_hash_registry = create_image_hash_registry(threshold=10)
         print("\n🔍 [PHASH] Initializing perceptual hash registry...", flush=True)
 
+        # ====================================================================
+        # PHASE 1: QUALITY IMPROVEMENTS
+        # ====================================================================
+        # 1. Empty chunk filtering (asset-aware)
+        # 2. OCR text post-processing (number joining)
+        # 3. Look-ahead buffer for symmetric overlap
+        # ====================================================================
+
+        # Apply quality filters
+        filtered_chunks = self._apply_quality_filters(all_chunks)
+        print(
+            f"\n🔍 [QUALITY] Filtered {len(all_chunks) - len(filtered_chunks)} empty/invalid chunks",
+            flush=True,
+        )
+
         # Write aggregated output to master JSONL with deduplication
         output_jsonl = self.output_dir / "ingestion.jsonl"
         written_chunks = 0
         duplicate_count = 0
 
+        # PHANTOM BUG FIX: Add defensive logging and error handling
+        logger.info(f"[FINALIZE] Starting JSONL write: {len(filtered_chunks)} chunks to process")
+        print(
+            f"\n📝 [FINALIZE] Writing {len(filtered_chunks)} chunks to {output_jsonl.name}...",
+            flush=True,
+        )
+
         with open(output_jsonl, "w", encoding="utf-8") as f:
-            for chunk in all_chunks:
-                chunk_dict = chunk.model_dump(mode="json")
+            for idx, chunk in enumerate(filtered_chunks):
+                try:
+                    # Log progress every 50 chunks
+                    if idx % 50 == 0 and idx > 0:
+                        logger.debug(f"[FINALIZE] Processed {idx}/{len(filtered_chunks)} chunks")
 
-                # ============================================================
-                # REQ-ASSET-01: STRICT FILENAME-METADATA ASSERTION
-                # ============================================================
-                asset_ref = chunk_dict.get("asset_ref")
-                if asset_ref and asset_ref.get("file_path"):
-                    file_path = asset_ref["file_path"]
-                    filename = file_path.split("/")[-1]
-                    parts = filename.split("_")
-                    if len(parts) >= 2:
-                        filename_page = int(parts[1])
-                        metadata_page = chunk_dict.get("metadata", {}).get("page_number")
-                        if filename_page != metadata_page:
-                            error_msg = (
-                                f"[ASSET-METADATA-MISMATCH] FATAL: "
-                                f"Asset '{filename}' page {filename_page} "
-                                f"!= metadata page {metadata_page}. "
-                                f"STOPPING EXPORT."
-                            )
-                            logger.error(error_msg)
-                            raise ValueError(error_msg)
+                    chunk_dict = chunk.model_dump(mode="json")
 
-                # ============================================================
-                # REQ-DEDUP-01: pHash Deduplication for IMAGE chunks
-                # ============================================================
-                if chunk.modality == Modality.IMAGE and asset_ref:
-                    asset_file = asset_ref.get("file_path")
-                    if asset_file:
-                        full_asset_path = self.output_dir / asset_file
-                        if full_asset_path.exists():
-                            try:
-                                from PIL import Image
+                    # ============================================================
+                    # REQ-ASSET-01: STRICT FILENAME-METADATA ASSERTION
+                    # ============================================================
+                    asset_ref = chunk_dict.get("asset_ref")
+                    if asset_ref and asset_ref.get("file_path"):
+                        file_path = asset_ref["file_path"]
+                        filename = file_path.split("/")[-1]
+                        parts = filename.split("_")
+                        if len(parts) >= 2:
+                            filename_page = int(parts[1])
+                            metadata_page = chunk_dict.get("metadata", {}).get("page_number")
+                            if filename_page != metadata_page:
+                                error_msg = (
+                                    f"[ASSET-METADATA-MISMATCH] FATAL: "
+                                    f"Asset '{filename}' page {filename_page} "
+                                    f"!= metadata page {metadata_page}. "
+                                    f"STOPPING EXPORT."
+                                )
+                                logger.error(error_msg)
+                                raise ValueError(error_msg)
 
-                                with Image.open(full_asset_path) as img:
-                                    dup_info = self._image_hash_registry.check_and_register(
-                                        image=img,
-                                        page_number=chunk.metadata.page_number,
-                                        asset_path=asset_file,
-                                    )
+                    # ============================================================
+                    # REQ-DEDUP-01: pHash Deduplication for IMAGE chunks
+                    # ============================================================
+                    if chunk.modality == Modality.IMAGE and asset_ref:
+                        asset_file = asset_ref.get("file_path")
+                        if asset_file:
+                            full_asset_path = self.output_dir / asset_file
+                            if full_asset_path.exists():
+                                try:
+                                    from PIL import Image
 
-                                    if dup_info.is_duplicate:
-                                        # DUPLICATE_REJECTED - skip this chunk
-                                        duplicate_count += 1
-                                        orig_page = (
-                                            dup_info.original_record.page_number
-                                            if dup_info.original_record
-                                            else "unknown"
+                                    with Image.open(full_asset_path) as img:
+                                        dup_info = self._image_hash_registry.check_and_register(
+                                            image=img,
+                                            page_number=chunk.metadata.page_number,
+                                            asset_path=asset_file,
                                         )
-                                        logger.warning(
-                                            f"[DUPLICATE_REJECTED] Skipping {asset_file} "
-                                            f"(duplicate of page {orig_page})"
+
+                                        if dup_info.is_duplicate:
+                                            # DUPLICATE_REJECTED - skip this chunk
+                                            duplicate_count += 1
+                                            orig_page = (
+                                                dup_info.original_record.page_number
+                                                if dup_info.original_record
+                                                else "unknown"
+                                            )
+                                            logger.warning(
+                                                f"[DUPLICATE_REJECTED] Skipping {asset_file} "
+                                                f"(duplicate of page {orig_page})"
+                                            )
+                                            # Delete the duplicate asset file
+                                            try:
+                                                full_asset_path.unlink()
+                                                logger.info(
+                                                    f"Deleted duplicate asset: {asset_file}"
+                                                )
+                                            except Exception as del_e:
+                                                logger.warning(
+                                                    f"Failed to delete duplicate: {del_e}"
+                                                )
+                                            continue  # Skip writing this chunk
+
+                                        # Log successful registration
+                                        logger.info(
+                                            f"[FINALIZING] Asset {filename} linked to "
+                                            f"Page {chunk.metadata.page_number}"
                                         )
-                                        # Delete the duplicate asset file
-                                        try:
-                                            full_asset_path.unlink()
-                                            logger.info(f"Deleted duplicate asset: {asset_file}")
-                                        except Exception as del_e:
-                                            logger.warning(f"Failed to delete duplicate: {del_e}")
-                                        continue  # Skip writing this chunk
 
-                                    # Log successful registration
-                                    logger.info(
-                                        f"[FINALIZING] Asset {filename} linked to "
-                                        f"Page {chunk.metadata.page_number}"
-                                    )
+                                except Exception as hash_e:
+                                    logger.warning(f"pHash check failed for {asset_file}: {hash_e}")
 
-                            except Exception as hash_e:
-                                logger.warning(f"pHash check failed for {asset_file}: {hash_e}")
+                    json_line = json.dumps(chunk_dict, ensure_ascii=False)
+                    f.write(json_line + "\n")
+                    written_chunks += 1
 
-                json_line = json.dumps(chunk_dict, ensure_ascii=False)
-                f.write(json_line + "\n")
-                written_chunks += 1
+                except IndexError as e:
+                    import traceback
+
+                    logger.error(
+                        f"[PHANTOM-BUG] IndexError at chunk {idx}/{len(filtered_chunks)}!\n"
+                        f"Chunk ID: {chunk.chunk_id if chunk else 'None'}\n"
+                        f"Error: {e}\n"
+                        f"Traceback:\n{traceback.format_exc()}"
+                    )
+                    raise  # Re-raise to see full stack
+                except Exception as e:
+                    import traceback
+
+                    logger.error(
+                        f"[FINALIZE-ERROR] Error processing chunk {idx}: {e}\n"
+                        f"Chunk ID: {chunk.chunk_id if chunk else 'None'}\n"
+                        f"Traceback:\n{traceback.format_exc()}"
+                    )
+                    raise
 
         # Log deduplication results
         registry_stats = self._image_hash_registry.get_stats()
@@ -1429,17 +1120,49 @@ class BatchProcessor:
             f"{duplicate_count} duplicates rejected",
             flush=True,
         )
+        print(
+            f"\n📊 [EXPORT] Written {written_chunks} chunks "
+            f"({duplicate_count} duplicates rejected, "
+            f"{len(all_chunks) - len(filtered_chunks)} filtered)",
+            flush=True,
+        )
         logger.info(
             f"Written {written_chunks} chunks to {output_jsonl} "
-            f"({duplicate_count} duplicates rejected)"
+            f"({duplicate_count} duplicates rejected, "
+            f"{len(all_chunks) - len(filtered_chunks)} filtered)"
         )
 
         # Get vision stats and flush cache
+        # PHANTOM BUG FIX: Add try-except to catch IndexError during cache operations
         vision_stats = {}
         if self._vision_manager:
-            vision_stats = self._vision_manager.get_stats()
-            self._vision_manager.flush_cache()
-            logger.info(f"Vision cache flushed: {vision_stats}")
+            try:
+                logger.info("[VISION-STATS] Attempting to get vision stats...")
+                vision_stats = self._vision_manager.get_stats()
+                logger.info(f"[VISION-STATS] Stats retrieved successfully: {vision_stats}")
+
+                logger.info("[VISION-CACHE] Attempting to flush cache...")
+                self._vision_manager.flush_cache()
+                logger.info(f"[VISION-CACHE] Cache flushed successfully")
+            except IndexError as e:
+                import traceback
+
+                logger.error(
+                    f"[PHANTOM-BUG] IndexError during vision cache operations!\n"
+                    f"Error: {e}\n"
+                    f"Traceback:\n{traceback.format_exc()}\n"
+                    f"Vision stats before error: {vision_stats}"
+                )
+                # Don't crash - continue with empty stats
+                vision_stats = {"error": str(e)}
+            except Exception as e:
+                import traceback
+
+                logger.error(
+                    f"[VISION-ERROR] Unexpected error during cache operations: {e}\n"
+                    f"Traceback:\n{traceback.format_exc()}"
+                )
+                vision_stats = {"error": str(e)}
 
         elapsed = time.perf_counter() - start_time
 
@@ -1461,6 +1184,194 @@ class BatchProcessor:
             errors=errors,
             vision_stats=vision_stats,
         )
+
+    # ========================================================================
+    # PHASE 1: QUALITY IMPROVEMENT METHODS
+    # ========================================================================
+
+    def _should_skip_chunk(
+        self,
+        chunk: IngestionChunk,
+    ) -> bool:
+        """
+        Determine if a chunk should be filtered out before export.
+
+        CRITICAL RULE: Chunks with asset_ref (images/tables) must NEVER be
+        filtered, even if content is empty. The asset itself contains information.
+
+        Args:
+            chunk: IngestionChunk to evaluate
+
+        Returns:
+            True if chunk should be skipped, False if it should be kept
+        """
+        # RULE 1: NEVER skip chunks with assets (REQ-MM-05)
+        if chunk.asset_ref is not None:
+            return False
+
+        # RULE 2: Empty or whitespace-only content (and no asset)
+        content = chunk.content or ""
+        if not content or not content.strip():
+            logger.debug(f"[FILTER] Skipping empty chunk: {chunk.chunk_id}")
+            return True
+
+        # RULE 3: Too short (< 3 chars - likely artifacts)
+        if len(content.strip()) < 3:
+            logger.debug(f"[FILTER] Skipping short chunk ({len(content)} chars): {chunk.chunk_id}")
+            return True
+
+        # RULE 4: Only special characters (decorations)
+        import re
+
+        if re.match(r"^[\s\-_=•]+$", content):
+            logger.debug(f"[FILTER] Skipping decoration chunk: {chunk.chunk_id}")
+            return True
+
+        # RULE 5: Suspicious bbox (very small area) - only for non-asset chunks
+        if chunk.metadata and chunk.metadata.spatial and chunk.metadata.spatial.bbox:
+            bbox = chunk.metadata.spatial.bbox
+            width = bbox[2] - bbox[0]
+            height = bbox[3] - bbox[1]
+            area = width * height
+
+            # In normalized coordinates (0-1000), area < 100 is 0.01% of page
+            if area < 100:
+                logger.debug(f"[FILTER] Skipping tiny bbox chunk (area={area}): {chunk.chunk_id}")
+                return True
+
+        return False
+
+    def _post_process_ocr_text(self, text: str) -> str:
+        """
+        Post-process OCR text to fix common fragmentation issues.
+
+        Fixes:
+        - Fragmented decimals: "2 . 1" → "2.1"
+        - Fragmented multiplication: "2 . 1 ×" → "2.1×"
+        - Fragmented percentages: "10 %" → "10%"
+        - Fragmented units: "300 MHz" → "300MHz"
+        - Fragmented math symbols: "± 2" → "±2"
+
+        CRITICAL: Does NOT join all spaces between numbers to preserve
+        mathematical sequences like "1 2 3 4".
+
+        Args:
+            text: Raw OCR text
+
+        Returns:
+            Cleaned text with technical values properly joined
+        """
+        import re
+
+        # Decimals: "2 . 1" → "2.1"
+        text = re.sub(r"(\d+)\s+\.\s+(\d+)", r"\1.\2", text)
+
+        # Multiplication: "2 . 1 ×" or "2.1 ×" → "2.1×"
+        text = re.sub(r"(\d+\.?\d*)\s+×", r"\1×", text)
+
+        # Percentages: "10 %" → "10%"
+        text = re.sub(r"(\d+\.?\d*)\s+%", r"\1%", text)
+
+        # Units (GHz, MHz, KB, MB, etc.)
+        text = re.sub(
+            r"(\d+\.?\d*)\s+(GHz|MHz|KB|MB|GB|TB|ms|μs|ns)", r"\1\2", text, flags=re.IGNORECASE
+        )
+
+        # Mathematical symbols: "± 2" → "±2", "≈ 2.5" → "≈2.5"
+        text = re.sub(r"([±≈])\s+(\d)", r"\1\2", text)
+
+        return text
+
+    def _apply_quality_filters(
+        self,
+        chunks: List[IngestionChunk],
+    ) -> List[IngestionChunk]:
+        """
+        Apply quality filters to chunk list.
+
+        Filters:
+        1. Empty chunk filtering (asset-aware)
+        2. OCR text post-processing (number joining)
+        3. Look-ahead buffer for symmetric overlap
+
+        Args:
+            chunks: Raw chunk list
+
+        Returns:
+            Filtered and improved chunk list
+        """
+        # Step 1: Filter out invalid chunks
+        valid_chunks = [chunk for chunk in chunks if not self._should_skip_chunk(chunk)]
+        logger.info(f"[QUALITY] Filtered {len(chunks) - len(valid_chunks)} invalid chunks")
+
+        # Step 2: Post-process OCR text
+        for chunk in valid_chunks:
+            if chunk.modality == Modality.TEXT:
+                original = chunk.content
+                cleaned = self._post_process_ocr_text(original)
+                if original != cleaned:
+                    chunk.content = cleaned
+                    logger.debug(f"[OCR-CLEAN] Fixed technical values in chunk {chunk.chunk_id}")
+
+        # Step 3: Look-ahead buffer for symmetric overlap (fill next_text_snippet)
+        valid_chunks = self._apply_lookahead_buffer(valid_chunks)
+
+        return valid_chunks
+
+    def _apply_lookahead_buffer(
+        self,
+        chunks: List[IngestionChunk],
+    ) -> List[IngestionChunk]:
+        """
+        Apply look-ahead buffer to fill next_text_snippet fields.
+
+        This ensures symmetric overlap (REQ-MM-03) by looking ahead to the
+        next chunk to populate next_text_snippet.
+
+        CRITICAL: The last chunk of the document (or batch) should have
+        next_text_snippet = None, not cause an IndexError.
+
+        Args:
+            chunks: Chunk list with potentially empty next_text_snippet fields
+
+        Returns:
+            Chunk list with next_text_snippet populated where possible
+        """
+        # CRITICAL: Guard against empty chunks list
+        if not chunks:
+            return chunks
+
+        # Process all chunks except the last one
+        for i in range(len(chunks) - 1):
+            current_chunk = chunks[i]
+            next_chunk = chunks[i + 1]
+
+            # Only fill if next_text_snippet is empty
+            if current_chunk.semantic_context is None:
+                from .schema.ingestion_schema import SemanticContext
+
+                current_chunk.semantic_context = SemanticContext()
+
+            if not current_chunk.semantic_context.next_text_snippet:
+                # CRITICAL: Safety check - ensure next_chunk exists and has content
+                if next_chunk and next_chunk.content:
+                    next_text = next_chunk.content[:300]
+                    current_chunk.semantic_context.next_text_snippet = next_text
+
+                    logger.debug(
+                        f"[LOOKAHEAD] Filled next_text_snippet for chunk {current_chunk.chunk_id} "
+                        f"from {next_chunk.chunk_id}"
+                    )
+
+        # Last chunk: explicitly set next_text_snippet to None (safety)
+        # This prevents any look-ahead issues on the final chunk
+        last_chunk = chunks[-1]
+        if last_chunk.semantic_context is None:
+            from .schema.ingestion_schema import SemanticContext
+
+            last_chunk.semantic_context = SemanticContext(next_text_snippet=None)
+
+        return chunks
 
     def should_use_batching(self, pdf_path: str | Path) -> bool:
         """

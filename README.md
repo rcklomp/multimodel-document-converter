@@ -24,6 +24,7 @@ Transform complex, visually-rich documents (magazines, technical manuals, report
 - [Quality Assurance](#-quality-assurance)
 - [Output Schema](#-output-schema)
 - [Integration Examples](#-integration-examples)
+- [Layout-Aware OCR](#-layout-aware-ocr-phase-1b)
 - [Advanced Configuration](#-advanced-configuration)
 - [Troubleshooting](#-troubleshooting)
 - [API Reference](#-api-reference)
@@ -55,9 +56,10 @@ Transform complex, visually-rich documents (magazines, technical manuals, report
 
 | Feature | Description |
 |---------|-------------|
+| **Multi-Dimensional Profile Classifier** | Automatic document classification based on physical checks, text density, image ratio, and detected domain/era. Selects optimal processing strategy. |
 | **Dynamic Semantic Overlap (DSO)** | AI-powered overlap calculation between chunks using sentence embeddings. High-similarity boundaries get 1.5x overlap to preserve context. |
-| **Smart Vision Orchestration** | Automatic document classification (Editorial vs Technical) with adaptive extraction thresholds via `--sensitivity` dial (0.1-1.0). |
-| **Shadow Extraction** | Parallel PyMuPDF scan catches large editorial images that Docling's AI misses. Full-Page Guard prevents accidental page captures. |
+| **Smart Vision Orchestration** | Automatic document classification with adaptive extraction thresholds via `--sensitivity` dial (0.1-1.0). |
+| **Auto OCR Mode Detection** | Automatically selects `legacy` or `layout-aware` OCR mode based on document diagnostics. |
 | **Token Post-Validation (QA-CHECK-01)** | Tiktoken-based verification that chunk tokens match source tokens ±10%. Catches data loss before it reaches your vector DB. |
 
 ### 🎨 Multimodal Excellence
@@ -65,9 +67,10 @@ Transform complex, visually-rich documents (magazines, technical manuals, report
 | Feature | Description |
 |---------|-------------|
 | **High-Fidelity Rendering** | 2.0x scale, 10px padding on all asset crops. No blurry extractions. |
-| **VLM Integration** | Ollama (local), OpenAI (gpt-4o-mini), Anthropic (claude-3-5-haiku) for image descriptions. |
+| **VLM Integration** | Ollama (local), OpenAI (gpt-4o-mini), LM Studio (OpenAI-compatible), Anthropic (claude-3-5-haiku) for image descriptions. |
 | **Perceptual Deduplication** | pHash-based duplicate detection prevents the same image appearing multiple times. |
 | **Asset Integrity** | Every `asset_ref.file_path` verified to exist on disk. Orphan chunks are impossible. |
+| **Coordinate System** | REQ-COORD-02: `page_width` and `page_height` in spatial metadata for UI overlay support. |
 
 ### 🏗️ Production Architecture
 
@@ -96,6 +99,9 @@ mmrag-v2 process photo_book.pdf --sensitivity 0.9 --batch-size 10
 
 # Strict mode (fails on data loss)
 mmrag-v2 process critical_document.pdf --batch-size 10 --strict-qa
+
+# Using LM Studio (OpenAI-compatible API)
+mmrag-v2 process document.pdf --vision-provider openai --api-key lm-studio
 ```
 
 ### Output Structure
@@ -151,7 +157,7 @@ python -c "import docling; print(f'Docling {docling.__version__}')"
 mmrag-v2 check
 ```
 
-### Step 3: Setup Vision Provider (Optional but Recommended)
+### Step 3: Setup Vision Provider
 
 #### Option A: Local Ollama (Free, Private)
 
@@ -166,7 +172,21 @@ ollama pull llava:latest
 ollama serve
 ```
 
-#### Option B: Cloud Providers
+#### Option B: LM Studio (OpenAI-Compatible, Recommended for v17.1+)
+
+```bash
+# 1. Download LM Studio from https://lmstudio.ai
+# 2. Load a vision model (e.g., llama-3.2-vision)
+# 3. Start the local server (default: http://localhost:1234)
+
+# Set base URL environment variable
+export OPENAI_BASE_URL="http://localhost:1234/v1"
+
+# Use with the openai provider
+mmrag-v2 process document.pdf --vision-provider openai --api-key lm-studio
+```
+
+#### Option C: Cloud Providers
 
 ```bash
 # OpenAI
@@ -193,30 +213,30 @@ mmrag-v2 process [OPTIONS] INPUT_FILE
 | `--output-dir`, `-o` | `./output` | Directory for JSONL and assets |
 | `--batch-size`, `-b` | `10` | Pages per batch (0=disable batching) |
 | `--pages` | `None` | **Specific pages** (comma-separated: `6,21,169,241`) or **max count** (single number: `10`) |
-| `--vision-provider`, `-v` | `ollama` | VLM provider: `ollama`, `openai`, `anthropic`, `none` |
+| `--vision-provider`, `-v` | `ollama` | VLM provider: `ollama`, `openai`, `anthropic`, `haiku`, `none` |
 | `--vision-model`, `-m` | Auto-detect | Model name (e.g., `llava:latest`, `gpt-4o-mini`) |
 | `--api-key`, `-k` | Env var | API key for cloud providers |
+| `--vlm-timeout` | `180` | VLM call timeout in seconds |
 
 #### Quality Control Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--sensitivity`, `-s` | `0.5` | Image extraction sensitivity (0.1-1.0) |
-| `--strict-qa` | `False` | Fail on token validation errors (Gap #4) |
-| `--semantic-overlap` | `True` | Enable Dynamic Semantic Overlap (DSO) chunking (Gap #3) |
-| `--vlm-context-depth` | `3` | Previous text chunks for VLM semantic anchoring (Gap #3) |
+| `--strict-qa` | `False` | Fail on token validation errors |
+| `--semantic-overlap` | `True` | Enable Dynamic Semantic Overlap (DSO) chunking |
+| `--vlm-context-depth` | `3` | Previous text chunks for VLM semantic anchoring |
 | `--allow-fullpage-shadow` | `False` | Override Full-Page Guard |
-| `--vlm-timeout` | `90` | VLM call timeout in seconds |
 
 #### OCR Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--enable-ocr` | `False` | Enable OCR for scanned pages |
-| `--ocr-engine` | `easyocr` | Engine: `tesseract` or `easyocr` |
-| `--ocr-mode` | `legacy` | OCR mode: `legacy` (shadow extraction) or `layout-aware` (3-layer cascade) |
+| `--enable-ocr/--no-ocr` | `False` | Enable OCR for scanned pages |
+| `--ocr-engine` | `easyocr` | Engine: `tesseract`, `easyocr`, or `doctr` |
+| `--ocr-mode` | `auto` | OCR mode: `auto` (smart detection), `legacy`, or `layout-aware` |
 | `--ocr-confidence-threshold` | `0.7` | Minimum OCR confidence for layout-aware mode (0.0-1.0) |
-| `--enable-doctr/--no-doctr` | `True` | Enable Doctr Layer 3 for layout-aware OCR (slower but more accurate) |
+| `--enable-doctr/--no-doctr` | `True` | Enable Doctr Layer 3 for layout-aware OCR |
 
 ### Examples
 
@@ -235,17 +255,17 @@ mmrag-v2 process manual.pdf \
   --strict-qa \
   --output-dir ./manual_output
 
-# Scanned document with OCR
+# Scanned document with layout-aware OCR
 mmrag-v2 process scanned.pdf \
+  --ocr-mode layout-aware \
   --enable-ocr \
-  --ocr-engine tesseract \
-  --vision-provider none \
+  --batch-size 10 \
   --output-dir ./scanned_output
 
-# Cloud VLM with OpenAI
+# LM Studio with OpenAI-compatible API
 mmrag-v2 process document.pdf \
   --vision-provider openai \
-  --api-key sk-your-key \
+  --api-key lm-studio \
   --batch-size 10
 
 # Process SPECIFIC pages only (targeted extraction)
@@ -253,12 +273,6 @@ mmrag-v2 process firearms.pdf --pages 6,21,169,241 --no-cache
 
 # Process first 20 pages only (max count mode)
 mmrag-v2 process large.pdf --pages 20 --batch-size 10
-
-# Disable Dynamic Semantic Overlap for raw chunking
-mmrag-v2 process document.pdf --no-semantic-overlap --batch-size 10
-
-# Increase VLM context depth for better image descriptions
-mmrag-v2 process photo_book.pdf --vlm-context-depth 5 --sensitivity 0.8
 ```
 
 ### Utility Commands
@@ -281,53 +295,53 @@ mmrag-v2 batch ./documents --pattern "*.pdf" --vision-provider ollama
 ### System Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────────────────────────┐
 │                     MM-Converter-V2 Pipeline                     │
-├─────────────────────────────────────────────────────────────────┤
+├──────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│  ┌──────────┐    ┌───────────────┐    ┌──────────────────────┐  │
-│  │ PDF/EPUB │───▶│ SmartConfig   │───▶│ Strategy Orchestrator│  │
-│  │ DOCX/HTML│    │ (Profile)     │    │ (Thresholds)         │  │
-│  └──────────┘    └───────────────┘    └──────────────────────┘  │
-│                                                 │                │
-│                                                 ▼                │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │                   BatchProcessor                          │   │
-│  │  ┌────────────┐  ┌────────────┐  ┌────────────────────┐  │   │
-│  │  │ PDF Split  │─▶│ Docling    │─▶│ Shadow Extraction  │  │   │
-│  │  │ (N pages)  │  │ (Layout AI)│  │ (PyMuPDF Scan)     │  │   │
-│  │  └────────────┘  └────────────┘  └────────────────────┘  │   │
-│  │         │               │                    │            │   │
-│  │         ▼               ▼                    ▼            │   │
-│  │  ┌────────────────────────────────────────────────────┐  │   │
-│  │  │              Context State Machine                  │  │   │
-│  │  │    (Breadcrumbs, Hierarchy, Page Tracking)         │  │   │
-│  │  └────────────────────────────────────────────────────┘  │   │
-│  │         │                                                 │   │
-│  │         ▼                                                 │   │
-│  │  ┌────────────────────────────────────────────────────┐  │   │
-│  │  │              VLM Enrichment Layer                   │  │   │
-│  │  │    (Ollama/OpenAI/Anthropic + Vision Cache)        │  │   │
-│  │  └────────────────────────────────────────────────────┘  │   │
-│  └──────────────────────────────────────────────────────────┘   │
+│  ┌──────────┐    ┌───────────────────┐    ┌───────────────────┐  │
+│  │ PDF/EPUB │───▶│ DocumentDiagnostic│───▶│Profile Classifier │  │
+│  │ DOCX/HTML│    │ (Physical Checks) │    │(Multi-Dimensional)│  │
+│  └──────────┘    └───────────────────┘    └───────────────────┘  │
+│                           │                        │             │
+│                           ▼                        ▼             │
+│  ┌──────────────────────────────────────────────────────────┐    │
+│  │                   BatchProcessor                         │    │
+│  │  ┌────────────┐  ┌────────────┐  ┌────────────────────┐  │    │
+│  │  │ PDF Split  │─▶│ Docling    │─▶│ OCR Cascade        │  │    │
+│  │  │ (N pages)  │  │ (Layout AI)│  │ (Auto/Layout-Aware)│  │    │
+│  │  └────────────┘  └────────────┘  └────────────────────┘  │    │
+│  │         │               │                    │           │    │
+│  │         ▼               ▼                    ▼           │    │
+│  │  ┌────────────────────────────────────────────────────┐  │    │
+│  │  │              Context State Machine                 │  │    │
+│  │  │    (Breadcrumbs, Hierarchy, Page Tracking)         │  │    │
+│  │  └────────────────────────────────────────────────────┘  │    │
+│  │         │                                                │    │
+│  │         ▼                                                │    │
+│  │  ┌────────────────────────────────────────────────────┐  │    │
+│  │  │              VLM Enrichment Layer                  │  │    │
+│  │  │    (Ollama/OpenAI/LM Studio/Anthropic + Cache)     │  │    │
+│  │  └────────────────────────────────────────────────────┘  │    │
+│  └──────────────────────────────────────────────────────────┘    │
 │                                │                                 │
 │                                ▼                                 │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │                 Quality Assurance Layer                   │   │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌────────────────┐  │   │
-│  │  │ Token        │  │ Asset        │  │ pHash          │  │   │
-│  │  │ Validator    │  │ Validator    │  │ Deduplicator   │  │   │
-│  │  │ (QA-CHECK-01)│  │ (QA-CHECK-02)│  │                │  │   │
-│  │  └──────────────┘  └──────────────┘  └────────────────┘  │   │
-│  └──────────────────────────────────────────────────────────┘   │
+│  ┌──────────────────────────────────────────────────────────┐    │
+│  │                 Quality Assurance Layer                  │    │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌────────────────┐  │    │
+│  │  │ Token        │  │ Asset        │  │ Coordinate     │  │    │
+│  │  │ Validator    │  │ Validator    │  │ Validator      │  │    │
+│  │  │ (QA-CHECK-01)│  │ (QA-CHECK-02)│  │ (REQ-COORD)    │  │    │
+│  │  └──────────────┘  └──────────────┘  └────────────────┘  │    │
+│  └──────────────────────────────────────────────────────────┘    │
 │                                │                                 │
 │                                ▼                                 │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │                    Output Layer                           │   │
-│  │         ingestion.jsonl + assets/ directory               │   │
-│  └──────────────────────────────────────────────────────────┘   │
+│  ┌──────────────────────────────────────────────────────────┐    │
+│  │                    Output Layer                          │    │
+│  │         ingestion.jsonl + assets/ directory              │    │
+│  └──────────────────────────────────────────────────────────┘    │
 │                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ### Key Components
@@ -336,159 +350,14 @@ mmrag-v2 batch ./documents --pattern "*.pdf" --vision-provider ollama
 |-----------|----------|---------|
 | `BatchProcessor` | `src/mmrag_v2/batch_processor.py` | Orchestrates large PDF processing with memory management |
 | `V2DocumentProcessor` | `src/mmrag_v2/processor.py` | Core Docling-based document conversion |
+| `DocumentDiagnosticEngine` | `src/mmrag_v2/orchestration/document_diagnostic.py` | Pre-flight document analysis |
+| `ProfileClassifier` | `src/mmrag_v2/orchestration/profile_classifier.py` | Multi-dimensional profile selection |
 | `SmartConfigProvider` | `src/mmrag_v2/orchestration/smart_config.py` | Document profiling and classification |
 | `StrategyOrchestrator` | `src/mmrag_v2/orchestration/strategy_orchestrator.py` | Dynamic threshold computation |
-| `ShadowExtractor` | `src/mmrag_v2/orchestration/shadow_extractor.py` | PyMuPDF-based asset recovery |
 | `VisionManager` | `src/mmrag_v2/vision/vision_manager.py` | Multi-provider VLM abstraction |
 | `TokenValidator` | `src/mmrag_v2/validators/token_validator.py` | QA-CHECK-01 data integrity guard |
 | `ContextStateV2` | `src/mmrag_v2/state/context_state.py` | Breadcrumb state machine |
-
----
-
-## 🔄 Processing Pipeline
-
-### Phase 1: Document Analysis
-
-```
-Input PDF → SmartConfigProvider → DocumentProfile
-                                      │
-                                      ├── doc_type: "editorial" | "technical"
-                                      ├── image_to_text_ratio: 0.0-1.0
-                                      └── avg_image_size: pixels
-```
-
-### Phase 2: Strategy Generation
-
-Based on document profile + `--sensitivity` dial:
-
-| Sensitivity | Min Dimension | Background Extraction | Use Case |
-|-------------|---------------|----------------------|----------|
-| `0.1` | 400×400px | Disabled | Technical docs, minimal images |
-| `0.5` | 250×250px | Profile-dependent | **Default - Balanced** |
-| `0.7` | 190×190px | Enabled | Magazines with mixed content |
-| `1.0` | 100×100px | Enabled | Maximum recall (capture everything) |
-
-**Note:** Editorial documents automatically receive a 50px threshold reduction.
-
-### Phase 3: Batch Processing
-
-For a 244-page PDF with `--batch-size 10`:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Batch Processing Flow                     │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  Pages 1-10  ──▶  Docling  ──▶  Shadow Scan  ──▶  Chunks    │
-│       │                                              │       │
-│       └─────────── gc.collect() ◀────────────────────┘       │
-│                                                              │
-│  Pages 11-20 ──▶  Docling  ──▶  Shadow Scan  ──▶  Chunks    │
-│       │                                              │       │
-│       └─────────── gc.collect() ◀────────────────────┘       │
-│                                                              │
-│  ... (repeat for all batches)                                │
-│                                                              │
-│  Final: Merge all chunks ──▶ Token Validation ──▶ JSONL     │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Phase 4: Shadow Extraction
-
-Catches images that Docling's AI misses:
-
-```python
-# For each page where Docling found ZERO images:
-shadow_extractor.scan_page(doc, page_number)
-    │
-    ├── Extract all bitmap objects from PDF stream
-    ├── Filter by size threshold (from strategy)
-    ├── Apply Full-Page Guard (area_ratio > 0.95 → VLM verify)
-    ├── Check against Docling bboxes (Ghost Filter)
-    └── Persist as "shadow" assets with extraction_method="shadow"
-```
-
-### Phase 5: Quality Assurance
-
-```python
-# QA-CHECK-01: Token Balance Verification
-validator = TokenValidator(tolerance=0.10)
-result = validator.validate_token_balance(
-    chunks=all_chunks,
-    source_text=denoised_text,
-    overlap_ratio=dso_overlap_estimate
-)
-
-if not result.is_valid and strict_qa:
-    raise DataIntegrityError(result.error_message)
-```
-
----
-
-## 🎯 Smart Vision Orchestration
-
-### Document Classification
-
-The system automatically classifies documents based on sampling 3 pages (Cover, Middle, End):
-
-| Classification | Image Ratio | Avg Image Size | Characteristics |
-|----------------|-------------|----------------|-----------------|
-| **Editorial** | ≥40% | ≥300px | Magazines, photo books, brochures |
-| **Technical** | <40% | <300px | Manuals, reports, whitepapers |
-
-### Console Output
-
-When processing begins, you'll see the strategy banner:
-
-```
-🎯 SMART VISION ORCHESTRATION
-   📊 Document Profile: EDITORIAL
-   📐 Image-to-Text Ratio: 0.72
-   🎚️  Sensitivity Dial: 0.7
-   📏 Min Image Dimension: 140x140px
-   🖼️  Background Extraction: ENABLED
-⏳ Starting batch processing for: Combat Aircraft - August 2025 UK.pdf
-```
-
----
-
-## ✅ Quality Assurance
-
-### QA-CHECK-01: Token Balance Validation
-
-Ensures no text is lost during chunking:
-
-```
-Source Tokens: 10,000 (from denoised text)
-Chunk Tokens:  11,500 (includes DSO overlap)
-Overlap Allow: 1,500 (15% estimate)
-─────────────────────────────────
-Effective:     10,000 (11,500 - 1,500)
-Variance:      0.0% ✓ (within 10% tolerance)
-```
-
-**Logging:**
-```
-[INFO] [QA-CHECK-01] ✓ Token balance verified (document.pdf): Source=10000 tokens, Chunks=11500 tokens, Overlap=1500 tokens, Variance=+0.0%
-```
-
-**On Failure:**
-```
-[CRITICAL] [QA-CHECK-01] ✗ CRITICAL WARNING (document.pdf): Source=10000 tokens, Chunks=7500 tokens, Overlap=1500 tokens, Variance=-35.0% (exceeds 10.0% tolerance). Possible data loss during chunking.
-```
-
-### QA-CHECK-02: Asset Verification
-
-Every `asset_ref.file_path` is verified to exist on disk before JSONL export.
-
-### QA-CHECK-03: Hierarchy Integrity
-
-`breadcrumb_path` depth must match `hierarchy.level` value.
-
-### QA-CHECK-04: Coordinate Validation
-
-All `bbox` values must be integers in range [0, 1000] (normalized canvas).
+| `EnhancedOCREngine` | `src/mmrag_v2/ocr/enhanced_ocr_engine.py` | 3-layer OCR cascade |
 
 ---
 
@@ -516,8 +385,8 @@ Each line is a valid JSON object:
     },
     "spatial": {
       "bbox": [50, 100, 950, 800],
-      "page_width": 612.0,
-      "page_height": 792.0
+      "page_width": 612,
+      "page_height": 792
     },
     "extraction_method": "docling",
     "created_at": "2025-12-30T14:23:45.123456+00:00"
@@ -533,7 +402,7 @@ Each line is a valid JSON object:
   "chunk_id": "a1b2c3d4_042_figure_01",
   "doc_id": "a1b2c3d4e5f6",
   "modality": "image",
-  "content": "Cutaway diagram showing the F-35's internal weapons bay with AIM-120 AMRAAM missiles and precision-guided munitions.",
+  "content": "Cutaway diagram showing the F-35's internal weapons bay with AIM-120 AMRAAM missiles.",
   "metadata": {
     "source_file": "combat_aircraft_aug2025.pdf",
     "file_type": "pdf",
@@ -543,7 +412,9 @@ Each line is a valid JSON object:
       "level": 4
     },
     "spatial": {
-      "bbox": [100, 200, 900, 600]
+      "bbox": [100, 200, 900, 600],
+      "page_width": 612,
+      "page_height": 792
     },
     "extraction_method": "docling",
     "visual_description": "Cutaway diagram showing the F-35's internal weapons bay..."
@@ -558,6 +429,31 @@ Each line is a valid JSON object:
 }
 ```
 
+### Spatial Metadata (REQ-COORD-02)
+
+The `spatial` object contains normalized coordinates for UI overlay support:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `bbox` | `[int, int, int, int]` | Normalized coordinates [x0, y0, x1, y1] in range 0-1000 |
+| `page_width` | `int` | Original page width in PDF points (e.g., 612 for US Letter) |
+| `page_height` | `int` | Original page height in PDF points (e.g., 792 for US Letter) |
+
+**Converting bbox to pixels for UI overlay:**
+```python
+# Given: bbox = [100, 200, 900, 600], page_width = 612, page_height = 792
+# Scale factor for rendering at 150 DPI
+dpi_scale = 150 / 72  # PDF points are 72 DPI
+render_width = page_width * dpi_scale  # 1275 pixels
+render_height = page_height * dpi_scale  # 1650 pixels
+
+# Convert normalized bbox to pixel coordinates
+x0 = (bbox[0] / 1000) * render_width   # 127.5
+y0 = (bbox[1] / 1000) * render_height  # 330.0
+x1 = (bbox[2] / 1000) * render_width   # 1147.5
+y1 = (bbox[3] / 1000) * render_height  # 990.0
+```
+
 ### Modality Types
 
 | Modality | Description | Has asset_ref |
@@ -565,76 +461,115 @@ Each line is a valid JSON object:
 | `text` | Paragraphs, headings, lists | No |
 | `image` | Figures, photos, diagrams | Yes |
 | `table` | Markdown tables | Optional |
-| `shadow` | PyMuPDF-extracted assets | Yes |
 
 ---
 
-## 🔌 Integration Examples
+## 🎯 Smart Vision Orchestration
 
-### LangChain + Qdrant
+### Document Diagnostic Layer
 
-```python
-import json
-from langchain_community.vectorstores import Qdrant
-from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.schema import Document
+Before processing begins, the system runs a pre-flight diagnostic:
 
-# Load chunks
-with open("output/ingestion.jsonl") as f:
-    chunks = [json.loads(line) for line in f]
-
-# Convert to LangChain documents
-documents = [
-    Document(
-        page_content=chunk["content"],
-        metadata={
-            "source": chunk["metadata"]["source_file"],
-            "page": chunk["metadata"]["page_number"],
-            "breadcrumb": " > ".join(chunk["metadata"]["hierarchy"]["breadcrumb_path"]),
-            "modality": chunk["modality"],
-            "asset_path": chunk.get("asset_ref", {}).get("file_path"),
-        }
-    )
-    for chunk in chunks
-]
-
-# Create vector store
-embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-vector_store = Qdrant.from_documents(
-    documents, embeddings,
-    url="http://localhost:6333",
-    collection_name="multimodal_docs"
-)
-
-# Search with breadcrumb context
-results = vector_store.similarity_search(
-    "What is the F-35's stealth capability?",
-    k=5,
-    filter={"modality": "text"}
-)
+```
+━━━━━ DOCUMENT DIAGNOSTICS ━━━━━
+Modality: digital
+File Size: 45.2 MB
+Avg Text/Page: 1250 chars
+Is Likely Scan: No
+Confidence: 0.92
+Era: modern
+Domain: editorial
+Strategy: editorial_balanced
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-### Direct Python API
+### Multi-Dimensional Profile Selection
 
-```python
-from src.mmrag_v2.batch_processor import BatchProcessor
+The ProfileClassifier analyzes multiple dimensions to select the optimal processing profile:
 
-# Create processor
-processor = BatchProcessor(
-    output_dir="./output",
-    batch_size=10,
-    vision_provider="ollama",
-    vision_model="llava:latest",
-    strict_qa=True,
-)
+| Profile | Use Case | VLM Freedom | Scan Hints |
+|---------|----------|-------------|------------|
+| `EditorialProfile` | Modern digital magazines | `discovery` | No |
+| `TechnicalProfile` | Technical manuals, reports | `strict` | No |
+| `ScannedModernProfile` | Clean scans (2000s+) | `guided` | Yes |
+| `ScannedDegradedProfile` | Vintage scans (pre-1970) | `guided` | Yes |
+| `AcademicWhitepaperProfile` | Academic papers, whitepapers | `strict` | No |
 
-# Process document
-result = processor.process_pdf("large_document.pdf")
+### Strategy Banner
 
-print(f"Total chunks: {result.total_chunks}")
-print(f"Batches processed: {result.batches_processed}")
-print(f"Time: {result.processing_time_seconds:.1f}s")
-print(f"Output: {result.output_jsonl}")
+When processing begins, you'll see the strategy configuration:
+
+```
+🎯 SMART VISION ORCHESTRATION
+   📊 Document Profile: EDITORIAL
+   📐 Image-to-Text Ratio: 0.72
+   🎚️  Sensitivity Dial: 0.7
+   📏 Min Image Dimension: 140x140px
+   🖼️  Background Extraction: ENABLED
+```
+
+---
+
+## ✅ Quality Assurance
+
+### QA-CHECK-01: Token Balance Validation
+
+Ensures no text is lost during chunking:
+
+```
+Source Tokens: 10,000 (from denoised text)
+Chunk Tokens:  11,500 (includes DSO overlap)
+Overlap Allow: 1,500 (15% estimate)
+─────────────────────────────────
+Effective:     10,000 (11,500 - 1,500)
+Variance:      0.0% ✓ (within 10% tolerance)
+```
+
+### QA-CHECK-02: Asset Verification
+
+Every `asset_ref.file_path` is verified to exist on disk before JSONL export.
+
+### QA-CHECK-03: Hierarchy Integrity
+
+`breadcrumb_path` depth must match `hierarchy.level` value.
+
+### REQ-COORD: Coordinate Validation
+
+- All `bbox` values must be integers in range [0, 1000]
+- `page_width` and `page_height` must be populated for IMAGE and TABLE chunks
+
+---
+
+## 🔬 Layout-Aware OCR (Phase 1B)
+
+### Overview
+
+For scanned documents, the standard pipeline produces VLM summaries instead of verbatim text. The **Layout-Aware OCR** module uses a 3-layer confidence-based cascade:
+
+```
+Layer 1: Docling (existing)  →  confidence > 0.7 → accept
+                             ↓
+Layer 2: Tesseract 5.x       →  confidence > 0.7 → accept
+                             ↓
+Layer 3: Doctr (transformer) →  FINAL PASS (accept all)
+```
+
+### Auto-Detection (Default)
+
+When `--ocr-mode auto` (default), the system automatically selects:
+- **Digital documents** → `legacy` mode (shadow extraction)
+- **Scanned documents** → `layout-aware` mode (3-layer OCR cascade)
+
+```bash
+# Auto-detection (recommended)
+mmrag-v2 process document.pdf --batch-size 10
+
+# Force layout-aware for vintage documents
+mmrag-v2 process vintage_catalog.pdf \
+  --ocr-mode layout-aware \
+  --ocr-confidence-threshold 0.7 \
+  --enable-doctr \
+  --batch-size 10
 ```
 
 ---
@@ -650,36 +585,28 @@ export ANTHROPIC_API_KEY="..."
 
 # Ollama (if not on localhost)
 export OLLAMA_HOST="http://your-server:11434"
+
+# OpenAI-compatible APIs (LM Studio, LocalAI, vLLM)
+export OPENAI_BASE_URL="http://localhost:1234/v1"
 ```
 
-### Python Configuration
+### Python API
 
 ```python
-from src.mmrag_v2.batch_processor import BatchProcessor
-from src.mmrag_v2.orchestration.strategy_orchestrator import StrategyOrchestrator
-from src.mmrag_v2.orchestration.smart_config import SmartConfigProvider
+from mmrag_v2.batch_processor import BatchProcessor
 
-# Step 1: Analyze document
-analyzer = SmartConfigProvider()
-profile = analyzer.analyze("document.pdf")
-
-# Step 2: Create custom strategy
-orchestrator = StrategyOrchestrator()
-strategy = orchestrator.create_strategy(
-    profile=profile,
-    sensitivity=0.8,  # High recall
-)
-
-# Step 3: Process with strategy
 processor = BatchProcessor(
     output_dir="./output",
     batch_size=10,
-    vision_provider="ollama",
-    extraction_strategy=strategy,
+    vision_provider="openai",  # or "ollama", "anthropic", "none"
+    vision_api_key="your-key",
     strict_qa=True,
+    semantic_overlap=True,
 )
 
 result = processor.process_pdf("document.pdf")
+print(f"Chunks: {result.total_chunks}")
+print(f"Output: {result.output_jsonl}")
 ```
 
 ---
@@ -693,9 +620,9 @@ result = processor.process_pdf("document.pdf")
 | `ModuleNotFoundError: tiktoken` | `pip install tiktoken` |
 | `Ollama connection refused` | Run `ollama serve` in another terminal |
 | `Memory error on large PDF` | Reduce `--batch-size` (try 5) |
-| `Token validation failed` | Check if ads/headers were incorrectly included in source text |
+| `Token validation failed` | Check if ads/headers were incorrectly included |
 | `No images extracted` | Increase `--sensitivity` (try 0.8) |
-| `Full-page images rejected` | Use `--allow-fullpage-shadow` or verify VLM is available |
+| `page_width/page_height is null` | Update to latest version (fixed in v2.3) |
 
 ### Debug Mode
 
@@ -705,252 +632,6 @@ mmrag-v2 process document.pdf --verbose
 
 # Process single batch for testing
 mmrag-v2 process document.pdf --pages 10 --batch-size 10
-```
-
----
-
-## 📚 API Reference
-
-### BatchProcessor
-
-```python
-class BatchProcessor:
-    def __init__(
-        self,
-        output_dir: str = "./output",
-        batch_size: int = 10,
-        vision_provider: str = "ollama",
-        vision_model: Optional[str] = None,
-        vision_api_key: Optional[str] = None,
-        vlm_timeout: int = 90,
-        enable_ocr: bool = False,
-        ocr_engine: str = "easyocr",
-        extraction_strategy: Optional[ExtractionStrategy] = None,
-        max_pages: Optional[int] = None,
-        allow_fullpage_shadow: bool = False,
-        strict_qa: bool = False,
-        semantic_overlap: bool = True,      # Gap #3: Dynamic Semantic Overlap
-        vlm_context_depth: int = 3,         # Gap #3: VLM context anchoring
-    ) -> None:
-        """Initialize the BatchProcessor."""
-
-    def process_pdf(self, pdf_path: str | Path) -> BatchProcessingResult:
-        """Process a PDF using batch splitting strategy."""
-```
-
-#### BatchProcessor Parameters
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `output_dir` | `str` | `"./output"` | Directory for JSONL and assets |
-| `batch_size` | `int` | `10` | Pages per batch |
-| `vision_provider` | `str` | `"ollama"` | VLM provider (`ollama`, `openai`, `anthropic`, `none`) |
-| `vision_model` | `Optional[str]` | `None` | Model name (auto-detects for Ollama) |
-| `vision_api_key` | `Optional[str]` | `None` | API key for cloud providers |
-| `vlm_timeout` | `int` | `90` | VLM call timeout in seconds |
-| `enable_ocr` | `bool` | `False` | Enable OCR for scanned pages |
-| `ocr_engine` | `str` | `"easyocr"` | OCR engine (`tesseract` or `easyocr`) |
-| `extraction_strategy` | `Optional[ExtractionStrategy]` | `None` | Custom extraction strategy |
-| `max_pages` | `Optional[int]` | `None` | Maximum pages to process |
-| `allow_fullpage_shadow` | `bool` | `False` | Override Full-Page Guard |
-| `strict_qa` | `bool` | `False` | Fail on token validation errors (Gap #4) |
-| `semantic_overlap` | `bool` | `True` | Enable Dynamic Semantic Overlap (Gap #3) |
-| `vlm_context_depth` | `int` | `3` | Previous chunks for VLM context (Gap #3) |
-
-### TokenValidator
-
-```python
-class TokenValidator:
-    def __init__(self, tolerance: float = 0.10) -> None:
-        """Initialize with variance tolerance (default 10%)."""
-
-    def validate_token_balance(
-        self,
-        chunks: List[IngestionChunk],
-        source_text: str,
-        overlap_ratio: float = 0.15,
-    ) -> TokenValidationResult:
-        """Validate chunk tokens match source tokens."""
-```
-
----
-
-## 🔬 Layout-Aware OCR (Phase 1B)
-
-### Overview
-
-For scanned documents, the standard pipeline produces VLM summaries instead of verbatim text. The **Layout-Aware OCR** module solves this by using a 3-layer confidence-based cascade:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│              LAYOUT-AWARE OCR PIPELINE                       │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  Layer 1: Docling (existing)                                │
-│  • Fastest route (10-20s per page)                          │
-│  • Confidence threshold: >0.7 = accept                      │
-│           │                                                  │
-│           │ IF confidence < 0.7                             │
-│           ▼                                                  │
-│  Layer 2: Tesseract 5.x + Preprocessing                     │
-│  • Image enhancement (deskew, denoise, contrast)            │
-│  • Confidence threshold: >0.7 = accept                      │
-│           │                                                  │
-│           │ IF confidence still < 0.7                       │
-│           ▼                                                  │
-│  Layer 3: Doctr (transformer-based)                         │
-│  • State-of-the-art accuracy (db_resnet50 + CRNN)          │
-│  • Best for degraded vintage scans                          │
-│  • FINAL PASS - accept all results                          │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### When to Use
-
-| Document Type | Recommended Mode | Why |
-|---------------|-----------------|-----|
-| Digital PDF | `--ocr-mode legacy` | Docling handles native text perfectly |
-| Modern scan (clean) | `--ocr-mode legacy` | Tesseract within Docling is sufficient |
-| Vintage scan (1900s-1950s) | `--ocr-mode layout-aware` | Requires Doctr for degraded text |
-| Mixed content | `--ocr-mode layout-aware` | Separates TEXT from IMAGE regions cleanly |
-
-### Usage Examples
-
-```bash
-# Vintage firearms catalog with layout-aware OCR
-mmrag-v2 process vintage_catalog.pdf \
-  --ocr-mode layout-aware \
-  --ocr-confidence-threshold 0.7 \
-  --enable-doctr \
-  --batch-size 10 \
-  --output-dir ./vintage_output
-
-# Scanned document without Doctr (faster, less accurate)
-mmrag-v2 process scanned.pdf \
-  --ocr-mode layout-aware \
-  --no-doctr \
-  --batch-size 10
-
-# High-confidence threshold for cleaner output
-mmrag-v2 process clean_scan.pdf \
-  --ocr-mode layout-aware \
-  --ocr-confidence-threshold 0.85
-```
-
-### OCR Module Components
-
-Located in `src/mmrag_v2/ocr/`:
-
-| Module | Purpose |
-|--------|---------|
-| `image_preprocessor.py` | Deskew, denoise, CLAHE contrast, adaptive thresholding |
-| `enhanced_ocr_engine.py` | 3-layer OCR cascade with confidence routing |
-| `layout_aware_processor.py` | Integrates layout detection with OCR routing |
-
-### ImagePreprocessor
-
-Optimized for vintage scanned documents with age-related artifacts:
-
-```python
-from mmrag_v2.ocr import ImagePreprocessor
-
-preprocessor = ImagePreprocessor(
-    adaptive_block_size=11,
-    denoise_strength=10,
-    deskew_threshold=0.5,
-    clahe_clip_limit=2.0,
-)
-
-# Full enhancement pipeline
-enhanced = preprocessor.enhance_for_ocr(image)
-
-# Quality estimation (0.0-1.0)
-quality = preprocessor.estimate_quality(image)
-```
-
-**Pipeline Steps:**
-1. Grayscale conversion (RGB/RGBA → Gray)
-2. Deskewing (straighten rotated scans)
-3. CLAHE contrast enhancement
-4. Non-local means denoising
-5. Adaptive thresholding (binarization)
-
-### EnhancedOCREngine
-
-```python
-from mmrag_v2.ocr import EnhancedOCREngine, OCRResult
-
-engine = EnhancedOCREngine(
-    confidence_threshold=0.7,
-    enable_tesseract=True,
-    enable_doctr=True,
-)
-
-# Process full page
-result: OCRResult = engine.process_page(page_image)
-
-print(f"Text: {result.text[:100]}...")
-print(f"Confidence: {result.confidence:.2f}")
-print(f"Layer used: {result.layer_used.value}")
-print(f"Processing time: {result.processing_time_ms}ms")
-
-# Check layer availability
-status = engine.get_layer_status()
-# {'docling': True, 'tesseract': True, 'doctr': True}
-```
-
-### LayoutAwareOCRProcessor
-
-Combines layout detection with OCR cascade:
-
-```python
-from mmrag_v2.ocr import LayoutAwareOCRProcessor
-from pathlib import Path
-
-processor = LayoutAwareOCRProcessor(
-    ocr_confidence_threshold=0.7,
-    enable_doctr=True,
-    output_dir=Path("./output/assets"),
-    vlm_manager=vision_manager,  # Optional
-)
-
-# Process a page
-chunks = processor.process_page(
-    page_image=page_image,  # RGB numpy array
-    page_number=21,
-    doc_id="abc123",
-    docling_elements=docling_result.elements,  # Optional
-)
-
-for chunk in chunks:
-    print(f"{chunk.modality}: {chunk.content[:50]}...")
-    if chunk.asset_ref:
-        print(f"  Asset: {chunk.asset_ref['file_path']}")
-```
-
-**Output Types:**
-- `modality: "text"` - OCR-extracted verbatim text
-- `modality: "image"` - VLM-described image regions
-- `modality: "table"` - OCR-extracted table content
-
-### Dependencies
-
-Layout-aware OCR requires additional packages (automatically installed):
-
-```bash
-# Already in pyproject.toml
-opencv-python>=4.8.0
-python-doctr[torch]>=0.8.0
-
-# System dependency (installed via brew)
-tesseract  # Must be 5.x
-```
-
-Verify installation:
-```bash
-python -c "import cv2, pytesseract, doctr; print('✓')"
-tesseract --version  # Should show 5.x
 ```
 
 ---
@@ -974,11 +655,11 @@ This implementation is fully compliant with **SRS Multimodal Ingestion V2.3**:
 | Requirement | Status | Implementation |
 |-------------|--------|----------------|
 | IRON-01: Atomic tables/figures | ✅ | Never split across chunks |
-| IRON-03: No full-page exports | ✅ | Full-Page Guard with VLM verification |
-| IRON-05: Disk-first persistence | ✅ | Immediate write after each batch |
+| IRON-07: Full-Page Guard | ✅ | Area ratio > 0.95 rejected |
 | QA-CHECK-01: Token validation | ✅ | TokenValidator with 10% tolerance |
+| REQ-COORD-01: Normalized bbox | ✅ | Integer range [0, 1000] |
+| REQ-COORD-02: Page dimensions | ✅ | page_width, page_height populated |
 | REQ-CHUNK-03: DSO overlap | ✅ | SemanticOverlapManager |
-| REQ-MM-05: Shadow extraction | ✅ | PyMuPDF parallel scan |
 
 ---
 
@@ -989,3 +670,4 @@ Internal Project - SRS v2.3 Compliant
 ---
 
 **Built with ❤️ for Advanced RAG Systems**
+

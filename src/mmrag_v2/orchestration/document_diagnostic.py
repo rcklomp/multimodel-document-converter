@@ -51,12 +51,14 @@ SCAN_IMAGE_RATIO_THRESHOLD: float = 0.8  # >80% page area covered by images = sc
 
 # Diagnostic sampling
 DIAGNOSTIC_SAMPLE_PAGES: int = 5  # Analyze first 5 pages
+DEEP_SCAN_SAMPLE_PAGES: int = 15  # V16: Deep scan for low confidence cases
 DPI_LOW: int = 72  # Quick analysis
 DPI_HIGH: int = 150  # Detailed analysis
 
 # Confidence thresholds
 HIGH_CONFIDENCE_THRESHOLD: float = 0.85
 LOW_CONFIDENCE_THRESHOLD: float = 0.50
+DEEP_SCAN_TRIGGER_THRESHOLD: float = 0.60  # V16: Trigger deep scan if below this
 
 
 # ============================================================================
@@ -255,6 +257,18 @@ class DocumentDiagnosticEngine:
         """
         Analyze a PDF document and return diagnostic report.
 
+        V16 DEEP SCAN FEATURE (2026-01-10):
+        ===================================
+        If initial confidence < DEEP_SCAN_TRIGGER_THRESHOLD (0.6), the engine
+        automatically performs a "Deep Scan" analyzing up to 15 pages using
+        stratified sampling (beginning, middle, end) to build a more robust
+        confidence profile.
+
+        This catches documents with:
+        - Long introductions with only images (then text-heavy content later)
+        - Mixed modality (some pages scanned, some digital)
+        - OCR that varies in quality across the document
+
         Args:
             pdf_path: Path to PDF file
 
@@ -271,13 +285,48 @@ class DocumentDiagnosticEngine:
         # Step 1: Physical check (file size, page count)
         physical_check = self._perform_physical_check(pdf_path)
 
-        # Step 2: Page-level diagnostics
+        # Step 2: Page-level diagnostics (initial sample)
         page_diagnostics = self._analyze_sample_pages(pdf_path)
 
         # Step 3: Build confidence profile
         confidence_profile = self._build_confidence_profile(
             physical_check, page_diagnostics, pdf_path
         )
+
+        # ================================================================
+        # V16 DEEP SCAN: Automatic extended analysis for low confidence
+        # ================================================================
+        # If confidence is below threshold and document has enough pages,
+        # perform a deep scan with stratified sampling for more accuracy.
+        if (
+            confidence_profile.overall_confidence < DEEP_SCAN_TRIGGER_THRESHOLD
+            and physical_check.total_pages > self.sample_pages
+        ):
+            logger.warning(
+                f"[DIAGNOSTIC] ⚠ LOW CONFIDENCE ({confidence_profile.overall_confidence:.2f} < "
+                f"{DEEP_SCAN_TRIGGER_THRESHOLD}) - Triggering DEEP SCAN"
+            )
+
+            # Perform deep scan with stratified sampling
+            deep_diagnostics = self._perform_deep_scan(pdf_path, physical_check.total_pages)
+
+            # Merge diagnostics
+            page_diagnostics = self._merge_diagnostics(page_diagnostics, deep_diagnostics)
+
+            # Rebuild confidence profile with more data
+            confidence_profile = self._build_confidence_profile(
+                physical_check, page_diagnostics, pdf_path
+            )
+
+            # Update reasoning
+            confidence_profile.warnings.append(
+                f"Deep scan performed: {len(page_diagnostics)} pages analyzed "
+                f"(stratified sampling across {physical_check.total_pages} total pages)"
+            )
+
+            logger.info(
+                f"[DIAGNOSTIC] Deep scan complete: new confidence={confidence_profile.overall_confidence:.2f}"
+            )
 
         # Step 4: Determine recommended strategy
         recommended_strategy = self._determine_strategy(physical_check, confidence_profile)
@@ -303,6 +352,154 @@ class DocumentDiagnosticEngine:
         )
 
         return report
+
+    def _perform_deep_scan(
+        self,
+        pdf_path: Path,
+        total_pages: int,
+    ) -> List[PageDiagnostic]:
+        """
+        V16 DEEP SCAN: Stratified sampling for low-confidence documents.
+
+        Performs extended analysis using stratified sampling:
+        - First 5 pages (already analyzed in initial pass)
+        - Middle 5 pages (random sample from middle third)
+        - Last 5 pages (random sample from last third)
+
+        This captures variation across the document that might be missed
+        by only analyzing the first few pages.
+
+        Args:
+            pdf_path: Path to PDF file
+            total_pages: Total number of pages in document
+
+        Returns:
+            List of PageDiagnostic for additional sampled pages
+        """
+        import random
+
+        logger.info(
+            f"[DEEP-SCAN] Starting stratified sampling on {total_pages} pages "
+            f"(max {DEEP_SCAN_SAMPLE_PAGES} samples)"
+        )
+
+        # Calculate page ranges for stratified sampling
+        # We want to sample from: beginning (already done), middle, end
+        pages_per_section = max(1, (DEEP_SCAN_SAMPLE_PAGES - self.sample_pages) // 2)
+
+        # Already have first N pages, so sample from middle and end
+        middle_start = total_pages // 3
+        middle_end = (2 * total_pages) // 3
+        end_start = (2 * total_pages) // 3
+
+        # Generate page indices to sample (0-indexed)
+        middle_pages = list(range(middle_start, middle_end))
+        end_pages = list(range(end_start, total_pages))
+
+        # Random sample from each section
+        sample_middle = random.sample(middle_pages, min(pages_per_section, len(middle_pages)))
+        sample_end = random.sample(end_pages, min(pages_per_section, len(end_pages)))
+
+        # Combine and sort
+        pages_to_analyze = sorted(set(sample_middle + sample_end))
+
+        logger.info(
+            f"[DEEP-SCAN] Sampling pages: {pages_to_analyze} "
+            f"(middle: {sample_middle}, end: {sample_end})"
+        )
+
+        # Analyze the additional pages
+        diagnostics: List[PageDiagnostic] = []
+
+        doc: Optional[fitz.Document] = None
+        try:
+            doc = fitz.open(str(pdf_path))
+
+            for page_idx in pages_to_analyze:
+                if page_idx >= len(doc):
+                    continue
+
+                page = doc.load_page(page_idx)
+                page_rect = page.rect
+                page_area = page_rect.width * page_rect.height
+
+                # Text analysis
+                text_result = page.get_text()
+                text: str = str(text_result) if text_result else ""
+                text_length = len(text.strip())
+                text_density = text_length / page_area if page_area > 0 else 0
+
+                # Image analysis
+                image_list = page.get_images(full=True)
+                image_count = len(image_list)
+
+                # Calculate image coverage
+                image_area = 0.0
+                for img in image_list:
+                    try:
+                        xref = img[0]
+                        img_info = doc.extract_image(xref)
+                        if img_info:
+                            width = img_info.get("width", 0)
+                            height = img_info.get("height", 0)
+                            image_area += width * height
+                    except Exception:
+                        pass
+
+                image_coverage = min(image_area / page_area, 1.0) if page_area > 0 else 0
+
+                # OCR artifact detection
+                has_ocr_artifacts = self._detect_ocr_artifacts(text)
+
+                # Noise level estimation
+                noise_level = self._estimate_noise_level(text, text_density)
+
+                # Table detection
+                contains_tables = "table" in text.lower() or "|" in text
+
+                diagnostics.append(
+                    PageDiagnostic(
+                        page_number=page_idx + 1,  # 1-indexed
+                        text_length=text_length,
+                        text_density=text_density,
+                        image_count=image_count,
+                        image_coverage=image_coverage,
+                        has_ocr_artifacts=has_ocr_artifacts,
+                        detected_noise_level=noise_level,
+                        contains_tables=contains_tables,
+                    )
+                )
+
+            logger.info(f"[DEEP-SCAN] Analyzed {len(diagnostics)} additional pages")
+            return diagnostics
+
+        finally:
+            if doc is not None:
+                doc.close()
+
+    def _merge_diagnostics(
+        self,
+        initial: List[PageDiagnostic],
+        deep_scan: List[PageDiagnostic],
+    ) -> List[PageDiagnostic]:
+        """
+        Merge initial and deep scan diagnostics, removing duplicates.
+
+        Args:
+            initial: Initial page diagnostics
+            deep_scan: Deep scan page diagnostics
+
+        Returns:
+            Merged list of unique page diagnostics
+        """
+        # Use dict to ensure unique pages (keyed by page_number)
+        merged = {d.page_number: d for d in initial}
+        for d in deep_scan:
+            if d.page_number not in merged:
+                merged[d.page_number] = d
+
+        # Return sorted by page number
+        return sorted(merged.values(), key=lambda d: d.page_number)
 
     def _perform_physical_check(self, pdf_path: Path) -> PhysicalCheckResult:
         """
@@ -357,44 +554,314 @@ class DocumentDiagnosticEngine:
             avg_image_coverage = total_image_coverage / pages_analyzed if pages_analyzed > 0 else 0
 
             # ================================================================
-            # PHYSICAL CHECK LOGIC (Gemini Audit Fix #1)
+            # V2.4 FORENSICS: Detect "Sandwich PDFs" (OCR-over-Scan)
             # ================================================================
-            # Rule: if text_length < 100 AND file_size > 1MB → force scanned
+            # PROBLEM: Harry Potter is a SCAN but has an OCR layer on top.
+            # This makes it look "digital" (791 chars/page, Acrobat metadata).
+            # But the text is from OCR, not native vector text!
+            #
+            # SOLUTION: Forensic analysis to detect OCR-sandwich patterns:
+            # 1. FONT ANALYSIS: OCR uses generic fonts (GlyphLess, Identity-H, T1)
+            # 2. IMAGE-IS-PAGE: If 1 image fills the entire page = scan
+            # 3. FONT DIVERSITY: Real digital docs have multiple fonts
+            #
+            # This check runs BEFORE other logic to catch sandwich PDFs early.
+            # ================================================================
+            is_sandwich_pdf = False
+            sandwich_reasons = []
+
+            # Collect font information from sample pages
+            all_fonts = set()
+            pages_with_fullpage_image = 0
+
+            for page_num in range(pages_analyzed):
+                page = doc.load_page(page_num)
+                page_rect = page.rect
+                page_area = page_rect.width * page_rect.height
+
+                # FONT ANALYSIS: Collect all font names
+                text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
+                blocks = text_dict.get("blocks", []) if isinstance(text_dict, dict) else []
+                for block in blocks:
+                    if isinstance(block, dict) and block.get("type") == 0:  # Text block
+                        lines = block.get("lines", [])
+                        for line in lines:
+                            if isinstance(line, dict):
+                                spans = line.get("spans", [])
+                                for span in spans:
+                                    if isinstance(span, dict):
+                                        font_name = str(span.get("font", "")).lower()
+                                        if font_name:
+                                            all_fonts.add(font_name)
+
+                # IMAGE-IS-PAGE CHECK: Does one image fill the entire page?
+                image_list = page.get_images(full=True)
+                for img in image_list:
+                    try:
+                        xref = img[0]
+                        img_info = doc.extract_image(xref)
+                        if img_info:
+                            img_width = img_info.get("width", 0)
+                            img_height = img_info.get("height", 0)
+                            img_area = img_width * img_height
+                            # If image covers > 90% of page area, it's likely the scan itself
+                            if page_area > 0 and img_area / page_area > 0.90:
+                                pages_with_fullpage_image += 1
+                                break  # Only count once per page
+                    except Exception:
+                        pass
+
+            # ================================================================
+            # SANDWICH PDF DETECTION RULES
+            # ================================================================
+            # OCR-generated fonts have distinctive names
+            OCR_FONT_INDICATORS = [
+                "glyphless",  # Common OCR invisible font
+                "identity",  # Identity-H encoding (OCR)
+                "cid",  # CID fonts from OCR
+                "r0",  # Generic OCR font naming (R0001, R0002)
+                "t1",  # Type1 placeholder
+                "unknown",  # Generic fallback
+                "notdef",  # Missing glyph font
+            ]
+
+            # Check 1: Suspicious OCR fonts
+            ocr_font_count = sum(
+                1 for f in all_fonts if any(ind in f for ind in OCR_FONT_INDICATORS)
+            )
+            total_fonts = len(all_fonts)
+
+            # ================================================================
+            # V2.5 FIX: SANDWICH DETECTION REQUIRES LOW NATIVE TEXT
+            # ================================================================
+            # CRITICAL: All sandwich PDF checks should ONLY apply when
+            # avg_text_per_page is LOW (< 500). If there's substantial native
+            # text, the document is DIGITAL regardless of other indicators.
+            #
+            # Combat Aircraft Bug: 2675 chars/page + 2 fonts = falsely flagged
+            # as sandwich because of "low font diversity" check.
+            #
+            # FIX: Gate ALL sandwich checks behind a text threshold.
+            # If avg_text_per_page >= 500, skip sandwich detection entirely.
+            # ================================================================
+            SANDWICH_TEXT_CEILING = 500  # If above this, skip sandwich detection
+
+            if avg_text_per_page < SANDWICH_TEXT_CEILING:
+                # Only check for sandwich PDFs when native text is LOW
+
+                if total_fonts > 0 and ocr_font_count / total_fonts > 0.5:
+                    is_sandwich_pdf = True
+                    sandwich_reasons.append(
+                        f"OCR fonts detected ({ocr_font_count}/{total_fonts} fonts are OCR-style)"
+                    )
+
+                # Check 2: Very low font diversity with some text = likely OCR
+                # Real magazines have 5+ fonts; OCR scans often have 1-2
+                # NOTE: Only applies when text is LOW (gated above)
+                if total_fonts <= 2 and avg_text_per_page > 50:
+                    is_sandwich_pdf = True
+                    sandwich_reasons.append(
+                        f"Suspiciously low font diversity ({total_fonts} fonts for {avg_text_per_page:.0f} chars/page)"
+                    )
+
+                # Check 3: Most pages have a single full-page image (the scan itself)
+                fullpage_ratio = (
+                    pages_with_fullpage_image / pages_analyzed if pages_analyzed > 0 else 0
+                )
+                if fullpage_ratio > 0.7:  # >70% of pages have full-page images
+                    is_sandwich_pdf = True
+                    sandwich_reasons.append(
+                        f"Full-page images detected ({pages_with_fullpage_image}/{pages_analyzed} pages = "
+                        f"{fullpage_ratio:.0%}) - likely scanned pages"
+                    )
+            else:
+                # HIGH native text = definitely digital, skip sandwich detection
+                logger.debug(
+                    f"[DIAGNOSTIC] Skipping sandwich detection: {avg_text_per_page:.0f} chars/page "
+                    f">= {SANDWICH_TEXT_CEILING} threshold"
+                )
+
+            # ================================================================
+            # PHYSICAL CHECK LOGIC (V2.1 FIX: TEXT LAYER IS KING)
+            # ================================================================
+            # CRITICAL RULE: Native text layer presence OVERRIDES image coverage!
+            #
+            # Modern digital magazines (Combat Aircraft) often have:
+            # - 100% image coverage (full-page photos, backgrounds)
+            # - BUT ALSO native text as vectors on top
+            # - This is NOT a scan! The text layer proves digital origin.
+            #
+            # Scanned documents have:
+            # - 100% image coverage (because the whole page IS one image)
+            # - VERY LOW native text (only what OCR extracted, if any)
+            #
+            # THE FIX: Check text layer FIRST. If substantial text exists,
+            # it's DIGITAL regardless of image coverage.
+            #
+            # V2.2 ENHANCEMENT: Also check PDF metadata for digital origin proof.
+
             is_likely_scan = False
             scan_confidence = 0.0
             reasoning_parts = []
 
-            # Check 1: Low text + large file = scan
-            if (
-                avg_text_per_page < SCAN_TEXT_THRESHOLD_CHARS
-                and file_size_mb > SCAN_FILE_SIZE_THRESHOLD_MB
-            ):
+            # ================================================================
+            # THRESHOLD: Native text layer indicates digital origin
+            # ================================================================
+            # If we have > 500 chars/page of native text, this is DIGITAL
+            # even if image coverage is 100%. Modern magazines/PDFs have
+            # text as vectors overlaid on images.
+            #
+            # NOTE: This threshold is applied to the AVERAGE of sampled pages.
+            # A cover page with only 100 chars won't disqualify the document
+            # if subsequent pages have 2000+ chars.
+            NATIVE_TEXT_DIGITAL_THRESHOLD = 500  # chars/page (AVERAGE)
+
+            # ================================================================
+            # V2.2: PDF METADATA CHECK - Digital software as proof
+            # ================================================================
+            # If PDF was created by digital software, it's DEFINITELY digital
+            # regardless of any other heuristic.
+            pdf_metadata = doc.metadata or {}
+            creator = str(pdf_metadata.get("creator", "") or "").lower()
+            producer = str(pdf_metadata.get("producer", "") or "").lower()
+
+            # Known digital PDF creators (proves born-digital origin)
+            DIGITAL_CREATORS = [
+                "indesign",  # Adobe InDesign
+                "quartz",  # macOS/iOS native
+                "acrobat",  # Adobe Acrobat (NOT scanned PDFs)
+                "illustrator",  # Adobe Illustrator
+                "distiller",  # Adobe Distiller
+                "office",  # Microsoft Office
+                "word",  # Microsoft Word
+                "powerpoint",  # Microsoft PowerPoint
+                "latex",  # LaTeX
+                "pdflatex",  # pdfLaTeX
+                "cairo",  # Cairo graphics library
+                "skia",  # Skia graphics library
+                "reportlab",  # ReportLab Python
+                "pdfkit",  # wkhtmltopdf/PDFKit
+                "prince",  # PrinceXML
+                "weasyprint",  # WeasyPrint
+            ]
+
+            # Check for digital creator in metadata
+            is_digital_by_metadata = any(dc in creator or dc in producer for dc in DIGITAL_CREATORS)
+
+            # ================================================================
+            # V2.3 FIX: METADATA CHECK REQUIRES TEXT LAYER CONFIRMATION
+            # ================================================================
+            # PROBLEM: Acrobat Distiller is also used to export SCANNED documents!
+            # Harry Potter PDF has "Acrobat Distiller" in producer but only 8 chars/page.
+            # This means the PDF is a SCAN exported through Acrobat, NOT born-digital.
+            #
+            # FIX: Metadata check only confirms DIGITAL if there's ALSO substantial text.
+            # If avg_text_per_page < 100, the document is still a SCAN regardless of metadata.
+            # Scanned documents have their text in the image, not as native text.
+            #
+            # THRESHOLD: 100 chars/page is the minimum for metadata confirmation.
+            # (Same as SCAN_TEXT_THRESHOLD_CHARS)
+            METADATA_REQUIRES_TEXT_THRESHOLD = 100  # chars/page
+
+            # ================================================================
+            # V2.4 SANDWICH PDF OVERRIDE
+            # ================================================================
+            # If we detected a sandwich PDF (OCR layer over scan), OVERRIDE
+            # all other checks and mark as SCAN. This catches Harry Potter!
+            # ================================================================
+            if is_sandwich_pdf:
                 is_likely_scan = True
-                scan_confidence = 0.9
+                scan_confidence = 0.90
+                reasoning_parts.append(f"⚠ SANDWICH PDF DETECTED: OCR layer over scanned pages")
+                for reason in sandwich_reasons:
+                    reasoning_parts.append(f"  → {reason}")
                 reasoning_parts.append(
-                    f"Low text ({avg_text_per_page:.0f} chars/page) + "
-                    f"large file ({file_size_mb:.1f}MB) indicates scanned document"
+                    f"Text appears to be from OCR ({avg_text_per_page:.0f} chars/page), "
+                    f"not native digital origin"
                 )
 
-            # Check 2: High image coverage = image-heavy or scan
-            if avg_image_coverage > SCAN_IMAGE_RATIO_THRESHOLD:
-                is_likely_scan = True
-                scan_confidence = max(scan_confidence, avg_image_coverage)
+            elif is_digital_by_metadata and avg_text_per_page >= METADATA_REQUIRES_TEXT_THRESHOLD:
+                # Metadata + text layer = definitely digital (but NOT if sandwich PDF!)
+                is_likely_scan = False
+                scan_confidence = 0.0
+                matched_creator = next(
+                    (dc for dc in DIGITAL_CREATORS if dc in creator or dc in producer),
+                    "unknown",
+                )
                 reasoning_parts.append(
-                    f"High image coverage ({avg_image_coverage:.1%}) indicates "
-                    f"scanned or image-heavy document"
+                    f"✓ DIGITAL: PDF metadata ('{matched_creator}') + "
+                    f"text layer ({avg_text_per_page:.0f} chars/page) confirms digital origin"
+                )
+                reasoning_parts.append(
+                    f"Creator: '{pdf_metadata.get('creator', 'N/A')}' | "
+                    f"Producer: '{pdf_metadata.get('producer', 'N/A')}'"
+                )
+            elif is_digital_by_metadata and avg_text_per_page < METADATA_REQUIRES_TEXT_THRESHOLD:
+                # Metadata says digital, but NO text layer = likely a scanned document
+                # exported through Acrobat. This is the Harry Potter scenario!
+                is_likely_scan = True
+                scan_confidence = 0.85
+                matched_creator = next(
+                    (dc for dc in DIGITAL_CREATORS if dc in creator or dc in producer),
+                    "unknown",
+                )
+                reasoning_parts.append(
+                    f"⚠ SCAN: PDF has '{matched_creator}' metadata BUT only "
+                    f"{avg_text_per_page:.0f} chars/page native text"
+                )
+                reasoning_parts.append(
+                    f"This is likely a SCANNED document exported through {matched_creator}"
                 )
 
-            # Check 3: Zero Docling assets (from SmartConfig) would trigger this
-            # This is handled in the calling code
+            # ================================================================
+            # PRIORITY CHECK: Native text layer = DIGITAL (overrides all else)
+            # ================================================================
+            elif avg_text_per_page >= NATIVE_TEXT_DIGITAL_THRESHOLD:
+                # SUBSTANTIAL NATIVE TEXT = ALWAYS DIGITAL
+                is_likely_scan = False
+                scan_confidence = 0.0
+                reasoning_parts.append(
+                    f"✓ DIGITAL: Native text layer detected "
+                    f"({avg_text_per_page:.0f} chars/page avg >= {NATIVE_TEXT_DIGITAL_THRESHOLD} threshold)"
+                )
+                reasoning_parts.append(
+                    f"Image coverage ({avg_image_coverage:.1%}) does NOT indicate scan - "
+                    f"text layer proves digital origin"
+                )
+            else:
+                # LOW/NO NATIVE TEXT - Now check other indicators
+                # Check 1: Low text + large file = likely scan
+                if (
+                    avg_text_per_page < SCAN_TEXT_THRESHOLD_CHARS
+                    and file_size_mb > SCAN_FILE_SIZE_THRESHOLD_MB
+                ):
+                    is_likely_scan = True
+                    scan_confidence = 0.9
+                    reasoning_parts.append(
+                        f"Low text ({avg_text_per_page:.0f} chars/page < {SCAN_TEXT_THRESHOLD_CHARS}) + "
+                        f"large file ({file_size_mb:.1f}MB) indicates scanned document"
+                    )
 
-            # Determine modality
+                # Check 2: High image coverage + low text = scan
+                # NOTE: We only reach here if text is already low (< 500 chars/page)
+                if avg_image_coverage > SCAN_IMAGE_RATIO_THRESHOLD:
+                    is_likely_scan = True
+                    scan_confidence = max(scan_confidence, avg_image_coverage)
+                    reasoning_parts.append(
+                        f"High image coverage ({avg_image_coverage:.1%}) + "
+                        f"low native text ({avg_text_per_page:.0f} chars/page) indicates scan"
+                    )
+
+            # ================================================================
+            # DETERMINE MODALITY
+            # ================================================================
             if is_likely_scan:
                 if avg_text_per_page > 50:
                     detected_modality = DocumentModality.SCANNED_CLEAN
                 else:
                     detected_modality = DocumentModality.SCANNED_DEGRADED
             elif avg_image_coverage > 0.5:
+                # High images but also high text = digital magazine/editorial
                 detected_modality = DocumentModality.IMAGE_HEAVY
             else:
                 detected_modality = DocumentModality.NATIVE_DIGITAL
@@ -637,41 +1104,268 @@ class DocumentDiagnosticEngine:
         pdf_path: Path,
         page_diagnostics: List[PageDiagnostic],
     ) -> ContentDomain:
-        """Estimate content domain based on filename and characteristics."""
+        """
+        Estimate content domain based on filename and characteristics.
+
+        V2.6 FIX (2026-01-11): Expanded academic keyword detection
+        =========================================================
+        Academic papers often have descriptive titles like:
+        - "Hybrid_electric_vehicles_and_their_challenges.pdf"
+        - "Deep_Learning_for_Natural_Language_Processing.pdf"
+        - "Analysis_of_Climate_Change_Effects_on_Biodiversity.pdf"
+
+        These don't contain obvious keywords like "paper" or "thesis"
+        but have patterns that indicate academic content:
+        1. Underscores separating words (exported from academic systems)
+        2. Technical/scientific terminology
+        3. "and", "of", "for", "in" conjunctions typical of paper titles
+        """
         filename_lower = pdf_path.stem.lower()
 
-        # Filename-based hints
-        technical_keywords = ["manual", "guide", "spec", "handbook", "firearms", "weapons", "tech"]
-        editorial_keywords = ["magazine", "news", "article", "review", "journal"]
-        academic_keywords = ["paper", "thesis", "research", "study", "report"]
-        commercial_keywords = ["catalog", "brochure", "ad", "marketing", "promo"]
+        # Replace underscores with spaces for better matching
+        filename_normalized = filename_lower.replace("_", " ").replace("-", " ")
 
-        for kw in technical_keywords:
-            if kw in filename_lower:
-                return ContentDomain.TECHNICAL
+        # ================================================================
+        # ACADEMIC KEYWORD DETECTION (V2.6 EXPANDED)
+        # ================================================================
+        # Technical/scientific terms that indicate academic content
+        academic_keywords = [
+            # Publication types
+            "paper",
+            "thesis",
+            "dissertation",
+            "research",
+            "study",
+            "report",
+            "arxiv",
+            "acm",
+            "ieee",
+            "whitepaper",
+            "white paper",
+            "survey",
+            "review",
+            "analysis",
+            "evaluation",
+            "assessment",
+            "investigation",
+            # Scientific domains
+            "hybrid",
+            "electric",
+            "vehicle",
+            "vehicles",
+            "autonomous",
+            "robot",
+            "neural",
+            "network",
+            "deep learning",
+            "machine learning",
+            "algorithm",
+            "model",
+            "framework",
+            "system",
+            "architecture",
+            "protocol",
+            "method",
+            "approach",
+            "technique",
+            "solution",
+            "implementation",
+            # Academic structure words
+            "challenges",
+            "opportunities",
+            "applications",
+            "implications",
+            "performance",
+            "efficiency",
+            "optimization",
+            "comparison",
+            "simulation",
+            "experiment",
+            "results",
+            "findings",
+            "conclusions",
+            # Technical fields
+            "computer",
+            "software",
+            "hardware",
+            "database",
+            "network",
+            "security",
+            "privacy",
+            "encryption",
+            "blockchain",
+            "quantum",
+            "energy",
+            "power",
+            "battery",
+            "fuel",
+            "renewable",
+            "sustainable",
+            "climate",
+            "environment",
+            "ecology",
+            "biology",
+            "chemistry",
+            "physics",
+            "mathematics",
+            "statistics",
+            "economics",
+            "finance",
+            "medical",
+            "health",
+            "clinical",
+            "pharmaceutical",
+            "genomic",
+            "llm",
+            "agent",
+            "transformer",
+            "attention",
+            "reinforcement",
+            "operating system",
+            "distributed",
+            "parallel",
+            "concurrent",
+        ]
 
-        for kw in editorial_keywords:
-            if kw in filename_lower:
-                return ContentDomain.EDITORIAL
+        # Editorial keywords (magazines, newspapers)
+        editorial_keywords = ["magazine", "news", "daily", "weekly", "monthly", "issue"]
+
+        # Technical manual keywords
+        technical_keywords = [
+            "manual",
+            "guide",
+            "spec",
+            "handbook",
+            "firearms",
+            "weapons",
+            "tech",
+            "instruction",
+            "documentation",
+        ]
+
+        # Commercial keywords
+        commercial_keywords = ["catalog", "brochure", "ad", "marketing", "promo", "sale"]
+
+        # ================================================================
+        # SCORING SYSTEM: Count keyword matches
+        # ================================================================
+        # Instead of first-match, count ALL matches to determine domain
+        academic_score = 0
+        editorial_score = 0
+        technical_score = 0
+        commercial_score = 0
 
         for kw in academic_keywords:
-            if kw in filename_lower:
-                return ContentDomain.ACADEMIC
+            if kw in filename_normalized:
+                academic_score += 1
+                logger.debug(f"[DOMAIN-DETECT] Academic keyword match: '{kw}'")
+
+        for kw in editorial_keywords:
+            if kw in filename_normalized:
+                editorial_score += 1
+                logger.debug(f"[DOMAIN-DETECT] Editorial keyword match: '{kw}'")
+
+        for kw in technical_keywords:
+            if kw in filename_normalized:
+                technical_score += 1
+                logger.debug(f"[DOMAIN-DETECT] Technical keyword match: '{kw}'")
 
         for kw in commercial_keywords:
-            if kw in filename_lower:
-                return ContentDomain.COMMERCIAL
+            if kw in filename_normalized:
+                commercial_score += 1
+                logger.debug(f"[DOMAIN-DETECT] Commercial keyword match: '{kw}'")
 
-        # Content-based hints
+        # ================================================================
+        # EDITORIAL BOOST: "magazine" keyword is very strong signal
+        # ================================================================
+        # If "magazine" is in the filename, give a STRONG boost to editorial
+        # This prevents magazines from being misclassified as academic
+        if "magazine" in filename_normalized:
+            editorial_score += 5  # Strong boost for explicit magazine keyword
+            logger.debug(f"[DOMAIN-DETECT] EDITORIAL BOOST: 'magazine' in filename (+5)")
+
+        # ================================================================
+        # ACADEMIC PATTERN DETECTION
+        # ================================================================
+        # Academic papers often have specific filename patterns
+        # BUT only apply pattern boost if editorial_score is still 0
+        # (magazines shouldn't get academic pattern boosts)
+        import re
+
+        if editorial_score == 0:
+            academic_patterns = [
+                # Underscores with conjunctions (common in exported papers)
+                r"\w+_and_\w+",  # "vehicles_and_their"
+                r"\w+_of_\w+",  # "analysis_of_climate"
+                r"\w+_for_\w+",  # "learning_for_nlp"
+                r"\w+_in_\w+",  # "advances_in_robotics"
+                # Multiple underscores (academic export format)
+                r"\w+_\w+_\w+_\w+",  # 4+ word titles
+            ]
+
+            for pattern in academic_patterns:
+                if re.search(pattern, filename_lower):
+                    academic_score += 2  # Boost for pattern match
+                    logger.debug(f"[DOMAIN-DETECT] Academic pattern match: '{pattern}'")
+                    break
+
+        # Log scores
+        logger.info(
+            f"[DOMAIN-DETECT] Scores for '{pdf_path.name}': "
+            f"academic={academic_score}, editorial={editorial_score}, "
+            f"technical={technical_score}, commercial={commercial_score}"
+        )
+
+        # ================================================================
+        # DETERMINE DOMAIN BY HIGHEST SCORE
+        # ================================================================
+        # Academic wins if it has >= 2 matches (to avoid false positives)
+        if academic_score >= 2 and academic_score >= editorial_score:
+            logger.info(f"[DOMAIN-DETECT] → ACADEMIC (score={academic_score})")
+            return ContentDomain.ACADEMIC
+
+        if editorial_score > 0 and editorial_score > academic_score:
+            logger.info(f"[DOMAIN-DETECT] → EDITORIAL (score={editorial_score})")
+            return ContentDomain.EDITORIAL
+
+        if technical_score > 0 and technical_score >= academic_score:
+            logger.info(f"[DOMAIN-DETECT] → TECHNICAL (score={technical_score})")
+            return ContentDomain.TECHNICAL
+
+        if commercial_score > 0:
+            logger.info(f"[DOMAIN-DETECT] → COMMERCIAL (score={commercial_score})")
+            return ContentDomain.COMMERCIAL
+
+        # ================================================================
+        # CONTENT-BASED FALLBACK
+        # ================================================================
         has_tables = any(p.contains_tables for p in page_diagnostics)
         high_images = any(p.image_coverage > 0.5 for p in page_diagnostics)
 
+        # Calculate average text density
+        avg_text_density = (
+            sum(p.text_density for p in page_diagnostics) / len(page_diagnostics)
+            if page_diagnostics
+            else 0
+        )
+
+        # Academic papers have:
+        # 1. High text density (lots of text per page)
+        # 2. Low-to-moderate image coverage (diagrams but not editorial photos)
+        # 3. Often have tables
+        if avg_text_density > 0.01 and not high_images:  # High text, low images
+            logger.info(f"[DOMAIN-DETECT] → ACADEMIC (content-based: high text density)")
+            return ContentDomain.ACADEMIC
+
         if has_tables and not high_images:
+            logger.info(f"[DOMAIN-DETECT] → TECHNICAL (content-based: has tables)")
             return ContentDomain.TECHNICAL
 
         if high_images:
+            logger.info(f"[DOMAIN-DETECT] → EDITORIAL (content-based: high images)")
             return ContentDomain.EDITORIAL
 
+        logger.info(f"[DOMAIN-DETECT] → UNKNOWN (no matches)")
         return ContentDomain.UNKNOWN
 
     def _determine_strategy(

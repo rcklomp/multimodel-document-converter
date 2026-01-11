@@ -3,22 +3,24 @@ MMRAG V2 - Multimodal RAG Document Converter
 =============================================
 ENGINE_USE: Docling v2.66.0 (Native Layout Analysis)
 
-High-fidelity ETL pipeline for multimodal document ingestion.
-Converts PDF, EPUB, HTML, DOCX documents into validated JSONL
-output suitable for downstream RAG systems.
+V3.0.0 Architecture:
+- Universal Intermediate Representation (UIR)
+- TEXT regions -> OCR cascade -> modality: "text"
+- IMAGE regions -> VLM visual description -> modality: "image"
+- TABLE regions -> Structure extraction -> modality: "table"
+- NEVER "shadow" modality per ARCHITECTURE.md
 
 Features:
 - Docling v2.66.0 native layout analysis
 - Hierarchical breadcrumb tracking (ContextStateV2)
 - VLM-based image enrichment (Ollama, OpenAI, Anthropic)
-- Shadow extraction for missed images
 - Memory-efficient batch processing
 - Perceptual hash deduplication
 
 Usage:
     # CLI
     mmrag-v2 process document.pdf --vision-provider ollama
-    
+
     # Python API
     from mmrag_v2 import V2DocumentProcessor
     processor = V2DocumentProcessor(output_dir="./output")
@@ -26,11 +28,12 @@ Usage:
 
 Author: Claude 4.5 Opus (Architect)
 Date: 2025-12-28
-Version: 2.0.0
+Version: 3.0.0
 """
+
 from __future__ import annotations
 
-__version__ = "2.0.0"
+__version__ = "3.0.0"
 __author__ = "Claude 4.5 Opus (Architect)"
 
 # Core processor
@@ -42,7 +45,7 @@ from .batch_processor import BatchProcessor, create_batch_processor
 # Mapper
 from .mapper import DoclingToV2Mapper, create_mapper
 
-# Schema
+# Schema (V3.0.0: No shadow imports)
 from .schema import (
     BoundingBox,
     ChunkType,
@@ -53,7 +56,6 @@ from .schema import (
     create_image_chunk,
     create_table_chunk,
     create_text_chunk,
-    create_shadow_chunk,
 )
 
 # State
@@ -70,14 +72,12 @@ from .utils import (
 # Vision
 from .vision import VisionManager, create_vision_manager
 
-# Orchestration
+# Orchestration (V3.0.0: Shadow extraction removed)
 from .orchestration import (
     DocumentProfile,
     SmartConfigProvider,
     ExtractionStrategy,
     StrategyOrchestrator,
-    ShadowExtractor,
-    create_shadow_extractor,
 )
 
 __all__ = [
@@ -101,7 +101,6 @@ __all__ = [
     "create_image_chunk",
     "create_table_chunk",
     "create_text_chunk",
-    "create_shadow_chunk",
     # State
     "ContextStateV2",
     "create_context_state",
@@ -118,6 +117,4 @@ __all__ = [
     "SmartConfigProvider",
     "ExtractionStrategy",
     "StrategyOrchestrator",
-    "ShadowExtractor",
-    "create_shadow_extractor",
 ]

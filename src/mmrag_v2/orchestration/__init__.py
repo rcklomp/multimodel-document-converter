@@ -1,10 +1,9 @@
 """
 Orchestration module for MM-Converter-V2.
-Contains SmartConfigProvider, StrategyOrchestrator, ShadowExtractor, DocumentDiagnosticEngine,
+Contains SmartConfigProvider, StrategyOrchestrator, DocumentDiagnosticEngine,
 and Strategy Profiles for polymorphic document processing.
 
-GEMINI AUDIT: Added DocumentDiagnosticEngine for pre-processing intelligence.
-AUTO-PILOT: Added Strategy Profiles for polymorphic document-type separation.
+V3.0.0: Shadow extraction REMOVED per ARCHITECTURE.md (NEVER "shadow").
 """
 
 from .smart_config import (
@@ -15,12 +14,6 @@ from .smart_config import (
 from .strategy_orchestrator import (
     ExtractionStrategy,
     StrategyOrchestrator,
-)
-from .shadow_extractor import (
-    ShadowAsset,
-    ShadowScanResult,
-    ShadowExtractor,
-    create_shadow_extractor,
 )
 from .document_diagnostic import (
     DocumentDiagnosticEngine,
@@ -52,12 +45,7 @@ __all__ = [
     # Strategy orchestrator
     "ExtractionStrategy",
     "StrategyOrchestrator",
-    # Shadow extractor
-    "ShadowAsset",
-    "ShadowScanResult",
-    "ShadowExtractor",
-    "create_shadow_extractor",
-    # Document diagnostic (GEMINI AUDIT FIX)
+    # Document diagnostic
     "DocumentDiagnosticEngine",
     "DiagnosticReport",
     "PhysicalCheckResult",
@@ -67,7 +55,7 @@ __all__ = [
     "DocumentEra",
     "ContentDomain",
     "create_diagnostic_engine",
-    # Strategy profiles (AUTO-PILOT)
+    # Strategy profiles
     "BaseProfile",
     "ProfileType",
     "ProfileParameters",

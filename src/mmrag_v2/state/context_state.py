@@ -52,6 +52,9 @@ NOISE_PATTERN = re.compile(r"^[\s\-·•\.\d\*]+$")
 # Pattern to detect page numbers or artifacts
 PAGE_NUMBER_PATTERN = re.compile(r"^\d+$|^page\s*\d+$", re.IGNORECASE)
 
+# Pattern to detect section numbers in headings (e.g., "3.1", "2.", "1.2.3")
+SECTION_NUMBER_PATTERN = re.compile(r"^(\d+(?:\.\d+)*)\s*\.?\s+(.+)$")
+
 
 # ============================================================================
 # VALIDATION FUNCTIONS
@@ -112,12 +115,26 @@ def _truncate_heading(text: str) -> str:
 
 
 @dataclass
+class HierarchyLevel:
+    """Single source of truth for a heading level."""
+
+    text: str
+    level: int
+    section_number: Optional[List[int]] = None
+
+
+@dataclass
 class ContextStateV2:
     """
     Maintains hierarchical document context during processing.
 
     REQ-STATE: Tracks the current position in the document hierarchy
     through a breadcrumb path of headings.
+
+    ARCHITECTURE V2 (HARDCORE FIX):
+    - Single source of truth: hierarchy_stack (no more sync issues)
+    - Aggressive reset: Clear all levels ≥ new level before adding
+    - No skipping: Inherently correct logic
 
     The breadcrumb path is updated when:
     1. A new heading is encountered (appropriate level adjustment)
@@ -127,8 +144,7 @@ class ContextStateV2:
         doc_id: Document identifier
         source_file: Original source filename
         current_page: Current page number (1-indexed)
-        breadcrumbs: List of heading texts forming the breadcrumb path
-        heading_levels: Corresponding heading levels for breadcrumbs
+        hierarchy_stack: Single list of HierarchyLevel objects (ONE SOURCE OF TRUTH)
         current_header_level: Level of the most recent heading
         _page_first_heading: Track first heading per page for context
     """
@@ -136,10 +152,25 @@ class ContextStateV2:
     doc_id: str = ""
     source_file: str = ""
     current_page: int = 1
-    breadcrumbs: List[str] = field(default_factory=list)
-    heading_levels: List[int] = field(default_factory=list)
+    hierarchy_stack: List[HierarchyLevel] = field(default_factory=list)
     current_header_level: int = 0
     _page_first_heading: Dict[int, str] = field(default_factory=dict)
+
+    # LEGACY COMPATIBILITY: These properties expose the old interface
+    @property
+    def breadcrumbs(self) -> List[str]:
+        """Compatibility property: Extract text from hierarchy_stack."""
+        return [h.text for h in self.hierarchy_stack]
+
+    @property
+    def heading_levels(self) -> List[int]:
+        """Compatibility property: Extract levels from hierarchy_stack."""
+        return [h.level for h in self.hierarchy_stack]
+
+    @property
+    def section_numbers(self) -> List[List[int]]:
+        """Compatibility property: Extract section numbers from hierarchy_stack."""
+        return [h.section_number if h.section_number else [] for h in self.hierarchy_stack]
 
     def update_page(self, page_number: int) -> None:
         """
@@ -154,15 +185,25 @@ class ContextStateV2:
 
     def update_on_heading(self, heading_text: str, level: int) -> None:
         """
+        HARDCORE FIX: AGGRESSIVE RESET ARCHITECTURE
+
         Update the context state when a heading is encountered.
 
-        REQ-STATE-01: The breadcrumb path is adjusted based on heading level:
-        - Same or lower level: Pop back to parent, then add new heading
-        - Higher level (nested): Add as child of current heading
+        NEW LOGIC:
+        1. Validate heading text
+        2. Clamp level to 1-5 (Pydantic constraint)
+        3. AGGRESSIVELY POP: Remove ALL headings >= new level
+        4. Add new heading to stack
+        5. Enforce max depth
+
+        NO MORE:
+        - Complex section number logic that causes sync issues
+        - Conditional popping that skips cleanup
+        - Multiple lists that get out of sync
 
         Args:
             heading_text: The heading text
-            level: Heading level (1-6, where 1 is highest)
+            level: Heading level (1-6, clamped to 1-5)
         """
         # Validate heading
         if not is_valid_heading(heading_text):
@@ -176,35 +217,174 @@ class ContextStateV2:
         if self.current_page not in self._page_first_heading:
             self._page_first_heading[self.current_page] = heading_text
 
-        # Level must be positive
-        level = max(1, min(6, level))
+        # CRITICAL: Clamp level to 1-5 (Pydantic HierarchyMetadata.level constraint)
+        level = max(1, min(5, level))
 
-        # CASE 1: Empty breadcrumbs - just add
-        if not self.breadcrumbs:
-            self.breadcrumbs.append(heading_text)
-            self.heading_levels.append(level)
+        # Extract section number (for logging only)
+        section_number = self._extract_section_number(heading_text)
+
+        # CASE 1: Empty stack - initialize
+        if not self.hierarchy_stack:
+            new_level = HierarchyLevel(
+                text=heading_text, level=level, section_number=section_number
+            )
+            self.hierarchy_stack.append(new_level)
             self.current_header_level = level
-            logger.debug(f"Initial heading: '{heading_text}' (L{level})")
+            logger.debug(f"[HIERARCHY] Initial: '{heading_text}' L{level}")
             return
 
-        # CASE 2: Same or lower level - pop back to appropriate depth
-        # e.g., if current is H2 and we see H2 or H1, pop back
-        while self.heading_levels and self.heading_levels[-1] >= level:
-            popped = self.breadcrumbs.pop()
-            self.heading_levels.pop()
-            logger.debug(f"Popped heading: '{popped}'")
+        # CASE 2: AGGRESSIVE RESET - Remove all headings at same or deeper level
+        # This prevents the stack from growing beyond depth limit
+        # Example: [H1, H2, H3] + new H2 → [H1, H2-new]
+        original_depth = len(self.hierarchy_stack)
+
+        # Find the cutoff point: keep all headings with level < new level
+        keep_until = 0
+        for i, h in enumerate(self.hierarchy_stack):
+            if h.level < level:
+                keep_until = i + 1
+            else:
+                break  # Found first heading at same or deeper level
+
+        # Aggressive reset: keep only shallower headings
+        if keep_until < len(self.hierarchy_stack):
+            removed = self.hierarchy_stack[keep_until:]
+            self.hierarchy_stack = self.hierarchy_stack[:keep_until]
+            logger.debug(
+                f"[AGGRESSIVE-RESET] Removed {len(removed)} headings at level >= {level}: "
+                f"{[h.text[:30] for h in removed]}"
+            )
 
         # CASE 3: Add new heading
-        self.breadcrumbs.append(heading_text)
-        self.heading_levels.append(level)
+        new_level_obj = HierarchyLevel(
+            text=heading_text, level=level, section_number=section_number
+        )
+        self.hierarchy_stack.append(new_level_obj)
         self.current_header_level = level
 
-        # Enforce maximum depth
-        while len(self.breadcrumbs) > MAX_BREADCRUMB_DEPTH:
-            self.breadcrumbs.pop(0)
-            self.heading_levels.pop(0)
+        # CASE 4: Enforce maximum depth
+        if len(self.hierarchy_stack) > MAX_BREADCRUMB_DEPTH:
+            excess = len(self.hierarchy_stack) - MAX_BREADCRUMB_DEPTH
+            logger.warning(
+                f"[MAX-DEPTH] Stack exceeded {MAX_BREADCRUMB_DEPTH}, removing {excess} oldest headings"
+            )
+            self.hierarchy_stack = self.hierarchy_stack[-MAX_BREADCRUMB_DEPTH:]
 
-        logger.debug(f"Updated breadcrumbs: {' > '.join(self.breadcrumbs)} (L{level})")
+        # Log final state
+        breadcrumb_str = " > ".join([h.text for h in self.hierarchy_stack])
+        logger.debug(
+            f"[HIERARCHY] Updated: {breadcrumb_str} "
+            f"(depth: {original_depth}→{len(self.hierarchy_stack)}, L{level})"
+        )
+
+    def _extract_section_number(self, heading_text: str) -> Optional[List[int]]:
+        """
+        Extract section number from heading text.
+
+        Examples:
+            "3.1 Introduction" → [3, 1]
+            "2. Methods" → [2]
+            "1.2.3 Details" → [1, 2, 3]
+            "Appendix A." → None (no valid numeric section)
+            "Introduction" → None
+
+        Args:
+            heading_text: The heading text to parse
+
+        Returns:
+            List of integers representing section number, or None if no section number
+        """
+        match = SECTION_NUMBER_PATTERN.match(heading_text.strip())
+        if match:
+            section_str = match.group(1)
+            try:
+                # Split by period and convert to integers
+                numbers = [int(n) for n in section_str.split(".") if n]
+                # CRITICAL: Only return if we have actual numbers
+                # This prevents returning [] which could cause index errors later
+                if numbers:
+                    logger.debug(f"[SEC-NUM] Extracted {numbers} from '{heading_text}'")
+                    return numbers
+            except ValueError:
+                pass
+        return None
+
+    def _should_pop_by_section_number(
+        self,
+        new_section: List[int],
+        new_level: int,
+    ) -> bool:
+        """
+        Determine if stack should be popped based on section numbering.
+
+        Logic:
+        - Compare section numbers at the same depth
+        - If new section's first number is LOWER than previous at same level, POP
+        - Example: Moving from "2.5" to "3.1" → DON'T pop (3 > 2)
+        - Example: Moving from "3.5" to "2.1" → POP (2 < 3, likely error or new chapter)
+
+        This prevents Chapter 2 hierarchy from persisting into Chapter 3.
+
+        Args:
+            new_section: Section number of new heading (e.g., [3, 1])
+            new_level: Level of new heading
+
+        Returns:
+            True if stack should be popped, False otherwise
+        """
+        # CRITICAL: Guard against empty lists
+        if not self.section_numbers or not new_section or not self.heading_levels:
+            return False
+
+        # Find the last heading at the same or shallower level
+        for i in range(len(self.heading_levels) - 1, -1, -1):
+            # PHANTOM BUG FIX: Ensure index is within bounds of section_numbers
+            # section_numbers and heading_levels must be synchronized
+            if i >= len(self.section_numbers):
+                logger.warning(
+                    f"[PHANTOM-BUG-FIX] Index {i} out of range for section_numbers "
+                    f"(len={len(self.section_numbers)}). Skipping."
+                )
+                continue
+
+            prev_level = self.heading_levels[i]
+            prev_section = self.section_numbers[i]
+
+            # Only compare if at same level and both have section numbers
+            if prev_level == new_level and prev_section:
+                # Compare the FIRST number in the section (chapter/major section)
+                prev_major = prev_section[0] if prev_section else 0
+                new_major = new_section[0] if new_section else 0
+
+                # If new major section is LOWER, we've likely jumped back
+                # This shouldn't happen in normal documents, but handle gracefully
+                if new_major < prev_major:
+                    logger.warning(
+                        f"[SEC-POP] Section number decreased: {prev_major} → {new_major}. "
+                        f"Popping stack to reset hierarchy."
+                    )
+                    return True
+
+                # If at deeper nesting level (e.g., comparing 3.2 with 3.1)
+                # Check if we need to pop due to subsection reset
+                if len(new_section) > 1 and len(prev_section) > 1:
+                    # Compare at the same depth
+                    depth = min(len(new_section), len(prev_section))
+                    for d in range(depth):
+                        if new_section[d] < prev_section[d]:
+                            logger.info(
+                                f"[SEC-POP] Subsection reset detected: "
+                                f"{'.'.join(map(str, prev_section))} → "
+                                f"{'.'.join(map(str, new_section))}"
+                            )
+                            return True
+                        elif new_section[d] > prev_section[d]:
+                            # Normal progression
+                            break
+
+                break  # Found comparison point, exit loop
+
+        return False
 
     def get_breadcrumb_path(self) -> List[str]:
         """
@@ -248,12 +428,21 @@ class ContextStateV2:
         Returns:
             Deep copy of this ContextStateV2
         """
+        # Deep copy hierarchy_stack
+        copied_stack = [
+            HierarchyLevel(
+                text=h.text,
+                level=h.level,
+                section_number=list(h.section_number) if h.section_number else None,
+            )
+            for h in self.hierarchy_stack
+        ]
+
         return ContextStateV2(
             doc_id=self.doc_id,
             source_file=self.source_file,
             current_page=self.current_page,
-            breadcrumbs=list(self.breadcrumbs),
-            heading_levels=list(self.heading_levels),
+            hierarchy_stack=copied_stack,
             current_header_level=self.current_header_level,
             _page_first_heading=dict(self._page_first_heading),
         )
@@ -261,8 +450,7 @@ class ContextStateV2:
     def reset(self) -> None:
         """Reset state to initial values (keeping doc_id and source_file)."""
         self.current_page = 1
-        self.breadcrumbs = []
-        self.heading_levels = []
+        self.hierarchy_stack = []
         self.current_header_level = 0
         self._page_first_heading = {}
 
@@ -280,6 +468,7 @@ class ContextStateV2:
             "breadcrumbs": self.breadcrumbs,
             "heading_levels": self.heading_levels,
             "current_header_level": self.current_header_level,
+            "section_numbers": self.section_numbers,  # PHASE 2: Include in serialization
         }
 
     @classmethod
@@ -293,12 +482,27 @@ class ContextStateV2:
         Returns:
             ContextStateV2 instance
         """
+        # Reconstruct hierarchy_stack from legacy breadcrumbs/levels/sections
+        breadcrumbs = data.get("breadcrumbs", [])
+        heading_levels = data.get("heading_levels", [])
+        section_numbers = data.get("section_numbers", [])
+
+        hierarchy_stack = []
+        for i in range(len(breadcrumbs)):
+            text = breadcrumbs[i]
+            level = heading_levels[i] if i < len(heading_levels) else 1
+            sec_num = section_numbers[i] if i < len(section_numbers) else None
+            # Convert empty list to None
+            if sec_num is not None and len(sec_num) == 0:
+                sec_num = None
+
+            hierarchy_stack.append(HierarchyLevel(text=text, level=level, section_number=sec_num))
+
         return cls(
             doc_id=data.get("doc_id", ""),
             source_file=data.get("source_file", ""),
             current_page=data.get("current_page", 1),
-            breadcrumbs=data.get("breadcrumbs", []),
-            heading_levels=data.get("heading_levels", []),
+            hierarchy_stack=hierarchy_stack,
             current_header_level=data.get("current_header_level", 0),
         )
 
@@ -343,8 +547,9 @@ def create_context_state(
         # Remove multiple spaces
         doc_title = " ".join(doc_title.split())
         if doc_title:
-            state.breadcrumbs.append(doc_title)
-            state.heading_levels.append(0)  # Level 0 = document root
+            # Use hierarchy_stack directly instead of properties
+            initial_level = HierarchyLevel(text=doc_title, level=0, section_number=None)
+            state.hierarchy_stack.append(initial_level)
             logger.debug(f"Initialized breadcrumb with document title: '{doc_title}'")
 
     return state

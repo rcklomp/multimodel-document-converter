@@ -43,6 +43,7 @@ from .schema.ingestion_schema import (
     HierarchyMetadata,
     IngestionChunk,
     Modality,
+    COORD_SCALE,
     create_image_chunk,
     create_table_chunk,
     create_text_chunk,
@@ -197,8 +198,9 @@ class DoclingToV2Mapper:
             "table": 0,
         }
 
-        # Text buffer for context
-        self._text_buffer: List[str] = []
+        # Text buffer for context (REQ-MM-03)
+        self._text_buffer: List[str] = []  # Previous text snippets (for prev_text_snippet)
+        self._next_text_buffer: List[str] = []  # Lookahead for next_text_snippet
 
         # Page dimensions cache
         self._page_dims: Dict[int, Tuple[float, float]] = {}
@@ -216,6 +218,9 @@ class DoclingToV2Mapper:
         """
         Map a Docling ConversionResult to IngestionChunks.
 
+        REQ-MM-03: Uses two-pass approach to populate semantic_context
+        with both prev_text_snippet AND next_text_snippet.
+
         Args:
             result: Docling ConversionResult from DocumentConverter
 
@@ -230,9 +235,30 @@ class DoclingToV2Mapper:
         # Cache page images for asset extraction
         page_images = self._extract_page_images(doc)
 
-        # Iterate through document elements
-        for item_tuple in doc.iterate_items():
+        # REQ-MM-03: Two-pass approach for semantic context
+        # Pass 1: Collect all elements and their text content for lookahead
+        all_elements: List[Tuple[Any, int]] = []  # (element, index)
+        text_contents: List[str] = []  # Text content for each element (or empty)
+
+        for idx, item_tuple in enumerate(doc.iterate_items()):
             element, _ = item_tuple
+            all_elements.append((element, idx))
+
+            # Extract text for context building
+            text = getattr(element, "text", "") or ""
+            text_contents.append(text.strip())
+
+        # Pass 2: Process elements with lookahead for next_text
+        for idx, (element, _) in enumerate(all_elements):
+            # Build next_text_snippet from subsequent text elements
+            next_text_parts = []
+            for lookahead_idx in range(idx + 1, min(idx + 4, len(text_contents))):
+                if text_contents[lookahead_idx]:
+                    next_text_parts.append(text_contents[lookahead_idx])
+                    if len(" ".join(next_text_parts)) >= 300:
+                        break
+
+            self._next_text_buffer = next_text_parts
 
             for chunk in self._map_element(element, page_images):
                 yield chunk
@@ -311,10 +337,29 @@ class DoclingToV2Mapper:
                 self.state.update_on_heading(text.strip(), heading_level)
 
         # Create hierarchy metadata
+        # REQ-HIER-03: breadcrumb_path MUST contain at minimum [source_filename, "Page X"]
+        breadcrumbs = self.state.get_breadcrumb_path()
+
+        # Ensure minimum breadcrumb depth per REQ-HIER-03
+        source_name = Path(self.source_file).stem if self.source_file else "Document"
+        page_marker = f"Page {page_no}"
+
+        if not breadcrumbs:
+            # No hierarchy detected - use minimum fallback
+            breadcrumbs = [source_name, page_marker]
+        elif len(breadcrumbs) == 1:
+            # Only document name - add page marker
+            breadcrumbs = [breadcrumbs[0], page_marker]
+        elif page_marker not in breadcrumbs:
+            # Ensure page marker is present for deep navigation
+            # Insert after document name if hierarchy exists
+            if len(breadcrumbs) >= 1:
+                breadcrumbs = [breadcrumbs[0], page_marker] + breadcrumbs[1:]
+
         hierarchy = HierarchyMetadata(
             parent_heading=self.state.get_parent_heading(),
-            breadcrumb_path=self.state.get_breadcrumb_path(),
-            level=self.state.current_header_level if self.state.current_header_level > 0 else None,
+            breadcrumb_path=breadcrumbs,
+            level=len(breadcrumbs) if breadcrumbs else None,
         )
 
         # Route to appropriate handler based on element type
@@ -387,10 +432,15 @@ class DoclingToV2Mapper:
             )
             return
 
-        # Get context
+        # REQ-MM-03: Get semantic context (prev + next text snippets)
         prev_text = " ".join(self._text_buffer[-3:]) if self._text_buffer else None
         if prev_text:
             prev_text = prev_text[-300:]
+
+        # Get next_text from lookahead buffer (populated in map_document two-pass)
+        next_text = " ".join(self._next_text_buffer) if self._next_text_buffer else None
+        if next_text:
+            next_text = next_text[:300]
 
         # Generate description
         visual_description = self._generate_description(
@@ -399,6 +449,13 @@ class DoclingToV2Mapper:
             prev_text=prev_text,
         )
 
+        # REQ-COORD-01: bbox is REQUIRED for image modality
+        # Provide fallback full-page bbox if not available
+        image_bbox: List[int] = bbox if bbox is not None else [0, 0, COORD_SCALE, COORD_SCALE]
+
+        # REQ-COORD-02: Get page dimensions for UI overlay support
+        page_w, page_h = self._page_dims.get(page_no, (DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT))
+
         yield create_image_chunk(
             doc_id=self.doc_hash,
             content=visual_description,
@@ -406,12 +463,15 @@ class DoclingToV2Mapper:
             file_type=self.file_type,
             page_number=page_no,
             asset_path=asset_path,
-            bbox=bbox,
+            bbox=image_bbox,
             hierarchy=hierarchy,
             prev_text=prev_text,
+            next_text=next_text,  # REQ-MM-03: Now includes next_text_snippet
             visual_description=visual_description,
             width_px=width,
             height_px=height,
+            page_width=int(page_w),
+            page_height=int(page_h),
         )
 
     def _map_table_element(
@@ -448,15 +508,24 @@ class DoclingToV2Mapper:
         # Table content
         content = text if text else f"[Table on page {page_no}]"
 
+        # REQ-COORD-01: bbox is REQUIRED for table modality
+        # Provide fallback full-page bbox if not available
+        table_bbox: List[int] = bbox if bbox is not None else [0, 0, COORD_SCALE, COORD_SCALE]
+
+        # REQ-COORD-02: Get page dimensions for UI overlay support
+        page_w, page_h = self._page_dims.get(page_no, (DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT))
+
         yield create_table_chunk(
             doc_id=self.doc_hash,
             content=content,
             source_file=self.source_file,
             file_type=self.file_type,
             page_number=page_no,
-            bbox=bbox,
+            bbox=table_bbox,
             hierarchy=hierarchy,
             asset_path=asset_path,
+            page_width=int(page_w),
+            page_height=int(page_h),
         )
 
     def _map_text_element(
