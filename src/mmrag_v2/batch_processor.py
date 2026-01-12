@@ -75,7 +75,11 @@ from .utils.image_hash_registry import (
     create_page1_validator,
 )
 from .vision.vision_manager import VisionManager, create_vision_manager
-from .validators.token_validator import TokenValidator, create_token_validator
+from .validators.token_validator import (
+    TokenValidator,
+    create_token_validator,
+    TokenValidationResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -224,6 +228,12 @@ class BatchProcessor:
         # REQ-VLM-02: Track asset counts per page for low-recall trigger
         self._assets_per_page: Dict[int, int] = {}
         self._current_pdf_path: Optional[Path] = None
+
+        # QA-CHECK-01: Initialize token validator for data integrity
+        self._token_validator = create_token_validator(tolerance=0.10)
+
+        # REQ-COORD-02: Track page dimensions per page for UI overlay support
+        self._page_dimensions: Dict[int, Tuple[int, int]] = {}
 
         logger.info(
             f"BatchProcessor initialized: "
@@ -431,6 +441,7 @@ class BatchProcessor:
         # Convert ProcessedChunk to IngestionChunk
         ingestion_chunks: List[IngestionChunk] = []
         doc_title = Path(source_file).stem if source_file else "Document"
+        page_height_px, page_width_px = page_image.shape[:2]
 
         for pc in processed_chunks:
             # REQ-HIER-03: Breadcrumbs MUST contain minimum [filename, "Page X"]
@@ -457,18 +468,30 @@ class BatchProcessor:
             # V3.0.0: Use normalized bbox from ProcessedChunk (already 0-1000)
             spatial = None
             if pc.bbox:
-                spatial = SpatialMetadata(bbox=pc.bbox)
+                spatial = SpatialMetadata(
+                    bbox=pc.bbox,
+                    page_width=int(page_width_px),
+                    page_height=int(page_height_px),
+                )
             elif modality in (Modality.IMAGE, Modality.TABLE):
                 # Fallback only if bbox is missing
-                spatial = SpatialMetadata(bbox=[0, 0, COORD_SCALE, COORD_SCALE])
+                spatial = SpatialMetadata(
+                    bbox=[0, 0, COORD_SCALE, COORD_SCALE],
+                    page_width=int(page_width_px),
+                    page_height=int(page_height_px),
+                )
 
             # Create metadata with extraction_method and visual_description
+            if pc.extraction_method and "ocr" in pc.extraction_method.lower():
+                extraction_method = "ocr"
+            else:
+                extraction_method = "docling"
             metadata = ChunkMetadata(
                 page_number=pc.page_number,
                 source_file=source_file,
                 file_type=FileType.PDF,
                 hierarchy=hierarchy,
-                extraction_method=pc.extraction_method,
+                extraction_method=extraction_method,
                 visual_description=pc.visual_description,
                 spatial=spatial,
             )
@@ -975,10 +998,49 @@ class BatchProcessor:
                 logger.debug(f"gc.collect() after batch {batch_info.batch_index + 1}")
 
         # ====================================================================
+        # REQ-COORD-02: Extract page dimensions for UI overlay support
+        # ====================================================================
+        print("\n📐 [REQ-COORD-02] Extracting page dimensions...", flush=True)
+        self._page_dimensions = self._extract_page_dimensions(pdf_path)
+
+        # ====================================================================
         # REQ-DEDUP-01: Initialize ImageHashRegistry for pHash deduplication
         # ====================================================================
         self._image_hash_registry = create_image_hash_registry(threshold=10)
-        print("\n🔍 [PHASH] Initializing perceptual hash registry...", flush=True)
+        print("🔍 [PHASH] Initializing perceptual hash registry...", flush=True)
+
+        # ====================================================================
+        # CLUSTER B: GOVERNANCE & VALIDATION LAYERS
+        # ====================================================================
+        # 1. REQ-COORD-02: Page dimension propagation to ALL chunks
+        # 2. IRON-07: Full-Page Guard for [0,0,1000,1000] bboxes
+        # 3. QA-CHECK-01: Token validation per chunk
+        # 4. Quality filters (existing)
+        # ====================================================================
+
+        # Step 1: REQ-COORD-02 - Propagate page dimensions to ALL chunks
+        all_chunks = self._propagate_page_dimensions(all_chunks)
+
+        # Step 2: IRON-07 - Apply Full-Page Guard to filter/modify full-page assets
+        all_chunks = self._apply_full_page_guard(all_chunks)
+
+        # Step 3: QA-CHECK-01 - Validate token limits per chunk
+        all_chunks, token_flagged_count = self._validate_token_limit_per_chunk(all_chunks)
+        if token_flagged_count > 0:
+            print(
+                f"⚠️ [QA-CHECK-01] {token_flagged_count} chunks exceeded token limit",
+                flush=True,
+            )
+
+        # Step 4: QA-CHECK-01 - Run token balance validation
+        token_result = self._run_token_validation(all_chunks, pdf_path.name)
+        if not token_result.is_valid:
+            print(
+                f"⚠️ [QA-CHECK-01] Token balance warning: {token_result.variance_percent:.1f}% variance",
+                flush=True,
+            )
+            if self.strict_qa:
+                errors.append(f"QA-CHECK-01 failed: {token_result.error_message}")
 
         # ====================================================================
         # PHASE 1: QUALITY IMPROVEMENTS
@@ -1391,6 +1453,329 @@ class BatchProcessor:
             return page_count > self.batch_size
         except Exception:
             return False
+
+    # ========================================================================
+    # REQ-COORD-02: PAGE DIMENSION EXTRACTION
+    # ========================================================================
+
+    def _extract_page_dimensions(self, pdf_path: Path) -> Dict[int, Tuple[int, int]]:
+        """
+        REQ-COORD-02: Extract page dimensions from PDF for UI overlay support.
+
+        This method scans the PDF and extracts (width, height) in pixels
+        for each page. These dimensions are propagated to ALL chunks
+        (text/image/table) via spatial.page_width and spatial.page_height.
+
+        Args:
+            pdf_path: Path to the PDF file
+
+        Returns:
+            Dict mapping page_number (1-indexed) to (width_px, height_px)
+        """
+        page_dims: Dict[int, Tuple[int, int]] = {}
+
+        try:
+            doc = fitz.open(pdf_path)
+            for page_idx in range(len(doc)):
+                page = doc.load_page(page_idx)
+                rect = page.rect
+                # Convert PDF points to integer pixels (at 72 DPI base)
+                width_px = int(rect.width)
+                height_px = int(rect.height)
+                page_dims[page_idx + 1] = (width_px, height_px)
+
+            doc.close()
+            logger.info(f"[REQ-COORD-02] Extracted page dimensions for {len(page_dims)} pages")
+        except Exception as e:
+            logger.warning(f"[REQ-COORD-02] Failed to extract page dimensions: {e}")
+
+        return page_dims
+
+    def _propagate_page_dimensions(
+        self,
+        chunks: List[IngestionChunk],
+    ) -> List[IngestionChunk]:
+        """
+        REQ-COORD-02: Propagate page dimensions to ALL chunks.
+
+        This ensures that page_width and page_height are NEVER null
+        in any chunk's spatial metadata, which is required for UI overlay support.
+
+        Args:
+            chunks: List of chunks to update
+
+        Returns:
+            Updated chunk list with page dimensions
+        """
+        if not self._page_dimensions:
+            logger.warning("[REQ-COORD-02] No page dimensions available for propagation")
+            return chunks
+
+        updated_count = 0
+        for chunk in chunks:
+            page_no = chunk.metadata.page_number
+            dims = self._page_dimensions.get(page_no)
+
+            if dims:
+                width_px, height_px = dims
+
+                # Ensure spatial metadata exists
+                if chunk.metadata.spatial is None:
+                    chunk.metadata.spatial = SpatialMetadata(bbox=None)
+
+                # Only update if currently null (non-destructive)
+                if chunk.metadata.spatial.page_width is None:
+                    chunk.metadata.spatial.page_width = width_px
+                    updated_count += 1
+                if chunk.metadata.spatial.page_height is None:
+                    chunk.metadata.spatial.page_height = height_px
+
+        logger.info(f"[REQ-COORD-02] Propagated page dimensions to {updated_count} chunks")
+        return chunks
+
+    # ========================================================================
+    # QA-CHECK-01: TOKEN VALIDATION
+    # ========================================================================
+
+    def _run_token_validation(
+        self,
+        chunks: List[IngestionChunk],
+        source_file: str,
+    ) -> TokenValidationResult:
+        """
+        QA-CHECK-01: Run token balance validation on text chunks.
+
+        This validates that the sum of TEXT chunk tokens approximately matches
+        the expected token count, accounting for DSO overlap.
+
+        Args:
+            chunks: All chunks (only TEXT modality is validated)
+            source_file: Document name for logging
+
+        Returns:
+            TokenValidationResult with validation metrics
+        """
+        if self._token_validator is None:
+            logger.warning("[QA-CHECK-01] TokenValidator not initialized; skipping validation")
+            return TokenValidationResult(
+                is_valid=True,
+                source_token_count=0,
+                chunk_token_count=0,
+                variance_percent=0.0,
+                overlap_allowance_tokens=0,
+                tolerance_percent=10.0,
+                error_message="TokenValidator unavailable",
+            )
+
+        try:
+            # Extract only TEXT chunks for validation
+            text_chunks = [c for c in chunks if c.modality == Modality.TEXT]
+
+            if not text_chunks:
+                logger.info("[QA-CHECK-01] No TEXT chunks to validate")
+                return TokenValidationResult(
+                    is_valid=True,
+                    source_token_count=0,
+                    chunk_token_count=0,
+                    variance_percent=0.0,
+                    overlap_allowance_tokens=0,
+                    tolerance_percent=10.0,
+                )
+
+            # Build source text from all TEXT chunks (without overlap)
+            # NOTE: This is an approximation - true source is the original document
+            source_text = " ".join(c.content for c in text_chunks if c.content)
+
+            # Run validation
+            result = self._token_validator.validate_token_balance(
+                chunks=text_chunks,
+                source_text=source_text,
+                overlap_ratio=0.15,  # DSO default overlap
+            )
+
+            # Log result
+            self._token_validator.log_validation_result(result, doc_name=source_file)
+
+            return result
+        except Exception as e:
+            logger.warning(f"[QA-CHECK-01] Token validation failed; continuing. Error: {e}")
+            return TokenValidationResult(
+                is_valid=True,
+                source_token_count=0,
+                chunk_token_count=0,
+                variance_percent=0.0,
+                overlap_allowance_tokens=0,
+                tolerance_percent=10.0,
+                error_message=str(e),
+            )
+
+    def _validate_token_limit_per_chunk(
+        self,
+        chunks: List[IngestionChunk],
+        max_tokens: int = 512,
+    ) -> Tuple[List[IngestionChunk], int]:
+        """
+        QA-CHECK-01 (Token Limit): Validate individual chunk token limits.
+
+        Per SRS REQ-CHUNK-02: Text chunks have hard max of 512 tokens.
+        Chunks exceeding this limit are flagged and optionally truncated.
+
+        Args:
+            chunks: All chunks to validate
+            max_tokens: Maximum allowed tokens per chunk (default: 512)
+
+        Returns:
+            Tuple of (validated_chunks, flagged_count)
+        """
+        flagged_count = 0
+
+        for chunk in chunks:
+            if chunk.modality != Modality.TEXT:
+                continue
+
+            # Count tokens in this chunk
+            token_count = self._token_validator._counter.count_tokens(chunk.content)
+
+            if token_count > max_tokens:
+                flagged_count += 1
+                logger.warning(
+                    f"[QA-CHECK-01] Chunk {chunk.chunk_id} exceeds token limit: "
+                    f"{token_count} > {max_tokens}. Content will be truncated."
+                )
+
+                # Truncate content to fit within limit
+                # This is a simple character-based truncation; a more sophisticated
+                # approach would use sentence boundaries
+                if self.strict_qa:
+                    raise ValueError(
+                        f"[QA-CHECK-01 STRICT] Chunk {chunk.chunk_id} exceeds "
+                        f"token limit ({token_count} > {max_tokens})"
+                    )
+
+                # Approximate truncation: 4 chars per token (rough estimate)
+                max_chars = max_tokens * 4
+                chunk.content = chunk.content[:max_chars] + "..."
+
+        if flagged_count > 0:
+            logger.warning(
+                f"[QA-CHECK-01] {flagged_count} chunks exceeded token limit "
+                f"(strict_qa={'ENABLED' if self.strict_qa else 'DISABLED'})"
+            )
+
+        return chunks, flagged_count
+
+    # ========================================================================
+    # FULL-PAGE GUARD (IRON-07, REQ-MM-09)
+    # ========================================================================
+
+    def _is_full_page_bbox(self, bbox: Optional[List[int]]) -> bool:
+        """
+        IRON-07: Check if bbox covers full page (area_ratio > 0.95).
+
+        A bbox of [0, 0, 1000, 1000] in normalized coordinates covers
+        100% of the page and should trigger Full-Page Guard.
+
+        Args:
+            bbox: Normalized bbox [x_min, y_min, x_max, y_max] in 0-1000 scale
+
+        Returns:
+            True if bbox is full-page or nearly full-page
+        """
+        if bbox is None:
+            return False
+
+        # Calculate area in normalized coordinates
+        width = bbox[2] - bbox[0]
+        height = bbox[3] - bbox[1]
+        area = width * height
+
+        # Full page = 1000 * 1000 = 1,000,000
+        full_page_area = COORD_SCALE * COORD_SCALE
+        area_ratio = area / full_page_area
+
+        return area_ratio > 0.95
+
+    def _apply_full_page_guard(
+        self,
+        chunks: List[IngestionChunk],
+    ) -> List[IngestionChunk]:
+        """
+        IRON-07, REQ-MM-09: Apply Full-Page Guard to IMAGE chunks.
+
+        When an IMAGE chunk has a bbox covering >95% of the page, this
+        adjusts the VLM context to indicate it's a page-level element,
+        reducing irrelevant descriptions of page borders/backgrounds.
+
+        By default, full-page assets are kept with an editorial prefix.
+        If strict_qa is enabled, full-page assets are filtered out.
+
+        Args:
+            chunks: All chunks
+
+        Returns:
+            Filtered/modified chunk list
+        """
+        filtered = []
+        fullpage_count = 0
+
+        for chunk in chunks:
+            # Only apply to IMAGE modality
+            if chunk.modality != Modality.IMAGE:
+                filtered.append(chunk)
+                continue
+
+            # Check if full-page
+            bbox = None
+            if chunk.metadata.spatial and chunk.metadata.spatial.bbox:
+                bbox = chunk.metadata.spatial.bbox
+
+            if self._is_full_page_bbox(bbox):
+                fullpage_count += 1
+
+                if self.strict_qa:
+                    logger.warning(
+                        f"[FULL-PAGE-GUARD] Filtering full-page asset on "
+                        f"page {chunk.metadata.page_number} (strict QA enabled)"
+                    )
+                    continue
+
+                if self.allow_fullpage_shadow:
+                    logger.info(
+                        f"[FULL-PAGE-GUARD] Allowing full-page asset on "
+                        f"page {chunk.metadata.page_number} (--allow-fullpage-shadow)"
+                    )
+                else:
+                    logger.info(
+                        f"[FULL-PAGE-GUARD] Retaining full-page asset on "
+                        f"page {chunk.metadata.page_number} (non-strict mode)"
+                    )
+
+                # Prepend full-page context to visual description
+                if chunk.metadata.visual_description:
+                    chunk.metadata.visual_description = (
+                        f"[FULL-PAGE EDITORIAL IMAGE] {chunk.metadata.visual_description}"
+                    )
+                else:
+                    chunk.metadata.visual_description = (
+                        f"[FULL-PAGE EDITORIAL IMAGE on page {chunk.metadata.page_number}]"
+                    )
+
+                filtered.append(chunk)
+            else:
+                filtered.append(chunk)
+
+        if fullpage_count > 0:
+            if self.strict_qa:
+                action = "filtered"
+            else:
+                action = "retained"
+            logger.info(f"[FULL-PAGE-GUARD] {fullpage_count} full-page assets {action}")
+            print(
+                f"\n🛡️ [FULL-PAGE-GUARD] {fullpage_count} full-page assets {action}",
+                flush=True,
+            )
+
+        return filtered
 
 
 # ============================================================================

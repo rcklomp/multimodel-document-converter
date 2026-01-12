@@ -1,11 +1,11 @@
 """
-mmrag-v2 process "data/raw/Combat Aircraft - August 2025 UK.pdf" \
+mmrag-v2 process "data/raw/ATZ.Elektronik.-.Effizientere.Software.Entwicklung.GERMAN.RETAiL.eBOOk-PDFWriters.pdf" \
     --batch-size 5 \
     --vision-provider openai \
     --vision-model "llama-joycaption-beta-one-hf-llava-mmproj" \
     --api-key "lm-studio" \
     --vlm-timeout 300 \
-    --output-dir "output/Combat Aircraft - August 2025 UK_V18_1"
+    --output-dir "output/ATZ.Elektronik.-.Effizientere.Software.Entwicklung.GERMAN.RETAiL.eBOOk-PDFWriters_V18_2_2"
 """
 
 import requests

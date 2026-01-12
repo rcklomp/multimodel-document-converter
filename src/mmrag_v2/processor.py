@@ -75,7 +75,11 @@ from .utils.advanced_spatial_propagator import (
     SpatialPropagator,
     create_spatial_propagator,
 )
-from .utils.coordinate_normalization import ensure_normalized, validate_bbox_strict
+from .utils.coordinate_normalization import (
+    ensure_normalized,
+    validate_bbox_strict,
+    denormalize_bbox,
+)
 from .utils.image_hash_registry import (
     ImageHashRegistry,
     create_image_hash_registry,
@@ -467,51 +471,189 @@ class V2DocumentProcessor:
         logger.debug(f"Image size OK: {width}x{height}")
         return True
 
+    def _extract_raw_image(
+        self,
+        element: Any,
+        bbox_normalized: Optional[List[int]],
+        page_images: Dict[int, Image.Image],
+        page_no: int,
+        page_dims: Tuple[float, float],
+    ) -> Optional[Image.Image]:
+        """
+        Extract raw image from element WITHOUT saving to disk.
+
+        This enables size-checking BEFORE saving to prevent orphan assets.
+
+        COORDINATE TRANSFORMATION (REQ-COORD-02):
+        ==========================================
+        The bbox parameter is normalized 0-1000 (per REQ-COORD-01).
+        For cropping, we must convert to absolute pixels:
+
+        1. Denormalize: bbox_normalized (0-1000) → PDF points
+           pixel_x = (normalized_x / 1000) * page_width
+        2. Scale: PDF points → rendered pixels (dynamic scale)
+           rendered_x = pixel_x * (page_img.width / page_width)
+
+        MATHEMATICAL VERIFICATION:
+        ==========================
+        Given: bbox_normalized = [100, 200, 300, 400] on 612x792 page
+        Step 1: Denormalize to PDF points
+                x0 = (100/1000) * 612 = 61.2
+                y0 = (200/1000) * 792 = 158.4
+                x1 = (300/1000) * 612 = 183.6
+                y1 = (400/1000) * 792 = 316.8
+        Step 2: Scale to rendered pixels (2.0x)
+                crop = (122, 316, 367, 633)
+
+        Args:
+            element: Docling element (may have .image attribute)
+            bbox_normalized: Bounding box in 0-1000 normalized scale (or None)
+            page_images: Dict of page number → rendered PIL Image
+            page_no: Batch page number (for page_images lookup)
+            page_dims: (page_width, page_height) in PDF points
+
+        Returns:
+            PIL Image if extracted successfully, None otherwise
+        """
+        extracted_image: Optional[Image.Image] = None
+
+        try:
+            # PRIORITY 1: Crop from rendered page image using bbox
+            # This preserves consistent 10px padding from _apply_padding()
+            if bbox_normalized and page_no in page_images:
+                page_img = page_images[page_no]
+                page_width, page_height = page_dims
+
+                # ============================================================
+                # COORDINATE TRANSFORMATION: Normalized → Absolute Pixels
+                # ============================================================
+                # Step 1: Denormalize bbox from 0-1000 to PDF points
+                abs_bbox = denormalize_bbox(bbox_normalized, page_width, page_height)
+                # abs_bbox is now [x0_pts, y0_pts, x1_pts, y1_pts] in PDF points
+
+                # Step 2: Scale PDF points to rendered pixels (dynamic)
+                # Derive scale from rendered image size vs PDF points
+                if page_width <= 0 or page_height <= 0:
+                    logger.warning(
+                        f"Invalid page_dims for scaling: {page_dims}. "
+                        f"Falling back to 1.0 scale."
+                    )
+                    scale_x = 1.0
+                    scale_y = 1.0
+                else:
+                    scale_x = page_img.size[0] / page_width
+                    scale_y = page_img.size[1] / page_height
+
+                crop_box = (
+                    int(abs_bbox[0] * scale_x),
+                    int(abs_bbox[1] * scale_y),
+                    int(abs_bbox[2] * scale_x),
+                    int(abs_bbox[3] * scale_y),
+                )
+
+                # Validate crop coordinates against page image bounds
+                img_width, img_height = page_img.size
+                x0 = max(0, min(crop_box[0], img_width - 1))
+                y0 = max(0, min(crop_box[1], img_height - 1))
+                x1 = max(x0 + 1, min(crop_box[2], img_width))
+                y1 = max(y0 + 1, min(crop_box[3], img_height))
+
+                # Validate minimum crop size
+                if x1 <= x0 or y1 <= y0:
+                    logger.warning(
+                        f"Invalid crop coordinates after denormalization: "
+                        f"bbox_normalized={bbox_normalized} → crop=({x0},{y0},{x1},{y1})"
+                    )
+                    return None
+
+                extracted_image = page_img.crop((x0, y0, x1, y1))
+
+                logger.debug(
+                    f"Extracted image via crop: "
+                    f"bbox_normalized={bbox_normalized} → "
+                    f"abs_bbox={[f'{v:.1f}' for v in abs_bbox]} → "
+                    f"crop=({x0},{y0},{x1},{y1}) → "
+                    f"size={extracted_image.size}"
+                )
+                return extracted_image
+
+            # PRIORITY 2: Try to get image from element directly (Docling native)
+            # NOTE: If no page image is available, we cannot apply consistent padding.
+            if bbox_normalized and page_no not in page_images:
+                logger.warning(
+                    f"Page image missing for page {page_no}; "
+                    f"falling back to element.image without padding."
+                )
+            if hasattr(element, "image") and element.image:
+                img_data = element.image
+                if hasattr(img_data, "pil_image") and img_data.pil_image is not None:
+                    extracted_image = img_data.pil_image
+                    logger.debug(f"Extracted image from element.image (native)")
+                    return extracted_image
+                elif isinstance(img_data, bytes):
+                    extracted_image = Image.open(BytesIO(img_data))
+                    logger.debug(f"Extracted image from element.image (bytes)")
+                    return extracted_image
+                elif isinstance(img_data, Image.Image):
+                    extracted_image = img_data
+                    logger.debug(f"Extracted image from element.image (PIL)")
+                    return extracted_image
+
+            logger.debug(f"No image source available for element on page {page_no}")
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to extract raw image on page {page_no}: {e}")
+            return None
+
     def _save_asset(
         self,
         element: Any,
         asset_path: str,
-        bbox: Optional[List[int]],
+        bbox_normalized: Optional[List[int]],
         page_images: Dict[int, Image.Image],
         page_no: int,
+        page_dims: Tuple[float, float] = (612.0, 792.0),
     ) -> Optional[Image.Image]:
         """
-        Save image/table asset to disk with REQ-MM-01 padding.
+        Save image/table asset to disk with proper coordinate transformation.
 
-        Returns the PIL Image if successfully saved (for VLM enrichment).
+        CRITICAL FIX (Cluster A - Visual Integrity):
+        =============================================
+        The bbox parameter is in NORMALIZED 0-1000 scale (per REQ-COORD-01).
+        This method now properly denormalizes to PDF points, then scales to
+        rendered pixels for accurate cropping.
+
+        REQ-MM-01: 10px padding is applied BEFORE normalization in _apply_padding()
+
+        Args:
+            element: Docling element with potential .image attribute
+            asset_path: Relative path for saving (e.g., "assets/xxx_001_figure_01.png")
+            bbox_normalized: Bounding box in 0-1000 normalized scale
+            page_images: Dict of page number → rendered PIL Image (at 2.0x scale)
+            page_no: Batch page number (key for page_images)
+            page_dims: (page_width, page_height) in PDF points (default: Letter size)
+
+        Returns:
+            PIL Image if successfully saved (for VLM enrichment), None otherwise
         """
         full_path = self.assets_dir / Path(asset_path).name
-        saved_image: Optional[Image.Image] = None
 
         try:
-            # Try to get image from element directly
-            if hasattr(element, "image") and element.image:
-                img_data = element.image
-                if hasattr(img_data, "pil_image") and img_data.pil_image is not None:
-                    saved_image = img_data.pil_image
-                elif isinstance(img_data, bytes):
-                    saved_image = Image.open(BytesIO(img_data))
-                elif isinstance(img_data, Image.Image):
-                    saved_image = img_data
+            # Extract raw image using proper coordinate transformation
+            saved_image = self._extract_raw_image(
+                element=element,
+                bbox_normalized=bbox_normalized,
+                page_images=page_images,
+                page_no=page_no,
+                page_dims=page_dims,
+            )
 
-                if saved_image is not None:
-                    saved_image.save(str(full_path), "PNG")
-                logger.debug(f"Saved asset from element.image: {full_path}")
-                return saved_image
-
-            # Try to crop from page image if bbox available
-            if bbox and page_no in page_images:
-                page_img = page_images[page_no]
-                scale = 2.0
-                crop_box = (
-                    int(bbox[0] * scale),
-                    int(bbox[1] * scale),
-                    int(bbox[2] * scale),
-                    int(bbox[3] * scale),
-                )
-                saved_image = page_img.crop(crop_box)
+            if saved_image is not None:
                 saved_image.save(str(full_path), "PNG")
-                logger.debug(f"Saved cropped asset: {full_path}")
+                logger.debug(
+                    f"Saved asset: {full_path} ({saved_image.size[0]}x{saved_image.size[1]})"
+                )
                 return saved_image
 
             logger.warning(f"Could not save asset: {asset_path} - no image data")
@@ -1028,7 +1170,44 @@ class V2DocumentProcessor:
                 logger.error(error_msg)
                 raise ValueError(error_msg)
 
-            # Log asset creation for verification
+            # ================================================================
+            # CLUSTER A FIX: DEFERRED SAVING TO PREVENT ORPHAN ASSETS
+            # ================================================================
+            # Extract raw image FIRST (without saving to disk)
+            # Check size BEFORE saving to prevent orphan PNGs
+            # This fixes the "Orphan Asset" issue where images are saved
+            # before size filtering, leaving orphan files when rejected.
+            # ================================================================
+
+            # Get page dimensions for coordinate transformation
+            img_page_w, img_page_h = page_dims.get(batch_page_no, (612.0, 792.0))
+
+            # STEP 1: Extract raw image WITHOUT saving to disk
+            raw_image = self._extract_raw_image(
+                element=element,
+                bbox_normalized=bbox,  # Already normalized 0-1000
+                page_images=page_images,
+                page_no=batch_page_no,
+                page_dims=(img_page_w, img_page_h),
+            )
+
+            # STEP 2: Size check BEFORE saving (prevents orphan assets)
+            # Note: _check_image_size returns False for None images
+            if raw_image is None or not self._check_image_size(
+                raw_image,
+                min_width=self._min_image_width,
+                min_height=self._min_image_height,
+            ):
+                logger.debug(
+                    f"[ORPHAN-PREVENTION] Skipping image on page {page_no}: "
+                    f"{'no image extracted' if raw_image is None else 'too small'} "
+                    f"(threshold: {self._min_image_width}x{self._min_image_height}px). "
+                    f"No file saved to disk."
+                )
+                return  # Skip this element - NO file written to disk
+
+            # At this point, raw_image is guaranteed non-None (passed size check)
+            # STEP 3: Only save to disk if size check passed
             print(
                 f"    📸 Asset: {asset_name} | "
                 f"Page={page_no} | "
@@ -1036,23 +1215,17 @@ class V2DocumentProcessor:
                 flush=True,
             )
 
-            # Save asset and get PIL Image for VLM
-            # Use batch_page_no for page_images lookup (keyed by batch page)
-            saved_image = self._save_asset(element, asset_path, bbox, page_images, batch_page_no)
-
-            # Filter by size: skip tiny images (USPS ID, logos) unless they're explicitly figures
-            # Only call VLM for high-value images (size check)
-            # Uses dynamic threshold from extraction strategy if provided
-            if not self._check_image_size(
-                saved_image,
-                min_width=self._min_image_width,
-                min_height=self._min_image_height,
-            ):
+            full_path = self.assets_dir / Path(asset_path).name
+            try:
+                raw_image.save(str(full_path), "PNG")
                 logger.debug(
-                    f"Skipping image on page {page_no}: too small "
-                    f"(threshold: {self._min_image_width}x{self._min_image_height}px)"
+                    f"[DEFERRED-SAVE] Saved asset after size check: {full_path} "
+                    f"({raw_image.size[0]}x{raw_image.size[1]})"
                 )
-                return  # Skip this element entirely
+                saved_image = raw_image
+            except Exception as e:
+                logger.error(f"Failed to save asset {asset_path}: {e}")
+                return  # Skip this element if save fails
 
             # Context for VLM
             prev_text = " ".join(text_buffer[-3:]) if text_buffer else None
@@ -1127,8 +1300,19 @@ class V2DocumentProcessor:
             )
             asset_path = f"assets/{asset_name}"
 
-            # Use batch_page_no for page_images lookup (keyed by batch page)
-            self._save_asset(element, asset_path, bbox, page_images, batch_page_no)
+            # Get page dimensions for proper coordinate transformation
+            tbl_page_w, tbl_page_h = page_dims.get(batch_page_no, (612.0, 792.0))
+
+            # Save table asset with proper coordinate transformation
+            saved_table_image = self._save_asset(
+                element,
+                asset_path,
+                bbox,
+                page_images,
+                batch_page_no,
+                page_dims=(tbl_page_w, tbl_page_h),
+            )
+            asset_path = asset_path if saved_table_image is not None else None
 
             table_content = text if text else f"[Table on page {page_no}]"
 
@@ -1183,7 +1367,21 @@ class V2DocumentProcessor:
             final_text = text.strip()
 
             if not final_text and bbox is not None:
-                # TEXT element has NO content but HAS bbox → likely scanned region
+                # ================================================================
+                # OCR GOVERNANCE (Cluster B): Respect CLI --enable-ocr/--disable-ocr
+                # ================================================================
+                # If enable_ocr is False, we NEVER trigger OCR - the element
+                # remains empty or is dropped. This respects user's CLI preference.
+                # ================================================================
+                if not self.enable_ocr:
+                    logger.info(
+                        f"[OCR-GOVERNANCE] Page {page_no}: Empty TEXT region detected, "
+                        f"but OCR is DISABLED via CLI (--no-ocr). Skipping element."
+                    )
+                    final_text = ""
+                    return  # Drop the empty element - no OCR allowed
+
+                # OCR is enabled - proceed with cascade
                 logger.info(
                     f"[OCR-CASCADE] Page {page_no}: TEXT element has empty content, "
                     f"triggering OCR cascade on bbox"

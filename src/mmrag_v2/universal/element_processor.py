@@ -130,11 +130,21 @@ class ElementProcessor:
 
     The output NEVER contains "shadow" modality.
 
+    OCR GOVERNANCE (Cluster B):
+    - When enable_ocr=False, the processor NEVER triggers OCR cascade
+    - Empty text elements are dropped, not OCR'd
+    - This respects the user's CLI preference (--no-ocr)
+
+    REQ-COORD-02:
+    - Page dimensions (page_width, page_height) are propagated to ALL chunks
+    - This enables UI overlay support for visual debugging
+
     Usage:
         processor = ElementProcessor(
             ocr_engine=enhanced_ocr_engine,
             vision_manager=vision_manager,
             output_dir=Path("./output/assets"),
+            enable_ocr=True,  # OCR Governance
         )
 
         for page in uir.pages:
@@ -146,6 +156,7 @@ class ElementProcessor:
         vision_manager: VLM for image descriptions
         output_dir: Directory for saving assets
         confidence_threshold: Threshold for OCR fallback
+        enable_ocr: Whether OCR is allowed (CLI governance)
     """
 
     def __init__(
@@ -154,6 +165,7 @@ class ElementProcessor:
         vision_manager: Optional["VisionManager"] = None,
         output_dir: Optional[Path] = None,
         confidence_threshold: float = CONFIDENCE_THRESHOLD_HIGH,
+        enable_ocr: bool = True,
     ) -> None:
         """
         Initialize element processor.
@@ -163,23 +175,25 @@ class ElementProcessor:
             vision_manager: Optional VLM for image descriptions
             output_dir: Directory for saving extracted assets
             confidence_threshold: Threshold below which to use OCR
+            enable_ocr: Whether OCR is allowed (respects --enable-ocr/--no-ocr CLI flag)
         """
         self.ocr_engine = ocr_engine
         self.vision_manager = vision_manager
         self.output_dir = Path(output_dir) if output_dir else Path("./output/assets")
         self.confidence_threshold = confidence_threshold
+        self.enable_ocr = enable_ocr  # OCR Governance (Cluster B)
 
         # Ensure output directory exists
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Initialize OCR if not provided
-        if self.ocr_engine is None:
+        # Initialize OCR if not provided AND OCR is enabled
+        if self.ocr_engine is None and self.enable_ocr:
             self._init_ocr_engine()
 
         logger.info(
             f"ElementProcessor initialized: "
             f"confidence_threshold={confidence_threshold}, "
-            f"ocr={'enabled' if self.ocr_engine else 'disabled'}, "
+            f"ocr={'enabled' if self.ocr_engine and self.enable_ocr else 'disabled (governance)'}, "
             f"vlm={'enabled' if self.vision_manager else 'disabled'}"
         )
 
@@ -292,6 +306,18 @@ class ElementProcessor:
             logger.warning(f"Unknown element type: {element.type}")
             return None
 
+    @staticmethod
+    def _normalize_extraction_method(method: str) -> str:
+        """Map internal extraction methods to schema-compatible values."""
+        if not method:
+            return "docling"
+        method_lower = method.lower()
+        if "ocr" in method_lower:
+            return "ocr"
+        if "shadow" in method_lower:
+            return "shadow"
+        return "docling"
+
     def _process_text_element(
         self,
         element: Element,
@@ -307,6 +333,11 @@ class ElementProcessor:
         - HIGH confidence (>=0.7): Use extracted content directly
         - LOW confidence (<0.7): Run OCR cascade on raw_image
 
+        OCR GOVERNANCE (Cluster B):
+        - If enable_ocr=False, OCR cascade is NEVER triggered
+        - Empty text elements are dropped (not OCR'd)
+        - This respects user's CLI preference (--no-ocr)
+
         OUTPUT: ALWAYS modality="text" with actual OCR'd content
         """
         content = element.content
@@ -315,23 +346,37 @@ class ElementProcessor:
 
         # Quality check: need OCR?
         if element.needs_ocr and element.has_image_data:
-            logger.debug(
-                f"Text element needs OCR (confidence={confidence:.2f}): "
-                f"page {page.page_number}, idx {element_idx}"
-            )
-
-            # Run OCR cascade
-            ocr_result = self._run_ocr(element.raw_image)
-
-            if ocr_result:
-                content = ocr_result.get("text", content)
-                extraction_method = ocr_result.get("method", "ocr_cascade")
-                confidence = ocr_result.get("confidence", confidence)
-
-                logger.debug(
-                    f"OCR result: {len(content)} chars, "
-                    f"method={extraction_method}, conf={confidence:.2f}"
+            # ================================================================
+            # OCR GOVERNANCE (Cluster B): Respect enable_ocr flag
+            # ================================================================
+            if not self.enable_ocr:
+                logger.info(
+                    f"[OCR-GOVERNANCE] Page {page.page_number}: TEXT element needs OCR "
+                    f"(confidence={confidence:.2f}), but OCR is DISABLED. "
+                    f"Using available content or dropping element."
                 )
+                # Fall through - use whatever content we have (may be empty)
+            else:
+                logger.debug(
+                    f"Text element needs OCR (confidence={confidence:.2f}): "
+                    f"page {page.page_number}, idx {element_idx}"
+                )
+
+                # Run OCR cascade (only if enable_ocr=True)
+                ocr_result = self._run_ocr(element.raw_image)
+
+                if ocr_result:
+                    content = ocr_result.get("text", content)
+                    extraction_method = ocr_result.get("method", "ocr_cascade")
+                    confidence = ocr_result.get("confidence", confidence)
+
+                    logger.debug(
+                        f"OCR result: {len(content)} chars, "
+                        f"method={extraction_method}, conf={confidence:.2f}"
+                    )
+
+        # Normalize extraction method to schema-compatible value
+        extraction_method = self._normalize_extraction_method(extraction_method)
 
         # Skip empty content
         if not content or not content.strip():
@@ -353,6 +398,8 @@ class ElementProcessor:
             metadata={
                 "source_file": source_file,
                 "source_label": element.source_label,
+                "page_width": page.width,
+                "page_height": page.height,
             },
         )
 
@@ -396,7 +443,7 @@ class ElementProcessor:
             content=visual_description,
             page_number=page.page_number,
             bbox=element.get_bbox_list(),
-            extraction_method="vlm",
+            extraction_method=self._normalize_extraction_method("vlm"),
             confidence=element.confidence,
             asset_path=asset_path,
             visual_description=visual_description,
@@ -405,6 +452,8 @@ class ElementProcessor:
                 "source_label": element.source_label,
                 "width_px": element.raw_image.shape[1] if element.has_image_data else None,
                 "height_px": element.raw_image.shape[0] if element.has_image_data else None,
+                "page_width": page.width,
+                "page_height": page.height,
             },
         )
 
@@ -440,6 +489,8 @@ class ElementProcessor:
             element_type="table",
         )
 
+        extraction_method = self._normalize_extraction_method(extraction_method)
+
         # Generate chunk ID
         chunk_id = self._generate_chunk_id(doc_id, page.page_number, "table", element_idx)
 
@@ -456,6 +507,8 @@ class ElementProcessor:
             metadata={
                 "source_file": source_file,
                 "source_label": element.source_label,
+                "page_width": page.width,
+                "page_height": page.height,
             },
         )
 

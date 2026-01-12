@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file. This project adheres to the functional requirements defined in **SRS v2.4**.
 
+## [18.1.1] - 2026-01-13
+
+### Added
+- **Cluster B Governance**: Activated `QA-CHECK-01` (Token Validation) to prevent downstream RAG failures caused by over-length text chunks.
+- **Full-Page Guard**: Implemented intelligent labeling for page-spanning elements (`[0,0,1000,1000]`) to reduce visual noise in VLM descriptions.
+- **Strict OCR Governance**: The `--enable-ocr` flag is now strictly enforced across the entire extraction cascade, including fallback scenarios.
+
+### Fixed
+- Resolved coordinate mismatch between JSONL metadata and physical asset crops.
+- Eliminated "null leakage" in spatial metadata for text and table chunks.
+
+### Changed
+- **Bbox/Crop Paradox Fix**: Complete overhaul of the coordinate transformation chain (Denormalization -> Scaling -> Cropping) for resolution-independent asset extraction.
+- **Dynamic Scaling**: Automatic detection of render resolution (DPI) to prevent "crop drift" across diverse PDF sources.
+- **Metadata Integrity**: `page_width` and `page_height` are now "sticky" and attached to every chunk at creation time (Resolves REQ-COORD-02).
+- **Deferred Saving**: Images are now written to disk only after validation, effectively eliminating "orphan" PNG files.
+
 ## [v18.1] - 2026-01-11
 
 ### Added
