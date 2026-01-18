@@ -5,7 +5,7 @@
 **Output:** JSONL Canonical Schema + Asset Directory
 **Platform:** Apple Silicon (ARM64 Native)
 **Status:** PRODUCTION READY
-**Supersedes:** SRS v2.2.1
+**Supersedes:** SRS v2.2.0
 
 ---
 
