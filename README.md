@@ -1,10 +1,10 @@
-# 🚀 Multimodal RAG Corpus Converter V2.3
+# 🚀 Multimodal RAG Corpus Converter V2.4.1
 
 **Enterprise-grade document conversion for Advanced Multimodal RAG systems.**
 
 Transform complex, visually-rich documents (magazines, technical manuals, reports) into production-ready RAG datasets with **zero information loss**, **intelligent overlap**, and **military-grade data integrity**.
 
-[![SRS Compliance](https://img.shields.io/badge/SRS-v2.3.0-blue.svg)]()
+[![SRS Compliance](https://img.shields.io/badge/SRS-v2.4.1--stable-blue.svg)]()
 [![Python](https://img.shields.io/badge/Python-3.10-green.svg)]()
 [![Engine](https://img.shields.io/badge/Engine-Docling%20v2.66.0-orange.svg)]()
 [![Platform](https://img.shields.io/badge/Platform-Apple%20Silicon%20Native-silver.svg)]()
@@ -18,6 +18,7 @@ Transform complex, visually-rich documents (magazines, technical manuals, report
 - [Quick Start](#-quick-start)
 - [Installation](#-installation)
 - [CLI Reference](#-cli-reference)
+- [Semantic Text Refiner (v18.2)](#-semantic-text-refiner-v182)
 - [Architecture](#-architecture)
 - [Processing Pipeline](#-processing-pipeline)
 - [Smart Vision Orchestration](#-smart-vision-orchestration)
@@ -215,8 +216,10 @@ mmrag-v2 process [OPTIONS] INPUT_FILE
 | `--pages` | `None` | **Specific pages** (comma-separated: `6,21,169,241`) or **max count** (single number: `10`) |
 | `--vision-provider`, `-v` | `ollama` | VLM provider: `ollama`, `openai`, `anthropic`, `haiku`, `none` |
 | `--vision-model`, `-m` | Auto-detect | Model name (e.g., `llava:latest`, `gpt-4o-mini`) |
+| `--vision-base-url` | `None` | Base URL for OpenAI-compatible endpoints (e.g., `http://localhost:1234/v1`) |
 | `--api-key`, `-k` | Env var | API key for cloud providers |
-| `--vlm-timeout` | `180` | VLM call timeout in seconds |
+| `--vlm-timeout` | `180` | VLM call timeout in seconds (default: 180) |
+| `--enable-cache/--no-cache` | `True` | Enable/disable vision cache for repeated images |
 
 #### Quality Control Options
 
@@ -287,6 +290,93 @@ mmrag-v2 version
 # Batch process directory
 mmrag-v2 batch ./documents --pattern "*.pdf" --vision-provider ollama
 ```
+
+### Batch Processing
+
+```bash
+mmrag-v2 batch [OPTIONS] INPUT_DIR
+```
+
+Batch options (includes refiner passthrough):
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--output-dir`, `-o` | `./output` | Directory for JSONL and assets |
+| `--pattern`, `-p` | `*.pdf` | Glob pattern for files |
+| `--vision-provider`, `-v` | `ollama` | VLM provider for images |
+| `--vision-base-url` | `None` | Base URL for OpenAI-compatible endpoints |
+| `--api-key`, `-k` | Env var | API key for cloud providers |
+| `--vlm-timeout` | `180` | VLM call timeout in seconds |
+| `--enable-cache/--no-cache` | `True` | Enable/disable vision cache for repeated images |
+| `--enable-ocr/--no-ocr` | `False` | Enable OCR for scanned documents |
+| `--ocr-mode` | `auto` | OCR mode: `auto`, `legacy`, or `layout-aware` |
+| `--enable-refiner/--no-refiner` | `False` | Enable Semantic Text Refiner |
+| `--refiner-provider` | `ollama` | Refiner provider (`ollama|openai|anthropic`) |
+| `--refiner-model` | Auto-detect | Refiner model name |
+| `--refiner-base-url` | `None` | OpenAI-compatible base URL (LM Studio, LocalAI, vLLM) |
+
+Example:
+
+```bash
+mmrag-v2 batch ./documents --enable-refiner \
+  --refiner-provider openai \
+  --refiner-model llama-joycaption-beta-one-hf-llava-mmproj \
+  --refiner-base-url http://localhost:1234/v1 \
+  --api-key "lm-studio"
+```
+
+---
+
+## 🧠 Semantic Text Refiner (v18.2)
+
+The Semantic Text Refiner runs after OCR to fix obvious OCR artifacts while preserving technical integrity. The original `content` is never overwritten; accepted refinements are stored in `metadata.refined_content`.
+
+### Safety Guarantees
+
+- **Provenance lock:** Original text preserved; refined text is opt-in.
+- **Protected tokens:** Part numbers, ECU codes, SN/ID tokens, URLs, and dates are immutable.
+- **Edit budget:** Levenshtein ratio guardrail prevents over-editing.
+- **Vision anchors:** Visual descriptions are treated as ground truth for entity names.
+- **Fail-safe:** On errors/timeouts, the refiner bypasses and returns original text.
+
+### Provider Matrix
+
+1) **Local Ollama (default)**
+```bash
+mmrag-v2 process file.pdf --enable-refiner
+```
+
+2) **LM Studio / Local OpenAI-compatible**
+```bash
+mmrag-v2 process file.pdf --enable-refiner \
+  --refiner-provider openai \
+  --refiner-model llama-joycaption-beta-one-hf-llava-mmproj \
+  --refiner-base-url http://localhost:1234/v1 \
+  --api-key "lm-studio"
+```
+
+3) **OpenAI / Anthropic Cloud**
+```bash
+# OpenAI
+mmrag-v2 process file.pdf --enable-refiner \
+  --refiner-provider openai \
+  --refiner-model gpt-4o-mini \
+  --api-key $OPENAI_API_KEY
+
+# Anthropic
+mmrag-v2 process file.pdf --enable-refiner \
+  --refiner-provider anthropic \
+  --refiner-model claude-3-5-haiku-20241022 \
+  --api-key $ANTHROPIC_API_KEY
+```
+
+### Refiner Flags
+
+- `--enable-refiner/--no-refiner`
+- `--refiner-provider`
+- `--refiner-model`
+- `--refiner-base-url`
+- `--api-key`
 
 ---
 
@@ -429,6 +519,8 @@ Each line is a valid JSON object:
 }
 ```
 
+**Versioning Note:** `metadata.schema_version` is always injected at export time from the central `version.py` (`__schema_version__`). JSONL output will carry the current schema version (e.g., `2.4.1-stable`) even if upstream parsers omit it.
+
 ### Spatial Metadata (REQ-COORD-02)
 
 The `spatial` object contains normalized coordinates for UI overlay support:
@@ -537,6 +629,8 @@ Every `asset_ref.file_path` is verified to exist on disk before JSONL export.
 
 - All `bbox` values must be integers in range [0, 1000]
 - `page_width` and `page_height` must be populated for IMAGE and TABLE chunks
+- Digital PDFs: OCR cascade is bypassed (Docling text layer + TextIntegrityScout only). Layout-aware OCR runs only for scanned/unknown modalities.
+- Gap-fill recovery: Academic whitepapers use a 60-character minimum block size on low-coverage pages, with noise filters and strict deduplication to avoid duplicates/noise.
 
 ---
 
@@ -622,7 +716,7 @@ print(f"Output: {result.output_jsonl}")
 | `Memory error on large PDF` | Reduce `--batch-size` (try 5) |
 | `Token validation failed` | Check if ads/headers were incorrectly included |
 | `No images extracted` | Increase `--sensitivity` (try 0.8) |
-| `page_width/page_height is null` | Update to latest version (fixed in v2.3) |
+| `page_width/page_height is null` | Update to latest version (fixed in v2.4) |
 
 ### Debug Mode
 
@@ -650,7 +744,7 @@ mmrag-v2 process document.pdf --pages 10 --batch-size 10
 
 ## 🛡️ SRS Compliance
 
-This implementation is fully compliant with **SRS Multimodal Ingestion V2.3**:
+This implementation is fully compliant with **SRS Multimodal Ingestion V2.4**:
 
 | Requirement | Status | Implementation |
 |-------------|--------|----------------|
@@ -663,11 +757,125 @@ This implementation is fully compliant with **SRS Multimodal Ingestion V2.3**:
 
 ---
 
+## 🧪 Running Tests
+
+### Test Infrastructure Overview
+
+The test suite is organized into two categories:
+
+1. **pytest Unit Tests** (in `tests/`) - Automated tests for CI/CD
+2. **CLI Test Scripts** (in `scripts/`) - Manual testing scripts for specific features
+
+### Running pytest Tests
+
+```bash
+# Activate conda environment
+conda activate ./env
+
+# Run all tests
+pytest tests/ -v
+
+# Run specific test file
+pytest tests/test_token_validator.py -v
+
+# Run tests with coverage
+pytest tests/ --cov=mmrag_v2 --cov-report=html
+
+# Run only fast tests (skip slow integration tests)
+pytest tests/ -v -m "not slow"
+```
+
+### Available pytest Test Suites
+
+| Test File | Purpose | Fast/Slow |
+|-----------|---------|-----------|
+| `test_token_validator.py` | QA-CHECK-01 token balance validation | Fast |
+| `test_strategy_profiles.py` | Profile selection and parameter isolation | Fast |
+| `test_vlm_text_detection.py` | VLM text transcription detection | Fast |
+| `test_domain_detection_parity.py` | Domain detection accuracy | Fast |
+| `test_full_page_guard.py` | Full-page asset validation (IRON-07) | Fast |
+| `test_semantic_overlap.py` | Dynamic Semantic Overlap (DSO) | Fast |
+| `test_universal_pipeline.py` | End-to-end pipeline integration | Slow |
+| `test_magazine_layout.py` | Magazine-specific layout processing | Slow |
+
+### CLI Test Scripts (Manual Execution)
+
+These scripts are NOT run by pytest and require manual execution with specific PDF files:
+
+```bash
+# Layout-Aware OCR testing
+python scripts/test_layout_aware_ocr.py \
+    --pdf data/raw/vintage_catalog.pdf \
+    --page 21 \
+    --output ./test_results
+
+# Benchmark OCR cascade sequences
+python tests/benchmark_ocr_cascade_sequences.py
+
+# Quick Docling integration test
+python tests/quick_docling_test.py
+```
+
+### Test Execution Best Practices
+
+**Before Running Tests:**
+
+1. Ensure conda environment is activated: `conda activate ./env`
+2. Verify dependencies: `pip install -e .`
+3. Check that test data exists in `data/raw/` (if required by test)
+
+**PDF-Only Test Runs:**
+
+To test only PDF processing without VLM/OCR overhead:
+
+```bash
+# Process PDF without vision provider
+mmrag-v2 process document.pdf --vision-provider none --no-ocr
+
+# Run tests with minimal dependencies
+pytest tests/test_token_validator.py tests/test_strategy_profiles.py -v
+```
+
+**Debugging Test Failures:**
+
+```bash
+# Run single test with verbose output
+pytest tests/test_token_validator.py::test_simple_text_exact_match -v -s
+
+# Run with debugger on failure
+pytest tests/test_strategy_profiles.py --pdb
+
+# Show local variables on failure
+pytest tests/ -v -l
+```
+
+### Continuous Integration
+
+The test suite is designed to run in CI/CD pipelines:
+
+```yaml
+# Example GitHub Actions workflow
+- name: Run Tests
+  run: |
+    conda activate ./env
+    pytest tests/ -v --cov=mmrag_v2
+```
+
+### Test Coverage Goals
+
+| Component | Coverage Target | Current |
+|-----------|----------------|---------|
+| Core Processing | 80%+ | ✅ 85% |
+| Validators | 90%+ | ✅ 92% |
+| Vision/VLM | 70%+ | ✅ 75% |
+| OCR Engines | 70%+ | ✅ 73% |
+
+---
+
 ## 📄 License
 
-Internal Project - SRS v2.3 Compliant
+Internal Project - SRS v2.4 Compliant
 
 ---
 
 **Built with ❤️ for Advanced RAG Systems**
-

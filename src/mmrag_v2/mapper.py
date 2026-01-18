@@ -157,6 +157,7 @@ class DoclingToV2Mapper:
         page_offset: int = 0,
         min_image_width: int = MIN_IMAGE_WIDTH_PX,
         min_image_height: int = MIN_IMAGE_HEIGHT_PX,
+        intelligence_metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Initialize the DoclingToV2Mapper.
@@ -170,6 +171,7 @@ class DoclingToV2Mapper:
             page_offset: Page offset for batch processing
             min_image_width: Minimum image width to extract
             min_image_height: Minimum image height to extract
+            intelligence_metadata: V2.4 intelligence stack metadata for observability
         """
         self.doc_hash = doc_hash
         self.source_file = source_file
@@ -178,6 +180,9 @@ class DoclingToV2Mapper:
         self.page_offset = page_offset
         self.min_image_width = min_image_width
         self.min_image_height = min_image_height
+
+        # BUG-006 FIX: Store intelligence metadata for chunk creation
+        self.intelligence_metadata = intelligence_metadata or {}
 
         # Create assets directory
         self.assets_dir = self.output_dir / "assets"
@@ -472,6 +477,7 @@ class DoclingToV2Mapper:
             height_px=height,
             page_width=int(page_w),
             page_height=int(page_h),
+            **self.intelligence_metadata,  # BUG-006 FIX: Propagate intelligence metadata
         )
 
     def _map_table_element(
@@ -508,6 +514,16 @@ class DoclingToV2Mapper:
         # Table content
         content = text if text else f"[Table on page {page_no}]"
 
+        # FIX #3: REQ-MM-03 - Get semantic context (prev + next text snippets) SAME AS IMAGES
+        prev_text = " ".join(self._text_buffer[-3:]) if self._text_buffer else None
+        if prev_text:
+            prev_text = prev_text[-300:]
+
+        # Get next_text from lookahead buffer (populated in map_document two-pass)
+        next_text = " ".join(self._next_text_buffer) if self._next_text_buffer else None
+        if next_text:
+            next_text = next_text[:300]
+
         # REQ-COORD-01: bbox is REQUIRED for table modality
         # Provide fallback full-page bbox if not available
         table_bbox: List[int] = bbox if bbox is not None else [0, 0, COORD_SCALE, COORD_SCALE]
@@ -524,8 +540,11 @@ class DoclingToV2Mapper:
             bbox=table_bbox,
             hierarchy=hierarchy,
             asset_path=asset_path,
+            prev_text=prev_text,  # FIX #3: Add prev_text context parity with images
+            next_text=next_text,  # FIX #3: Add next_text context parity with images
             page_width=int(page_w),
             page_height=int(page_h),
+            **self.intelligence_metadata,  # BUG-006 FIX: Propagate intelligence metadata
         )
 
     def _map_text_element(
@@ -561,6 +580,7 @@ class DoclingToV2Mapper:
                     page_number=page_no,
                     hierarchy=hierarchy,
                     chunk_type=chunk_type,
+                    **self.intelligence_metadata,  # BUG-006 FIX: Propagate intelligence metadata
                 )
 
     def _get_element_label(self, element: Any) -> str:

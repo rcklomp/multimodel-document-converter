@@ -41,3 +41,6 @@ env/
 
 # Cache files
 .vision_cache.json
+
+# Old documents
+docs/archive-do not use

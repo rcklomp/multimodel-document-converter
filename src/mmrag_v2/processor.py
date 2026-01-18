@@ -66,6 +66,7 @@ from .schema.ingestion_schema import (
     calculate_hierarchy_level,
     COORD_SCALE,
 )
+from .version import __schema_version__ as SCHEMA_VERSION
 from .state.context_state import ContextStateV2, create_context_state, is_valid_heading
 from .state.magazine_section_detector import (
     MagazineSectionDetector,
@@ -204,6 +205,8 @@ class V2DocumentProcessor:
         source_file_override: Optional[str] = None,
         # Smart orchestration parameters
         extraction_strategy: Optional["ExtractionStrategy"] = None,
+        # V2.4 Intelligence Stack Metadata (Observability)
+        intelligence_metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Initialize V2DocumentProcessor.
@@ -229,6 +232,15 @@ class V2DocumentProcessor:
 
         # V3.0.0: Profile parameters for OCR configuration (shadow-first mode REMOVED)
         self._profile_params: Optional["ProfileParameters"] = None
+
+        # V2.4: Store intelligence metadata for JSONL observability
+        self._intelligence_metadata: Dict[str, Any] = intelligence_metadata or {}
+        if self._intelligence_metadata:
+            logger.info(
+                f"[OBSERVABILITY] Intelligence metadata loaded: "
+                f"profile_type={self._intelligence_metadata.get('profile_type')}, "
+                f"min_dims={self._intelligence_metadata.get('min_image_dims')}"
+            )
 
         # Use strategy's min dimensions if provided, else defaults
         if extraction_strategy:
@@ -284,6 +296,9 @@ class V2DocumentProcessor:
         else:
             self._vision_manager = None
 
+        # Initialize Semantic Text Refiner (v18.2) - disabled by default
+        self._refiner = None
+
         # ================================================================
         # GEMINI AUDIT FIX: Initialize enhancement modules
         # ================================================================
@@ -315,7 +330,9 @@ class V2DocumentProcessor:
         """
         pipeline_options = PdfPipelineOptions()
         pipeline_options.images_scale = 2.0  # High-Fidelity Rendering
-        pipeline_options.generate_page_images = False  # No full-page renders
+        pipeline_options.generate_page_images = (
+            True  # ✅ REQ-PDF-04: Enable page rendering for padding
+        )
         pipeline_options.generate_picture_images = True  # Extract figures
         pipeline_options.generate_table_images = True  # Extract tables
 
@@ -580,10 +597,15 @@ class V2DocumentProcessor:
             # PRIORITY 2: Try to get image from element directly (Docling native)
             # NOTE: If no page image is available, we cannot apply consistent padding.
             if bbox_normalized and page_no not in page_images:
-                logger.warning(
-                    f"Page image missing for page {page_no}; "
-                    f"falling back to element.image without padding."
+                # ✅ IRON-06: FAIL FAST on missing page buffer
+                error_msg = (
+                    f"[IRON-06 VIOLATION] Page image buffer missing for page {page_no}. "
+                    f"Cannot apply REQ-MM-01 10px padding. Processing HALTED. "
+                    f"This should NOT happen with generate_page_images=True. "
+                    f"Check Docling configuration and batch_processor page_images dict."
                 )
+                logger.error(error_msg)
+                raise RuntimeError(error_msg)
             if hasattr(element, "image") and element.image:
                 img_data = element.image
                 if hasattr(img_data, "pil_image") and img_data.pil_image is not None:
@@ -738,6 +760,279 @@ class V2DocumentProcessor:
         description = " | ".join(parts)
         return description[:MAX_CHUNK_CHARS]
 
+    def _run_shadow_extraction(
+        self,
+        file_path: Path,
+        doc_hash: str,
+        source_file: str,
+        file_type: FileType,
+        page_images: Dict[int, Image.Image],
+        page_dims: Dict[int, Tuple[float, float]],
+        page_offset: int,
+        state: ContextStateV2,
+        text_buffer: List[str],
+        element_indices: Dict[str, int],
+        docling_processed_pages: set,
+    ) -> Generator[IngestionChunk, None, None]:
+        """
+        FIX 1: SHADOW EXTRACTION (REQ-MM-05/06/07)
+
+        Scan PDF for bitmaps/images that Docling may have missed.
+        This is the "safety net" that catches large editorial images.
+
+        THRESHOLD (SRS v2.4 STRICT):
+        - 300x300 pixels OR
+        - 40% of page area OR GREATER
+
+        This method runs AFTER Docling processing and extracts any
+        visual elements that meet the threshold but weren't extracted
+        by Docling's AI-driven layout analysis.
+
+        Args:
+            file_path: Path to original PDF file
+            doc_hash: Document hash for asset naming
+            source_file: Source filename
+            file_type: FileType enum
+            page_images: Rendered page images (from Docling)
+            page_dims: Page dimensions dict
+            page_offset: Page offset for batch processing
+            state: Context state for breadcrumbs
+            text_buffer: Text buffer for prev_text context
+            element_indices: Element counters (figure, table)
+            docling_processed_pages: Set of pages Docling processed
+
+        Yields:
+            IngestionChunk objects for shadow-extracted assets
+        """
+        if not file_path.exists() or file_path.suffix.lower() != ".pdf":
+            logger.info("[SHADOW-EXTRACTION] Skipping non-PDF or missing file")
+            return
+
+        logger.info(f"[SHADOW-EXTRACTION] Scanning {file_path.name} for missed visual assets...")
+
+        try:
+            pdf_doc = fitz.open(str(file_path))
+            shadow_count = 0
+
+            for page_idx in range(len(pdf_doc)):
+                batch_page_no = page_idx + 1  # 1-indexed
+                actual_page_no = batch_page_no + page_offset
+
+                # Only process pages that Docling processed
+                if batch_page_no not in docling_processed_pages:
+                    continue
+
+                page = pdf_doc[page_idx]
+                page_w = page.rect.width
+                page_h = page.rect.height
+                page_area = page_w * page_h
+
+                # Extract image list from PDF
+                image_list = page.get_images(full=True)
+
+                if not image_list:
+                    continue
+
+                logger.debug(
+                    f"[SHADOW-EXTRACTION] Page {actual_page_no}: "
+                    f"Found {len(image_list)} raw images in PDF stream"
+                )
+
+                for img_idx, img_info in enumerate(image_list):
+                    try:
+                        xref = img_info[0]
+
+                        # Get image bbox on page
+                        img_rects = page.get_image_rects(xref)
+                        if not img_rects:
+                            continue
+
+                        # Use first occurrence bbox
+                        img_rect = img_rects[0]
+                        img_width = img_rect.width
+                        img_height = img_rect.height
+                        img_area = img_width * img_height
+                        area_ratio = img_area / page_area if page_area > 0 else 0
+
+                        # ================================================================
+                        # REQ-MM-06: THRESHOLD CHECK - 300x300px OR 40% page area
+                        # ================================================================
+                        meets_size_threshold = img_width >= 300 and img_height >= 300
+                        meets_area_threshold = area_ratio >= 0.40
+
+                        if not (meets_size_threshold or meets_area_threshold):
+                            logger.debug(
+                                f"[SHADOW-EXTRACTION] Page {actual_page_no}, img {img_idx}: "
+                                f"Below threshold ({img_width:.0f}x{img_height:.0f}, {area_ratio:.1%})"
+                            )
+                            continue
+
+                        logger.info(
+                            f"[SHADOW-EXTRACTION] Page {actual_page_no}: "
+                            f"Found large image ({img_width:.0f}x{img_height:.0f}, {area_ratio:.1%})"
+                        )
+
+                        # Extract image data
+                        base_image = pdf_doc.extract_image(xref)
+                        if not base_image:
+                            continue
+
+                        image_bytes = base_image["image"]
+                        image_ext = base_image.get("ext", "png")
+
+                        # Convert to PIL Image
+                        pil_image = Image.open(io.BytesIO(image_bytes))
+
+                        # Apply size check (same as regular images)
+                        if not self._check_image_size(
+                            pil_image,
+                            min_width=self._min_image_width,
+                            min_height=self._min_image_height,
+                        ):
+                            logger.debug(
+                                f"[SHADOW-EXTRACTION] Page {actual_page_no}: "
+                                f"Image too small after extraction"
+                            )
+                            continue
+
+                        # ================================================================
+                        # FIX 2: VLM GUARD (IRON-07) - Same as regular images
+                        # ================================================================
+                        if area_ratio > 0.95:
+                            logger.info(
+                                f"[SHADOW-EXTRACTION][FULL-PAGE-GUARD] Page {actual_page_no}: "
+                                f"Shadow asset covers {area_ratio:.1%} of page. Checking VLM..."
+                            )
+
+                            if not self._vision_manager:
+                                logger.warning(
+                                    f"[SHADOW-EXTRACTION][FULL-PAGE-GUARD] Page {actual_page_no}: "
+                                    f"DISCARDING full-page shadow asset (no VLM for verification)"
+                                )
+                                print(
+                                    f"    ⛔ [SHADOW-VLM-GUARD] Discarded full-page shadow asset "
+                                    f"on page {actual_page_no}",
+                                    flush=True,
+                                )
+                                continue  # DISCARD
+
+                        # Increment figure counter for shadow assets
+                        element_indices["figure"] += 1
+                        asset_name = ASSET_PATTERN.format(
+                            doc_hash=doc_hash,
+                            page=actual_page_no,
+                            element_type="figure",
+                            index=element_indices["figure"],
+                        )
+                        asset_path = f"assets/{asset_name}"
+                        full_path = self.assets_dir / Path(asset_path).name
+
+                        # Save asset to disk
+                        pil_image.save(str(full_path), "PNG")
+                        logger.info(f"[SHADOW-EXTRACTION] Saved shadow asset: {asset_name}")
+                        print(
+                            f"    🔍 [SHADOW] {asset_name} | "
+                            f"Page={actual_page_no} | "
+                            f"Size={img_width:.0f}x{img_height:.0f} ({area_ratio:.1%})",
+                            flush=True,
+                        )
+                        shadow_count += 1
+
+                        # Get context for VLM
+                        prev_text = " ".join(text_buffer[-3:]) if text_buffer else None
+                        if prev_text:
+                            prev_text = prev_text[-CONTEXT_SNIPPET_LENGTH:]
+
+                        # Enrich with VLM
+                        content = self._enrich_image_with_vlm(
+                            image=pil_image,
+                            state=state,
+                            page_no=actual_page_no,
+                            anchor_text=prev_text,
+                            profile_params=self._profile_params,
+                        )
+
+                        # Visual description
+                        if self._vision_manager and content and len(content) >= 20:
+                            visual_description = content
+                        else:
+                            visual_description = (
+                                content if content else f"[Shadow image on page {actual_page_no}]"
+                            )
+
+                        # Normalize bbox
+                        bbox_list = [
+                            img_rect.x0,
+                            img_rect.y0,
+                            img_rect.x1,
+                            img_rect.y1,
+                        ]
+                        bbox_padded = self._apply_padding(bbox_list, page_w, page_h)
+                        bbox_normalized = ensure_normalized(
+                            bbox_padded,
+                            page_w,
+                            page_h,
+                            f"shadow_page{actual_page_no}_img{img_idx}",
+                        )
+
+                        # Get hierarchy
+                        breadcrumbs = state.get_breadcrumb_path()
+                        source_name = Path(source_file).stem if source_file else "Document"
+                        page_marker = f"Page {actual_page_no}"
+
+                        if not breadcrumbs:
+                            breadcrumbs = [source_name, page_marker]
+                        elif len(breadcrumbs) == 1:
+                            breadcrumbs = [breadcrumbs[0], page_marker]
+                        elif page_marker not in " ".join(breadcrumbs):
+                            breadcrumbs = [breadcrumbs[0], page_marker] + breadcrumbs[1:]
+
+                        hierarchy = HierarchyMetadata(
+                            parent_heading=state.get_parent_heading(),
+                            breadcrumb_path=breadcrumbs,
+                            level=len(breadcrumbs) if breadcrumbs else None,
+                        )
+
+                        # Create IMAGE chunk with extraction_method="shadow"
+                        yield create_image_chunk(
+                            doc_id=doc_hash,
+                            content=content,
+                            source_file=source_file,
+                            file_type=file_type,
+                            page_number=actual_page_no,
+                            asset_path=asset_path,
+                            bbox=bbox_normalized,
+                            hierarchy=hierarchy,
+                            prev_text=prev_text,
+                            visual_description=visual_description,
+                            page_width=int(page_w),
+                            page_height=int(page_h),
+                            extraction_method="shadow",  # REQ-MM-07: Mark as shadow
+                            **self._intelligence_metadata,
+                        )
+
+                    except Exception as img_err:
+                        logger.error(
+                            f"[SHADOW-EXTRACTION] Page {actual_page_no}, img {img_idx}: "
+                            f"Failed to process: {img_err}"
+                        )
+                        continue
+
+            pdf_doc.close()
+
+            if shadow_count > 0:
+                logger.info(
+                    f"[SHADOW-EXTRACTION] Extracted {shadow_count} shadow assets "
+                    f"from {file_path.name}"
+                )
+            else:
+                logger.info(
+                    f"[SHADOW-EXTRACTION] No additional shadow assets found in {file_path.name}"
+                )
+
+        except Exception as e:
+            logger.error(f"[SHADOW-EXTRACTION] Failed to scan {file_path.name}: {e}")
+
     def _chunk_text_with_overlap(
         self,
         text: str,
@@ -842,6 +1137,44 @@ class V2DocumentProcessor:
                 f"min_confidence: {profile_params.ocr_min_confidence}"
             )
 
+    def enable_refiner(
+        self,
+        provider: str = "ollama",
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        threshold: float = 0.15,
+        max_edit: float = 0.35,
+    ) -> None:
+        """
+        Enable Semantic Text Refiner (v18.2) for OCR artifact repair.
+
+        Args:
+            provider: LLM provider (ollama|openai|anthropic)
+            model: Model name (optional for Ollama - auto-detects)
+            api_key: API key for cloud providers
+            threshold: Min corruption score to trigger refinement (0.0-1.0)
+            max_edit: Max edit ratio (0.0-1.0, default 0.35 = 35%)
+        """
+        try:
+            from .refiner import create_refiner
+
+            self._refiner = create_refiner(
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+                threshold=threshold,
+                max_edit=max_edit,
+            )
+            logger.info(
+                f"[REFINER] Enabled: provider={provider}, "
+                f"threshold={threshold}, max_edit={max_edit}"
+            )
+        except Exception as e:
+            logger.error(f"[REFINER] Failed to initialize: {e}")
+            self._refiner = None
+
     def get_vision_stats(self) -> Dict[str, Any]:
         """Get vision manager statistics."""
         if self._vision_manager:
@@ -945,10 +1278,10 @@ class V2DocumentProcessor:
                 height = getattr(page, "height", 792.0) or 792.0
                 page_dims[pg_no] = (width, height)
 
-        # V3.0.0: Pending context queue for IMAGE next_text_snippet
-        # IMAGE chunks are held until next TEXT chunk arrives, then their
+        # V3.0.0: Pending context queue for IMAGE and TABLE next_text_snippet
+        # IMAGE/TABLE chunks are held until next TEXT chunk arrives, then their
         # next_text_snippet is filled with the subsequent text content.
-        pending_image_chunks: List[IngestionChunk] = []
+        pending_visual_chunks: List[IngestionChunk] = []
 
         for item_tuple in doc.iterate_items():
             element, _ = item_tuple
@@ -965,18 +1298,20 @@ class V2DocumentProcessor:
                 page_dims=page_dims,
                 page_offset=self._page_offset,
             ):
-                # V3.0.0: Deferred yield for IMAGE chunks (pending context)
+                # V3.0.0: Deferred yield for IMAGE and TABLE chunks (pending context)
                 from .schema.ingestion_schema import Modality
 
-                if chunk.modality == Modality.IMAGE:
-                    # Hold IMAGE chunk until next TEXT arrives
-                    pending_image_chunks.append(chunk)
-                    logger.debug(f"[PENDING-CONTEXT] Holding IMAGE chunk for next_text_snippet")
+                if chunk.modality in (Modality.IMAGE, Modality.TABLE):
+                    # Hold IMAGE/TABLE chunk until next TEXT arrives
+                    pending_visual_chunks.append(chunk)
+                    logger.debug(
+                        f"[PENDING-CONTEXT] Holding {chunk.modality.value} chunk for next_text_snippet"
+                    )
                 elif chunk.modality == Modality.TEXT:
-                    # Flush all pending IMAGE chunks with this text as next_text_snippet
-                    if pending_image_chunks:
+                    # Flush all pending IMAGE/TABLE chunks with this text as next_text_snippet
+                    if pending_visual_chunks:
                         next_snippet = chunk.content[:CONTEXT_SNIPPET_LENGTH]
-                        for pending in pending_image_chunks:
+                        for pending in pending_visual_chunks:
                             # Update semantic context with next text
                             if pending.semantic_context is None:
                                 pending.semantic_context = SemanticContext(
@@ -985,19 +1320,49 @@ class V2DocumentProcessor:
                             else:
                                 pending.semantic_context.next_text_snippet = next_snippet
                             logger.debug(
-                                f"[PENDING-CONTEXT] Filled IMAGE next_text: '{next_snippet[:50]}...'"
+                                f"[PENDING-CONTEXT] Filled {pending.modality.value} next_text: '{next_snippet[:50]}...'"
                             )
                             yield pending
-                        pending_image_chunks.clear()
+                        pending_visual_chunks.clear()
                     # Now yield the TEXT chunk
                     yield chunk
                 else:
-                    # TABLE or other modality - yield directly
+                    # Unknown modality - yield directly
                     yield chunk
 
-        # Flush any remaining pending IMAGE chunks (no following text)
-        for pending in pending_image_chunks:
-            logger.debug(f"[PENDING-CONTEXT] Flushing IMAGE chunk without next_text")
+        # ================================================================
+        # FIX 1: SHADOW EXTRACTION (REQ-MM-05/06/07)
+        # Shadow scan runs AFTER Docling to catch missed large images
+        # ================================================================
+        logger.info(
+            "[SHADOW-EXTRACTION] Running post-Docling shadow scan for missed visual assets..."
+        )
+        for shadow_chunk in self._run_shadow_extraction(
+            file_path=Path(input_path),
+            doc_hash=doc_hash,
+            source_file=source_file,
+            file_type=file_type,
+            page_images=page_images,
+            page_dims=page_dims,
+            page_offset=self._page_offset,
+            state=state,
+            text_buffer=text_buffer,
+            element_indices=element_indices,
+            docling_processed_pages=set(page_images.keys()),
+        ):
+            # Shadow chunks may also be IMAGE/TABLE, handle pending context
+            from .schema.ingestion_schema import Modality
+
+            if shadow_chunk.modality in (Modality.IMAGE, Modality.TABLE):
+                pending_visual_chunks.append(shadow_chunk)
+            else:
+                yield shadow_chunk
+
+        # Flush any remaining pending IMAGE/TABLE chunks (no following text)
+        for pending in pending_visual_chunks:
+            logger.debug(
+                f"[PENDING-CONTEXT] Flushing {pending.modality.value} chunk without next_text"
+            )
             yield pending
 
         # Store final state for batch processing (REQ-STATE: breadcrumb continuity)
@@ -1207,7 +1572,103 @@ class V2DocumentProcessor:
                 return  # Skip this element - NO file written to disk
 
             # At this point, raw_image is guaranteed non-None (passed size check)
-            # STEP 3: Only save to disk if size check passed
+
+            # ================================================================
+            # FIX 2: VLM GUARD (IRON-07 / REQ-MM-11)
+            # Full-page assets (>95% page area) MUST be discarded if no VLM
+            # ================================================================
+            img_page_w, img_page_h = page_dims.get(batch_page_no, (612.0, 792.0))
+
+            # Calculate area ratio (REQ-MM-08)
+            if bbox:
+                # Denormalize bbox to PDF points for area calculation
+                from .utils.coordinate_normalization import denormalize_bbox
+
+                abs_bbox = denormalize_bbox(bbox, img_page_w, img_page_h)
+                asset_width = abs_bbox[2] - abs_bbox[0]
+                asset_height = abs_bbox[3] - abs_bbox[1]
+                page_area = img_page_w * img_page_h
+                asset_area = asset_width * asset_height
+                area_ratio = asset_area / page_area if page_area > 0 else 0
+            else:
+                # No bbox - assume full page
+                area_ratio = 1.0
+
+            # REQ-MM-09/10/11: Full-Page Guard validation
+            if area_ratio > 0.95:
+                logger.info(
+                    f"[FULL-PAGE-GUARD] Page {page_no}: Asset covers {area_ratio:.1%} of page "
+                    f"(threshold: 95%). Checking VLM availability..."
+                )
+
+                # IRON-07: If no VLM, DISCARD the asset
+                if not self._vision_manager or self._vision_manager is None:
+                    logger.warning(
+                        f"[FULL-PAGE-GUARD] Page {page_no}: DISCARDING full-page asset "
+                        f"(area_ratio={area_ratio:.1%}). No VLM available for verification. "
+                        f"Asset: {asset_name}"
+                    )
+                    print(
+                        f"    ⛔ [VLM-GUARD] Discarded full-page asset on page {page_no} "
+                        f"(no VLM verification available)",
+                        flush=True,
+                    )
+                    return  # DISCARD - do not save, do not yield chunk
+
+                # IRON-07: VLM VERIFICATION - Actually verify the asset is editorial
+                logger.info(
+                    f"[FULL-PAGE-GUARD] Page {page_no}: Running VLM verification for full-page asset..."
+                )
+                try:
+                    # Call VLM with verification prompt
+                    verification_prompt = (
+                        "Is this image editorial content (photo, illustration, infographic, diagram) "
+                        "or is it a UI element/page scan/navigation element? "
+                        "Answer 'EDITORIAL' if it contains meaningful visual content, "
+                        "or 'UI' if it's just a page background, navigation, or UI element."
+                    )
+
+                    verification_result = self._vision_manager.enrich_image(
+                        image=raw_image,
+                        state=state,
+                        page_number=page_no,
+                        anchor_text=verification_prompt,
+                    )
+
+                    # Check VLM response
+                    if verification_result and "UI" in verification_result.upper():
+                        logger.warning(
+                            f"[FULL-PAGE-GUARD] Page {page_no}: VLM identified as UI element: '{verification_result}'. "
+                            f"DISCARDING asset: {asset_name}"
+                        )
+                        print(
+                            f"    ⛔ [VLM-VERIFICATION] Discarded full-page asset on page {page_no} "
+                            f"(VLM: UI element)",
+                            flush=True,
+                        )
+                        return  # DISCARD - VLM says it's UI
+                    else:
+                        logger.info(
+                            f"[FULL-PAGE-GUARD] Page {page_no}: VLM verified as editorial: '{verification_result}'. "
+                            f"KEEPING asset: {asset_name}"
+                        )
+                        print(
+                            f"    ✅ [VLM-VERIFICATION] Verified full-page editorial asset on page {page_no}",
+                            flush=True,
+                        )
+
+                except Exception as vlm_err:
+                    logger.error(
+                        f"[FULL-PAGE-GUARD] Page {page_no}: VLM verification failed: {vlm_err}. "
+                        f"DISCARDING asset for safety: {asset_name}"
+                    )
+                    print(
+                        f"    ⛔ [VLM-VERIFICATION] VLM error on page {page_no}, discarding for safety",
+                        flush=True,
+                    )
+                    return  # DISCARD - VLM failed, err on side of caution
+
+            # STEP 3: Only save to disk if size check passed AND VLM guard passed
             print(
                 f"    📸 Asset: {asset_name} | "
                 f"Page={page_no} | "
@@ -1288,6 +1749,8 @@ class V2DocumentProcessor:
                 visual_description=visual_description,
                 page_width=int(img_page_w),
                 page_height=int(img_page_h),
+                # V2.4: Intelligence Stack Metadata
+                **self._intelligence_metadata,
             )
 
         elif "table" in label_lower:
@@ -1323,7 +1786,17 @@ class V2DocumentProcessor:
             # REQ-COORD-02: Get page dimensions for UI overlay support
             tbl_page_w, tbl_page_h = page_dims.get(batch_page_no, (612.0, 792.0))
 
-            yield create_table_chunk(
+            # ================================================================
+            # FIX 3: TABLE CONTEXT PARITY (REQ-MM-03) - UNIVERSAL TREATMENT
+            # Tables MUST get EXACT same prev/next treatment as images
+            # Use pending queue logic for next_text_snippet population
+            # ================================================================
+            prev_text_table = " ".join(text_buffer[-3:]) if text_buffer else None
+            if prev_text_table:
+                prev_text_table = prev_text_table[-CONTEXT_SNIPPET_LENGTH:]
+
+            # Create table chunk with semantic context - will be populated by pending queue
+            table_chunk = create_table_chunk(
                 doc_id=doc_hash,
                 content=table_content,
                 source_file=source_file,
@@ -1334,7 +1807,24 @@ class V2DocumentProcessor:
                 asset_path=asset_path,
                 page_width=int(tbl_page_w),
                 page_height=int(tbl_page_h),
+                prev_text=prev_text_table,  # REQ-MM-03: Context parity with images
+                next_text=None,  # Will be filled by next TEXT chunk in pending queue
+                # V2.4: Intelligence Stack Metadata
+                **self._intelligence_metadata,
             )
+
+            # REQ-MM-03: TABLE CONTEXT PARITY - Initialize semantic context
+            if table_chunk.semantic_context is None:
+                table_chunk.semantic_context = SemanticContext(
+                    prev_text_snippet=prev_text_table,
+                    next_text_snippet=None,  # Will be filled by pending queue
+                    parent_heading=hierarchy.parent_heading,
+                    breadcrumb_path=hierarchy.breadcrumb_path,
+                )
+            else:
+                table_chunk.semantic_context.prev_text_snippet = prev_text_table
+
+            yield table_chunk
 
         # ========================================================================
         # V3.0.0: TEXT ELEMENT PROCESSING WITH OCR CASCADE
@@ -1536,6 +2026,34 @@ class V2DocumentProcessor:
                     if i + 1 < len(text_chunks):
                         next_text_context = text_chunks[i + 1][:CONTEXT_SNIPPET_LENGTH]
 
+                    refined_content = None
+                    refinement_applied = False
+                    corruption_score = None
+                    refinement_provider = None
+                    refinement_model = None
+
+                    if self._refiner:
+                        try:
+                            semantic_context = SemanticContext(
+                                prev_text_snippet=prev_text_context,
+                                next_text_snippet=next_text_context,
+                                parent_heading=hierarchy.parent_heading,
+                                breadcrumb_path=hierarchy.breadcrumb_path,
+                            )
+                            refine_result = self._refiner.process(
+                                raw_text=chunk_text,
+                                visual_description=None,
+                                semantic_context=semantic_context,
+                            )
+                            corruption_score = refine_result.corruption_score
+                            refinement_provider = refine_result.provider
+                            refinement_model = refine_result.model
+                            if refine_result.refinement_applied:
+                                refined_content = refine_result.refined_text
+                                refinement_applied = True
+                        except Exception as refiner_error:
+                            logger.error(f"[REFINER] Failed on page {page_no}: {refiner_error}")
+
                     yield create_text_chunk(
                         doc_id=doc_hash,
                         content=chunk_text,
@@ -1546,6 +2064,13 @@ class V2DocumentProcessor:
                         bbox=text_bbox,  # FIX #2: Propagate spatial data
                         prev_text=prev_text_context,
                         next_text=next_text_context,
+                        refined_content=refined_content,
+                        refinement_applied=refinement_applied,
+                        corruption_score=corruption_score,
+                        refinement_provider=refinement_provider,
+                        refinement_model=refinement_model,
+                        # V2.4: Intelligence Stack Metadata
+                        **self._intelligence_metadata,
                     )
 
     def process_to_jsonl(
@@ -1565,6 +2090,11 @@ class V2DocumentProcessor:
         with open(final_output_path, "w", encoding="utf-8") as f:
             for chunk in self.process_document(file_path):
                 chunk_dict = chunk.model_dump(mode="json")
+                # Ensure schema_version is emitted in metadata for downstream versioning
+                meta = chunk_dict.get("metadata", {})
+                if meta.get("schema_version") is None:
+                    meta["schema_version"] = SCHEMA_VERSION
+                    chunk_dict["metadata"] = meta
 
                 # REQ-COORD-01: ASSERTION - Crash if unnormalized coordinates
                 # Per SRS Section 6.2: bbox MUST be integers in range [0, 1000]
@@ -1620,6 +2150,12 @@ class V2DocumentProcessor:
         # Open in APPEND mode for atomic writes
         for chunk in self.process_document(file_path):
             chunk_dict = chunk.model_dump(mode="json")
+
+            # Ensure schema_version is emitted in metadata for downstream versioning
+            meta = chunk_dict.get("metadata", {})
+            if meta.get("schema_version") is None:
+                meta["schema_version"] = SCHEMA_VERSION
+                chunk_dict["metadata"] = meta
 
             # REQ-COORD-01: ASSERTION - Crash if unnormalized coordinates
             spatial = chunk_dict.get("metadata", {}).get("spatial")

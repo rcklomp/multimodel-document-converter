@@ -1,6 +1,6 @@
-# SOFTWARE REQUIREMENTS SPECIFICATION: Multimodal RAG Ingestion Engine (v2.4)
+# SOFTWARE REQUIREMENTS SPECIFICATION: Multimodal RAG Ingestion Engine (v2.4.1)
 
-**Version:** 2.4.0 (PRODUCTION SPEC)
+**Version:** 2.4.1-stable (PRODUCTION SPEC)
 **Target Agent:** Cline (Python 3.10)
 **Output:** JSONL Canonical Schema + Asset Directory
 **Platform:** Apple Silicon (ARM64 Native)
@@ -9,10 +9,13 @@
 
 ---
 
+**Versioning Note:** `metadata.schema_version` is injected during export from the central version.py (`__schema_version__`), ensuring JSONL always carries the current schema version (e.g., 2.4.1-stable).
+
 ## Document Control
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 2.4.1 | 2026-01-18 | System | Updated schema_version to 2.4.1-stable; enforced metadata emission and digital OCR policy |
 | 2.3.0 | 2026-01-02 | System | Surya-OCR verwijderd, coördinatensysteem gedocumenteerd, Shadow Extraction aangescherpt, hiërarchiestandaard toegevoegd |
 | 2.2.1 | 2025-12-xx | System | Initial PDF spec |
 
@@ -91,6 +94,20 @@ The engine routes input files to specific processing pipelines based on MIME typ
 | **REQ-DOCX-01** | Map XML Styles (`Heading 1`...) to metadata hierarchy. | MUST |
 | **REQ-PPTX-01** | Treat Slides as Pages. Slide Title = `Heading 1`. Group overlapping shapes into single `asset` image. | MUST |
 | **REQ-XLSX-01** | Convert active worksheets to **GitHub Flavored Markdown** tables. Prune empty rows/columns. | MUST |
+
+
+
+### 2.5 Digital OCR Policy (Updated 2.4.1-stable)
+
+- Native-digital PDFs: skip the layout-aware OCR cascade. Use Docling's text layer plus TextIntegrityScout (PyMuPDF blocks) for recovery; no Tesseract/Doctr invocation.
+- Scanned/unknown PDFs: layout-aware OCR (Docling → Tesseract → Doctr) remains available when modality is not digital.
+- Legacy shadow extraction remains available when explicitly configured.
+
+### 2.6 Gap-Fill Recovery (Updated 2.4.1-stable)
+
+- For academic_whitepaper profile, low-coverage pages trigger gap-fill on blocks ≥ 60 characters.
+- Academic noise filters and strict deduplication (80% similarity) prevent pulling page numbers/bibliography noise or duplicates.
+- Recovery chunks are marked `extraction_method: recovery_gap_fill` (or recovery_subsurface/scan as applicable).
 
 ---
 

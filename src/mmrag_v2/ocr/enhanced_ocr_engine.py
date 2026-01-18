@@ -113,18 +113,18 @@ class EnhancedOCREngine:
         Returns:
             Best OCRResult from the cascade
         """
-        logger.info(f"[OCR-CASCADE] Starting cascade processing")
+        logger.debug(f"[OCR-CASCADE] Starting cascade processing")
 
         # Layer 1: Check Docling result
         if docling_result and docling_result.confidence >= self.confidence_threshold:
-            logger.info(
+            logger.debug(
                 f"[OCR-CASCADE] Layer 1 (Docling) accepted: "
                 f"confidence={docling_result.confidence:.2f}"
             )
             return docling_result
 
         if docling_result:
-            logger.info(
+            logger.debug(
                 f"[OCR-CASCADE] Layer 1 (Docling) insufficient: "
                 f"confidence={docling_result.confidence:.2f} < {self.confidence_threshold}"
             )
@@ -134,13 +134,13 @@ class EnhancedOCREngine:
             tesseract_result = self._run_tesseract(page_image)
 
             if tesseract_result.confidence >= self.confidence_threshold:
-                logger.info(
+                logger.debug(
                     f"[OCR-CASCADE] Layer 2 (Tesseract) accepted: "
                     f"confidence={tesseract_result.confidence:.2f}"
                 )
                 return tesseract_result
 
-            logger.info(
+            logger.debug(
                 f"[OCR-CASCADE] Layer 2 (Tesseract) insufficient: "
                 f"confidence={tesseract_result.confidence:.2f} < {self.confidence_threshold}"
             )
@@ -148,7 +148,7 @@ class EnhancedOCREngine:
         # Layer 3: Doctr (final fallback)
         if self.enable_doctr:
             doctr_result = self._run_doctr(page_image)
-            logger.info(
+            logger.debug(
                 f"[OCR-CASCADE] Layer 3 (Doctr) final result: "
                 f"confidence={doctr_result.confidence:.2f}"
             )

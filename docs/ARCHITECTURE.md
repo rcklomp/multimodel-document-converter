@@ -4,8 +4,11 @@
 **Date:** January 2026  
 **Status:** PRODUCTION DESIGN  
 **Supersedes:** Legacy shadow-first approach
+**Policy Update (2.4.1-stable):** Native-digital PDFs bypass the OCR cascade (Docling text layer + recovery only). Layout-aware OCR (Tesseract/Doctr) is reserved for scanned/unknown modalities. Gap-fill recovery on academic whitepapers uses a 60-character minimum block to fill low-coverage pages with strict deduplication and noise filters.
 
 ---
+
+**Versioning Note:** All chunks emit `metadata.schema_version` from the central version.py to guarantee downstream compatibility.
 
 ## 1. Executive Summary
 
@@ -40,80 +43,80 @@ A **Universal Intermediate Representation (UIR)** that decouples format-specific
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                     UNIVERSAL DOCUMENT PIPELINE                              │
+│                     UNIVERSAL DOCUMENT PIPELINE                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  INPUT FILES                                                                │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐           │
-│  │   PDF   │  │  ePub   │  │  HTML   │  │  DOCX   │  │  PPTX   │           │
-│  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘           │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐            │
+│  │   PDF   │  │  ePub   │  │  HTML   │  │  DOCX   │  │  PPTX   │            │
+│  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘            │
 │       │            │            │            │            │                 │
 │       ▼            ▼            ▼            ▼            ▼                 │
-│  ┌─────────────────────────────────────────────────────────────┐           │
-│  │                    FORMAT ROUTER                             │           │
-│  │  router.detect(path) → appropriate FormatEngine              │           │
-│  │  Uses: magic bytes, extension, content sampling              │           │
-│  └─────────────────────────────────────────────────────────────┘           │
+│  ┌─────────────────────────────────────────────────────────────┐            │
+│  │                    FORMAT ROUTER                            │            │
+│  │  router.detect(path) → appropriate FormatEngine             │            │
+│  │  Uses: magic bytes, extension, content sampling             │            │
+│  └─────────────────────────────────────────────────────────────┘            │
 │                               │                                             │
-│       ┌───────────────────────┼───────────────────────┐                    │
-│       ▼                       ▼                       ▼                    │
-│  ┌──────────┐           ┌──────────┐           ┌──────────┐                │
-│  │PDFEngine │           │EpubEngine│           │HTMLEngine│                │
-│  │ (Docling)│           │(EbookLib)│           │(Trafil.) │                │
-│  └────┬─────┘           └────┬─────┘           └────┬─────┘                │
+│       ┌───────────────────────┼───────────────────────┐                     │
+│       ▼                       ▼                       ▼                     │
+│  ┌──────────┐           ┌──────────┐           ┌──────────┐                 │
+│  │PDFEngine │           │EpubEngine│           │HTMLEngine│                 │
+│  │ (Docling)│           │(EbookLib)│           │(Trafil.) │                 │
+│  └────┬─────┘           └────┬─────┘           └────┬─────┘                 │
 │       │                      │                      │                       │
-│       └──────────────────────┼──────────────────────┘                      │
+│       └──────────────────────┼──────────────────────┘                       │
 │                              ▼                                              │
-│  ┌─────────────────────────────────────────────────────────────┐           │
-│  │           UNIVERSAL INTERMEDIATE REPRESENTATION              │           │
-│  │                                                              │           │
-│  │  UniversalDocument                                           │           │
-│  │    ├── doc_id: str (MD5 hash)                                │           │
-│  │    ├── source_file: str                                      │           │
-│  │    ├── file_type: FileType                                   │           │
-│  │    └── pages: List[UniversalPage]                            │           │
-│  │          ├── page_number: int                                │           │
-│  │          ├── classification: "digital" | "scanned"           │           │
-│  │          ├── dimensions: (width, height)                     │           │
-│  │          └── elements: List[Element]                         │           │
-│  │                ├── type: TEXT | IMAGE | TABLE                │           │
-│  │                ├── content: str (extracted text/empty)       │           │
-│  │                ├── bbox: [x1, y1, x2, y2] (0-1000)          │           │
-│  │                ├── confidence: float (0.0-1.0)               │           │
-│  │                └── raw_image: Optional[np.ndarray]           │           │
-│  └─────────────────────────────────────────────────────────────┘           │
+│  ┌─────────────────────────────────────────────────────────────┐            │
+│  │           UNIVERSAL INTERMEDIATE REPRESENTATION             │            │
+│  │                                                             │            │
+│  │  UniversalDocument                                          │            │
+│  │    ├── doc_id: str (MD5 hash)                               │            │
+│  │    ├── source_file: str                                     │            │
+│  │    ├── file_type: FileType                                  │            │
+│  │    └── pages: List[UniversalPage]                           │            │
+│  │          ├── page_number: int                               │            │
+│  │          ├── classification: "digital" | "scanned"          │            │
+│  │          ├── dimensions: (width, height)                    │            │
+│  │          └── elements: List[Element]                        │            │
+│  │                ├── type: TEXT | IMAGE | TABLE               │            │
+│  │                ├── content: str (extracted text/empty)      │            │
+│  │                ├── bbox: [x1, y1, x2, y2] (0-1000)          │            │
+│  │                ├── confidence: float (0.0-1.0)              │            │
+│  │                └── raw_image: Optional[np.ndarray]          │            │
+│  └─────────────────────────────────────────────────────────────┘            │
 │                              │                                              │
 │                              ▼                                              │
-│  ┌─────────────────────────────────────────────────────────────┐           │
-│  │              QUALITY-BASED ELEMENT PROCESSOR                 │           │
-│  │                                                              │           │
-│  │  for element in page.elements:                               │           │
-│  │                                                              │           │
-│  │    if element.type == TEXT:                                  │           │
-│  │      if element.confidence >= 0.7:                           │           │
-│  │        → Use extracted content directly                      │           │
-│  │      else:                                                   │           │
-│  │        → OCR Cascade (Tesseract → Doctr)                     │           │
-│  │      OUTPUT: modality="text"                                 │           │
-│  │                                                              │           │
-│  │    elif element.type == IMAGE:                               │           │
-│  │      → VLM visual description (NO text reading)              │           │
-│  │      OUTPUT: modality="image"                                │           │
-│  │                                                              │           │
-│  │    elif element.type == TABLE:                               │           │
-│  │      → Structure-preserving extraction                       │           │
-│  │      OUTPUT: modality="table"                                │           │
-│  └─────────────────────────────────────────────────────────────┘           │
+│  ┌─────────────────────────────────────────────────────────────┐            │
+│  │              QUALITY-BASED ELEMENT PROCESSOR                │            │
+│  │                                                             │            │
+│  │  for element in page.elements:                              │            │
+│  │                                                             │            │
+│  │    if element.type == TEXT:                                 │            │
+│  │      if element.confidence >= 0.7:                          │            │
+│  │        → Use extracted content directly                     │            │
+│  │      else:                                                  │            │
+│  │        → OCR Cascade (Tesseract → Doctr)                    │            │
+│  │      OUTPUT: modality="text"                                │            │
+│  │                                                             │            │
+│  │    elif element.type == IMAGE:                              │            │
+│  │      → VLM visual description (NO text reading)             │            │
+│  │      OUTPUT: modality="image"                               │            │
+│  │                                                             │            │
+│  │    elif element.type == TABLE:                              │            │
+│  │      → Structure-preserving extraction                      │            │
+│  │      OUTPUT: modality="table"                               │            │
+│  └─────────────────────────────────────────────────────────────┘            │
 │                              │                                              │
 │                              ▼                                              │
-│  ┌─────────────────────────────────────────────────────────────┐           │
-│  │                    OUTPUT GENERATOR                          │           │
-│  │                                                              │           │
-│  │  ingestion.jsonl + assets/                                   │           │
-│  │  - Every chunk has proper modality (text/image/table)        │           │
-│  │  - Coordinates normalized to 0-1000 (REQ-COORD-01)           │           │
-│  │  - Assets named per REQ-MM-02                                │           │
-│  └─────────────────────────────────────────────────────────────┘           │
+│  ┌─────────────────────────────────────────────────────────────┐            │
+│  │                    OUTPUT GENERATOR                         │            │
+│  │                                                             │            │
+│  │  ingestion.jsonl + assets/                                  │            │
+│  │  - Every chunk has proper modality (text/image/table)       │            │
+│  │  - Coordinates normalized to 0-1000 (REQ-COORD-01)          │            │
+│  │  - Assets named per REQ-MM-02                               │            │
+│  └─────────────────────────────────────────────────────────────┘            │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -510,23 +513,30 @@ The `ElementProcessor` will:
 │                  LARGE DOCUMENT (244 pages)             │
 ├─────────────────────────────────────────────────────────┤
 │                                                         │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐    │
-│  │Batch 1  │  │Batch 2  │  │Batch 3  │  │ ...     │    │
-│  │ p1-10   │  │ p11-20  │  │ p21-30  │  │         │    │
-│  └────┬────┘  └────┬────┘  └────┬────┘  └─────────┘    │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐     │
+│  │Batch 1  │  │Batch 2  │  │Batch 3  │  │ ...     │     │
+│  │ p1-10   │  │ p11-20  │  │ p21-30  │  │         │     │
+│  └────┬────┘  └────┬────┘  └────┬────┘  └─────────┘     │
 │       │            │            │                       │
 │       ▼            ▼            ▼                       │
-│  ┌──────────────────────────────────────────────┐      │
-│  │  Process batch → gc.collect() → Next batch   │      │
-│  │  (REQ-PDF-05: Memory hygiene)                │      │
-│  └──────────────────────────────────────────────┘      │
+│  ┌──────────────────────────────────────────────┐       │
+│  │  Process batch → gc.collect() → Next batch   │       │
+│  │  (REQ-PDF-05: Memory hygiene)                │       │
+│  └──────────────────────────────────────────────┘       │
 │                                                         │
-│  Memory Budget: < 8GB (16GB system - 8GB for OS/other) │
-│  Batch Size: 10 pages (configurable)                   │
-│  GC: Explicit gc.collect() between batches             │
+│  Memory Budget: < 8GB (16GB system - 8GB for OS/other)  │
+│  Batch Size: 10 pages (configurable)                    │
+│  GC: Explicit gc.collect() between batches              │
 │                                                         │
 └─────────────────────────────────────────────────────────┘
 ```
+
+### 8.1.1 Domain Detection Parity
+
+To guarantee `process` and `batch` parity, domain detection is **content-first**:
+- Content features (text density, image coverage, table presence) carry the primary weight.
+- Filename keywords are a weak hint only, so renames do not flip `profile_type`.
+- This prevents batch-renamed files (e.g., `doc1.pdf`) from diverging in classification.
 
 ### 8.2 Image Buffer Management
 
@@ -587,7 +597,7 @@ def process_batch(files: List[Path]) -> List[BatchResult]:
               └──────────────┬──────────────┘
                              │
        ┌─────────────────────┴─────────────────────┐
-       │              Unit Tests                    │
+       │              Unit Tests                   │
        │  (Each engine, OCR cascade, VLM routing)  │
        └───────────────────────────────────────────┘
 ```

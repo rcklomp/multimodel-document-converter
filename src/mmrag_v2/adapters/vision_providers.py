@@ -596,6 +596,7 @@ class OpenAIProvider(VisionProvider):
         api_key: str,
         model: str = DEFAULT_MODEL,
         timeout: tuple = DEFAULT_TIMEOUT,
+        base_url: Optional[str] = None,
     ) -> None:
         """
         Initialize OpenAI provider.
@@ -604,6 +605,7 @@ class OpenAIProvider(VisionProvider):
             api_key: OpenAI API key
             model: Model name (default: gpt-4o-mini)
             timeout: Request timeout tuple
+            base_url: Custom API base URL (e.g., http://192.168.10.11:1234/v1 for LM Studio)
         """
         if not api_key:
             raise ValueError("OpenAI API key is required")
@@ -611,8 +613,12 @@ class OpenAIProvider(VisionProvider):
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
+        self.base_url = base_url
 
-        logger.info(f"OpenAIProvider initialized: model={model}")
+        if base_url:
+            logger.info(f"OpenAIProvider initialized: model={model}, base_url={base_url}")
+        else:
+            logger.info(f"OpenAIProvider initialized: model={model}")
 
     @property
     def name(self) -> str:
@@ -673,9 +679,12 @@ class OpenAIProvider(VisionProvider):
             "temperature": 0.3,
         }
 
+        # Use custom base_url if provided, otherwise default to OpenAI
+        api_url = f"{self.base_url.rstrip('/')}/chat/completions" if self.base_url else self.API_URL
+
         try:
             response = requests.post(
-                self.API_URL,
+                api_url,
                 headers=headers,
                 json=payload,
                 timeout=self.timeout,
@@ -906,6 +915,7 @@ def create_vision_provider(
             api_key=api_key,
             model=kwargs.get("model", OpenAIProvider.DEFAULT_MODEL),
             timeout=kwargs.get("timeout", DEFAULT_TIMEOUT),
+            base_url=kwargs.get("base_url"),  # ✅ Now passes base_url parameter
         )
 
     elif provider_type in ("anthropic", "haiku"):

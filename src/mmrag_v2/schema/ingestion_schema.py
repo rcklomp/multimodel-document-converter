@@ -34,13 +34,16 @@ from typing import List, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+# Centralized versioning (single source of truth)
+from ..version import __schema_version__
+
 
 # ============================================================================
 # CONSTANTS
 # ============================================================================
 
 MAX_CONTEXT_SNIPPET_CHARS: int = 300  # REQ-MM-03
-SCHEMA_VERSION: str = "2.3.0"  # SRS v2.3.0 compliance
+SCHEMA_VERSION: str = __schema_version__  # V2.4: Intelligence Stack Observability (stable)
 COORD_SCALE: int = 1000
 
 
@@ -306,6 +309,15 @@ class SemanticContext(BaseModel):
         max_length=MAX_CONTEXT_SNIPPET_CHARS,
         description="Text after this element (max 300 chars)",
     )
+    parent_heading: Optional[str] = Field(
+        default=None,
+        max_length=200,
+        description="Nearest parent heading for contextual grounding",
+    )
+    breadcrumb_path: Optional[List[str]] = Field(
+        default=None,
+        description="Breadcrumb path for hierarchical context",
+    )
 
 
 # ============================================================================
@@ -364,6 +376,62 @@ class ChunkMetadata(BaseModel):
     )
     visual_description: Optional[str] = Field(
         default=None, max_length=400, description="VLM description for images (internal use)"
+    )
+
+    # REQ-REFINE-01: Refinement metadata (v18.2 - Semantic Text Refiner)
+    # Original 'content' is NEVER overwritten; refined text stored here for opt-in use
+    refined_content: Optional[str] = Field(
+        default=None,
+        description="LLM-refined text (Stage B output). Original content preserved in 'content' field.",
+    )
+    refinement_applied: bool = Field(
+        default=False,
+        description="True if Stage B LLM refinement was applied and accepted by Stage C validation",
+    )
+    corruption_score: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Stage A noise scanner corruption score (0.0=clean, 1.0=severely corrupted)",
+    )
+    refinement_provider: Optional[str] = Field(
+        default=None,
+        description="LLM provider used for refinement (ollama|openai|anthropic) - audit trail",
+    )
+    refinement_model: Optional[str] = Field(
+        default=None,
+        description="LLM model used for refinement (e.g., llama2, gpt-4o-mini) - audit trail",
+    )
+
+    # V2.4 INTELLIGENCE STACK METADATA (Observability Fix)
+    # These fields provide proof that intelligent classification ran
+    profile_type: Optional[str] = Field(
+        default=None,
+        description="Strategy profile used (e.g., academic_whitepaper, digital_magazine) - proves classification ran",
+    )
+    profile_sensitivity: Optional[float] = Field(
+        default=None,
+        ge=0.1,
+        le=1.0,
+        description="Profile-determined sensitivity value (0.1-1.0) - proves profile params were applied",
+    )
+    min_image_dims: Optional[str] = Field(
+        default=None,
+        description="Min image dimensions used (e.g., '30x30', '100x100') - proves threshold configuration",
+    )
+    confidence_threshold: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="VLM confidence threshold used - proves strategy configuration",
+    )
+    document_domain: Optional[str] = Field(
+        default=None,
+        description="Detected document domain (academic, editorial, technical) - diagnostic result",
+    )
+    document_modality: Optional[str] = Field(
+        default=None,
+        description="Detected modality (native_digital, scanned_clean, scanned_degraded) - diagnostic result",
     )
 
 
@@ -493,6 +561,20 @@ def create_text_chunk(
     extraction_method: str = "docling",
     prev_text: Optional[str] = None,
     next_text: Optional[str] = None,
+    refined_content: Optional[str] = None,
+    refinement_applied: bool = False,
+    corruption_score: Optional[float] = None,
+    refinement_provider: Optional[str] = None,
+    refinement_model: Optional[str] = None,
+    asset_ref: Optional[AssetReference] = None,
+    content_classification: Optional[str] = None,
+    # V2.4 Intelligence Stack Metadata
+    profile_type: Optional[str] = None,
+    profile_sensitivity: Optional[float] = None,
+    min_image_dims: Optional[str] = None,
+    confidence_threshold: Optional[float] = None,
+    document_domain: Optional[str] = None,
+    document_modality: Optional[str] = None,
 ) -> IngestionChunk:
     """
     Factory function to create a TEXT modality chunk.
@@ -526,6 +608,20 @@ def create_text_chunk(
         extraction_method=extraction_method,
         search_priority="high",
         ocr_confidence=confidence_level,
+        refined_content=refined_content,
+        refinement_applied=refinement_applied,
+        corruption_score=corruption_score,
+        refinement_provider=refinement_provider,
+        refinement_model=refinement_model,
+        asset_ref=asset_ref,
+        content_classification=content_classification,
+        # V2.4 Intelligence Stack Metadata
+        profile_type=profile_type,
+        profile_sensitivity=profile_sensitivity,
+        min_image_dims=min_image_dims,
+        confidence_threshold=confidence_threshold,
+        document_domain=document_domain,
+        document_modality=document_modality,
     )
 
     # Build semantic context if provided
@@ -534,6 +630,8 @@ def create_text_chunk(
         semantic_context = SemanticContext(
             prev_text_snippet=prev_text[:300] if prev_text else None,
             next_text_snippet=next_text[:300] if next_text else None,
+            parent_heading=hierarchy.parent_heading if hierarchy else None,
+            breadcrumb_path=hierarchy.breadcrumb_path if hierarchy else None,
         )
 
     return IngestionChunk(
@@ -564,6 +662,13 @@ def create_image_chunk(
     extraction_method: str = "docling",
     page_width: Optional[int] = None,
     page_height: Optional[int] = None,
+    # V2.4 Intelligence Stack Metadata (same as text chunks)
+    profile_type: Optional[str] = None,
+    profile_sensitivity: Optional[float] = None,
+    min_image_dims: Optional[str] = None,
+    confidence_threshold: Optional[float] = None,
+    document_domain: Optional[str] = None,
+    document_modality: Optional[str] = None,
 ) -> IngestionChunk:
     """
     Factory function to create an IMAGE modality chunk.
@@ -572,6 +677,8 @@ def create_image_chunk(
     IMAGE chunks get LOW search priority (VLM descriptions are supplementary).
 
     REQ-COORD-02: page_width and page_height MUST be populated for UI overlay support.
+
+    V2.4: Image chunks now carry intelligence metadata for full audit trail.
     """
     chunk_id = _generate_chunk_id(doc_id, f"image:{asset_path}", page_number, "image")
 
@@ -593,6 +700,13 @@ def create_image_chunk(
         visual_description=visual_description,
         extraction_method=extraction_method,
         search_priority="low",
+        # V2.4 Intelligence Stack Metadata
+        profile_type=profile_type,
+        profile_sensitivity=profile_sensitivity,
+        min_image_dims=min_image_dims,
+        confidence_threshold=confidence_threshold,
+        document_domain=document_domain,
+        document_modality=document_modality,
     )
 
     asset_ref = AssetReference(
@@ -607,6 +721,8 @@ def create_image_chunk(
     semantic_context = SemanticContext(
         prev_text_snippet=prev_text[:300] if prev_text else None,
         next_text_snippet=next_text[:300] if next_text else None,
+        parent_heading=hierarchy.parent_heading if hierarchy else None,
+        breadcrumb_path=hierarchy.breadcrumb_path if hierarchy else None,
     )
 
     return IngestionChunk(
@@ -629,17 +745,29 @@ def create_table_chunk(
     bbox: List[int],  # REQUIRED for tables per REQ-COORD-01
     hierarchy: Optional[HierarchyMetadata] = None,
     asset_path: Optional[str] = None,
+    # ✅ FIX 3B: Add semantic context parameters for REQ-MM-03 symmetry
+    prev_text: Optional[str] = None,
+    next_text: Optional[str] = None,
     width_px: Optional[int] = None,
     height_px: Optional[int] = None,
     extraction_method: str = "docling",
     page_width: Optional[int] = None,
     page_height: Optional[int] = None,
+    # V2.4 Intelligence Stack Metadata (same as text/image chunks)
+    profile_type: Optional[str] = None,
+    profile_sensitivity: Optional[float] = None,
+    min_image_dims: Optional[str] = None,
+    confidence_threshold: Optional[float] = None,
+    document_domain: Optional[str] = None,
+    document_modality: Optional[str] = None,
 ) -> IngestionChunk:
     """
     Factory function to create a TABLE modality chunk.
 
     REQUIRES: bbox (spatial coordinates) per SRS Section 6.3
     REQ-COORD-02: page_width and page_height MUST be populated for UI overlay support.
+
+    V2.4: Table chunks now carry intelligence metadata for full audit trail.
     """
     chunk_id = _generate_chunk_id(doc_id, f"table:{content[:50]}", page_number, "table")
 
@@ -660,6 +788,13 @@ def create_table_chunk(
         spatial=spatial,
         extraction_method=extraction_method,
         search_priority="medium",
+        # V2.4 Intelligence Stack Metadata
+        profile_type=profile_type,
+        profile_sensitivity=profile_sensitivity,
+        min_image_dims=min_image_dims,
+        confidence_threshold=confidence_threshold,
+        document_domain=document_domain,
+        document_modality=document_modality,
     )
 
     # Asset ref is required if we have an asset_path
@@ -672,6 +807,16 @@ def create_table_chunk(
             height_px=height_px,
         )
 
+    # ✅ FIX 3B: Build semantic context if provided (REQ-MM-03 symmetry with images)
+    semantic_context = None
+    if prev_text or next_text:
+        semantic_context = SemanticContext(
+            prev_text_snippet=prev_text[:300] if prev_text else None,
+            next_text_snippet=next_text[:300] if next_text else None,
+            parent_heading=hierarchy.parent_heading if hierarchy else None,
+            breadcrumb_path=hierarchy.breadcrumb_path if hierarchy else None,
+        )
+
     return IngestionChunk(
         chunk_id=chunk_id,
         doc_id=doc_id,
@@ -679,6 +824,7 @@ def create_table_chunk(
         modality=Modality.TABLE,
         metadata=metadata,
         asset_ref=asset_ref,
+        semantic_context=semantic_context,  # ✅ FIX 3B: Add semantic context
     )
 
 
@@ -696,6 +842,13 @@ def create_shadow_chunk(
     visual_description: Optional[str] = None,
     width_px: Optional[int] = None,
     height_px: Optional[int] = None,
+    # V2.4 Intelligence Stack Metadata (for backwards compat)
+    profile_type: Optional[str] = None,
+    profile_sensitivity: Optional[float] = None,
+    min_image_dims: Optional[str] = None,
+    confidence_threshold: Optional[float] = None,
+    document_domain: Optional[str] = None,
+    document_modality: Optional[str] = None,
 ) -> IngestionChunk:
     """
     DEPRECATED: Factory function to create a SHADOW modality chunk.
@@ -726,4 +879,11 @@ def create_shadow_chunk(
         width_px=width_px,
         height_px=height_px,
         extraction_method="shadow",
+        # V2.4: Pass through intelligence metadata
+        profile_type=profile_type,
+        profile_sensitivity=profile_sensitivity,
+        min_image_dims=min_image_dims,
+        confidence_threshold=confidence_threshold,
+        document_domain=document_domain,
+        document_modality=document_modality,
     )

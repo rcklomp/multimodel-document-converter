@@ -30,12 +30,17 @@ import logging
 import os
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional, TYPE_CHECKING
+from typing import Any, List, Optional, Tuple, TYPE_CHECKING
 
 import typer
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn
+
+from .version import __engine_version__, __schema_version__  # Single source of version truth
+
+# Get logger for V2.4 metadata logging
+logger = logging.getLogger(__name__)
 
 # TYPE_CHECKING imports (no runtime cost)
 if TYPE_CHECKING:
@@ -135,6 +140,135 @@ def setup_logging(verbose: bool = False) -> None:
 
 
 # ============================================================================
+# SHARED INTELLIGENCE STACK PIPELINE
+# ============================================================================
+
+
+def _run_intelligent_pipeline(
+    input_file: Path,
+    diagnostic_report: Optional[Any] = None,
+    verbose: bool = False,
+) -> Tuple[Optional[Any], Optional[Any], Optional[Any], Optional[Any]]:
+    """
+    Run the full Intelligence Stack for a PDF document.
+
+    This function centralizes the diagnostic and classification pipeline
+    to ensure parity between `process` and `batch` commands.
+
+    Pipeline:
+    1. DocumentDiagnosticEngine - Initial analysis
+    2. SmartConfigProvider - Feature profiling
+    3. ProfileManager.select_profile() - Classification
+    4. StrategyOrchestrator - Strategy creation
+
+    Args:
+        input_file: Path to PDF file
+        diagnostic_report: Optional pre-computed diagnostic report
+        verbose: Enable verbose logging
+
+    Returns:
+        Tuple of (diagnostic_report, smart_profile, selected_profile, extraction_strategy)
+        Returns (None, None, None, None) for non-PDF files
+    """
+    import sys
+    from .orchestration.smart_config import SmartConfigProvider
+    from .orchestration.strategy_orchestrator import StrategyOrchestrator
+    from .orchestration.document_diagnostic import create_diagnostic_engine
+    from .orchestration.strategy_profiles import ProfileManager
+
+    is_pdf = input_file.suffix.lower() == ".pdf"
+
+    if not is_pdf:
+        return None, None, None, None
+
+    console.print("[dim]🔍 Analyzing document (PyMuPDF)...[/dim]")
+    sys.stdout.flush()
+
+    # Step 0: Document Diagnostic (if not provided)
+    if diagnostic_report is None:
+        console.print("[dim]🔍 Running document diagnostics...[/dim]")
+        diagnostic_engine = create_diagnostic_engine(sample_pages=5)
+        diagnostic_report = diagnostic_engine.analyze(input_file)
+
+    # Print diagnostic results
+    console.print()
+    console.print("[bold cyan]━━━━━ DOCUMENT DIAGNOSTICS ━━━━━[/bold cyan]")
+    console.print(
+        f"[cyan]Modality:[/cyan] {diagnostic_report.physical_check.detected_modality.value}"
+    )
+    console.print(f"[cyan]File Size:[/cyan] {diagnostic_report.physical_check.file_size_mb:.1f} MB")
+    console.print(
+        f"[cyan]Avg Text/Page:[/cyan] {diagnostic_report.physical_check.avg_text_per_page:.0f} chars"
+    )
+    console.print(
+        f"[cyan]Is Likely Scan:[/cyan] {'Yes' if diagnostic_report.physical_check.is_likely_scan else 'No'}"
+    )
+    console.print(
+        f"[cyan]Confidence:[/cyan] {diagnostic_report.confidence_profile.overall_confidence:.2f}"
+    )
+    console.print(f"[cyan]Era:[/cyan] {diagnostic_report.confidence_profile.detected_era.value}")
+    console.print(
+        f"[cyan]Domain:[/cyan] {diagnostic_report.confidence_profile.detected_domain.value}"
+    )
+    console.print(f"[cyan]Strategy:[/cyan] {diagnostic_report.recommended_strategy}")
+
+    if diagnostic_report.confidence_profile.warnings:
+        console.print("[yellow]Warnings:[/yellow]")
+        for warning in diagnostic_report.confidence_profile.warnings:
+            console.print(f"  [yellow]⚠ {warning}[/yellow]")
+
+    console.print(f"[cyan]Reasoning:[/cyan] {diagnostic_report.physical_check.reasoning}")
+    console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
+    console.print()
+
+    # Step 1: Smart Config Provider - Feature profiling
+    console.print("[dim]🔍 Analyzing document profile...[/dim]")
+    analyzer = SmartConfigProvider()
+    smart_profile = analyzer.analyze(input_file, diagnostic_report=diagnostic_report)
+
+    # Step 2: Profile Classification
+    console.print("[dim]🎯 Selecting strategy profile (multi-dimensional classifier)...[/dim]")
+    selected_profile = ProfileManager.select_profile(
+        diagnostic_report=diagnostic_report,
+        force_profile=None,
+        doc_profile=smart_profile,
+    )
+    profile_params = selected_profile.get_parameters()
+
+    # Print profile selection banner
+    console.print()
+    console.print("[bold magenta]━━━━━ STRATEGY PROFILE ━━━━━[/bold magenta]")
+    console.print(f"[magenta]Profile:[/magenta] {selected_profile.name}")
+    console.print(f"[magenta]Type:[/magenta] {selected_profile.profile_type.value}")
+    console.print(f"[magenta]VLM Freedom:[/magenta] {profile_params.vlm_freedom.value}")
+    console.print(
+        f"[magenta]Scan Hints:[/magenta] {'Yes' if profile_params.inject_scan_hints else 'No'}"
+    )
+    console.print(
+        f"[magenta]Min Dimensions:[/magenta] {profile_params.min_image_width}x{profile_params.min_image_height}px"
+    )
+    console.print(
+        f"[magenta]Confidence Threshold:[/magenta] {profile_params.confidence_threshold:.1f}"
+    )
+    console.print("[bold magenta]━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold magenta]")
+    console.print()
+
+    # Step 3: Create extraction strategy
+    orchestrator = StrategyOrchestrator()
+    extraction_strategy = orchestrator.create_strategy(
+        smart_profile,
+        profile_params.sensitivity,
+        profile_params=profile_params,
+        profile_type=selected_profile.profile_type.value,
+    )
+
+    # Print strategy banner
+    orchestrator.print_strategy_banner(extraction_strategy)
+
+    return diagnostic_report, smart_profile, selected_profile, extraction_strategy
+
+
+# ============================================================================
 # API KEY RESOLUTION
 # ============================================================================
 
@@ -194,6 +328,11 @@ def process_document(
         "--vision-model",
         "-m",
         help="Vision model name for Ollama (optional - auto-detects loaded model if not specified)",
+    ),
+    vision_base_url: Optional[str] = typer.Option(
+        None,
+        "--vision-base-url",
+        help="Base URL for OpenAI-compatible vision endpoints (e.g., http://localhost:1234/v1)",
     ),
     api_key: Optional[str] = typer.Option(
         None,
@@ -282,6 +421,40 @@ def process_document(
         "--pages",
         help="Specific pages to process (comma-separated, e.g., '6,21,169,241') or max count (e.g., '10')",
     ),
+    enable_refiner: bool = typer.Option(
+        False,
+        "--enable-refiner/--no-refiner",
+        help="Enable Semantic Text Refiner (v18.2) for OCR artifact repair",
+    ),
+    refiner_provider: str = typer.Option(
+        "ollama",
+        "--refiner-provider",
+        help="LLM provider for refinement (ollama|openai|anthropic)",
+    ),
+    refiner_model: Optional[str] = typer.Option(
+        None,
+        "--refiner-model",
+        help="LLM model for refinement (optional for Ollama - auto-detects)",
+    ),
+    refiner_base_url: Optional[str] = typer.Option(
+        None,
+        "--refiner-base-url",
+        help="Base URL for OpenAI-compatible refiner endpoints (e.g., http://localhost:1234)",
+    ),
+    refiner_threshold: float = typer.Option(
+        0.15,
+        "--refiner-threshold",
+        help="Min corruption score to trigger refinement (0.0-1.0, default: 0.15)",
+        min=0.0,
+        max=1.0,
+    ),
+    refiner_max_edit: float = typer.Option(
+        0.35,
+        "--refiner-max-edit",
+        help="Max edit ratio allowed (0.0-1.0, default: 0.35 = 35%%)",
+        min=0.0,
+        max=1.0,
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -309,6 +482,9 @@ def process_document(
         mmrag-v2 process document.pdf --vision-provider none
     """
     setup_logging(verbose)
+    logger.info(f"[SYSTEM] MMRAG Engine Version: {__engine_version__}")
+
+    batch_size_pages = batch_size
 
     # Validate API key for cloud providers
     resolved_key = resolve_api_key(api_key, vision_provider)
@@ -334,11 +510,14 @@ def process_document(
     console.print("\n[bold blue]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold blue]")
     console.print("[bold]MMRAG V2 Document Processor[/bold]")
     console.print("[bold blue]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold blue]")
+    console.print(f"[yellow][SYSTEM][/yellow] MMRAG Engine Version: {__engine_version__}")
     console.print("[cyan]ENGINE_USE:[/cyan] Docling v2.66.0")
     console.print(f"[cyan]Input:[/cyan] {input_file}")
     console.print(f"[cyan]Output:[/cyan] {output_dir}")
     console.print(f"[cyan]Vision Provider:[/cyan] {vision_provider.value}")
-    console.print(f"[cyan]Batch Size:[/cyan] {batch_size if batch_size > 0 else 'Disabled'}")
+    console.print(
+        f"[cyan]Batch Size:[/cyan] {batch_size_pages if batch_size_pages > 0 else 'Disabled'}"
+    )
     console.print(f"[cyan]VLM Timeout:[/cyan] {vlm_timeout}s")
     ocr_str = f"Enabled ({ocr_engine.value})" if enable_ocr else "Disabled"
     console.print(f"[cyan]OCR:[/cyan] {ocr_str}")
@@ -394,7 +573,7 @@ def process_document(
 
     try:
         is_pdf = input_file.suffix.lower() == ".pdf"
-        use_batching = batch_size > 0 and is_pdf
+        use_batching = batch_size_pages > 0 and is_pdf
 
         # Smart Vision Orchestration for PDFs
         # NOTE: SmartConfigProvider uses PyMuPDF (fast), not Docling
@@ -569,20 +748,46 @@ def process_document(
             # Step 3: Print strategy banner (provides immediate feedback)
             orchestrator.print_strategy_banner(extraction_strategy)
 
+            # ================================================================
+            # V2.4: BUILD INTELLIGENCE METADATA FOR OBSERVABILITY
+            # ================================================================
+            # This metadata proves that intelligent classification ran and
+            # documents the exact thresholds/parameters used during extraction.
+            intelligence_metadata = {
+                "profile_type": selected_profile.profile_type.value,
+                "profile_sensitivity": profile_params.sensitivity,
+                "min_image_dims": f"{profile_params.min_image_width}x{profile_params.min_image_height}",
+                "confidence_threshold": profile_params.confidence_threshold,
+                "document_domain": diagnostic_report.confidence_profile.detected_domain.value,
+                "document_modality": diagnostic_report.physical_check.detected_modality.value,
+            }
+            logger.info(
+                f"[V2.4-METADATA] Intelligence metadata prepared: "
+                f"profile={intelligence_metadata['profile_type']}, "
+                f"dims={intelligence_metadata['min_image_dims']}"
+            )
+        else:
+            # Non-PDF: No intelligence stack available
+            intelligence_metadata = {}
+
         # Default effective_ocr_mode for non-PDF files
         if not is_pdf:
             effective_ocr_mode = ocr_mode
 
         if use_batching:
             # Use BatchProcessor for large PDFs (lazy import)
+            # BUG-008 FIX: Pass vision_cache_dir based on enable_cache flag
+            cache_dir = str(output_dir) if enable_cache else None
             BatchProcessor = _lazy_import_batch_processor()
             processor = BatchProcessor(
                 output_dir=str(output_dir),
-                batch_size=batch_size,
+                batch_size=batch_size_pages,
                 vision_provider=vision_provider.value,
                 vision_model=vision_model,
                 vision_api_key=resolved_key,
+                vision_base_url=vision_base_url,
                 vlm_timeout=vlm_timeout,
+                vision_cache_dir=cache_dir,
                 enable_ocr=enable_ocr,
                 ocr_engine=ocr_engine.value,
                 extraction_strategy=extraction_strategy,
@@ -598,10 +803,22 @@ def process_document(
                 enable_doctr=enable_doctr,
             )
 
+            if enable_refiner:
+                processor.enable_refiner(
+                    provider=refiner_provider,
+                    model=refiner_model,
+                    api_key=api_key,
+                    base_url=refiner_base_url,
+                    threshold=refiner_threshold,
+                    max_edit=refiner_max_edit,
+                )
+
             # REQ-OCR-01: Pass profile parameters for OCR hints (ScannedDegradedProfile)
             # This enables the hybrid OCR+VLM layer for scanned documents
             if profile_params is not None:
                 processor.set_profile_params(profile_params)
+                # V2.4: Pass intelligence metadata for observability
+                processor.set_intelligence_metadata(intelligence_metadata)
                 if profile_params.enable_ocr_hints:
                     console.print()
                     console.print("[bold yellow]━━━━━ OCR-HYBRID LAYER ━━━━━[/bold yellow]")
@@ -654,9 +871,22 @@ def process_document(
                 max_pages=max_pages,
                 vision_provider=vision_provider.value,
                 vision_api_key=resolved_key,
+                vision_base_url=vision_base_url,
                 vision_cache_dir=cache_dir,
                 extraction_strategy=extraction_strategy,
+                # V2.4: Pass intelligence metadata for observability
+                intelligence_metadata=intelligence_metadata,
             )
+
+            if enable_refiner:
+                proc.enable_refiner(
+                    provider=refiner_provider,
+                    model=refiner_model,
+                    api_key=api_key,
+                    base_url=refiner_base_url,
+                    threshold=refiner_threshold,
+                    max_edit=refiner_max_edit,
+                )
 
             with Progress(
                 SpinnerColumn(),
@@ -665,7 +895,9 @@ def process_document(
                 transient=True,
             ) as progress:
                 task = progress.add_task("Processing document...", total=None)
-                output_path = proc.process_to_jsonl(str(input_file))
+                output_path = proc.process_to_jsonl_atomic(
+                    str(input_file)
+                )  # ✅ IRON-08: Atomic writes
                 progress.update(task, completed=True)
 
             stats = proc.get_vision_stats()
@@ -719,16 +951,124 @@ def batch_process(
         help="Vision provider for image enrichment",
         case_sensitive=False,
     ),
+    vision_model: Optional[str] = typer.Option(
+        None,
+        "--vision-model",
+        help="Vision model name (optional - auto-detects if not specified)",
+    ),
+    vision_base_url: Optional[str] = typer.Option(
+        None,
+        "--vision-base-url",
+        help="Base URL for OpenAI-compatible vision endpoints (e.g., http://localhost:1234/v1)",
+    ),
     api_key: Optional[str] = typer.Option(
         None,
         "--api-key",
         "-k",
         help="API key for cloud providers",
     ),
+    vlm_timeout: int = typer.Option(
+        180,
+        "--vlm-timeout",
+        help="VLM read timeout in seconds (default: 180)",
+    ),
+    sensitivity: float = typer.Option(
+        0.5,
+        "--sensitivity",
+        "-s",
+        help="Vision extraction sensitivity (0.1=strict, 1.0=max recall) - OVERRIDDEN by profile unless explicitly set",
+        min=0.1,
+        max=1.0,
+    ),
+    allow_fullpage_shadow: bool = typer.Option(
+        False,
+        "--allow-fullpage-shadow/--no-fullpage-shadow",
+        help="Override Full-Page Guard for full-page shadow assets",
+    ),
+    strict_qa: bool = typer.Option(
+        False,
+        "--strict-qa/--no-strict-qa",
+        help="Enable strict QA-CHECK-01 mode (fail on token validation errors)",
+    ),
+    semantic_overlap: bool = typer.Option(
+        True,
+        "--semantic-overlap/--no-semantic-overlap",
+        help="Enable Dynamic Semantic Overlap (DSO) chunking",
+    ),
+    vlm_context_depth: int = typer.Option(
+        3,
+        "--vlm-context-depth",
+        help="Number of previous text chunks to include as VLM context",
+        min=0,
+        max=10,
+    ),
     enable_ocr: bool = typer.Option(
         False,
         "--enable-ocr/--no-ocr",
         help="Enable OCR for scanned documents",
+    ),
+    ocr_engine: OCREngine = typer.Option(
+        OCREngine.EASYOCR,
+        "--ocr-engine",
+        help="OCR engine to use",
+        case_sensitive=False,
+    ),
+    ocr_mode: OCRMode = typer.Option(
+        OCRMode.AUTO,
+        "--ocr-mode",
+        help="OCR processing mode: 'auto' (smart detection), 'legacy', or 'layout-aware' (3-layer cascade)",
+        case_sensitive=False,
+    ),
+    ocr_confidence_threshold: float = typer.Option(
+        0.7,
+        "--ocr-confidence-threshold",
+        help="Minimum OCR confidence for layout-aware mode (0.0-1.0)",
+        min=0.0,
+        max=1.0,
+    ),
+    enable_doctr: bool = typer.Option(
+        True,
+        "--enable-doctr/--no-doctr",
+        help="Enable Doctr Layer 3 for layout-aware OCR (slower but more accurate)",
+    ),
+    enable_cache: bool = typer.Option(
+        True,
+        "--enable-cache/--no-cache",
+        help="Enable vision cache for repeated images",
+    ),
+    enable_refiner: bool = typer.Option(
+        False,
+        "--enable-refiner/--no-refiner",
+        help="Enable Semantic Text Refiner (v18.2)",
+    ),
+    refiner_provider: str = typer.Option(
+        "ollama",
+        "--refiner-provider",
+        help="Refiner LLM provider (ollama|openai|anthropic)",
+    ),
+    refiner_model: Optional[str] = typer.Option(
+        None,
+        "--refiner-model",
+        help="Refiner LLM model (optional for Ollama - auto-detects)",
+    ),
+    refiner_base_url: Optional[str] = typer.Option(
+        None,
+        "--refiner-base-url",
+        help="Base URL for OpenAI-compatible refiner endpoints (e.g., http://localhost:1234)",
+    ),
+    refiner_threshold: float = typer.Option(
+        0.15,
+        "--refiner-threshold",
+        help="Min corruption score to trigger refinement (0.0-1.0)",
+        min=0.0,
+        max=1.0,
+    ),
+    refiner_max_edit: float = typer.Option(
+        0.35,
+        "--refiner-max-edit",
+        help="Max edit ratio allowed (0.0-1.0, default: 0.35 = 35%%)",
+        min=0.0,
+        max=1.0,
     ),
     verbose: bool = typer.Option(
         False,
@@ -749,6 +1089,7 @@ def batch_process(
         mmrag-v2 batch ./documents -p "*.epub" -v none
     """
     setup_logging(verbose)
+    logger.info(f"[SYSTEM] MMRAG Engine Version: {__engine_version__}")
 
     files: List[Path] = list(input_dir.glob(pattern))
 
@@ -773,6 +1114,7 @@ def batch_process(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     console.print(f"\n[bold]Processing {len(files)} files...[/bold]\n")
+    console.print(f"[yellow][SYSTEM][/yellow] MMRAG Engine Version: {__engine_version__}")
 
     success_count = 0
     error_count = 0
@@ -783,22 +1125,231 @@ def batch_process(
 
     for file_path in files:
         try:
-            console.print(f"[cyan]Processing:[/cyan] {file_path.name}")
+            console.print(f"\n[cyan]Processing:[/cyan] {file_path.name}")
+            console.print(f"[dim]{'=' * 60}[/dim]")
 
             doc_output_dir = output_dir / file_path.stem
             doc_output_dir.mkdir(parents=True, exist_ok=True)
 
-            processor = V2DocumentProcessor(
-                output_dir=str(doc_output_dir),
-                enable_ocr=enable_ocr,
-                vision_provider=vision_provider.value,
-                vision_api_key=resolved_key,
-                vision_cache_dir=doc_output_dir,
+            # ================================================================
+            # CODEX FIX: PDF-only guard for Intelligence Stack
+            # ================================================================
+            # The pipeline (SmartConfig/Diagnostic) is PDF-specific.
+            # For non-PDFs, use simple fallback processing.
+            is_pdf = file_path.suffix.lower() == ".pdf"
+            cache_dir = doc_output_dir if enable_cache else None
+
+            if not is_pdf:
+                # BUG-003 FIX: Non-PDF files get default intelligence metadata
+                console.print(f"[dim]Non-PDF file, using default processing...[/dim]")
+                intelligence_metadata_nonpdf = {
+                    "profile_type": "default",
+                    "profile_sensitivity": 0.5,
+                    "min_image_dims": "50x50",
+                    "confidence_threshold": 0.5,
+                    "document_domain": "general",
+                    "document_modality": "digital",
+                }
+                processor = V2DocumentProcessor(
+                    output_dir=str(doc_output_dir),
+                    enable_ocr=enable_ocr,
+                    ocr_engine=ocr_engine.value,
+                    vision_provider=vision_provider.value,
+                    vision_api_key=resolved_key,
+                    vision_base_url=vision_base_url,
+                    vision_cache_dir=cache_dir,
+                    intelligence_metadata=intelligence_metadata_nonpdf,
+                )
+
+                if enable_refiner:
+                    processor.enable_refiner(
+                        provider=refiner_provider,
+                        model=refiner_model,
+                        api_key=api_key,
+                        base_url=refiner_base_url,
+                        threshold=refiner_threshold,
+                        max_edit=refiner_max_edit,
+                    )
+
+                processor.process_to_jsonl_atomic(
+                    str(file_path)
+                )  # ✅ IRON-08: Universal atomic writes
+                console.print("  [green]✓ Complete[/green]")
+                success_count += 1
+                continue
+
+            # ================================================================
+            # V2.4 INTELLIGENCE STACK INTEGRATION (PARITY RESTORATION)
+            # ================================================================
+            # Run the full diagnostic pipeline for PDFs to ensure consistent
+            # classification and strategy selection across both `process` and
+            # `batch` commands.
+            #
+            # This fixes the architectural inconsistency where batch was a
+            # "dumb pipe" bypassing the metadata-driven intelligence layer.
+            # ================================================================
+            diagnostic_report, smart_profile, selected_profile, extraction_strategy = (
+                _run_intelligent_pipeline(file_path, verbose=verbose)
             )
 
-            processor.process_to_jsonl(str(file_path))
+            # Extract profile parameters
+            profile_params = selected_profile.get_parameters() if selected_profile else None
 
-            console.print("  [green]✓ Complete[/green]")
+            # ================================================================
+            # CODEX FIX: Sensitivity override logic (matching process command)
+            # ================================================================
+            if profile_params:
+                effective_sensitivity = profile_params.sensitivity
+                if sensitivity != 0.5:  # User explicitly set sensitivity
+                    effective_sensitivity = sensitivity
+                    console.print(
+                        f"[dim]Using user-specified sensitivity: {effective_sensitivity}[/dim]"
+                    )
+                else:
+                    console.print(f"[dim]Using profile sensitivity: {effective_sensitivity}[/dim]")
+
+            # ================================================================
+            # CODEX FIX: Scan mode warnings (matching process command)
+            # ================================================================
+            if diagnostic_report and diagnostic_report.should_force_scan_mode():
+                console.print(
+                    "[yellow]⚠ Diagnostic: Forcing scan mode due to physical checks[/yellow]"
+                )
+                if not enable_ocr:
+                    console.print(
+                        "[yellow]  → Consider using --enable-ocr for better text extraction[/yellow]"
+                    )
+
+            # ================================================================
+            # CODEX FIX: OCR-mode auto-detection (matching process command)
+            # ================================================================
+            effective_ocr_mode = ocr_mode
+            if ocr_mode == OCRMode.AUTO and diagnostic_report:
+                is_scanned = diagnostic_report.physical_check.is_likely_scan
+                detected_modality = diagnostic_report.physical_check.detected_modality.value
+
+                if is_scanned or detected_modality in ("scanned", "scanned_degraded"):
+                    effective_ocr_mode = OCRMode.LAYOUT_AWARE
+                    console.print()
+                    console.print("[bold green]━━━━━ SMART OCR DETECTION ━━━━━[/bold green]")
+                    console.print(
+                        f"[green]Auto-detected:[/green] Scanned document ({detected_modality})"
+                    )
+                    console.print(
+                        "[green]OCR Mode:[/green] [bold]layout-aware[/bold] (3-layer OCR cascade)"
+                    )
+                    console.print("[dim]Override with --ocr-mode legacy if needed[/dim]")
+                    console.print("[bold green]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold green]")
+                    console.print()
+                else:
+                    effective_ocr_mode = OCRMode.LEGACY
+                    console.print(
+                        f"[dim]🔍 Auto-detected digital document → using legacy OCR mode[/dim]"
+                    )
+
+            # ================================================================
+            # V2.4: BUILD INTELLIGENCE METADATA FOR BATCH OBSERVABILITY
+            # ================================================================
+            # PARITY FIX: Remove defensive check to match process command behavior.
+            # If any value is None, let it fail loudly rather than silently
+            # falling back to empty dict (which causes profile_type mismatch).
+            #
+            # This ensures both process and batch use IDENTICAL metadata
+            # propagation logic for true parity.
+            # ================================================================
+            if not (selected_profile and profile_params and diagnostic_report):
+                logger.error(
+                    f"[PARITY-BUG] Intelligence Stack returned None values: "
+                    f"selected_profile={selected_profile}, "
+                    f"profile_params={profile_params}, "
+                    f"diagnostic_report={diagnostic_report}"
+                )
+                raise ValueError(
+                    "Intelligence Stack failed: One or more required values is None. "
+                    "This indicates a bug in the classification pipeline."
+                )
+
+            intelligence_metadata = {
+                "profile_type": selected_profile.profile_type.value,
+                "profile_sensitivity": profile_params.sensitivity,
+                "min_image_dims": f"{profile_params.min_image_width}x{profile_params.min_image_height}",
+                "confidence_threshold": profile_params.confidence_threshold,
+                "document_domain": diagnostic_report.confidence_profile.detected_domain.value,
+                "document_modality": diagnostic_report.physical_check.detected_modality.value,
+            }
+
+            # Log metadata for parity verification
+            logger.info(
+                f"[BATCH-METADATA] Intelligence metadata created: "
+                f"profile={intelligence_metadata['profile_type']}, "
+                f"dims={intelligence_metadata['min_image_dims']}"
+            )
+
+            # ================================================================
+            # BUG-002 FIX: Use BatchProcessor for PDFs to enable all flags
+            # BUG-007 FIX: Pass vision_cache_dir based on enable_cache
+            # ================================================================
+            cache_dir = str(doc_output_dir) if enable_cache else None
+            BatchProcessorClass = _lazy_import_batch_processor()
+            processor = BatchProcessorClass(
+                output_dir=str(doc_output_dir),
+                batch_size=1,  # Single-file batch processing
+                vision_provider=vision_provider.value,
+                vision_model=vision_model,
+                vision_api_key=resolved_key,
+                vision_base_url=vision_base_url,
+                vlm_timeout=vlm_timeout,
+                vision_cache_dir=cache_dir,
+                enable_ocr=enable_ocr,
+                ocr_engine=ocr_engine.value,
+                extraction_strategy=extraction_strategy,
+                allow_fullpage_shadow=allow_fullpage_shadow,
+                strict_qa=strict_qa,
+                semantic_overlap=semantic_overlap,
+                vlm_context_depth=vlm_context_depth,
+                ocr_mode=effective_ocr_mode.value,
+                ocr_confidence_threshold=ocr_confidence_threshold,
+                enable_doctr=enable_doctr,
+            )
+
+            if enable_refiner:
+                processor.enable_refiner(
+                    provider=refiner_provider,
+                    model=refiner_model,
+                    api_key=api_key,
+                    base_url=refiner_base_url,
+                    threshold=refiner_threshold,
+                    max_edit=refiner_max_edit,
+                )
+
+            # ================================================================
+            # CODEX FIX: Profile params with OCR hints banner (matching process)
+            # ================================================================
+            if profile_params and hasattr(processor, "set_profile_params"):
+                processor.set_profile_params(profile_params)
+                # V2.4: Pass intelligence metadata for observability
+                processor.set_intelligence_metadata(intelligence_metadata)
+
+                # Print OCR hints banner if enabled (observability parity)
+                if profile_params.enable_ocr_hints:
+                    console.print()
+                    console.print("[bold yellow]━━━━━ OCR-HYBRID LAYER ━━━━━[/bold yellow]")
+                    console.print(f"[yellow]Status:[/yellow] ENABLED")
+                    console.print(f"[yellow]Render DPI:[/yellow] {profile_params.render_dpi}")
+                    console.print(
+                        f"[yellow]OCR Min Confidence:[/yellow] {profile_params.ocr_min_confidence}"
+                    )
+                    console.print("[yellow]Mode:[/yellow] OCR hints → VLM Judge")
+                    console.print("[bold yellow]━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold yellow]")
+                    console.print()
+
+            # ✅ IRON-08: Use atomic writes for batch processing
+            result = processor.process_pdf(file_path)
+
+            if result.success:
+                console.print("  [green]✓ Complete[/green]")
+            else:
+                console.print(f"  [yellow]⚠ Complete with warnings[/yellow]")
             success_count += 1
 
         except Exception as e:

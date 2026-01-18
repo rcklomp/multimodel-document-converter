@@ -1,8 +1,23 @@
 # Changelog: MM-Converter-V2
 
-All notable changes to this project will be documented in this file. This project adheres to the functional requirements defined in **SRS v2.4**.
+All notable changes to this project will be documented in this file. This project adheres to the functional requirements defined in **SRS v2.4.1**.
 
-## [18.1.1] - 2026-01-13
+## [v2.4.1] - 2026-01-18 stable
+
+### Changed
+- **No more wasted time:** Digital PDFs are detected and the OCR cascade is skipped, speeding up runs without sacrificing quality.
+- **The safety net:** TextIntegrityScout now hunts for hidden code/tables and rescued dozens of high-value blocks in stress tests that other parsers missed.
+- **Smart accounting:** Token balance checks won’t raise alarms when variance is within the profile’s noise allowance—academic papers get a green light when the gap is just expected noise.
+- **Strict versioning:** Every chunk now carries a schema version from a single source of truth, so downstream systems always know which logic produced the data.
+
+## [v2.4] - 2026-01-16
+
+### Fixed
+- **Parity bug (process vs batch profile mismatch):** domain detection now prioritizes content features with a low-weight filename hint, preventing filename-renaming from flipping `profile_type`.
+- **Batch parity diagnostics:** added combined content/filename score logging in domain detection for traceability.
+- **Fail-fast intelligence metadata wiring:** batch path raises if the intelligence stack returns `None` values instead of silently falling back.
+
+## [v18.1.1] - 2026-01-13
 
 ### Added
 - **Cluster B Governance**: Activated `QA-CHECK-01` (Token Validation) to prevent downstream RAG failures caused by over-length text chunks.

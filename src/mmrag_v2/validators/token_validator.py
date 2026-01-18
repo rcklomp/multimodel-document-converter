@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, List, Optional, Dict, Any
 
 try:
     import tiktoken
@@ -51,6 +51,7 @@ except ImportError:
 
 if TYPE_CHECKING:
     from ..schema.ingestion_schema import IngestionChunk
+    from .quality_filter_tracker import QualityFilterTracker, QualityFilterSummary
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ DEFAULT_OVERLAP_ALLOWANCE: float = 0.15  # 15% estimated overlap from DSO
 
 @dataclass
 class TokenValidationResult:
-    """Result of token balance validation."""
+    """Result of token balance validation with filtering awareness."""
 
     is_valid: bool
     source_token_count: int
@@ -80,6 +81,13 @@ class TokenValidationResult:
     overlap_allowance_tokens: int
     tolerance_percent: float
     error_message: Optional[str] = None
+
+    # Filtering analytics (new in v2.4)
+    filtered_token_count: int = 0
+    filtered_ratio_percent: float = 0.0
+    noise_allowance_percent: float = 0.0
+    is_filtered_ratio_valid: bool = True
+    adjusted_source_token_count: int = 0
 
 
 # ============================================================================
@@ -188,24 +196,32 @@ class TokenValidator:
         chunks: List["IngestionChunk"],
         source_text: str,
         overlap_ratio: float = DEFAULT_OVERLAP_ALLOWANCE,
+        quality_filter_tracker: Optional["QualityFilterTracker"] = None,
+        profile_type: str = "unknown",
+        noise_allowance: Optional[float] = None,
     ) -> TokenValidationResult:
         """
-        Validate that chunk tokens match source tokens (with overlap allowance).
+        Validate that chunk tokens match source tokens (with overlap allowance and filtering awareness).
 
-        **The Algorithm:**
+        **New Algorithm with Filtering Awareness:**
         1. Count tokens in source_text using tiktoken cl100k_base
         2. Sum tokens across all chunks using tiktoken
-        3. Calculate expected overlap tokens: source_tokens * overlap_ratio
-        4. Compute variance: (sum_chunk_tokens - overlap_tokens - source_tokens) / source_tokens
-        5. Check if variance is within tolerance
+        3. Get filtered tokens from QualityFilterTracker (if available)
+        4. Calculate effective source tokens: source_tokens - filtered_tokens
+        5. Calculate filtered ratio and check against noise allowance (profile-specific)
+        6. Calculate variance: (chunk_tokens - overlap_allowance - effective_source_tokens) / effective_source_tokens
+        7. Check if variance is within tolerance AND filtered ratio is within noise allowance
 
         Args:
             chunks: List of IngestionChunk objects
             source_text: Full source text (original document text)
             overlap_ratio: Expected overlap as decimal (0.15 = 15% overlap)
+            quality_filter_tracker: Optional QualityFilterTracker with filtered token analytics
+            profile_type: Document profile type (e.g., "academic_whitepaper")
+            noise_allowance: Maximum allowed filtered ratio (overrides profile-based default)
 
         Returns:
-            TokenValidationResult with is_valid flag and detailed metrics
+            TokenValidationResult with filtering analytics
         """
         # Step 1: Count source tokens
         source_token_count = self._counter.count_tokens(source_text)
@@ -229,19 +245,55 @@ class TokenValidator:
             chunk_token_count += chunk_tokens
 
         # Step 3: Calculate overlap allowance in tokens
+        # Do not penalize further when we already have fewer chunk tokens than source
         overlap_allowance_tokens = int(source_token_count * overlap_ratio)
+        if chunk_token_count < source_token_count:
+            overlap_allowance_tokens = 0
 
-        # Step 4: Calculate variance
-        # Expected: chunk_tokens ~= source_tokens + overlap_allowance
-        # If less: some chunks were lost (DATA LOSS - CRITICAL)
-        # If more: extra overlap due to DSO (OK, within tolerance)
+        # Step 4: Handle filtered tokens and noise allowance
+        filtered_token_count = 0
+        filtered_ratio = 0.0
+        is_filtered_ratio_valid = True
+        adjusted_source_token_count = source_token_count
+
+        # Get noise allowance for profile if not provided
+        if noise_allowance is None:
+            noise_allowance = self._get_noise_allowance_for_profile(profile_type)
+
+        # If we have a quality filter tracker, get filtered token analytics
+        if quality_filter_tracker is not None:
+            filtered_summary = quality_filter_tracker.get_summary()
+            filtered_token_count = filtered_summary.total_filtered_tokens
+
+            if source_token_count > 0:
+                filtered_ratio = filtered_token_count / source_token_count
+                # Check if filtered ratio exceeds noise allowance for this profile
+                is_filtered_ratio_valid = filtered_ratio <= noise_allowance
+
+            # Calculate adjusted source tokens (source minus intentionally filtered tokens)
+            adjusted_source_token_count = max(0, source_token_count - filtered_token_count)
+
+        # Step 5: Calculate variance with adjusted source tokens
+        # Note: We subtract filtered tokens from source because they were intentionally removed
         effective_chunk_count = chunk_token_count - overlap_allowance_tokens
-        variance_tokens = effective_chunk_count - source_token_count
-        variance_percent = (variance_tokens / source_token_count) if source_token_count > 0 else 0.0
+        variance_tokens = effective_chunk_count - adjusted_source_token_count
+        variance_percent = (
+            (variance_tokens / adjusted_source_token_count)
+            if adjusted_source_token_count > 0
+            else 0.0
+        )
 
-        # Step 5: Check tolerance
-        is_valid = abs(variance_percent) <= self.tolerance
+        # Step 6: Check tolerance (variance and filtered ratio)
+        # Negative variance (missing tokens) can be acceptable up to noise_allowance for the profile.
+        if variance_percent < 0:
+            allowed_negative = max(self.tolerance, noise_allowance)
+            is_variance_valid = abs(variance_percent) <= allowed_negative
+        else:
+            is_variance_valid = variance_percent <= self.tolerance
 
+        is_valid = is_variance_valid and is_filtered_ratio_valid
+
+        # Create result with filtering analytics
         result = TokenValidationResult(
             is_valid=is_valid,
             source_token_count=source_token_count,
@@ -249,15 +301,48 @@ class TokenValidator:
             variance_percent=variance_percent * 100,
             overlap_allowance_tokens=overlap_allowance_tokens,
             tolerance_percent=self.tolerance * 100,
+            filtered_token_count=filtered_token_count,
+            filtered_ratio_percent=filtered_ratio * 100,
+            noise_allowance_percent=noise_allowance * 100,
+            is_filtered_ratio_valid=is_filtered_ratio_valid,
+            adjusted_source_token_count=adjusted_source_token_count,
         )
 
         if not is_valid:
-            result.error_message = (
-                f"Token balance validation failed: "
-                f"variance {variance_percent*100:.1f}% exceeds tolerance {self.tolerance*100:.1f}%"
-            )
+            if not is_variance_valid:
+                result.error_message = (
+                    f"Token balance validation failed: "
+                    f"variance {variance_percent*100:.1f}% exceeds tolerance {self.tolerance*100:.1f}%"
+                )
+            elif not is_filtered_ratio_valid:
+                result.error_message = (
+                    f"Filtered ratio exceeds noise allowance: "
+                    f"filtered {filtered_ratio*100:.1f}% > allowance {noise_allowance*100:.1f}% "
+                    f"for profile '{profile_type}'"
+                )
 
         return result
+
+    @staticmethod
+    def _get_noise_allowance_for_profile(profile_type: str) -> float:
+        """
+        Get noise allowance percentage (as decimal) for a given profile type.
+
+        These allowances represent the maximum acceptable ratio of filtered tokens
+        to source tokens for each document profile.
+
+        Returns:
+            Noise allowance as decimal (e.g., 0.25 = 25%)
+        """
+        noise_allowances = {
+            "academic_whitepaper": 0.25,  # 25% - high bibliography/footnote noise
+            "technical_manual": 0.15,  # 15% - moderate noise
+            "digital_magazine": 0.10,  # 10% - low noise
+            "scanned_degraded": 0.05,  # 5%  - minimal filtering for OCR
+            "scanned_clean": 0.05,  # 5%  - minimal filtering for OCR
+            "unknown": 0.10,  # 10% - default
+        }
+        return noise_allowances.get(profile_type, 0.10)  # Default 10%
 
     def log_validation_result(
         self,
@@ -265,27 +350,51 @@ class TokenValidator:
         doc_name: str = "Unknown",
     ) -> None:
         """
-        Log validation result with appropriate level.
+        Log validation result with appropriate level, including filtering analytics.
 
         Args:
-            result: TokenValidationResult object
+            result: TokenValidationResult object with filtering analytics
             doc_name: Document name for context in log
         """
-        metrics = (
+        # Base metrics
+        base_metrics = (
             f"Source={result.source_token_count} tokens, "
             f"Chunks={result.chunk_token_count} tokens, "
             f"Overlap={result.overlap_allowance_tokens} tokens, "
             f"Variance={result.variance_percent:+.1f}%"
         )
 
-        if result.is_valid:
-            logger.info(f"[QA-CHECK-01] ✓ Token balance verified ({doc_name}): {metrics}")
-        else:
-            logger.critical(
-                f"[QA-CHECK-01] ✗ CRITICAL WARNING ({doc_name}): {metrics} "
-                f"(exceeds {result.tolerance_percent:.1f}% tolerance). "
-                f"Possible data loss during chunking."
+        # Filtering analytics (if available)
+        filtering_metrics = ""
+        if result.filtered_token_count > 0:
+            filtering_metrics = (
+                f", Filtered={result.filtered_token_count} tokens "
+                f"({result.filtered_ratio_percent:.1f}% of source, "
+                f"allowance={result.noise_allowance_percent:.1f}%)"
             )
+
+        metrics = base_metrics + filtering_metrics
+
+        if result.is_valid:
+            if result.filtered_token_count > 0:
+                logger.info(
+                    f"[QA-CHECK-01] ✓ Token balance verified with filtering ({doc_name}): {metrics}"
+                )
+            else:
+                logger.info(f"[QA-CHECK-01] ✓ Token balance verified ({doc_name}): {metrics}")
+        else:
+            if not result.is_filtered_ratio_valid:
+                logger.critical(
+                    f"[QA-CHECK-01] ✗ CRITICAL WARNING - Filtered ratio exceeded ({doc_name}): {metrics} "
+                    f"(filtered {result.filtered_ratio_percent:.1f}% > allowance {result.noise_allowance_percent:.1f}%). "
+                    f"Too much content filtered for profile."
+                )
+            else:
+                logger.critical(
+                    f"[QA-CHECK-01] ✗ CRITICAL WARNING ({doc_name}): {metrics} "
+                    f"(exceeds {result.tolerance_percent:.1f}% tolerance). "
+                    f"Possible data loss during chunking."
+                )
 
 
 # ============================================================================

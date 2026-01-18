@@ -39,6 +39,7 @@ pydantic>=2.0.0                        # Schema validation
 typer>=0.12.0                          # CLI framework
 rich>=13.0.0                           # CLI output formatting
 tqdm>=4.66.0                           # Progress bars
+python-Levenshtein>=0.21.0             # Fast edit distance (fallback to difflib if missing)
 
 # === VECTOR DATABASE (Phase 3) ===
 qdrant-client>=1.7.0                   # Qdrant vector store client

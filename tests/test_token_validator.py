@@ -17,7 +17,7 @@ Date: 2025-12-30
 
 import pytest
 
-from src.mmrag_v2.schema.ingestion_schema import (
+from mmrag_v2.schema.ingestion_schema import (
     ChunkType,
     FileType,
     HierarchyMetadata,
@@ -25,7 +25,7 @@ from src.mmrag_v2.schema.ingestion_schema import (
     Modality,
     create_text_chunk,
 )
-from src.mmrag_v2.validators.token_validator import (
+from mmrag_v2.validators.token_validator import (
     TokenValidator,
     TokenValidationResult,
     create_token_validator,

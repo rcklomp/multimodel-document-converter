@@ -10,4 +10,5 @@ dependencies:
       - torch
       - torchvision
       - torchaudio
+      - python-Levenshtein>=0.21.0
       - -e .  # Dit installeert alles uit pyproject.toml

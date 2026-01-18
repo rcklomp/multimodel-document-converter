@@ -259,6 +259,146 @@ def build_visual_prompt(
 
 
 # ============================================================================
+# LEGACY ALIAS (for backward compatibility with tests)
+# ============================================================================
+
+# STRICTER_VISUAL_PROMPT is the old name for VISUAL_ONLY_PROMPT
+# Keep as alias for existing tests
+STRICTER_VISUAL_PROMPT = VISUAL_ONLY_PROMPT
+
+
+# ============================================================================
+# VLM TEXT DETECTION VALIDATOR (REQ-VLM-SIGNAL)
+# ============================================================================
+
+
+def detect_text_reading(response: str) -> bool:
+    """
+    Detect if VLM response contains text transcription instead of visual description.
+
+    Returns True if text reading is detected (response should be rejected).
+    Returns False if response is a valid visual description (acceptable).
+
+    Args:
+        response: VLM response text
+
+    Returns:
+        True if text transcription detected, False otherwise
+    """
+    import re
+
+    if not response:
+        return False
+
+    response_lower = response.lower()
+
+    # Pattern 1: "The text says/reads..." patterns
+    if re.search(
+        r"\b(text|caption|label|title|heading)\s+(says?|reads?|indicates?|states?)\b",
+        response_lower,
+    ):
+        return True
+
+    # Pattern 2: "written on" patterns
+    if "written on" in response_lower:
+        return True
+
+    # Pattern 3: "text visible" patterns
+    if "text visible" in response_lower:
+        return True
+
+    # Pattern 4: Excessive quotes (more than 2 pairs = transcription)
+    quote_count = response.count('"') + response.count("'")
+    if quote_count > 4:  # More than 2 pairs
+        return True
+
+    # Pattern 5: Long quoted strings (>20 chars) indicate transcription
+    quoted_strings = re.findall(r'["\'](.{20,})["\']', response)
+    if quoted_strings:
+        return True
+
+    # Pattern 6: Multiple ALL CAPS words (>2) may indicate transcription
+    # But allow common technical abbreviations
+    caps_words = re.findall(r"\b[A-Z]{2,}\b", response)
+    # Filter out common abbreviations
+    technical_abbrevs = {"PDF", "OCR", "RGB", "DPI", "USA", "UK", "EU", "NATO", "USAF", "RAF"}
+    actual_caps = [w for w in caps_words if w not in technical_abbrevs]
+    if len(actual_caps) > 2:
+        return True
+
+    return False
+
+
+def validate_vlm_response(response: str) -> "VLMValidationResult":
+    """
+    Validate VLM response for quality and rule compliance.
+
+    Args:
+        response: Raw VLM response
+
+    Returns:
+        VLMValidationResult with validation status and cleaned response
+    """
+    from dataclasses import dataclass
+    from typing import List
+
+    @dataclass
+    class VLMValidationResult:
+        is_valid: bool
+        text_reading_detected: bool
+        cleaned_response: str
+        issues: List[str]
+
+    issues = []
+
+    # Check 1: Empty response
+    if not response or not response.strip():
+        return VLMValidationResult(
+            is_valid=False,
+            text_reading_detected=False,
+            cleaned_response="",
+            issues=["Empty response"],
+        )
+
+    # Check 2: Text transcription detection
+    text_reading = detect_text_reading(response)
+    if text_reading:
+        issues.append("Text transcription detected")
+        return VLMValidationResult(
+            is_valid=False, text_reading_detected=True, cleaned_response="", issues=issues
+        )
+
+    # Check 3: Generic fallback responses
+    fallback_phrases = [
+        "unable to describe",
+        "cannot describe",
+        "no description available",
+        "description unavailable",
+    ]
+    response_lower = response.lower()
+    if any(phrase in response_lower for phrase in fallback_phrases):
+        issues.append("Generic fallback response detected")
+        return VLMValidationResult(
+            is_valid=False, text_reading_detected=False, cleaned_response="", issues=issues
+        )
+
+    # Check 4: Clean response
+    cleaned = clean_vlm_response(response)
+
+    # Check 5: Response too short after cleaning
+    if len(cleaned) < 10:
+        issues.append("Response too short after cleaning")
+        return VLMValidationResult(
+            is_valid=False, text_reading_detected=False, cleaned_response=cleaned, issues=issues
+        )
+
+    # All checks passed
+    return VLMValidationResult(
+        is_valid=True, text_reading_detected=False, cleaned_response=cleaned, issues=[]
+    )
+
+
+# ============================================================================
 # LEGACY RESPONSE CLEANER
 # ============================================================================
 

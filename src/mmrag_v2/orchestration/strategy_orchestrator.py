@@ -222,14 +222,17 @@ class StrategyOrchestrator:
         # Get base dimensions for document type
         base_width, base_height = self._get_base_dimensions(profile.document_type)
 
-        # Apply sensitivity adjustment
+        # Apply sensitivity adjustment per REQ-SENS-01
+        # ✅ FIX 4B: Use SRS formula instead of multiplicative scaling
+        # REQ-SENS-01: min_dimension = 400px - (sensitivity * 300px)
         # Higher sensitivity = smaller minimum = more recall
-        # sensitivity 0.1 → multiply by 2.0 (larger min, fewer images)
-        # sensitivity 1.0 → multiply by 0.5 (smaller min, more images)
-        size_multiplier = 2.0 - (sensitivity * 1.5)
-
-        min_width = int(base_width * size_multiplier)
-        min_height = int(base_height * size_multiplier)
+        # sensitivity 0.1 → 400 - 30 = 370px (strict, fewer images)
+        # sensitivity 0.5 → 400 - 150 = 250px (balanced)
+        # sensitivity 1.0 → 400 - 300 = 100px (max recall, more images)
+        base_dimension = 400
+        sensitivity_range = 300
+        min_width = int(base_dimension - (sensitivity * sensitivity_range))
+        min_height = int(base_dimension - (sensitivity * sensitivity_range))
 
         # Use profile median if available, otherwise use computed minimum
         historical_median = max(
@@ -330,9 +333,12 @@ class StrategyOrchestrator:
         """
         sensitivity = max(MIN_SENSITIVITY, min(MAX_SENSITIVITY, sensitivity))
 
-        size_multiplier = 2.0 - (sensitivity * 1.5)
-        min_width = int(DEFAULT_MIN_WIDTH * size_multiplier)
-        min_height = int(DEFAULT_MIN_HEIGHT * size_multiplier)
+        # ✅ FIX 4B: Use SRS formula for consistency
+        # REQ-SENS-01: min_dimension = 400px - (sensitivity * 300px)
+        base_dimension = 400
+        sensitivity_range = 300
+        min_width = int(base_dimension - (sensitivity * sensitivity_range))
+        min_height = int(base_dimension - (sensitivity * sensitivity_range))
 
         return ExtractionStrategy(
             sensitivity=sensitivity,

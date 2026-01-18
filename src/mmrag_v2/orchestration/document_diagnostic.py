@@ -1105,24 +1105,91 @@ class DocumentDiagnosticEngine:
         page_diagnostics: List[PageDiagnostic],
     ) -> ContentDomain:
         """
-        Estimate content domain based on filename and characteristics.
+        Estimate content domain based on content characteristics.
 
-        V2.6 FIX (2026-01-11): Expanded academic keyword detection
-        =========================================================
-        Academic papers often have descriptive titles like:
-        - "Hybrid_electric_vehicles_and_their_challenges.pdf"
-        - "Deep_Learning_for_Natural_Language_Processing.pdf"
-        - "Analysis_of_Climate_Change_Effects_on_Biodiversity.pdf"
+        V2.7 PARITY FIX (2026-01-16): Content-first classification
+        ===========================================================
+        PROBLEM: Filename-based domain detection breaks parity when files
+        are renamed (e.g., in batch processing: doc1.pdf, doc2.pdf).
+        Same document → different filename → different domain → different profile!
 
-        These don't contain obvious keywords like "paper" or "thesis"
-        but have patterns that indicate academic content:
-        1. Underscores separating words (exported from academic systems)
-        2. Technical/scientific terminology
-        3. "and", "of", "for", "in" conjunctions typical of paper titles
+        FIX: Prioritize CONTENT features over filename. Filename is only
+        used as a WEAK signal (weight 0.1) to avoid over-dependence.
+
+        Classification order:
+        1. Content features (text density, image coverage, tables) - PRIMARY
+        2. Filename keywords - WEAK signal only (10% weight)
+        3. Fallback to UNKNOWN if uncertain
+
+        This ensures:
+        - Same PDF content → same domain → same profile (PARITY)
+        - Filename changes don't affect classification
+        - More robust for production pipelines
         """
-        filename_lower = pdf_path.stem.lower()
+        # ================================================================
+        # STEP 1: CONTENT-BASED CLASSIFICATION (PRIMARY)
+        # ================================================================
+        # Calculate content features from page diagnostics
+        has_tables = any(p.contains_tables for p in page_diagnostics)
+        high_images = any(p.image_coverage > 0.5 for p in page_diagnostics)
 
-        # Replace underscores with spaces for better matching
+        # Calculate average text density
+        avg_text_density = (
+            sum(p.text_density for p in page_diagnostics) / len(page_diagnostics)
+            if page_diagnostics
+            else 0
+        )
+
+        # Calculate average text per page (approximate from density)
+        avg_page_area = 612 * 792  # Standard US Letter size in points
+        avg_text_per_page = avg_text_density * avg_page_area
+
+        # ================================================================
+        # CONTENT-BASED RULES (High priority)
+        # ================================================================
+        content_score_academic = 0.0
+        content_score_editorial = 0.0
+        content_score_technical = 0.0
+
+        # Rule 1: High text density + low images = ACADEMIC
+        # Academic papers: 3000+ chars/page, diagrams but not photo-heavy
+        if avg_text_per_page > 3000:
+            content_score_academic += 0.7
+            logger.debug(
+                f"[DOMAIN-DETECT] Content: High text density ({avg_text_per_page:.0f}) → academic +0.7"
+            )
+
+            if not high_images:
+                content_score_academic += 0.2
+                logger.debug(f"[DOMAIN-DETECT] Content: Low image coverage → academic +0.2")
+
+        # Rule 2: High images + moderate text = EDITORIAL
+        # Magazines: lots of photos, 500-2000 chars/page
+        if high_images:
+            content_score_editorial += 0.6
+            logger.debug(f"[DOMAIN-DETECT] Content: High image coverage → editorial +0.6")
+
+            if 500 < avg_text_per_page < 2500:
+                content_score_editorial += 0.2
+                logger.debug(
+                    f"[DOMAIN-DETECT] Content: Magazine-like text density → editorial +0.2"
+                )
+
+        # Rule 3: Tables + moderate images = TECHNICAL
+        # Manuals: specs, procedures, diagrams
+        if has_tables:
+            content_score_technical += 0.5
+            logger.debug(f"[DOMAIN-DETECT] Content: Has tables → technical +0.5")
+
+            if not high_images and avg_text_per_page > 1000:
+                content_score_technical += 0.3
+                logger.debug(f"[DOMAIN-DETECT] Content: Technical text profile → technical +0.3")
+
+        # ================================================================
+        # STEP 2: FILENAME-BASED HINTS (WEAK SIGNAL - 10% weight)
+        # ================================================================
+        # Filename is only a WEAK hint to break ties, not primary signal
+        filename_lower = pdf_path.stem.lower()
         filename_normalized = filename_lower.replace("_", " ").replace("-", " ")
 
         # ================================================================
@@ -1309,63 +1376,64 @@ class DocumentDiagnosticEngine:
                     logger.debug(f"[DOMAIN-DETECT] Academic pattern match: '{pattern}'")
                     break
 
-        # Log scores
+        # ================================================================
+        # STEP 3: COMBINE SCORES (Content-weighted)
+        # ================================================================
+        # V2.7 PARITY FIX: Content scores get 90% weight, filename 10% weight
+        # This ensures content features dominate classification
+
+        CONTENT_WEIGHT = 0.9
+        FILENAME_WEIGHT = 0.1
+
+        # Normalize filename scores to 0-1 range (max score is ~7 for academic)
+        filename_norm_academic = min(academic_score / 7.0, 1.0) if academic_score > 0 else 0.0
+        filename_norm_editorial = min(editorial_score / 6.0, 1.0) if editorial_score > 0 else 0.0
+        filename_norm_technical = min(technical_score / 3.0, 1.0) if technical_score > 0 else 0.0
+
+        # Combined scores
+        final_academic = (content_score_academic * CONTENT_WEIGHT) + (
+            filename_norm_academic * FILENAME_WEIGHT
+        )
+        final_editorial = (content_score_editorial * CONTENT_WEIGHT) + (
+            filename_norm_editorial * FILENAME_WEIGHT
+        )
+        final_technical = (content_score_technical * CONTENT_WEIGHT) + (
+            filename_norm_technical * FILENAME_WEIGHT
+        )
+
+        # Log combined scores for transparency
         logger.info(
-            f"[DOMAIN-DETECT] Scores for '{pdf_path.name}': "
-            f"academic={academic_score}, editorial={editorial_score}, "
-            f"technical={technical_score}, commercial={commercial_score}"
+            f"[DOMAIN-DETECT] Combined scores (content={CONTENT_WEIGHT}, filename={FILENAME_WEIGHT}): "
+            f"academic={final_academic:.3f}, editorial={final_editorial:.3f}, "
+            f"technical={final_technical:.3f}"
         )
 
         # ================================================================
-        # DETERMINE DOMAIN BY HIGHEST SCORE
+        # STEP 4: SELECT DOMAIN BY HIGHEST COMBINED SCORE
         # ================================================================
-        # Academic wins if it has >= 2 matches (to avoid false positives)
-        if academic_score >= 2 and academic_score >= editorial_score:
-            logger.info(f"[DOMAIN-DETECT] → ACADEMIC (score={academic_score})")
-            return ContentDomain.ACADEMIC
+        # Minimum threshold to avoid false positives
+        MIN_CONFIDENCE_THRESHOLD = 0.3
 
-        if editorial_score > 0 and editorial_score > academic_score:
-            logger.info(f"[DOMAIN-DETECT] → EDITORIAL (score={editorial_score})")
-            return ContentDomain.EDITORIAL
+        # Get max score
+        max_score = max(final_academic, final_editorial, final_technical)
 
-        if technical_score > 0 and technical_score >= academic_score:
-            logger.info(f"[DOMAIN-DETECT] → TECHNICAL (score={technical_score})")
-            return ContentDomain.TECHNICAL
-
-        if commercial_score > 0:
-            logger.info(f"[DOMAIN-DETECT] → COMMERCIAL (score={commercial_score})")
-            return ContentDomain.COMMERCIAL
+        if max_score >= MIN_CONFIDENCE_THRESHOLD:
+            if final_academic == max_score:
+                logger.info(f"[DOMAIN-DETECT] → ACADEMIC (combined score={final_academic:.3f})")
+                return ContentDomain.ACADEMIC
+            elif final_editorial == max_score:
+                logger.info(f"[DOMAIN-DETECT] → EDITORIAL (combined score={final_editorial:.3f})")
+                return ContentDomain.EDITORIAL
+            elif final_technical == max_score:
+                logger.info(f"[DOMAIN-DETECT] → TECHNICAL (combined score={final_technical:.3f})")
+                return ContentDomain.TECHNICAL
 
         # ================================================================
-        # CONTENT-BASED FALLBACK
+        # STEP 5: FALLBACK TO UNKNOWN
         # ================================================================
-        has_tables = any(p.contains_tables for p in page_diagnostics)
-        high_images = any(p.image_coverage > 0.5 for p in page_diagnostics)
-
-        # Calculate average text density
-        avg_text_density = (
-            sum(p.text_density for p in page_diagnostics) / len(page_diagnostics)
-            if page_diagnostics
-            else 0
+        logger.info(
+            f"[DOMAIN-DETECT] → UNKNOWN (max score {max_score:.3f} below threshold {MIN_CONFIDENCE_THRESHOLD})"
         )
-
-        # Academic papers have:
-        # 1. High text density (lots of text per page)
-        # 2. Low-to-moderate image coverage (diagrams but not editorial photos)
-        # 3. Often have tables
-        if avg_text_density > 0.01 and not high_images:  # High text, low images
-            logger.info(f"[DOMAIN-DETECT] → ACADEMIC (content-based: high text density)")
-            return ContentDomain.ACADEMIC
-
-        if has_tables and not high_images:
-            logger.info(f"[DOMAIN-DETECT] → TECHNICAL (content-based: has tables)")
-            return ContentDomain.TECHNICAL
-
-        if high_images:
-            logger.info(f"[DOMAIN-DETECT] → EDITORIAL (content-based: high images)")
-            return ContentDomain.EDITORIAL
-
-        logger.info(f"[DOMAIN-DETECT] → UNKNOWN (no matches)")
         return ContentDomain.UNKNOWN
 
     def _determine_strategy(
