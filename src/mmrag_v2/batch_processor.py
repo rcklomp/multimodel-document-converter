@@ -166,6 +166,10 @@ class BatchProcessor:
         specific_pages: Optional[List[int]] = None,
         allow_fullpage_shadow: bool = False,
         strict_qa: bool = False,
+        force_ocr: bool = False,
+        qa_tolerance: float = 0.1,
+        qa_noise_allowance: float = 0.25,
+        auto_safe: bool = False,
         semantic_overlap: bool = True,
         vlm_context_depth: int = 3,
         # Phase 1B: Layout-aware OCR parameters
@@ -216,6 +220,10 @@ class BatchProcessor:
         self.specific_pages = specific_pages
         self.allow_fullpage_shadow = allow_fullpage_shadow
         self.strict_qa = strict_qa
+        self.force_ocr = force_ocr
+        self.qa_tolerance = qa_tolerance
+        self.qa_noise_allowance = qa_noise_allowance
+        self.auto_safe = auto_safe
         self.semantic_overlap = semantic_overlap
         self.vlm_context_depth = vlm_context_depth
 
@@ -2054,6 +2062,12 @@ class BatchProcessor:
             )
             return chunks
 
+        # Phase 3: Attempt image→text reclassification for mis-ID'd front-matter images
+        try:
+            chunks = self._reclassify_text_images(chunks)
+        except Exception as e:
+            logger.warning(f"[RECOVERY] Image→text reclassification skipped due to error: {e}")
+
         logger.info(
             f"[RECOVERY] ⚠️ Variance {variance_percent:.1f}% exceeds threshold ({RECOVERY_THRESHOLD}%). "
             f"Initiating TextIntegrityScout..."
@@ -2457,6 +2471,86 @@ class BatchProcessor:
             logger.error(f"[RECOVERY] TextIntegrityScout failed: {e}")
             print(f"    ⚠️ [RECOVERY] Scout failed: {e}", flush=True)
 
+        return chunks
+
+    def _reclassify_text_images(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
+        """
+        Phase 3: Reclassify IMAGE chunks that likely contain text (front pages only).
+        Uses EasyOCR if available. Guardrails: max 5 images per page, pages 1-2 only.
+        """
+        try:
+            import easyocr  # type: ignore
+            from PIL import Image
+        except Exception as e:  # pragma: no cover - optional dep
+            logger.info(f"[RECOVERY] EasyOCR not available; skipping image→text reclassification ({e})")
+            return chunks
+
+        KEYWORDS = [
+            "blurred text",
+            "text document",
+            "partially legible",
+            "difficult to read",
+            "pixelated text",
+            "text section",
+            "document section",
+            "text",
+        ]
+
+        reader = easyocr.Reader(["en"], gpu=False)  # small, CPU-safe
+        max_per_page = 5
+        updated = 0
+
+        # Group image chunks by page
+        images_by_page: Dict[int, List[IngestionChunk]] = {}
+        for ch in chunks:
+            if ch.modality != Modality.IMAGE:
+                continue
+            page_no = ch.metadata.page_number if ch.metadata else None
+            if not page_no:
+                continue
+            if page_no > 2:  # front-matter only
+                continue
+            desc = ""
+            if ch.metadata and hasattr(ch.metadata, "visual_description"):
+                desc = (ch.metadata.visual_description or "").lower()
+            if not any(k in desc for k in KEYWORDS):
+                continue
+            images_by_page.setdefault(page_no, []).append(ch)
+
+        for page_no, page_imgs in images_by_page.items():
+            attempts = 0
+            for img_chunk in page_imgs:
+                if attempts >= max_per_page:
+                    break
+                if not img_chunk.asset_ref or not getattr(img_chunk.asset_ref, "file_path", None):
+                    continue
+                attempts += 1
+                try:
+                    img = Image.open(img_chunk.asset_ref.file_path)
+                    width, height = img.size
+                    if width < 40 or height < 40:
+                        continue
+                    result = reader.readtext(img_chunk.asset_ref.file_path, detail=0)
+                    ocr_text = "\n".join([r.strip() for r in result if r.strip()])
+                    if len(ocr_text) < 20:
+                        continue
+                    alpha_ratio = sum(c.isalpha() for c in ocr_text) / max(len(ocr_text), 1)
+                    if alpha_ratio < 0.6:
+                        continue
+
+                    # Reclassify
+                    img_chunk.modality = Modality.TEXT
+                    img_chunk.content = ocr_text
+                    if img_chunk.metadata:
+                        img_chunk.metadata.extraction_method = "image_to_text_recovery"
+                    updated += 1
+                except Exception as e:  # pragma: no cover
+                    logger.debug(f"[RECOVERY] OCR failed for page {page_no} image: {e}")
+                    continue
+
+        if updated:
+            print(f"    ✓ [RECOVERY] Reclassified {updated} text-like images on front pages", flush=True)
+            logger.info(f"[RECOVERY] Reclassified {updated} images to text on front pages")
         return chunks
 
     # ========================================================================
