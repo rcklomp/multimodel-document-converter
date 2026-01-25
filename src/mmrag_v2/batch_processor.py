@@ -2171,6 +2171,8 @@ class BatchProcessor:
 
             # Step 3: Find orphaned text blocks per page
             total_rescued = 0
+            coverage_by_page: Dict[int, float] = {}
+            flagged_front_pages: List[int] = []
 
             for page_no, raw_text in raw_text_per_page.items():
                 # Front pages are allowed a lower threshold and stricter coverage target
@@ -2188,6 +2190,9 @@ class BatchProcessor:
                     src_tok = len(raw_text)
                     chk_tok = sum(len(t) for t in covered_texts)
                 coverage_ratio = (chk_tok / src_tok) if src_tok > 0 else 1.0
+                coverage_by_page[page_no] = coverage_ratio
+                if is_front_page and coverage_ratio < 0.85:
+                    flagged_front_pages.append(page_no)
 
                 if is_front_page and coverage_ratio < 0.8:
                     logger.info(
@@ -2467,6 +2472,15 @@ class BatchProcessor:
                 )
                 logger.info("[RECOVERY] No orphaned text blocks found")
 
+            # Phase 4: Enhanced front-page processing if coverage still low
+            if flagged_front_pages:
+                try:
+                    chunks = self._process_front_pages_enhanced(
+                        chunks, flagged_front_pages, covered_text_per_page
+                    )
+                except Exception as e:
+                    logger.warning(f"[RECOVERY] Enhanced front-page processing skipped: {e}")
+
         except Exception as e:
             logger.error(f"[RECOVERY] TextIntegrityScout failed: {e}")
             print(f"    ⚠️ [RECOVERY] Scout failed: {e}", flush=True)
@@ -2551,6 +2565,113 @@ class BatchProcessor:
         if updated:
             print(f"    ✓ [RECOVERY] Reclassified {updated} text-like images on front pages", flush=True)
             logger.info(f"[RECOVERY] Reclassified {updated} images to text on front pages")
+        return chunks
+
+    def _process_front_pages_enhanced(
+        self,
+        chunks: List[IngestionChunk],
+        pages: List[int],
+        covered_text_per_page: Dict[int, List[str]],
+    ) -> List[IngestionChunk]:
+        """
+        Phase 4 (lightweight): extra recovery on front pages with low coverage.
+        - OCR all images on flagged pages (regardless of VLM description) with EasyOCR if available.
+        - Re-run PyMuPDF block extraction with lower threshold and dedup by hash.
+        """
+        try:
+            import easyocr  # type: ignore
+        except Exception as e:  # pragma: no cover
+            logger.info(f"[RECOVERY] EasyOCR not available for enhanced pass: {e}")
+            return chunks
+
+        reader = easyocr.Reader(["en"], gpu=False)  # CPU-safe
+        doc = fitz.open(self._current_pdf_path)
+        new_chunks: List[IngestionChunk] = []
+        seen_hashes = set()
+
+        # seed dedup with existing text chunks
+        for ch in chunks:
+            if ch.modality == Modality.TEXT and ch.content:
+                h = hashlib.md5(ch.content.strip().lower().encode("utf-8")).hexdigest()
+                seen_hashes.add(h)
+
+        for page_no in pages:
+            page_idx = page_no - 1
+            if page_idx < 0 or page_idx >= len(doc):
+                continue
+
+            # 1) OCR every image chunk on this page
+            page_imgs = [c for c in chunks if c.modality == Modality.IMAGE and c.metadata.page_number == page_no]
+            ocr_count = 0
+            for img_chunk in page_imgs:
+                if not img_chunk.asset_ref or not getattr(img_chunk.asset_ref, "file_path", None):
+                    continue
+                if ocr_count >= 5:
+                    break
+                try:
+                    result = reader.readtext(img_chunk.asset_ref.file_path, detail=0)
+                    ocr_text = "\n".join([r.strip() for r in result if r.strip()])
+                    if len(ocr_text) < 20:
+                        continue
+                    alpha_ratio = sum(c.isalpha() for c in ocr_text) / max(len(ocr_text), 1)
+                    if alpha_ratio < 0.6:
+                        continue
+                    h = hashlib.md5(ocr_text.strip().lower().encode("utf-8")).hexdigest()
+                    if h in seen_hashes:
+                        continue
+                    seen_hashes.add(h)
+                    img_chunk.modality = Modality.TEXT
+                    img_chunk.content = ocr_text
+                    if img_chunk.metadata:
+                        img_chunk.metadata.extraction_method = "enhanced_image_ocr"
+                    ocr_count += 1
+                except Exception as e:  # pragma: no cover
+                    logger.debug(f"[RECOVERY] Enhanced OCR failed for page {page_no}: {e}")
+                    continue
+
+            # 2) Re-run PyMuPDF block extraction with low threshold
+            page = doc.load_page(page_idx)
+            blocks = page.get_text("blocks")
+            for b in blocks:
+                if len(b) < 5 or not isinstance(b[4], str):
+                    continue
+                text_clean = b[4].strip()
+                if len(text_clean) < 20:
+                    continue
+                h = hashlib.md5(text_clean.lower().encode("utf-8")).hexdigest()
+                if h in seen_hashes:
+                    continue
+                seen_hashes.add(h)
+
+                doc_title = self._current_pdf_path.stem
+                hierarchy = HierarchyMetadata(
+                    parent_heading=None,
+                    breadcrumb_path=[doc_title, f"Page {page_no}", "[ENHANCED]"],
+                    level=3,
+                )
+                bbox = [int(b[0]), int(b[1]), int(b[2]), int(b[3])]
+                new_chunk = create_text_chunk(
+                    doc_id=self._doc_hash or "unknown",
+                    content=text_clean,
+                    source_file=str(self._current_pdf_path.name),
+                    file_type=FileType.PDF,
+                    page_number=page_no,
+                    hierarchy=hierarchy,
+                    bbox=bbox,
+                    extraction_method="enhanced_frontpage",
+                    **self._intelligence_metadata,
+                )
+                new_chunks.append(new_chunk)
+
+        doc.close()
+
+        if new_chunks:
+            chunks.extend(new_chunks)
+            print(f"    ✓ [RECOVERY] Enhanced front pages added {len(new_chunks)} chunks", flush=True)
+            logger.info(f"[RECOVERY] Enhanced front pages added {len(new_chunks)} chunks")
+        else:
+            logger.info("[RECOVERY] Enhanced front pages produced no new chunks")
+
         return chunks
 
     # ========================================================================
