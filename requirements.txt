@@ -19,6 +19,8 @@ docling-ibm-models>=3.0.0              # IBM layout models (integrated with docl
 pytesseract>=0.3.10                    # Hybrid OCR fallback
 Pillow>=10.0.0,<11.0.0                 # Image processing (pinned for stability)
 pymupdf>=1.24.0                        # PDF rendering fallback
+opencv-python>=4.8.0                   # Image preprocessing (deskew/denoise)
+python-doctr[torch]>=0.8.0             # Transformer OCR for degraded scans
 
 # === EPUB PIPELINE (REQ-EPUB) ===
 ebooklib>=0.18                         # EPUB parsing
@@ -30,6 +32,7 @@ trafilatura>=1.6.0                     # Main content extraction
 
 # === CHUNKING & EMBEDDINGS (REQ-CHUNK-03) ===
 sentence-transformers>=3.0.0           # DSO implementation (all-MiniLM-L6-v2)
+scikit-learn>=1.4.0                    # Cosine similarity/clustering support
 
 # === IMAGE DEDUPLICATION (REQ-DEDUP-01) ===
 imagehash>=4.3.0                       # Perceptual hashing for duplicate detection
@@ -40,6 +43,8 @@ typer>=0.12.0                          # CLI framework
 rich>=13.0.0                           # CLI output formatting
 tqdm>=4.66.0                           # Progress bars
 python-Levenshtein>=0.21.0             # Fast edit distance (fallback to difflib if missing)
+tiktoken>=0.7.0                        # Token counting for validation/DSO
+python-dotenv>=1.0.0                   # Env var loading for API keys
 
 # === VECTOR DATABASE (Phase 3) ===
 qdrant-client>=1.7.0                   # Qdrant vector store client

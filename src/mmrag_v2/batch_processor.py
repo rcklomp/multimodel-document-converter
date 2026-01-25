@@ -2046,7 +2046,7 @@ class BatchProcessor:
         """
         # Only run if variance exceeds threshold
         RECOVERY_THRESHOLD = -10.0  # Trigger at 10% token loss
-        MIN_ORPHAN_LENGTH = 50  # Minimum chars to rescue
+        MIN_ORPHAN_LENGTH = 50  # Minimum chars to rescue (can be lowered on front pages)
 
         if variance_percent >= RECOVERY_THRESHOLD:
             logger.info(
@@ -2159,15 +2159,89 @@ class BatchProcessor:
             total_rescued = 0
 
             for page_no, raw_text in raw_text_per_page.items():
+                # Front pages are allowed a lower threshold and stricter coverage target
+                is_front_page = page_no <= 2
+                page_min_orphan = 20 if is_front_page else MIN_ORPHAN_LENGTH
+
+                # Compute coverage ratio for this page using current covered texts
+                covered_texts = covered_text_per_page.get(page_no, [])
+                if self._token_validator and self._token_validator._counter:
+                    src_tok = self._token_validator._counter.count_tokens(raw_text)
+                    chk_tok = sum(
+                        self._token_validator._counter.count_tokens(t) for t in covered_texts
+                    )
+                else:
+                    src_tok = len(raw_text)
+                    chk_tok = sum(len(t) for t in covered_texts)
+                coverage_ratio = (chk_tok / src_tok) if src_tok > 0 else 1.0
+
+                if is_front_page and coverage_ratio < 0.8:
+                    logger.info(
+                        f"[RECOVERY] Front-page coverage low ({coverage_ratio:.2%}) on page {page_no}; "
+                        "attempting block-level rescue"
+                    )
+                    # Recover small blocks on front pages that were missed
+                    covered_bboxes = []
+                    for ch in chunks:
+                        if ch.metadata.page_number != page_no:
+                            continue
+                        if ch.metadata and ch.metadata.spatial and ch.metadata.spatial.bbox:
+                            covered_bboxes.append(ch.metadata.spatial.bbox)
+
+                    def _bbox_overlaps_any(b1: List[float], others: List[List[int]]) -> bool:
+                        for ob in others:
+                            if _bbox_iou(b1, ob) > 0.1:
+                                return True
+                        return False
+
+                    for bbox, block_text in text_blocks_per_page.get(page_no, []):
+                        text_clean = block_text.strip()
+                        if len(text_clean) < 20:
+                            continue
+                        if _bbox_overlaps_any(bbox, covered_bboxes):
+                            continue
+                        para_lower = text_clean.lower()
+                        # quick dedup check
+                        already = False
+                        for covered in covered_texts:
+                            if len(covered) < 10:
+                                continue
+                            if para_lower[:40] in covered or covered[:40] in para_lower:
+                                already = True
+                                break
+                        if already:
+                            continue
+
+                        doc_title = Path(source_file).stem if source_file else "Document"
+                        hierarchy = HierarchyMetadata(
+                            parent_heading=None,
+                            breadcrumb_path=[doc_title, f"Page {page_no}", "[RECOVERED-FRONT]"],
+                            level=3,
+                        )
+                        recovery_chunk = create_text_chunk(
+                            doc_id=self._doc_hash or "unknown",
+                            content=text_clean,
+                            source_file=source_file,
+                            file_type=FileType.PDF,
+                            page_number=page_no,
+                            hierarchy=hierarchy,
+                            bbox=[int(v) for v in bbox],
+                            extraction_method="recovery_frontpage",
+                            **self._intelligence_metadata,
+                        )
+                        recovery_chunks.append(recovery_chunk)
+                        total_rescued += 1
+                        covered_texts.append(para_lower)
+
                 # Split raw text into paragraphs/blocks
                 paragraphs = re.split(r"\n\s*\n|\n{2,}", raw_text)
-                covered_texts = covered_text_per_page.get(page_no, [])
+                covered_texts = covered_text_per_page.get(page_no, covered_texts)
 
                 for para_idx, para in enumerate(paragraphs):
                     para_clean = para.strip()
 
                     # Skip short paragraphs
-                    if len(para_clean) < MIN_ORPHAN_LENGTH:
+                    if len(para_clean) < page_min_orphan:
                         continue
 
                     # Check if this paragraph is covered by any chunk
@@ -2278,16 +2352,6 @@ class BatchProcessor:
                             existing_texts.append(para_lower)
 
                 # Step 3c: Low-coverage gap fill (spatial gap filling beyond figures)
-                # Compute coverage ratio for this page using current covered texts
-                if self._token_validator and self._token_validator._counter:
-                    src_tok = self._token_validator._counter.count_tokens(raw_text)
-                    chk_tok = sum(
-                        self._token_validator._counter.count_tokens(t) for t in covered_texts
-                    )
-                else:
-                    src_tok = len(raw_text)
-                    chk_tok = sum(len(t) for t in covered_texts)
-                coverage_ratio = (chk_tok / src_tok) if src_tok > 0 else 1.0
 
                 if coverage_ratio < 0.6 and page_no in text_blocks_per_page:
                     # Build covered bboxes (text/image/table) to find gaps

@@ -227,9 +227,13 @@ mmrag-v2 process [OPTIONS] INPUT_FILE
 |--------|---------|-------------|
 | `--sensitivity`, `-s` | `0.5` | Image extraction sensitivity (0.1-1.0) |
 | `--strict-qa` | `False` | Fail on token validation errors |
+| `--qa-tolerance` | `0.10` | Allowed token variance (decimal, 0.10 = 10%) |
+| `--qa-noise-allowance` | profile-based | Allowed filtered-token ratio (decimal); overrides profile default |
 | `--semantic-overlap` | `True` | Enable Dynamic Semantic Overlap (DSO) chunking |
 | `--vlm-context-depth` | `3` | Previous text chunks for VLM semantic anchoring |
 | `--allow-fullpage-shadow` | `False` | Override Full-Page Guard |
+| `--auto-safe/--no-auto-safe` | `False` | Auto-tighten QA and enable OCR heuristically on risky digital PDFs |
+| `--profile-override` | `None` | Force a strategy profile (e.g., academic_whitepaper, digital_magazine, scanned_clean, scanned_degraded, scanned_magazine, technical_manual) |
 
 #### OCR Options
 
@@ -240,6 +244,15 @@ mmrag-v2 process [OPTIONS] INPUT_FILE
 | `--ocr-mode` | `auto` | OCR mode: `auto` (smart detection), `legacy`, or `layout-aware` |
 | `--ocr-confidence-threshold` | `0.7` | Minimum OCR confidence for layout-aware mode (0.0-1.0) |
 | `--enable-doctr/--no-doctr` | `True` | Enable Doctr Layer 3 for layout-aware OCR |
+| `--force-ocr/--no-force-ocr` | `False` | Bypass the digital-PDF guard; run OCR even when modality is “native_digital” |
+
+#### OCR & QA Quick Guide (avoid option overlap)
+
+* Fast digital PDFs (clean text layer): leave OCR flags off.  
+* Digital PDFs with figures/overlays or missing tokens: add `--force-ocr --ocr-mode layout-aware --enable-doctr` (or simply `--auto-safe` to let the heuristic enable this).  
+* Scans: `--enable-ocr --ocr-mode layout-aware --enable-doctr` (auto-safe will also flip this on when modality is scanned).  
+* QA strictness: default allows ~10% variance (up to 25% noise for academic). For tighter integrity use `--strict-qa` and/or set `--qa-tolerance 0.08 --qa-noise-allowance 0.10`, or use `--auto-safe` to apply those automatically on risky files.  
+* Auto mode: `--auto-safe` is opt-in; it tightens QA and enables layout-aware OCR for digital PDFs when the classifier sees images/high sensitivity. No change if it deems the doc low-risk.
 
 ### Examples
 

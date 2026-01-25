@@ -375,12 +375,41 @@ def process_document(
         "--semantic-overlap/--no-semantic-overlap",
         help="Enable Dynamic Semantic Overlap (DSO) chunking for natural boundaries (Gap #3)",
     ),
+    profile_override: Optional[str] = typer.Option(
+        None,
+        "--profile-override",
+        help="Force a strategy profile (e.g., academic_whitepaper, digital_magazine, scanned_clean, scanned_degraded, scanned_magazine, technical_manual)",
+    ),
+    force_ocr: bool = typer.Option(
+        False,
+        "--force-ocr/--no-force-ocr",
+        help="Force OCR cascade even for native digital PDFs (bypasses modality-based OCR guard)",
+    ),
     vlm_context_depth: int = typer.Option(
         3,
         "--vlm-context-depth",
         help="Number of previous text chunks to include as VLM context (Gap #3 semantic anchoring)",
         min=0,
         max=10,
+    ),
+    qa_tolerance: float = typer.Option(
+        0.10,
+        "--qa-tolerance",
+        help="QA variance tolerance (decimal, default 0.10 = 10%%)",
+        min=0.0,
+        max=1.0,
+    ),
+    qa_noise_allowance: Optional[float] = typer.Option(
+        None,
+        "--qa-noise-allowance",
+        help="Override filtered-token allowance (decimal). Default uses profile-based allowance.",
+        min=0.0,
+        max=1.0,
+    ),
+    auto_safe: bool = typer.Option(
+        False,
+        "--auto-safe/--no-auto-safe",
+        help="Auto-enable stronger QA + OCR heuristics when risk is detected (digital PDFs with hidden text/images)",
     ),
     enable_ocr: bool = typer.Option(
         False,
@@ -654,9 +683,24 @@ def process_document(
             console.print(
                 "[dim]🎯 Selecting strategy profile (multi-dimensional classifier)...[/dim]"
             )
+            force_profile_enum = None
+            if profile_override:
+                try:
+                    from .orchestration.strategy_profiles import ProfileType as ProfileTypeEnum
+
+                    force_profile_enum = ProfileTypeEnum(profile_override)
+                    console.print(
+                        f"[dim]⚙ Profile override requested: {force_profile_enum.value}[/dim]"
+                    )
+                except Exception:
+                    console.print(
+                        f"[red]Invalid --profile-override '{profile_override}'. Ignoring override.[/red]"
+                    )
+                    force_profile_enum = None
+
             selected_profile = ProfileManager.select_profile(
                 diagnostic_report=diagnostic_report,
-                force_profile=None,  # Let classifier decide
+                force_profile=force_profile_enum,  # Optional manual override
                 doc_profile=smart_profile,  # NEW: Pass for multi-dimensional classification
             )
             profile_params = selected_profile.get_parameters()
@@ -795,6 +839,10 @@ def process_document(
                 specific_pages=specific_pages,
                 allow_fullpage_shadow=allow_fullpage_shadow,
                 strict_qa=strict_qa,
+                force_ocr=force_ocr,
+                qa_tolerance=qa_tolerance,
+                qa_noise_allowance=qa_noise_allowance,
+                auto_safe=auto_safe,
                 semantic_overlap=semantic_overlap,
                 vlm_context_depth=vlm_context_depth,
                 # Layout-aware OCR parameters (Phase 1B) - USE effective_ocr_mode!
