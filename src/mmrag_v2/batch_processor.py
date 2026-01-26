@@ -347,6 +347,10 @@ class BatchProcessor:
                                  document_domain, document_modality, etc.
         """
         self._intelligence_metadata = intelligence_metadata
+        # Adjust QA tolerance per profile (digital_magazine is allowed higher variance)
+        profile = intelligence_metadata.get("profile_type")
+        if profile == "digital_magazine":
+            self._token_validator = create_token_validator(tolerance=0.18)
         logger.info(
             f"[V2.4-OBSERVABILITY] Intelligence metadata set: "
             f"profile={intelligence_metadata.get('profile_type')}, "

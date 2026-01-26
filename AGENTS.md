@@ -51,6 +51,12 @@ Companion docs:
 **D. Stateless Pipeline Orchestration**  
 - Keep Router → Engine → Processor separation; avoid monolithic BatchProcessor logic.
 
+**E. Visual Primacy (Magazine Doctrine)** 
+- In the digital_magazine profile, visual layout data overrides the native PDF text layer.
+
+**F. Recover through Shadow (Information Retrieval)**
+- Any shadow asset is a potential text source; use extraction_method=shadow_ocr to prevent information loss.
+
 ---
 
 ## 🧬 3. CLASSIFICATION & UIR CONTRACT (V2.4.1 scope)
@@ -71,6 +77,8 @@ Companion docs:
 ## 📍 5. CURRENT STATE & DIRECTIVES (Jan 24, 2026)
 **Phase:** `v2.4.1-stable` with targeted hotfixes (no v2.4.2 classifier).  
 **Recent Finding:** Significant token variance on AIOS PDF; recovery pipeline rescues missing text, but OCR guard disabled layout-aware OCR on digital PDFs.  
+**Known debt:** `digital_magazine` → "Combat Aircraft - August 2025 UK" stabilizes around **-16% token variance** due to heavy text-in-graphics; treat as tolerated debt (see QA guidance below).
+**QA policy update:** For `digital_magazine` only, QA tolerance is 18% (0.18). Do not raise tolerances for other profiles.
 
 ### Priority TODOs
 1. Add **`--force-ocr`** override to bypass the digital-modality OCR guard.  
