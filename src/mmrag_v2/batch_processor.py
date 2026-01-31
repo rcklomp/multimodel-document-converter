@@ -172,6 +172,7 @@ class BatchProcessor:
         auto_safe: bool = False,
         semantic_overlap: bool = True,
         vlm_context_depth: int = 3,
+        semantic_overlap_ratio: float = 0.15,
         # Phase 1B: Layout-aware OCR parameters
         ocr_mode: str = "legacy",
         ocr_confidence_threshold: float = 0.7,
@@ -226,6 +227,7 @@ class BatchProcessor:
         self.auto_safe = auto_safe
         self.semantic_overlap = semantic_overlap
         self.vlm_context_depth = vlm_context_depth
+        self._semantic_overlap_ratio = semantic_overlap_ratio
 
         # Phase 1B: Layout-aware OCR parameters
         self.ocr_mode = ocr_mode
@@ -252,7 +254,7 @@ class BatchProcessor:
         self._current_pdf_path: Optional[Path] = None
 
         # QA-CHECK-01: Initialize token validator for data integrity
-        self._token_validator = create_token_validator(tolerance=0.10)
+        self._token_validator = create_token_validator(tolerance=qa_tolerance)
 
         # Quality Filter Tracker for token-level filtering analytics
         self._quality_filter_tracker: Optional[QualityFilterTracker] = None
@@ -1160,14 +1162,22 @@ class BatchProcessor:
         # Initialize quality filter tracker for this document
         self._quality_filter_tracker = create_quality_filter_tracker()
 
-        # OCR strategy: scanned-only. If document_modality is native digital, disable cascade entirely.
+        # OCR strategy: respect user flags, but auto-disable for native digital unless force_ocr is set
         doc_modality = self._intelligence_metadata.get("document_modality")
-        if doc_modality == "native_digital":
+        if doc_modality == "native_digital" and not self.force_ocr:
+            # Only auto-disable if force_ocr is NOT set
             self.ocr_mode = "legacy"
             self.enable_ocr = False
             self.enable_doctr = False
             logger.info(
-                "[OCR-GUARD] Digital modality detected; OCR cascade disabled (legacy mode, enable_ocr=False, enable_doctr=False)"
+                "[OCR-GUARD] Digital modality detected (force_ocr=False); OCR cascade disabled (legacy mode, enable_ocr=False, enable_doctr=False)"
+            )
+        elif doc_modality == "native_digital" and self.force_ocr:
+            # User explicitly wants OCR on digital PDF - respect the flag for recovery phases
+            logger.info(
+                f"[OCR-GUARD] Digital modality detected BUT force_ocr=True; preserving OCR settings "
+                f"(mode={self.ocr_mode}, enable_ocr={self.enable_ocr}, enable_doctr={self.enable_doctr}) "
+                f"for recovery phase compatibility"
             )
         else:
             # Non-digital or unknown modality can still use configured OCR defaults
@@ -2690,11 +2700,9 @@ class BatchProcessor:
         """
         QA-CHECK-01: Run token balance validation on text chunks.
 
-        CRITICAL FIX: The source_text MUST come from the actual PDF, not from
-        the chunks themselves (which would be circular and meaningless).
-
-        We use PyMuPDF to extract the raw text from the PDF and compare it
-        against the sum of TEXT chunk tokens.
+        Uses PyMuPDF to extract raw text from PDF as source of truth for triggering
+        recovery mechanisms. This ensures we catch missing content that Docling
+        may have filtered out or missed.
 
         Args:
             chunks: All chunks (only TEXT modality is validated)
@@ -2731,10 +2739,12 @@ class BatchProcessor:
                 )
 
             # ================================================================
-            # CRITICAL FIX: Extract source text from ACTUAL PDF, not chunks
+            # Use PyMuPDF raw text extraction as source for recovery triggering
             # ================================================================
-            # Previous code was CIRCULAR: comparing chunks to themselves!
-            # Now we extract raw text from PDF using PyMuPDF.
+            # PyMuPDF sees the raw PDF text layer which includes content that
+            # Docling may filter out (ads, headers, etc.) or miss entirely.
+            # This higher baseline ensures recovery mechanisms trigger when
+            # content is missing from Docling's extraction.
             # ================================================================
             source_text = ""
             if self._current_pdf_path and self._current_pdf_path.exists():
@@ -2753,10 +2763,8 @@ class BatchProcessor:
                     )
                 except Exception as pdf_err:
                     logger.warning(f"[QA-CHECK-01] Failed to extract PDF text: {pdf_err}")
-                    # Fallback: use chunks (not ideal but better than crashing)
                     source_text = " ".join(c.content for c in text_chunks if c.content)
             else:
-                # No PDF path available - use chunks as fallback
                 logger.warning("[QA-CHECK-01] No PDF path available, using chunk text as source")
                 source_text = " ".join(c.content for c in text_chunks if c.content)
 
@@ -2801,7 +2809,7 @@ class BatchProcessor:
             result = self._token_validator.validate_token_balance(
                 chunks=adjusted_text_chunks,
                 source_text=source_text,
-                overlap_ratio=0.15,  # DSO default overlap
+                overlap_ratio=self._semantic_overlap_ratio,  # DSO overlap (adaptive-capable)
                 quality_filter_tracker=quality_tracker,
                 profile_type=profile_type,
                 noise_allowance=None,  # Use validator's profile-based defaults

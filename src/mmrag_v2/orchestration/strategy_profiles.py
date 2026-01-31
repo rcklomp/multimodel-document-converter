@@ -115,6 +115,22 @@ class ProfileParameters:
 
 
 @dataclass
+class AdaptiveSettings:
+    """
+    Per-document adaptive overrides layered on top of ProfileParameters.
+
+    Only non-None fields are applied; everything else stays as in the base profile.
+    """
+
+    sensitivity: Optional[float] = None
+    min_image_width: Optional[int] = None
+    min_image_height: Optional[int] = None
+    ocr_confidence_threshold: Optional[float] = None
+    enable_aggressive_ocr: Optional[bool] = None
+    semantic_overlap_ratio: Optional[float] = None
+
+
+@dataclass
 class VLMPromptConfig:
     """
     VLM prompt configuration for a profile.
@@ -182,6 +198,14 @@ class BaseProfile(ABC):
     def get_parameters(self) -> ProfileParameters:
         """Return extraction and VLM parameters for this profile."""
         pass
+
+    def get_adaptive_settings(
+        self, diagnostics: "DiagnosticReport", base_params: ProfileParameters
+    ) -> Optional["AdaptiveSettings"]:
+        """
+        Optional per-document adaptive overrides. Defaults to no overrides.
+        """
+        return None
 
     @abstractmethod
     def get_vlm_prompt_config(self) -> VLMPromptConfig:
@@ -298,6 +322,24 @@ class DigitalMagazineProfile(BaseProfile):
         # to prevent VLM from "trying too hard"
         return False
 
+    def get_adaptive_settings(
+        self, diagnostics: "DiagnosticReport", base_params: ProfileParameters
+    ) -> Optional["AdaptiveSettings"]:
+        # If magazine is very image-heavy, loosen filters and allow more recall
+        image_cov = getattr(diagnostics.physical_check, "image_coverage", 0.0)
+        median_dim = max(
+            getattr(diagnostics.physical_check, "median_image_width", 0),
+            getattr(diagnostics.physical_check, "median_image_height", 0),
+        )
+        if image_cov > 0.6 or median_dim > 200:
+            return AdaptiveSettings(
+                sensitivity=0.7,  # slightly higher recall
+                min_image_width=40,
+                min_image_height=40,
+                semantic_overlap_ratio=0.10,
+            )
+        return None
+
 
 # ============================================================================
 # ACADEMIC WHITEPAPER PROFILE
@@ -385,6 +427,23 @@ class AcademicWhitepaperProfile(BaseProfile):
     def should_use_diagnostic_context(self) -> bool:
         # Academic papers benefit from domain context
         return True
+
+    def get_adaptive_settings(
+        self, diagnostics: "DiagnosticReport", base_params: ProfileParameters
+    ) -> Optional["AdaptiveSettings"]:
+        image_cov = getattr(diagnostics.physical_check, "image_coverage", 0.0)
+        median_dim = max(
+            getattr(diagnostics.physical_check, "median_image_width", 0),
+            getattr(diagnostics.physical_check, "median_image_height", 0),
+        )
+        if image_cov > 0.25 or median_dim > 150:
+            return AdaptiveSettings(
+                min_image_width=30,
+                min_image_height=30,
+                sensitivity=min(0.8, base_params.sensitivity + 0.05),
+                semantic_overlap_ratio=0.10,
+            )
+        return None
 
 
 # ============================================================================
@@ -474,6 +533,17 @@ class ScannedDegradedProfile(BaseProfile):
         # Scans benefit from full diagnostic context
         return True
 
+    def get_adaptive_settings(
+        self, diagnostics: "DiagnosticReport", base_params: ProfileParameters
+    ) -> Optional["AdaptiveSettings"]:
+        overall_conf = getattr(diagnostics.confidence_profile, "overall_confidence", 1.0)
+        if overall_conf < 0.6:
+            return AdaptiveSettings(
+                enable_aggressive_ocr=True,
+                ocr_confidence_threshold=0.3,
+            )
+        return None
+
 
 # ============================================================================
 # SCANNED CLEAN PROFILE
@@ -562,6 +632,17 @@ class ScannedCleanProfile(BaseProfile):
     def should_use_diagnostic_context(self) -> bool:
         # Clean scans use diagnostic context for scan hints
         return True
+
+    def get_adaptive_settings(
+        self, diagnostics: "DiagnosticReport", base_params: ProfileParameters
+    ) -> Optional["AdaptiveSettings"]:
+        overall_conf = getattr(diagnostics.confidence_profile, "overall_confidence", 1.0)
+        if overall_conf < 0.6:
+            return AdaptiveSettings(
+                enable_aggressive_ocr=True,
+                ocr_confidence_threshold=0.3,
+            )
+        return None
 
 
 # ============================================================================
@@ -669,6 +750,32 @@ class ScannedLiteratureProfile(BaseProfile):
     def should_use_diagnostic_context(self) -> bool:
         # Literature scans use diagnostic context for artifact handling
         return True
+
+    def get_adaptive_settings(
+        self, diagnostics: "DiagnosticReport", base_params: ProfileParameters
+    ) -> Optional["AdaptiveSettings"]:
+        image_cov = getattr(diagnostics.physical_check, "image_coverage", 0.0)
+        page_count = getattr(getattr(diagnostics, "physical_check", None), "page_count", 0) or 0
+        if image_cov > 0.3 or page_count > 200:
+            return AdaptiveSettings(
+                min_image_width=25,
+                min_image_height=25,
+                semantic_overlap_ratio=0.10,
+            )
+        return None
+
+    def get_adaptive_settings(
+        self, diagnostics: "DiagnosticReport", base_params: ProfileParameters
+    ) -> Optional["AdaptiveSettings"]:
+        image_cov = getattr(diagnostics.physical_check, "image_coverage", 0.0)
+        page_count = getattr(getattr(diagnostics, "physical_check", None), "page_count", 0) or 0
+        if image_cov > 0.3 or page_count > 200:
+            return AdaptiveSettings(
+                min_image_width=25,
+                min_image_height=25,
+                semantic_overlap_ratio=0.10,
+            )
+        return None
 
 
 # ============================================================================

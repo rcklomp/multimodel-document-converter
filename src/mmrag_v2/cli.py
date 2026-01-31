@@ -38,6 +38,7 @@ from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from .version import __engine_version__, __schema_version__  # Single source of version truth
+from .utils.image_quality import sample_blur_variance
 
 # Get logger for V2.4 metadata logging
 logger = logging.getLogger(__name__)
@@ -174,7 +175,7 @@ def _run_intelligent_pipeline(
     from .orchestration.smart_config import SmartConfigProvider
     from .orchestration.strategy_orchestrator import StrategyOrchestrator
     from .orchestration.document_diagnostic import create_diagnostic_engine
-    from .orchestration.strategy_profiles import ProfileManager
+    from .orchestration.strategy_profiles import ProfileManager, AdaptiveSettings, ProfileType
 
     is_pdf = input_file.suffix.lower() == ".pdf"
 
@@ -623,6 +624,7 @@ def process_document(
             from .orchestration.strategy_profiles import (
                 ProfileManager,
                 ProfileType,
+                AdaptiveSettings,
             )
 
             # ================================================================
@@ -704,6 +706,23 @@ def process_document(
                 doc_profile=smart_profile,  # NEW: Pass for multi-dimensional classification
             )
             profile_params = selected_profile.get_parameters()
+            semantic_overlap_ratio = 0.15
+
+            # Apply adaptive overrides if provided by the profile
+            adaptive = selected_profile.get_adaptive_settings(diagnostic_report, profile_params)
+            if adaptive:
+                if adaptive.sensitivity is not None:
+                    profile_params.sensitivity = adaptive.sensitivity
+                if adaptive.min_image_width is not None:
+                    profile_params.min_image_width = adaptive.min_image_width
+                if adaptive.min_image_height is not None:
+                    profile_params.min_image_height = adaptive.min_image_height
+                if adaptive.ocr_confidence_threshold is not None:
+                    profile_params.ocr_min_confidence = adaptive.ocr_confidence_threshold
+                if adaptive.enable_aggressive_ocr:
+                    profile_params.enable_ocr_hints = True
+                if adaptive.semantic_overlap_ratio is not None:
+                    semantic_overlap_ratio = adaptive.semantic_overlap_ratio
 
             # Print profile selection banner
             console.print()
@@ -845,6 +864,7 @@ def process_document(
                 auto_safe=auto_safe,
                 semantic_overlap=semantic_overlap,
                 vlm_context_depth=vlm_context_depth,
+                semantic_overlap_ratio=semantic_overlap_ratio,
                 # Layout-aware OCR parameters (Phase 1B) - USE effective_ocr_mode!
                 ocr_mode=effective_ocr_mode.value,
                 ocr_confidence_threshold=ocr_confidence_threshold,
@@ -880,6 +900,35 @@ def process_document(
                     console.print()
 
             result = processor.process_pdf(input_file)
+
+            # Phase 1: Image quality telemetry for digital magazines
+            if (
+                selected_profile
+                and selected_profile.profile_type.value == "digital_magazine"
+                and result.assets_dir
+                and result.assets_dir.exists()
+            ):
+                assets = list(result.assets_dir.glob("*.png"))
+                if assets:
+                    scores = sample_blur_variance(assets, sample_size=10)
+                    if scores:
+                        # lazy import numpy for stats; fallback to Python median if unavailable
+                        try:
+                            import numpy as np
+
+                            median_blur = float(np.median(scores))
+                            p25_blur = float(np.percentile(scores, 25))
+                        except Exception:
+                            scores_sorted = sorted(scores)
+                            mid = len(scores_sorted) // 2
+                            median_blur = float(scores_sorted[mid])
+                            p25_blur = float(scores_sorted[int(len(scores_sorted) * 0.25)])
+                        logger.info(
+                            f"[IMAGE-QA] Median blur={median_blur:.1f}, P25={p25_blur:.1f} (n={len(scores)})"
+                        )
+                        console.print(
+                            f"[dim][IMAGE-QA] Median blur={median_blur:.1f}, P25={p25_blur:.1f} (n={len(scores)})[/dim]"
+                        )
 
             # Display results
             if result.success:
@@ -1037,6 +1086,11 @@ def batch_process(
         False,
         "--strict-qa/--no-strict-qa",
         help="Enable strict QA-CHECK-01 mode (fail on token validation errors)",
+    ),
+    force_ocr: bool = typer.Option(
+        False,
+        "--force-ocr/--no-force-ocr",
+        help="Force OCR cascade even for native digital PDFs (bypasses modality-based OCR guard)",
     ),
     semantic_overlap: bool = typer.Option(
         True,
@@ -1353,6 +1407,7 @@ def batch_process(
                 extraction_strategy=extraction_strategy,
                 allow_fullpage_shadow=allow_fullpage_shadow,
                 strict_qa=strict_qa,
+                force_ocr=force_ocr,
                 semantic_overlap=semantic_overlap,
                 vlm_context_depth=vlm_context_depth,
                 ocr_mode=effective_ocr_mode.value,
