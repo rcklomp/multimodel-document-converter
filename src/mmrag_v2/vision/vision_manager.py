@@ -27,6 +27,7 @@ import hashlib
 import io
 import json
 import logging
+import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, Optional, TYPE_CHECKING
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
     from ..orchestration.strategy_profiles import ProfileParameters
 
 # Import the new visual-only prompt system
-from .vision_prompts import build_visual_prompt, clean_vlm_response
+from .vision_prompts import build_visual_prompt, clean_vlm_response, validate_vlm_response
 
 logger = logging.getLogger(__name__)
 
@@ -323,6 +324,7 @@ class OllamaProvider(VisionProvider):
         """
         self.host = host.rstrip("/")
         self.timeout = timeout
+        self._request_seq = 0
 
         # Auto-detect model if not specified
         if not model:
@@ -330,6 +332,11 @@ class OllamaProvider(VisionProvider):
 
         self.model = model
         logger.info(f"OllamaProvider: model={self.model}, host={host}")
+
+    def _next_request_id(self) -> int:
+        """Generate a monotonic request id for provider call tracing."""
+        self._request_seq += 1
+        return self._request_seq
 
     def _detect_loaded_model(self) -> str:
         """
@@ -419,8 +426,14 @@ class OllamaProvider(VisionProvider):
             },
             "keep_alive": "30m",  # Houd het model 30 minuten vast na de laatste aanroep
         }
+        request_id = self._next_request_id()
+        t0 = time.perf_counter()
 
         try:
+            logger.info(
+                f"[VLM-REQ {request_id}] provider=ollama model={self.model} "
+                f"timeout={self.timeout}s image_kb={img_size_kb:.1f}"
+            )
             response = requests.post(
                 f"{self.host}/api/generate",
                 json=payload,
@@ -429,12 +442,19 @@ class OllamaProvider(VisionProvider):
             response.raise_for_status()
             result = response.json()
             description = result.get("response", "").strip()
+            elapsed = time.perf_counter() - t0
+            logger.info(
+                f"[VLM-RES {request_id}] provider=ollama elapsed={elapsed:.2f}s "
+                f"chars={len(description)}"
+            )
             logger.debug(f"[OLLAMA] Response received: {len(description)} chars")
             return description[:MAX_DESCRIPTION_CHARS]
 
         except requests.exceptions.Timeout as e:
+            elapsed = time.perf_counter() - t0
             logger.error(
-                f"[OLLAMA-TIMEOUT] Request timed out after {self.timeout}s. "
+                f"[VLM-TIMEOUT {request_id}] provider=ollama elapsed={elapsed:.2f}s "
+                f"timeout={self.timeout}s. "
                 f"Image: {img_size_kb:.1f}KB, Prompt: {prompt_size} chars. "
                 f"Try increasing --vlm-timeout to 180 or 300 seconds."
             )
@@ -443,24 +463,30 @@ class OllamaProvider(VisionProvider):
             ) from e
 
         except requests.exceptions.ConnectionError as e:
+            elapsed = time.perf_counter() - t0
             logger.error(
-                f"[OLLAMA-CONNECTION] Cannot connect to Ollama at {self.host}. "
+                f"[VLM-ERROR {request_id}] provider=ollama elapsed={elapsed:.2f}s "
+                f"Cannot connect to Ollama at {self.host}. "
                 f"Is 'ollama serve' running? Error: {e}"
             )
             raise RuntimeError(f"Ollama connection failed at {self.host}") from e
 
         except requests.exceptions.HTTPError as e:
+            elapsed = time.perf_counter() - t0
             status_code = e.response.status_code if e.response else "unknown"
             response_text = e.response.text[:200] if e.response else "no response"
             logger.error(
-                f"[OLLAMA-HTTP-ERROR] HTTP {status_code} from Ollama. " f"Response: {response_text}"
+                f"[VLM-ERROR {request_id}] provider=ollama elapsed={elapsed:.2f}s "
+                f"HTTP {status_code}. Response: {response_text}"
             )
             raise RuntimeError(f"Ollama HTTP error {status_code}: {response_text}") from e
 
         except Exception as e:
+            elapsed = time.perf_counter() - t0
             error_type = type(e).__name__
             logger.error(
-                f"[OLLAMA-ERROR] {error_type}: {e}. "
+                f"[VLM-ERROR {request_id}] provider=ollama elapsed={elapsed:.2f}s "
+                f"{error_type}: {e}. "
                 f"Image: {img_size_kb:.1f}KB, Prompt: {prompt_size} chars"
             )
             raise
@@ -498,11 +524,17 @@ class OpenAIProvider(VisionProvider):
         self.model = model
         self.timeout = timeout
         self.base_url = base_url
+        self._request_seq = 0
 
         if base_url:
             logger.info(f"OpenAIProvider: model={model}, base_url={base_url}")
         else:
             logger.info(f"OpenAIProvider: model={model}")
+
+    def _next_request_id(self) -> int:
+        """Generate a monotonic request id for provider call tracing."""
+        self._request_seq += 1
+        return self._request_seq
 
     def describe_image(
         self,
@@ -550,8 +582,14 @@ class OpenAIProvider(VisionProvider):
             if self.base_url
             else "https://api.openai.com/v1/chat/completions"
         )
+        request_id = self._next_request_id()
+        t0 = time.perf_counter()
 
         try:
+            logger.info(
+                f"[VLM-REQ {request_id}] provider=openai model={self.model} "
+                f"timeout={self.timeout}s endpoint={api_url}"
+            )
             response = requests.post(
                 api_url,
                 headers=headers,
@@ -561,9 +599,25 @@ class OpenAIProvider(VisionProvider):
             response.raise_for_status()
             result = response.json()
             description = result["choices"][0]["message"]["content"].strip()
+            elapsed = time.perf_counter() - t0
+            logger.info(
+                f"[VLM-RES {request_id}] provider=openai elapsed={elapsed:.2f}s "
+                f"chars={len(description)}"
+            )
             return description[:MAX_DESCRIPTION_CHARS]
+        except requests.Timeout:
+            elapsed = time.perf_counter() - t0
+            logger.error(
+                f"[VLM-TIMEOUT {request_id}] provider=openai elapsed={elapsed:.2f}s "
+                f"timeout={self.timeout}s endpoint={api_url}"
+            )
+            raise
         except Exception as e:
-            logger.error(f"OpenAI request failed (url={api_url}): {e}")
+            elapsed = time.perf_counter() - t0
+            logger.error(
+                f"[VLM-ERROR {request_id}] provider=openai elapsed={elapsed:.2f}s "
+                f"url={api_url} error={e}"
+            )
             raise
 
 
@@ -737,30 +791,18 @@ class VisionManager:
             )
 
         # ================================================================
-        # BUILD VISUAL-ONLY PROMPT using new prompt system
+        # BUILD VISUAL-ONLY PROMPT (no breadcrumb/text/page injection)
         # ================================================================
-        # Build context section
-        context_section = None
-        if anchor_text or state.breadcrumbs:
-            context_parts = []
-
-            if state.breadcrumbs:
-                breadcrumb_str = " > ".join(state.breadcrumbs)
-                context_parts.append(f"DOCUMENT SECTION: {breadcrumb_str}")
-
-            if anchor_text:
-                text_context = anchor_text[:200] if len(anchor_text) > 200 else anchor_text
-                context_parts.append(f'SURROUNDING TEXT: "{text_context}"')
-
-            context_parts.append(f"PAGE: {page_number}")
-            context_section = "\n".join(context_parts)
-
-        # Use new visual-only prompt builder
+        # AGENTS.md / Source Sanctity:
+        # - OCR extracts text; the VLM must describe visuals only.
+        # - We intentionally do NOT pass breadcrumbs, page number, or surrounding text
+        #   because it encourages meta-language ("page", "document", "surrounding text")
+        #   and speculative statements that degrade retrieval quality.
         prompt = build_visual_prompt(
-            context_section=context_section,
+            context_section=None,
             diagnostic_hints=None,
-            is_scan=False,  # Not scan-specific in this mode
-            is_diagram=False,  # Auto-detect would be better but not implemented yet
+            is_scan=False,  # Caller may route scan-specific prompting elsewhere
+            is_diagram=False,  # TODO: add light heuristic auto-detect
             is_photograph=False,
             ocr_confidence=ocr_confidence,
         )
@@ -770,13 +812,38 @@ class VisionManager:
             f"OCR confidence: {ocr_confidence if ocr_confidence else 'N/A'}"
         )
 
-        # Get description from provider
+        # Get description from provider (with validation + one strict retry)
         try:
             raw_response = self._provider.describe_image(image, prompt)
             self._processed_count += 1
 
-            # Clean response using new cleaner
-            description = clean_vlm_response(raw_response)
+            validation = validate_vlm_response(raw_response)
+            if not validation.is_valid:
+                logger.warning(
+                    f"[VISUAL-ONLY-VLM] Rejected VLM response on page {page_number}: "
+                    f"{', '.join(validation.issues) if validation.issues else 'invalid'}; retrying once"
+                )
+                raw_response = self._provider.describe_image(image, prompt)
+                self._processed_count += 1
+                validation = validate_vlm_response(raw_response)
+
+            if not validation.is_valid:
+                logger.warning(
+                    f"[VISUAL-ONLY-VLM] Rejected VLM response on page {page_number} after retry: "
+                    f"{', '.join(validation.issues) if validation.issues else 'invalid'}"
+                )
+                # If the model keeps trying to "read" or reference text, degrade gracefully:
+                # emit a stable layout descriptor instead of dropping to an unhelpful placeholder.
+                if validation.text_reading_detected:
+                    description = "Dense typographic layout; no distinct non-text visuals."
+                else:
+                    description = "Unverified visual element."
+
+                if self._cache:
+                    self._cache.set(image, description)
+                return description
+
+            description = validation.cleaned_response
 
             # Truncate to max length
             if len(description) > MAX_DESCRIPTION_CHARS:
@@ -791,9 +858,8 @@ class VisionManager:
 
         except Exception as e:
             logger.warning(f"VLM enrichment failed: {e}")
-            # Return fallback - visual element placeholder
-            breadcrumb_hint = f" in {state.breadcrumbs[-1]}" if state.breadcrumbs else ""
-            return f"Visual element on page {page_number}{breadcrumb_hint}"
+            # Return fallback - keep it visual-only (no page/document meta-language).
+            return "Unverified visual element."
 
     def _extract_clean_description(
         self,
@@ -864,10 +930,7 @@ class VisionManager:
                     elif obj:
                         clean = f"Image of {obj}"
                     else:
-                        breadcrumb_hint = (
-                            f" in {state.breadcrumbs[-1]}" if state.breadcrumbs else ""
-                        )
-                        clean = f"Visual element on page {page_number}{breadcrumb_hint}"
+                        clean = "Unverified visual element."
 
                     # Remove any remaining JSON artifacts that might have slipped through
                     clean = self._strip_json_artifacts(clean)
@@ -927,8 +990,7 @@ class VisionManager:
             clean = self._strip_json_artifacts(clean)
 
         if not clean or len(clean) < 5:
-            breadcrumb_hint = f" in {state.breadcrumbs[-1]}" if state.breadcrumbs else ""
-            clean = f"Visual element on page {page_number}{breadcrumb_hint}"
+            clean = "Unverified visual element."
 
         return clean[:MAX_DESCRIPTION_CHARS]
 
@@ -1229,10 +1291,7 @@ class VisionManager:
 
         except Exception as e:
             logger.warning(f"VLM enrichment failed: {e}")
-            breadcrumb_hint = f" in {state.breadcrumbs[-1]}" if state.breadcrumbs else ""
-            fallback = (
-                f"OBJ: Unknown DESC: [VLM analysis failed - page {page_number}{breadcrumb_hint}]"
-            )
+            fallback = "OBJ: Unknown DESC: [VLM analysis failed]"
 
             return {
                 "description": fallback,
@@ -1406,59 +1465,23 @@ class VisionManager:
                 # Continue without OCR hints - don't fail the VLM call
 
         # ================================================================
-        # BUILD CONTEXTUAL PROMPT WITH OCR HINTS
+        # BUILD VISUAL-ONLY PROMPT (scan-aware, no OCR/breadcrumb/page injection)
         # ================================================================
-        context_parts = []
+        # AGENTS.md / Source Sanctity:
+        # - OCR extracts text; VLM must not transcribe or summarize text.
+        # - Passing OCR hints / surrounding text / breadcrumbs encourages meta-language
+        #   and "reading" behavior, so we do not inject any of that into the prompt.
+        is_scan = bool(profile_params and profile_params.inject_scan_hints)
+        diagnostic_hints = SCAN_ARTIFACT_HINTS if is_scan else None
 
-        # Add breadcrumb context
-        if state.breadcrumbs:
-            breadcrumb_str = " > ".join(state.breadcrumbs)
-            context_parts.append(f"DOCUMENT SECTION: {breadcrumb_str}")
-
-        # Add surrounding text context
-        if anchor_text:
-            text_context = anchor_text[:200] if len(anchor_text) > 200 else anchor_text
-            context_parts.append(f'SURROUNDING TEXT: "{text_context}"')
-
-        context_parts.append(f"PAGE: {page_number}")
-
-        # Build diagnostic hints (including OCR hints if available)
-        diagnostic_hints = ""
-        if profile_params and profile_params.inject_scan_hints:
-            diagnostic_hints = SCAN_ARTIFACT_HINTS
-
-        # Add OCR hints to diagnostic section with STRONG prioritization instruction
-        if ocr_hint_section:
-            # REQ-OCR-02: Explicit instruction to prioritize OCR keywords
-            ocr_priority_instruction = """
-CRITICAL OCR KEYWORD INSTRUCTION:
-The OCR hints above contain DETECTED TEXT from this scanned page.
-If OCR detected BRAND NAMES (like Browning, Sako, Winchester), MODEL NUMBERS, 
-or PAGE TITLES, you MUST include these in your description.
-
-RULE: If OCR says "Browning" → Your output MUST contain "Browning"
-RULE: If OCR detected a title → Use it as the primary subject description
-DO NOT replace OCR keywords with generic terms like "rifle" or "firearm".
-"""
-            ocr_hint_section = ocr_hint_section + "\n" + ocr_priority_instruction
-
-            diagnostic_hints = (
-                diagnostic_hints + "\n\n" + ocr_hint_section
-                if diagnostic_hints
-                else ocr_hint_section
-            )
-
-        # Build final prompt
-        if context_parts:
-            context_section = "DOCUMENT CONTEXT:\n" + "\n".join(context_parts)
-            prompt = ENRICHMENT_PROMPT_BASE.format(
-                context_section=context_section,
-                diagnostic_hints=diagnostic_hints,
-            )
-        else:
-            prompt = ENRICHMENT_PROMPT_NO_CONTEXT.format(
-                diagnostic_hints=diagnostic_hints,
-            )
+        prompt = build_visual_prompt(
+            context_section=None,
+            diagnostic_hints=diagnostic_hints,
+            is_scan=is_scan,
+            is_diagram=False,
+            is_photograph=False,
+            ocr_confidence=None,
+        )
 
         # Log image dimensions for debugging large image issues
         img_width, img_height = image.size
@@ -1467,19 +1490,44 @@ DO NOT replace OCR keywords with generic terms like "rifle" or "firearm".
             f"prompt length: {len(prompt)} chars, OCR hints: {'Yes' if ocr_hint_section else 'No'}"
         )
 
-        # Get description from provider
+        # Get description from provider (with validation + one strict retry)
         try:
             raw_response = self._provider.describe_image(image, prompt)
             self._processed_count += 1
 
-            # Parse and clean the response
-            description = self._extract_clean_description(raw_response, page_number, state)
+            validation = validate_vlm_response(raw_response)
+            if not validation.is_valid:
+                logger.warning(
+                    f"[VISUAL-ONLY-VLM] Rejected VLM response on page {page_number}: "
+                    f"{', '.join(validation.issues) if validation.issues else 'invalid'}; retrying once"
+                )
+                raw_response = self._provider.describe_image(image, prompt)
+                self._processed_count += 1
+                validation = validate_vlm_response(raw_response)
+
+            if not validation.is_valid:
+                logger.warning(
+                    f"[VISUAL-ONLY-VLM] Rejected VLM response on page {page_number} after retry: "
+                    f"{', '.join(validation.issues) if validation.issues else 'invalid'}"
+                )
+                if validation.text_reading_detected:
+                    description = "Dense typographic layout; no distinct non-text visuals."
+                else:
+                    description = "Unverified visual element."
+
+                if self._cache:
+                    self._cache.set(image, description)
+                return description
+
+            description = validation.cleaned_response
+            if len(description) > MAX_DESCRIPTION_CHARS:
+                description = description[:MAX_DESCRIPTION_CHARS]
 
             # Cache the result
             if self._cache:
                 self._cache.set(image, description)
 
-            logger.info(f"[OCR-HINT-VLM] Page {page_number} SUCCESS: {description[:80]}...")
+            logger.info(f"[VISUAL-ONLY-VLM] Page {page_number} SUCCESS: {description[:80]}...")
             return description
 
         except Exception as e:
@@ -1533,8 +1581,7 @@ DO NOT replace OCR keywords with generic terms like "rifle" or "firearm".
                 flush=True,
             )
 
-            breadcrumb_hint = f" in {state.breadcrumbs[-1]}" if state.breadcrumbs else ""
-            return f"OBJ: Unknown DESC: [VLM analysis failed - page {page_number}{breadcrumb_hint}]"
+            return "OBJ: Unknown DESC: [VLM analysis failed]"
 
     def get_stats(self) -> Dict[str, Any]:
         """Get manager statistics."""

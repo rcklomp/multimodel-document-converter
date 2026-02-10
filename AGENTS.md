@@ -35,6 +35,8 @@ Companion docs:
 2. **Hardware Bound:** Optimize for **Apple Silicon (MPS)**; prefer `mps` for torch when available.
 3. **Library Lockdown:** `docling` **v2.66.0** pinned; do not bump without impact review.
 4. **Resource Ceiling:** Target **≤8GB RAM** during runs; keep batch sizes ≤10 pages and call `gc.collect()` between batches.
+5. **IRON-09 (Blind Test Validation):** A code change is only valid if the full `acceptance_suite` yields a `GATE_PASS`. This MUST include at least one "Blind Test" document (Greenhouse Design and Control by Pedro Ponce) that was not part of the dev-loop. Any pass based on hardcoded filenames or word-lists is a system failure.
+6. **IRON-10:** Refinement logic must rely on a single `20-unit` vertical threshold. No profile-specific or heading-specific branches allowed.
 
 ---
 
@@ -57,6 +59,11 @@ Companion docs:
 **F. Recover through Shadow (Information Retrieval)**
 - Any shadow asset is a potential text source; use extraction_method=shadow_ocr to prevent information loss.
 
+**G. Chunking by Profile, Validated by Evidence**
+- Do not enforce one global "optimal" chunk size.
+- Tune chunk-size behavior per profile (`technical_manual`, `scanned_degraded`, `digital_magazine`, etc.).
+- Treat chunk size as an empirical quality lever: changes require before/after acceptance metrics, not intuition.
+
 ---
 
 ## 🧬 3. CLASSIFICATION & UIR CONTRACT (V2.4.1 scope)
@@ -78,6 +85,7 @@ Companion docs:
 **Phase:** `v2.4.1-stable` with targeted hotfixes (no v2.4.2 classifier).  
 **Recent Finding:** Significant token variance on AIOS PDF; recovery pipeline rescues missing text, but OCR guard disabled layout-aware OCR on digital PDFs.  
 **Known debt:** `digital_magazine` → "Combat Aircraft - August 2025 UK" stabilizes around **-16% token variance** due to heavy text-in-graphics; treat as tolerated debt (see QA guidance below).
+**Decision (known debt):** Do not add/maintain extra "text-in-graphics" complexity (digital-magazine layout-OCR / image-region OCR). Keep the digital PDF path simple and stable; only run OCR on digital-like PDFs when the user explicitly sets `--force-ocr`.
 **QA policy update:** For `digital_magazine` only, QA tolerance is 18% (0.18). Do not raise tolerances for other profiles.
 
 ### Priority TODOs
@@ -85,6 +93,7 @@ Companion docs:
 2. Expose **QA strictness knobs** (`--qa-tolerance`, `--qa-noise-allowance`, or preset `--strict-qa`).  
 3. Fix **finalize chunk-count mismatch** (log vs. written JSONL).  
 4. Optional: add **profile override** flag to sidestep classifier drift without pulling in v2.4.2 classifier.
+5. Keep chunk sizing profile-driven and acceptance-tested (no universal hard min/max invariant).
 
 ---
 

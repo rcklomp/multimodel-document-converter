@@ -430,7 +430,7 @@ def process_document(
         case_sensitive=False,
     ),
     ocr_confidence_threshold: float = typer.Option(
-        0.7,
+        0.5,
         "--ocr-confidence-threshold",
         help="Minimum OCR confidence for layout-aware mode (0.0-1.0)",
         min=0.0,
@@ -709,7 +709,9 @@ def process_document(
             semantic_overlap_ratio = 0.15
 
             # Apply adaptive overrides if provided by the profile
-            adaptive = selected_profile.get_adaptive_settings(diagnostic_report, profile_params)
+            adaptive = selected_profile.get_adaptive_settings(
+                diagnostic_report, profile_params, doc_profile=smart_profile
+            )
             if adaptive:
                 if adaptive.sensitivity is not None:
                     profile_params.sensitivity = adaptive.sensitivity
@@ -1122,7 +1124,7 @@ def batch_process(
         case_sensitive=False,
     ),
     ocr_confidence_threshold: float = typer.Option(
-        0.7,
+        0.5,
         "--ocr-confidence-threshold",
         help="Minimum OCR confidence for layout-aware mode (0.0-1.0)",
         min=0.0,

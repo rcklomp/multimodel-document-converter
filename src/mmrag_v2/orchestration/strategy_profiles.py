@@ -200,7 +200,10 @@ class BaseProfile(ABC):
         pass
 
     def get_adaptive_settings(
-        self, diagnostics: "DiagnosticReport", base_params: ProfileParameters
+        self,
+        diagnostics: "DiagnosticReport",
+        base_params: ProfileParameters,
+        doc_profile: Optional[Any] = None,
     ) -> Optional["AdaptiveSettings"]:
         """
         Optional per-document adaptive overrides. Defaults to no overrides.
@@ -323,14 +326,19 @@ class DigitalMagazineProfile(BaseProfile):
         return False
 
     def get_adaptive_settings(
-        self, diagnostics: "DiagnosticReport", base_params: ProfileParameters
+        self,
+        diagnostics: "DiagnosticReport",
+        base_params: ProfileParameters,
+        doc_profile: Optional[Any] = None,
     ) -> Optional["AdaptiveSettings"]:
-        # If magazine is very image-heavy, loosen filters and allow more recall
-        image_cov = getattr(diagnostics.physical_check, "image_coverage", 0.0)
-        median_dim = max(
-            getattr(diagnostics.physical_check, "median_image_width", 0),
-            getattr(diagnostics.physical_check, "median_image_height", 0),
-        )
+        # If magazine is very image-heavy, loosen filters and allow more recall.
+        image_cov = float(getattr(diagnostics.physical_check, "avg_image_coverage", 0.0) or 0.0)
+        median_dim = 0
+        if doc_profile is not None:
+            median_dim = max(
+                int(getattr(doc_profile, "median_image_width", 0) or 0),
+                int(getattr(doc_profile, "median_image_height", 0) or 0),
+            )
         if image_cov > 0.6 or median_dim > 200:
             return AdaptiveSettings(
                 sensitivity=0.7,  # slightly higher recall
@@ -429,13 +437,18 @@ class AcademicWhitepaperProfile(BaseProfile):
         return True
 
     def get_adaptive_settings(
-        self, diagnostics: "DiagnosticReport", base_params: ProfileParameters
+        self,
+        diagnostics: "DiagnosticReport",
+        base_params: ProfileParameters,
+        doc_profile: Optional[Any] = None,
     ) -> Optional["AdaptiveSettings"]:
-        image_cov = getattr(diagnostics.physical_check, "image_coverage", 0.0)
-        median_dim = max(
-            getattr(diagnostics.physical_check, "median_image_width", 0),
-            getattr(diagnostics.physical_check, "median_image_height", 0),
-        )
+        image_cov = float(getattr(diagnostics.physical_check, "avg_image_coverage", 0.0) or 0.0)
+        median_dim = 0
+        if doc_profile is not None:
+            median_dim = max(
+                int(getattr(doc_profile, "median_image_width", 0) or 0),
+                int(getattr(doc_profile, "median_image_height", 0) or 0),
+            )
         if image_cov > 0.25 or median_dim > 150:
             return AdaptiveSettings(
                 min_image_width=30,
@@ -534,7 +547,10 @@ class ScannedDegradedProfile(BaseProfile):
         return True
 
     def get_adaptive_settings(
-        self, diagnostics: "DiagnosticReport", base_params: ProfileParameters
+        self,
+        diagnostics: "DiagnosticReport",
+        base_params: ProfileParameters,
+        doc_profile: Optional[Any] = None,
     ) -> Optional["AdaptiveSettings"]:
         overall_conf = getattr(diagnostics.confidence_profile, "overall_confidence", 1.0)
         if overall_conf < 0.6:
@@ -634,7 +650,10 @@ class ScannedCleanProfile(BaseProfile):
         return True
 
     def get_adaptive_settings(
-        self, diagnostics: "DiagnosticReport", base_params: ProfileParameters
+        self,
+        diagnostics: "DiagnosticReport",
+        base_params: ProfileParameters,
+        doc_profile: Optional[Any] = None,
     ) -> Optional["AdaptiveSettings"]:
         overall_conf = getattr(diagnostics.confidence_profile, "overall_confidence", 1.0)
         if overall_conf < 0.6:
@@ -752,23 +771,15 @@ class ScannedLiteratureProfile(BaseProfile):
         return True
 
     def get_adaptive_settings(
-        self, diagnostics: "DiagnosticReport", base_params: ProfileParameters
+        self,
+        diagnostics: "DiagnosticReport",
+        base_params: ProfileParameters,
+        doc_profile: Optional[Any] = None,
     ) -> Optional["AdaptiveSettings"]:
-        image_cov = getattr(diagnostics.physical_check, "image_coverage", 0.0)
-        page_count = getattr(getattr(diagnostics, "physical_check", None), "page_count", 0) or 0
-        if image_cov > 0.3 or page_count > 200:
-            return AdaptiveSettings(
-                min_image_width=25,
-                min_image_height=25,
-                semantic_overlap_ratio=0.10,
-            )
-        return None
-
-    def get_adaptive_settings(
-        self, diagnostics: "DiagnosticReport", base_params: ProfileParameters
-    ) -> Optional["AdaptiveSettings"]:
-        image_cov = getattr(diagnostics.physical_check, "image_coverage", 0.0)
-        page_count = getattr(getattr(diagnostics, "physical_check", None), "page_count", 0) or 0
+        # If the scan is image-heavy or very long, keep min dims low and reduce
+        # semantic overlap slightly (helps avoid repeated boilerplate).
+        image_cov = float(getattr(diagnostics.physical_check, "avg_image_coverage", 0.0) or 0.0)
+        page_count = int(getattr(diagnostics.physical_check, "total_pages", 0) or 0)
         if image_cov > 0.3 or page_count > 200:
             return AdaptiveSettings(
                 min_image_width=25,

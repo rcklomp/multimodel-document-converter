@@ -59,6 +59,7 @@ from .schema.ingestion_schema import (
     HierarchyMetadata,
     IngestionChunk,
     SemanticContext,
+    ChunkType,
     create_image_chunk,
     create_table_chunk,
     create_text_chunk,
@@ -113,6 +114,11 @@ MIN_IMAGE_HEIGHT_PX: int = 50
 MAX_CHUNK_CHARS: int = 400
 CHUNK_OVERLAP_RATIO: float = 0.10  # 10% overlap
 MIN_OVERLAP_CHARS: int = 60
+
+# Technical manuals (especially programming books) benefit from larger chunks,
+# but overly large chunks hurt retrieval and increase mid-sentence cut risk.
+# Token-limit enforcement (512 tokens) is handled later in BatchProcessor.
+TECHNICAL_MANUAL_MAX_CHUNK_CHARS: int = 1200
 
 # Sentence ending pattern for smart chunking
 SENTENCE_END_PATTERN = re.compile(r"[.!?]\s+")
@@ -421,9 +427,68 @@ class V2DocumentProcessor:
             logger.debug(f"[DENOISE] Rejected content (noise pattern): '{text}'")
             return True
 
+        # Code blocks can look "non-heading-like" (symbols/indentation). Never treat
+        # code-like content as noise; chunking should preserve it for technical_manual RAG.
+        if self._looks_like_code(text):
+            return False
+
         # Use same validation as heading
         if not is_valid_heading(text):
             logger.debug(f"[DENOISE] Rejected content (invalid): '{text}'")
+            return True
+
+        return False
+
+    def _looks_like_code(self, text: str) -> bool:
+        """
+        Heuristic code detector for programming books/manuals.
+
+        Docling/PyMuPDF often preserve indentation/newlines for code blocks; we prefer
+        to keep those blocks intact (and avoid sentence splitting / denoising).
+        """
+        if not text:
+            return False
+
+        t = text.strip("\n")
+        if "```" in t:
+            return True
+
+        lines = [ln for ln in t.splitlines() if ln.strip()]
+        if len(lines) < 2:
+            # Single-line code (common in OCR layers / inline examples).
+            if ">>>" in t or t.lstrip().startswith("..."):
+                return True
+            if re.search(r"^\s*(def|class|import|from)\b", t):
+                return True
+            # Avoid false positives on English "from ..."; require Python import syntax.
+            if re.search(r"\bfrom\s+[A-Za-z_][\w\.]*\s+import\b", t):
+                return True
+            if re.search(r"\bimport\s+[A-Za-z_][\w\.]*(\s*,\s*[A-Za-z_][\w\.]*)*", t):
+                return True
+            return False
+
+        indented = sum(1 for ln in lines if ln.startswith(("    ", "\t")))
+        repl_prompt = sum(
+            1 for ln in lines if ln.lstrip().startswith((">>>", "..."))
+        )
+        if indented / max(len(lines), 1) >= 0.3:
+            return True
+        if repl_prompt >= 1:
+            return True
+
+        # Language-agnostic + Python-heavy signals
+        code_kw = re.search(
+            r"^\s*(def|class|import|from|return|yield|async\s+def|await|try|except|with|for|while|if|elif|else)\b",
+            t,
+            flags=re.MULTILINE,
+        )
+        if code_kw:
+            return True
+
+        # Symbol density: code tends to include many operators/brackets.
+        symbols = sum(c in "{}[]()<>:=/*+-#.,;\\|" for c in t)
+        alnum = sum(c.isalnum() for c in t)
+        if symbols >= 20 and symbols > alnum * 0.10:
             return True
 
         return False
@@ -535,8 +600,35 @@ class V2DocumentProcessor:
         extracted_image: Optional[Image.Image] = None
 
         try:
-            # PRIORITY 1: Crop from rendered page image using bbox
-            # This preserves consistent 10px padding from _apply_padding()
+            # PRIORITY 1: Use Docling's native extracted image when available.
+            #
+            # This yields "clean" assets (not page crops) and avoids the common failure mode
+            # where bbox crops cut off chart axes / labels / code text in technical books.
+            if hasattr(element, "image") and element.image:
+                img_data = element.image
+                if hasattr(img_data, "pil_image") and img_data.pil_image is not None:
+                    extracted_image = img_data.pil_image
+                    logger.debug("Extracted image from element.image (native)")
+                elif isinstance(img_data, bytes):
+                    extracted_image = Image.open(BytesIO(img_data))
+                    logger.debug("Extracted image from element.image (bytes)")
+                elif isinstance(img_data, Image.Image):
+                    extracted_image = img_data
+                    logger.debug("Extracted image from element.image (PIL)")
+
+                if extracted_image is not None:
+                    # REQ-MM-01: ensure a small safety padding on the asset itself.
+                    # (BBox padding is applied separately to metadata.)
+                    try:
+                        from PIL import ImageOps
+
+                        extracted_image = ImageOps.expand(extracted_image, border=10, fill="white")
+                    except Exception:
+                        pass
+                    return extracted_image
+
+            # PRIORITY 2: Crop from rendered page image using bbox (fallback).
+            # This preserves consistent padding when native extraction isn't available.
             if bbox_normalized and page_no in page_images:
                 page_img = page_images[page_no]
                 page_width, page_height = page_dims
@@ -549,11 +641,9 @@ class V2DocumentProcessor:
                 # abs_bbox is now [x0_pts, y0_pts, x1_pts, y1_pts] in PDF points
 
                 # Step 2: Scale PDF points to rendered pixels (dynamic)
-                # Derive scale from rendered image size vs PDF points
                 if page_width <= 0 or page_height <= 0:
                     logger.warning(
-                        f"Invalid page_dims for scaling: {page_dims}. "
-                        f"Falling back to 1.0 scale."
+                        f"Invalid page_dims for scaling: {page_dims}. Falling back to 1.0 scale."
                     )
                     scale_x = 1.0
                     scale_y = 1.0
@@ -568,33 +658,44 @@ class V2DocumentProcessor:
                     int(abs_bbox[3] * scale_y),
                 )
 
-                # Validate crop coordinates against page image bounds
                 img_width, img_height = page_img.size
                 x0 = max(0, min(crop_box[0], img_width - 1))
                 y0 = max(0, min(crop_box[1], img_height - 1))
                 x1 = max(x0 + 1, min(crop_box[2], img_width))
                 y1 = max(y0 + 1, min(crop_box[3], img_height))
 
-                # Validate minimum crop size
                 if x1 <= x0 or y1 <= y0:
                     logger.warning(
-                        f"Invalid crop coordinates after denormalization: "
+                        "Invalid crop coordinates after denormalization: "
                         f"bbox_normalized={bbox_normalized} → crop=({x0},{y0},{x1},{y1})"
                     )
                     return None
 
-                extracted_image = page_img.crop((x0, y0, x1, y1))
+                crop_tuple = (x0, y0, x1, y1)
+                try:
+                    from .utils.image_trim import expand_crop_box_if_clipped
+
+                    expanded_crop = expand_crop_box_if_clipped(page_img, crop_tuple)
+                    if expanded_crop != crop_tuple:
+                        logger.debug(
+                            f"[CROP-EXPAND] Page {page_no}: expanded crop to avoid clipping "
+                            f"(from={crop_tuple} to={expanded_crop})"
+                        )
+                        crop_tuple = expanded_crop
+                except Exception as expand_err:
+                    logger.debug(f"[CROP-EXPAND] Skipped due to error: {expand_err}")
+
+                extracted_image = page_img.crop(crop_tuple)
 
                 logger.debug(
-                    f"Extracted image via crop: "
-                    f"bbox_normalized={bbox_normalized} → "
+                    f"Extracted image via crop: bbox_normalized={bbox_normalized} → "
                     f"abs_bbox={[f'{v:.1f}' for v in abs_bbox]} → "
-                    f"crop=({x0},{y0},{x1},{y1}) → "
+                    f"crop=({crop_tuple[0]},{crop_tuple[1]},{crop_tuple[2]},{crop_tuple[3]}) → "
                     f"size={extracted_image.size}"
                 )
                 return extracted_image
 
-            # PRIORITY 2: Try to get image from element directly (Docling native)
+            # PRIORITY 3: If bbox exists but we can't crop, fail fast (invariant).
             # NOTE: If no page image is available, we cannot apply consistent padding.
             if bbox_normalized and page_no not in page_images:
                 # ✅ IRON-06: FAIL FAST on missing page buffer
@@ -606,20 +707,6 @@ class V2DocumentProcessor:
                 )
                 logger.error(error_msg)
                 raise RuntimeError(error_msg)
-            if hasattr(element, "image") and element.image:
-                img_data = element.image
-                if hasattr(img_data, "pil_image") and img_data.pil_image is not None:
-                    extracted_image = img_data.pil_image
-                    logger.debug(f"Extracted image from element.image (native)")
-                    return extracted_image
-                elif isinstance(img_data, bytes):
-                    extracted_image = Image.open(BytesIO(img_data))
-                    logger.debug(f"Extracted image from element.image (bytes)")
-                    return extracted_image
-                elif isinstance(img_data, Image.Image):
-                    extracted_image = img_data
-                    logger.debug(f"Extracted image from element.image (PIL)")
-                    return extracted_image
 
             logger.debug(f"No image source available for element on page {page_no}")
             return None
@@ -672,6 +759,23 @@ class V2DocumentProcessor:
             )
 
             if saved_image is not None:
+                # Quality enhancement: trim large near-white margins from page-render crops.
+                # This is especially common in digital PDFs where vector diagrams are rasterized
+                # into cropped page images with lots of whitespace.
+                try:
+                    from .utils.image_trim import trim_white_margins
+
+                    trim_res = trim_white_margins(saved_image)
+                    if trim_res.trimmed:
+                        saved_image = trim_res.image
+                        logger.debug(
+                            f"[ASSET-TRIM] Page {page_no}: trimmed margins for {Path(asset_path).name} "
+                            f"(bbox={trim_res.bbox}, size={saved_image.size})"
+                        )
+                except Exception as trim_err:
+                    # Trimming is best-effort only.
+                    logger.debug(f"[ASSET-TRIM] Skipped due to error: {trim_err}")
+
                 saved_image.save(str(full_path), "PNG")
                 logger.debug(
                     f"Saved asset: {full_path} ({saved_image.size[0]}x{saved_image.size[1]})"
@@ -1038,30 +1142,67 @@ class V2DocumentProcessor:
         text: str,
         max_chars: int = MAX_CHUNK_CHARS,
         overlap_ratio: float = CHUNK_OVERLAP_RATIO,
-    ) -> List[str]:
-        """Split text into chunks with sentence-aware boundaries and overlap."""
+    ) -> List[Tuple[str, ChunkType]]:
+        """
+        Split text into chunks with overlap.
+
+        For programming/technical manuals, prefer code-aware chunking (avoid splitting
+        indented blocks mid-scope). For other documents, default to sentence-aware.
+        """
+        if not text:
+            return []
+
+        max_chars, overlap_ratio = self._effective_chunk_params(max_chars, overlap_ratio)
+        overlap_chars = max(MIN_OVERLAP_CHARS, int(max_chars * overlap_ratio))
+
+        # If the text contains code blocks, chunk by block boundaries (code/prose),
+        # otherwise keep the simpler sentence-aware chunker.
+        if self._looks_like_code(text):
+            return self._chunk_mixed_text_and_code(
+                text=text,
+                max_chars=max_chars,
+                overlap_chars=overlap_chars,
+            )
+
+        if len(text) <= max_chars:
+            return [(text, ChunkType.PARAGRAPH)]
+
+        return [(c, ChunkType.PARAGRAPH) for c in self._chunk_by_sentences(text, max_chars, overlap_chars)]
+
+    def _effective_chunk_params(
+        self, max_chars: int, overlap_ratio: float
+    ) -> Tuple[int, float]:
+        """Profile-aware chunk sizing (keeps default small chunks for non-technical docs)."""
+        profile_type = (self._intelligence_metadata.get("profile_type") or "").lower()
+        if profile_type == "technical_manual":
+            # Avoid over-fragmenting code/prose in programming books.
+            return max(max_chars, TECHNICAL_MANUAL_MAX_CHUNK_CHARS), overlap_ratio
+        return max_chars, overlap_ratio
+
+    def _chunk_by_sentences(self, text: str, max_chars: int, overlap_chars: int) -> List[str]:
+        """Sentence-aware chunking (non-code)."""
         if len(text) <= max_chars:
             return [text]
 
-        chunks = []
-        overlap_chars = max(MIN_OVERLAP_CHARS, int(max_chars * overlap_ratio))
-
         sentences = SENTENCE_END_PATTERN.split(text)
-        sentences_with_endings = []
+        sentences_with_endings: List[str] = []
         pos = 0
         for sent in sentences:
-            if sent.strip():
-                start = text.find(sent, pos)
-                if start >= 0:
-                    end = start + len(sent)
-                    if end < len(text) and text[end] in ".!?":
-                        end += 1
-                    sentences_with_endings.append(text[start:end].strip())
-                    pos = end
+            if not sent.strip():
+                continue
+            start = text.find(sent, pos)
+            if start < 0:
+                continue
+            end = start + len(sent)
+            if end < len(text) and text[end] in ".!?":
+                end += 1
+            sentences_with_endings.append(text[start:end].strip())
+            pos = end
 
         if not sentences_with_endings:
             return self._chunk_by_words(text, max_chars, overlap_chars)
 
+        chunks: List[str] = []
         current_chunk = ""
         for sentence in sentences_with_endings:
             if len(current_chunk) + len(sentence) + 1 > max_chars and current_chunk:
@@ -1075,6 +1216,98 @@ class V2DocumentProcessor:
             chunks.append(current_chunk.strip())
 
         return chunks if chunks else [text]
+
+    def _split_blocks_preserve_newlines(self, text: str) -> List[str]:
+        """
+        Split into blocks separated by blank lines while preserving internal newlines.
+        """
+        blocks: List[str] = []
+        current: List[str] = []
+        for ln in text.splitlines():
+            if ln.strip() == "":
+                if current:
+                    blocks.append("\n".join(current).strip("\n"))
+                    current = []
+                continue
+            current.append(ln)
+        if current:
+            blocks.append("\n".join(current).strip("\n"))
+        return [b for b in blocks if b.strip()]
+
+    def _chunk_code_by_lines(
+        self, code: str, max_chars: int, overlap_lines: int = 4
+    ) -> List[str]:
+        """
+        Chunk code by line boundaries, with a small line overlap for context.
+        """
+        lines = code.splitlines()
+        if not lines:
+            return []
+
+        chunks: List[str] = []
+        i = 0
+        while i < len(lines):
+            current: List[str] = []
+            cur_len = 0
+            while i < len(lines):
+                ln = lines[i]
+                add_len = len(ln) + (1 if current else 0)
+                if current and cur_len + add_len > max_chars:
+                    break
+                current.append(ln)
+                cur_len += add_len
+                i += 1
+            if current:
+                chunks.append("\n".join(current).strip("\n"))
+            if i < len(lines):
+                i = max(i - overlap_lines, 0)
+                # Prevent infinite loop on extremely long single lines.
+                if chunks and chunks[-1] == "\n".join(lines[i : i + len(current)]).strip("\n"):
+                    i += max(1, overlap_lines)
+        return [c for c in chunks if c.strip()]
+
+    def _chunk_mixed_text_and_code(
+        self, text: str, max_chars: int, overlap_chars: int
+    ) -> List[Tuple[str, ChunkType]]:
+        """
+        Chunk mixed prose/code by block boundaries.
+
+        - Prose blocks: sentence-aware, then size-limited with overlap.
+        - Code blocks: never sentence-split; only split by line boundaries if needed.
+        """
+        blocks = self._split_blocks_preserve_newlines(text)
+        if not blocks:
+            return [(text, ChunkType.PARAGRAPH)]
+
+        typed_blocks: List[Tuple[str, ChunkType]] = []
+        for b in blocks:
+            b_type = ChunkType.CODE if self._looks_like_code(b) else ChunkType.PARAGRAPH
+            typed_blocks.append((b, b_type))
+
+        # Merge adjacent blocks of the same type.
+        merged: List[Tuple[str, ChunkType]] = []
+        for b, t in typed_blocks:
+            if not merged or merged[-1][1] != t:
+                merged.append((b, t))
+            else:
+                merged[-1] = (merged[-1][0] + "\n\n" + b, t)
+
+        out: List[Tuple[str, ChunkType]] = []
+        for block_text, block_type in merged:
+            if block_type == ChunkType.CODE:
+                if len(block_text) <= max_chars:
+                    out.append((block_text, ChunkType.CODE))
+                else:
+                    for c in self._chunk_code_by_lines(block_text, max_chars=max_chars):
+                        out.append((c, ChunkType.CODE))
+                continue
+
+            # Prose: chunk within the block, then merge adjacent chunks up to max_chars.
+            prose_chunks = self._chunk_by_sentences(block_text, max_chars, overlap_chars)
+            for c in prose_chunks:
+                out.append((c, ChunkType.PARAGRAPH))
+
+        return [(t, k) for (t, k) in out if t and t.strip()]
 
     def _chunk_by_words(
         self,
@@ -1678,6 +1911,20 @@ class V2DocumentProcessor:
 
             full_path = self.assets_dir / Path(asset_path).name
             try:
+                # Same trim as _save_asset: clean up whitespace-heavy page crops for better downstream RAG.
+                try:
+                    from .utils.image_trim import trim_white_margins
+
+                    trim_res = trim_white_margins(raw_image)
+                    if trim_res.trimmed:
+                        raw_image = trim_res.image
+                        logger.debug(
+                            f"[ASSET-TRIM] Page {page_no}: trimmed margins for {Path(asset_path).name} "
+                            f"(bbox={trim_res.bbox}, size={raw_image.size})"
+                        )
+                except Exception as trim_err:
+                    logger.debug(f"[ASSET-TRIM] Skipped due to error: {trim_err}")
+
                 raw_image.save(str(full_path), "PNG")
                 logger.debug(
                     f"[DEFERRED-SAVE] Saved asset after size check: {full_path} "
@@ -1840,6 +2087,11 @@ class V2DocumentProcessor:
             or "section" in label_lower
             or "list" in label_lower
             or "caption" in label_lower
+            or "code" in label_lower  # Programming books: Docling emits code blocks as \"code\"
+            or "footnote" in label_lower  # Common in manuals/books; should be treated as TEXT
+            or "formula" in label_lower  # Math/formulas are text-like (often missed otherwise)
+            or "equation" in label_lower  # Alias for formula-like regions
+            or "index" in label_lower  # e.g., "document_index" pages
             or label_lower == ""  # Default label is text
         )
 
@@ -2013,10 +2265,8 @@ class V2DocumentProcessor:
 
             text_chunks = self._chunk_text_with_overlap(final_text)
 
-            for i, chunk_text in enumerate(text_chunks):
-                if not self._is_noise_content(chunk_text) and not self._is_advertisement(
-                    chunk_text
-                ):
+            for i, (chunk_text, chunk_type) in enumerate(text_chunks):
+                if not self._is_noise_content(chunk_text) and not self._is_advertisement(chunk_text):
                     # ================================================================
                     # V3.0.0: SEMANTIC CONTEXT - prev_text_snippet, next_text_snippet
                     # ================================================================
@@ -2024,7 +2274,7 @@ class V2DocumentProcessor:
                     # next_text: next chunk in list (if available)
                     next_text_context = None
                     if i + 1 < len(text_chunks):
-                        next_text_context = text_chunks[i + 1][:CONTEXT_SNIPPET_LENGTH]
+                        next_text_context = text_chunks[i + 1][0][:CONTEXT_SNIPPET_LENGTH]
 
                     refined_content = None
                     refinement_applied = False
@@ -2032,7 +2282,8 @@ class V2DocumentProcessor:
                     refinement_provider = None
                     refinement_model = None
 
-                    if self._refiner:
+                    # Never run the refiner on code blocks (avoid mutating syntax/indentation).
+                    if self._refiner and chunk_type != ChunkType.CODE:
                         try:
                             semantic_context = SemanticContext(
                                 prev_text_snippet=prev_text_context,
@@ -2061,6 +2312,7 @@ class V2DocumentProcessor:
                         file_type=file_type,
                         page_number=page_no,
                         hierarchy=hierarchy,
+                        chunk_type=chunk_type,
                         bbox=text_bbox,  # FIX #2: Propagate spatial data
                         prev_text=prev_text_context,
                         next_text=next_text_context,
@@ -2069,6 +2321,7 @@ class V2DocumentProcessor:
                         corruption_score=corruption_score,
                         refinement_provider=refinement_provider,
                         refinement_model=refinement_model,
+                        content_classification=("code" if chunk_type == ChunkType.CODE else None),
                         # V2.4: Intelligence Stack Metadata
                         **self._intelligence_metadata,
                     )

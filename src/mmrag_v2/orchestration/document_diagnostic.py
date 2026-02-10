@@ -353,6 +353,38 @@ class DocumentDiagnosticEngine:
 
         return report
 
+    def _select_page_indices(self, total_pages: int, sample_pages: int) -> List[int]:
+        """
+        Select page indices (0-based) for sampling.
+
+        Important: do NOT only sample the first N pages. Books often have image-heavy
+        front matter (covers/TOC) followed by text-heavy body pages. Using stratified,
+        evenly-spaced sampling avoids false "scanned" classification based on the
+        first few pages alone.
+        """
+        if total_pages <= 0 or sample_pages <= 0:
+            return []
+
+        n = min(sample_pages, total_pages)
+        if total_pages <= n:
+            return list(range(total_pages))
+        if n == 1:
+            return [0]
+
+        # Evenly spaced deterministic sample: 0 .. total_pages-1.
+        idxs = sorted({int(round(i * (total_pages - 1) / (n - 1))) for i in range(n)})
+
+        # Rounding can cause duplicates for small docs; fill with remaining pages.
+        if len(idxs) < n:
+            for i in range(total_pages):
+                if i not in idxs:
+                    idxs.append(i)
+                if len(idxs) >= n:
+                    break
+            idxs = sorted(idxs)
+
+        return idxs
+
     def _perform_deep_scan(
         self,
         pdf_path: Path,
@@ -519,10 +551,11 @@ class DocumentDiagnosticEngine:
             # Sample text extraction
             total_text_length = 0
             total_image_coverage = 0.0
-            pages_analyzed = min(self.sample_pages, total_pages)
+            page_indices = self._select_page_indices(total_pages, self.sample_pages)
+            pages_analyzed = len(page_indices)
 
-            for page_num in range(pages_analyzed):
-                page = doc.load_page(page_num)
+            for page_idx in page_indices:
+                page = doc.load_page(page_idx)
                 page_rect = page.rect
                 page_area = page_rect.width * page_rect.height
 
@@ -574,8 +607,8 @@ class DocumentDiagnosticEngine:
             all_fonts = set()
             pages_with_fullpage_image = 0
 
-            for page_num in range(pages_analyzed):
-                page = doc.load_page(page_num)
+            for page_idx in page_indices:
+                page = doc.load_page(page_idx)
                 page_rect = page.rect
                 page_area = page_rect.width * page_rect.height
 
@@ -649,6 +682,12 @@ class DocumentDiagnosticEngine:
             if avg_text_per_page < SANDWICH_TEXT_CEILING:
                 # Only check for sandwich PDFs when native text is LOW
 
+                # Check 3: Most pages have a single full-page image (the scan itself)
+                # Compute once; also used as a guard for other heuristics.
+                fullpage_ratio = (
+                    pages_with_fullpage_image / pages_analyzed if pages_analyzed > 0 else 0
+                )
+
                 if total_fonts > 0 and ocr_font_count / total_fonts > 0.5:
                     is_sandwich_pdf = True
                     sandwich_reasons.append(
@@ -658,16 +697,19 @@ class DocumentDiagnosticEngine:
                 # Check 2: Very low font diversity with some text = likely OCR
                 # Real magazines have 5+ fonts; OCR scans often have 1-2
                 # NOTE: Only applies when text is LOW (gated above)
-                if total_fonts <= 2 and avg_text_per_page > 50:
+                #
+                # IMPORTANT: Technical books often legitimately use 1-2 fonts (body + mono code),
+                # so low font diversity alone is NOT enough to declare an OCR-over-scan sandwich.
+                # Require additional strong scan evidence (full-page image pages, or extreme image coverage).
+                if total_fonts <= 2 and avg_text_per_page > 50 and (
+                    fullpage_ratio > 0.3 or avg_image_coverage > 0.8
+                ):
                     is_sandwich_pdf = True
                     sandwich_reasons.append(
-                        f"Suspiciously low font diversity ({total_fonts} fonts for {avg_text_per_page:.0f} chars/page)"
+                        f"Suspiciously low font diversity ({total_fonts} fonts for {avg_text_per_page:.0f} chars/page) "
+                        f"+ scan evidence (fullpage_ratio={fullpage_ratio:.0%}, image_cov={avg_image_coverage:.0%})"
                     )
 
-                # Check 3: Most pages have a single full-page image (the scan itself)
-                fullpage_ratio = (
-                    pages_with_fullpage_image / pages_analyzed if pages_analyzed > 0 else 0
-                )
                 if fullpage_ratio > 0.7:  # >70% of pages have full-page images
                     is_sandwich_pdf = True
                     sandwich_reasons.append(
@@ -894,10 +936,10 @@ class DocumentDiagnosticEngine:
         doc: Optional[fitz.Document] = None
         try:
             doc = fitz.open(str(pdf_path))
-            pages_to_analyze = min(self.sample_pages, len(doc))
+            page_indices = self._select_page_indices(len(doc), self.sample_pages)
 
-            for page_num in range(pages_to_analyze):
-                page = doc.load_page(page_num)
+            for page_idx in page_indices:
+                page = doc.load_page(page_idx)
                 page_rect = page.rect
                 page_area = page_rect.width * page_rect.height
 
@@ -937,7 +979,7 @@ class DocumentDiagnosticEngine:
 
                 diagnostics.append(
                     PageDiagnostic(
-                        page_number=page_num + 1,
+                        page_number=page_idx + 1,
                         text_length=text_length,
                         text_density=text_density,
                         image_count=image_count,
@@ -1131,7 +1173,17 @@ class DocumentDiagnosticEngine:
         # ================================================================
         # Calculate content features from page diagnostics
         has_tables = any(p.contains_tables for p in page_diagnostics)
-        high_images = any(p.image_coverage > 0.5 for p in page_diagnostics)
+
+        # Robustness: don't let a single image-heavy cover/figure page force "editorial".
+        # Use a ratio across sampled pages instead of `any(...)`.
+        high_image_pages = sum(1 for p in page_diagnostics if p.image_coverage > 0.5)
+        high_image_ratio = (
+            (high_image_pages / len(page_diagnostics)) if page_diagnostics else 0.0
+        )
+        # Require a stronger majority of image-heavy pages to classify as editorial/magazine.
+        # This avoids misclassifying programming books that have a photo-heavy cover and a few
+        # diagram pages in the sample (e.g., 2/5 = 40%).
+        high_images = high_image_ratio >= 0.6
 
         # Calculate average text density
         avg_text_density = (
@@ -1167,7 +1219,10 @@ class DocumentDiagnosticEngine:
         # Magazines: lots of photos, 500-2000 chars/page
         if high_images:
             content_score_editorial += 0.6
-            logger.debug(f"[DOMAIN-DETECT] Content: High image coverage → editorial +0.6")
+            logger.debug(
+                f"[DOMAIN-DETECT] Content: High image coverage ({high_image_pages}/{len(page_diagnostics)} pages) "
+                f"→ editorial +0.6"
+            )
 
             if 500 < avg_text_per_page < 2500:
                 content_score_editorial += 0.2
@@ -1303,6 +1358,13 @@ class DocumentDiagnosticEngine:
             "guide",
             "spec",
             "handbook",
+            # Programming / software manuals (technical books are often named this way)
+            "python",
+            "programming",
+            "cookbook",
+            "reference",
+            "developer",
+            "api",
             "firearms",
             "weapons",
             "tech",
@@ -1382,13 +1444,23 @@ class DocumentDiagnosticEngine:
         # V2.7 PARITY FIX: Content scores get 90% weight, filename 10% weight
         # This ensures content features dominate classification
 
-        CONTENT_WEIGHT = 0.9
-        FILENAME_WEIGHT = 0.1
+        # Default: content dominates (parity-safe).
+        # If content evidence is weak/ambiguous, allow filename to carry more weight
+        # to avoid pathological UNKNOWN on clearly-named technical books.
+        max_content = max(content_score_academic, content_score_editorial, content_score_technical)
+        if max_content < 0.35:
+            CONTENT_WEIGHT = 0.6
+            FILENAME_WEIGHT = 0.4
+        else:
+            CONTENT_WEIGHT = 0.9
+            FILENAME_WEIGHT = 0.1
 
         # Normalize filename scores to 0-1 range (max score is ~7 for academic)
         filename_norm_academic = min(academic_score / 7.0, 1.0) if academic_score > 0 else 0.0
         filename_norm_editorial = min(editorial_score / 6.0, 1.0) if editorial_score > 0 else 0.0
-        filename_norm_technical = min(technical_score / 3.0, 1.0) if technical_score > 0 else 0.0
+        # Technical filename signals are typically sparse but strong (e.g., \"python cookbook\").
+        # Normalize with a lower ceiling so 2 strong hits can decisively influence the tie-break.
+        filename_norm_technical = min(technical_score / 2.0, 1.0) if technical_score > 0 else 0.0
 
         # Combined scores
         final_academic = (content_score_academic * CONTENT_WEIGHT) + (

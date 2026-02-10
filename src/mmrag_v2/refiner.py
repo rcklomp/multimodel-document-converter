@@ -36,6 +36,7 @@ from __future__ import annotations
 import logging
 import difflib
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -299,6 +300,7 @@ class ContextualRefiner:
         self.model = config.llm_model
         self.base_url = config.llm_base_url
         self.api_key = config.llm_api_key
+        self._request_seq = 0
 
         # Auto-detect Ollama model if not specified
         if self.provider == "ollama" and not self.model:
@@ -308,6 +310,11 @@ class ContextualRefiner:
             f"[ContextualRefiner] Initialized: provider={self.provider}, "
             f"model={self.model}, temp={config.llm_temperature}"
         )
+
+    def _next_request_id(self) -> int:
+        """Generate a monotonic request id for refiner call tracing."""
+        self._request_seq += 1
+        return self._request_seq
 
     def _detect_ollama_model(self) -> str:
         """Auto-detect available Ollama model."""
@@ -384,6 +391,8 @@ class ContextualRefiner:
         """Call Ollama API."""
         base_url = self.base_url or "http://localhost:11434"
         endpoint = f"{base_url}/api/generate"
+        request_id = self._next_request_id()
+        t0 = time.perf_counter()
 
         payload = {
             "model": self.model,
@@ -396,6 +405,10 @@ class ContextualRefiner:
         }
 
         try:
+            logger.info(
+                f"[REFINER-REQ {request_id}] provider=ollama model={self.model} "
+                f"timeout={self.config.llm_timeout} endpoint={endpoint}"
+            )
             response = requests.post(
                 endpoint,
                 json=payload,
@@ -403,12 +416,25 @@ class ContextualRefiner:
             )
             response.raise_for_status()
             result = response.json()
-            return result.get("response", "").strip()
+            text = result.get("response", "").strip()
+            elapsed = time.perf_counter() - t0
+            logger.info(
+                f"[REFINER-RES {request_id}] provider=ollama elapsed={elapsed:.2f}s "
+                f"chars={len(text)}"
+            )
+            return text
         except requests.Timeout:
-            logger.error("[ContextualRefiner] Ollama timeout")
+            elapsed = time.perf_counter() - t0
+            logger.error(
+                f"[REFINER-TIMEOUT {request_id}] provider=ollama elapsed={elapsed:.2f}s "
+                f"timeout={self.config.llm_timeout}"
+            )
             return None
         except Exception as e:
-            logger.error(f"[ContextualRefiner] Ollama error: {e}")
+            elapsed = time.perf_counter() - t0
+            logger.error(
+                f"[REFINER-ERROR {request_id}] provider=ollama elapsed={elapsed:.2f}s error={e}"
+            )
             return None
 
     def _call_openai(self, user_prompt: str) -> Optional[str]:
@@ -421,6 +447,8 @@ class ContextualRefiner:
         if not base_url.endswith("/v1"):
             base_url = f"{base_url}/v1"
         endpoint = f"{base_url}/chat/completions"
+        request_id = self._next_request_id()
+        t0 = time.perf_counter()
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -437,6 +465,10 @@ class ContextualRefiner:
         }
 
         try:
+            logger.info(
+                f"[REFINER-REQ {request_id}] provider=openai model={payload['model']} "
+                f"timeout={self.config.llm_timeout} endpoint={endpoint}"
+            )
             response = requests.post(
                 endpoint,
                 headers=headers,
@@ -445,9 +477,25 @@ class ContextualRefiner:
             )
             response.raise_for_status()
             result = response.json()
-            return result["choices"][0]["message"]["content"].strip()
+            text = result["choices"][0]["message"]["content"].strip()
+            elapsed = time.perf_counter() - t0
+            logger.info(
+                f"[REFINER-RES {request_id}] provider=openai elapsed={elapsed:.2f}s "
+                f"chars={len(text)}"
+            )
+            return text
+        except requests.Timeout:
+            elapsed = time.perf_counter() - t0
+            logger.error(
+                f"[REFINER-TIMEOUT {request_id}] provider=openai elapsed={elapsed:.2f}s "
+                f"timeout={self.config.llm_timeout} endpoint={endpoint}"
+            )
+            return None
         except Exception as e:
-            logger.error(f"[ContextualRefiner] OpenAI error: {e}")
+            elapsed = time.perf_counter() - t0
+            logger.error(
+                f"[REFINER-ERROR {request_id}] provider=openai elapsed={elapsed:.2f}s error={e}"
+            )
             return None
 
     def _call_anthropic(self, user_prompt: str) -> Optional[str]:
@@ -469,8 +517,14 @@ class ContextualRefiner:
             "system": REFINER_SYSTEM_PROMPT,
             "messages": [{"role": "user", "content": user_prompt}],
         }
+        request_id = self._next_request_id()
+        t0 = time.perf_counter()
 
         try:
+            logger.info(
+                f"[REFINER-REQ {request_id}] provider=anthropic model={payload['model']} "
+                f"timeout={self.config.llm_timeout} endpoint={endpoint}"
+            )
             response = requests.post(
                 endpoint,
                 headers=headers,
@@ -479,9 +533,25 @@ class ContextualRefiner:
             )
             response.raise_for_status()
             result = response.json()
-            return result["content"][0]["text"].strip()
+            text = result["content"][0]["text"].strip()
+            elapsed = time.perf_counter() - t0
+            logger.info(
+                f"[REFINER-RES {request_id}] provider=anthropic elapsed={elapsed:.2f}s "
+                f"chars={len(text)}"
+            )
+            return text
+        except requests.Timeout:
+            elapsed = time.perf_counter() - t0
+            logger.error(
+                f"[REFINER-TIMEOUT {request_id}] provider=anthropic elapsed={elapsed:.2f}s "
+                f"timeout={self.config.llm_timeout}"
+            )
+            return None
         except Exception as e:
-            logger.error(f"[ContextualRefiner] Anthropic error: {e}")
+            elapsed = time.perf_counter() - t0
+            logger.error(
+                f"[REFINER-ERROR {request_id}] provider=anthropic elapsed={elapsed:.2f}s error={e}"
+            )
             return None
 
 
@@ -526,6 +596,13 @@ class ConsistencyValidator:
                 self._compiled_protected.append(re.compile(pattern))
             except re.error as e:
                 logger.warning(f"Invalid protected pattern: {pattern} - {e}")
+
+        # Guardrail: reject refinements that inject list markers mid-sentence
+        # (e.g., "If 3. necessary"), a recurring OCR-refiner regression.
+        self._list_marker_pattern = re.compile(r"\b(?:[1-9]|[12]\d|3\d|40)\.\s+[A-Za-z]")
+        self._infix_list_pattern = re.compile(
+            r"\b[A-Za-z][A-Za-z'\-]*\s+(?:[1-9]|[12]\d|3\d|40)\.\s+[A-Za-z][A-Za-z'\-]*"
+        )
 
     def extract_protected_tokens(self, text: str) -> Set[str]:
         """Extract all protected tokens from text."""
@@ -589,6 +666,24 @@ class ConsistencyValidator:
                 edit_ratio=edit_ratio,
                 protected_tokens_preserved=False,
                 rejection_reason=f"Protected tokens changed: {'; '.join(details)}",
+            )
+
+        # Reject if refinement introduces new list-marker artifacts.
+        orig_list_count = len(self._list_marker_pattern.findall(original))
+        ref_list_count = len(self._list_marker_pattern.findall(refined))
+        orig_infix_count = len(self._infix_list_pattern.findall(original))
+        ref_infix_count = len(self._infix_list_pattern.findall(refined))
+        if ref_list_count > orig_list_count or ref_infix_count > orig_infix_count:
+            return ValidationResult(
+                is_valid=False,
+                edit_distance=edit_dist,
+                edit_ratio=edit_ratio,
+                protected_tokens_preserved=True,
+                rejection_reason=(
+                    "Refinement introduced list-marker artifacts "
+                    f"(list {orig_list_count}->{ref_list_count}, "
+                    f"infix {orig_infix_count}->{ref_infix_count})"
+                ),
             )
 
         # All checks passed

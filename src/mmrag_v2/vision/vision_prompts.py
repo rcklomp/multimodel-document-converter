@@ -41,15 +41,15 @@ from typing import Optional
 # VISUAL-ONLY PROMPT (Strict Mode)
 # ============================================================================
 
-VISUAL_ONLY_PROMPT = """VISUAL CONTENT ANALYSIS - STRICT MODE
+VISUAL_ONLY_PROMPT = """VISUAL CONTENT ANALYSIS - VISUAL-ONLY MODE
 
 You are a VISUAL CATALOGER. Your ONLY job is to describe what you SEE in the image pixels.
 
 CRITICAL RULES:
 1. Describe ONLY visual elements: objects, colors, shapes, layouts, diagrams
 2. NEVER use meta-language like "This image shows..." or "The page contains..."
-3. NEVER transcribe or summarize text - OCR already captured it
-4. NEVER mention "document", "page", "text", "article", or "book"
+3. NEVER quote, transcribe, or paraphrase readable text - OCR already captured it
+4. You MAY describe typographic/layout structure at a high level (e.g., "two-column layout", "numbered list", "dense typographic layout") without quoting any words
 5. Start DIRECTLY with the subject: "Exploded diagram...", "Technical schematic...", "Vintage advertisement..."
 
 ALLOWED DESCRIPTORS:
@@ -58,13 +58,15 @@ ALLOWED DESCRIPTORS:
 ✓ "Vintage advertisement layout with product grid"
 ✓ "Detailed technical drawing with numbered components"
 ✓ "Black and white photograph of workshop machinery"
+✓ "Dense typographic layout with two columns and a numbered list"
 
 BANNED PHRASES (NEVER USE):
 ✗ "This image shows..."
 ✗ "The page contains..."
 ✗ "The document discusses..."
-✗ "Text visible in the image..."
-✗ "A photograph of a page from a book..."
+✗ "The text says/reads..."
+✗ Quoting any readable words (no quotes, no copied headings)
+✗ "A photograph of a page from a book/document..."
 
 OUTPUT FORMAT:
 Provide a single sentence (max 60 words) describing the VISUAL CONTENT ONLY.
@@ -192,8 +194,8 @@ DO NOT describe text content - describe ONLY non-textual visual elements:
 - Visual layouts, compositions, arrangements
 - Graphical elements that OCR cannot capture
 
-If this image contains ONLY text (no diagrams/photos), respond with:
-"Text-only page - visual content already captured by OCR"
+If this image contains ONLY typographic content (no diagrams/photos), respond with:
+"Dense typographic layout; no distinct non-text visuals."
 """
 
 
@@ -239,13 +241,17 @@ def build_visual_prompt(
 
     hints_str = "\n".join(hints_parts) if hints_parts else ""
 
-    # Select appropriate prompt template
+    # Select appropriate prompt template.
+    #
+    # IMPORTANT (AGENTS.md / Source Sanctity):
+    # We do not use CONTEXTUAL_VISUAL_PROMPT by default because it encourages
+    # meta-language ("surrounding text", "document section") and speculative
+    # claims. Context, if provided, must be used only for disambiguation and
+    # must NEVER be referenced in the output.
     if is_diagram:
         base_prompt = DIAGRAM_PROMPT
     elif is_photograph:
         base_prompt = PHOTOGRAPH_PROMPT
-    elif context_section:
-        base_prompt = CONTEXTUAL_VISUAL_PROMPT
     else:
         base_prompt = VISUAL_ONLY_PROMPT
 
@@ -292,11 +298,51 @@ def detect_text_reading(response: str) -> bool:
 
     response_lower = response.lower()
 
+    # We allow high-level typographic/layout descriptions (e.g., "two-column layout",
+    # "numbered list", "dense typographic layout"), but we reject anything that
+    # looks like quoting/reading/paraphrasing specific words.
+
+    # Pattern 0: Meta-language that violates visual-only constraints
+    # (even without explicit transcription).
+    #
+    # Keep this conservative but strict: these phrases almost always indicate
+    # the model is referencing document/page context instead of describing pixels.
+    meta_terms = [
+        # Context leakage
+        "surrounding text",
+        "the surrounding text",
+        "document section",
+        "in the text",
+        "mentioned in the text",
+        "as described in the text",
+        # Document/page meta (banned by VISUAL_ONLY_PROMPT)
+        "this document",
+        "the document",
+        "document",
+        "this page",
+        "the page",
+        "on page",
+        "page ",
+        "pages ",
+        "book",
+        "manual",
+        "instructional guide",
+        "guide",
+        "article",
+        "chapter",
+    ]
+    if any(t in response_lower for t in meta_terms):
+        return True
+
     # Pattern 1: "The text says/reads..." patterns
     if re.search(
-        r"\b(text|caption|label|title|heading)\s+(says?|reads?|indicates?|states?)\b",
+        r"\b(text|caption|label|title|heading)\s+(?:that\s+)?(says?|reads?|indicates?|states?)\b",
         response_lower,
     ):
+        return True
+
+    # Pattern 1b: "text that reads ..." / "label that reads ..."
+    if re.search(r"\b(text|caption|label|title|heading)\s+that\s+reads?\b", response_lower):
         return True
 
     # Pattern 2: "written on" patterns
@@ -304,8 +350,7 @@ def detect_text_reading(response: str) -> bool:
         return True
 
     # Pattern 3: "text visible" patterns
-    if "text visible" in response_lower:
-        return True
+    # Not necessarily transcription; allow as a weak signal (do not reject).
 
     # Pattern 4: Excessive quotes (more than 2 pairs = transcription)
     quote_count = response.count('"') + response.count("'")
@@ -315,6 +360,11 @@ def detect_text_reading(response: str) -> bool:
     # Pattern 5: Long quoted strings (>20 chars) indicate transcription
     quoted_strings = re.findall(r'["\'](.{20,})["\']', response)
     if quoted_strings:
+        return True
+
+    # Pattern 5b: Looks like copied headings (long ALLCAPS line) - often OCR/VLM reading.
+    # Keep small abbreviations allowed (handled below).
+    if re.search(r"^[A-Z0-9 ,./\\-]{25,}$", response.strip()):
         return True
 
     # Pattern 6: Multiple ALL CAPS words (>2) may indicate transcription
@@ -360,30 +410,37 @@ def validate_vlm_response(response: str) -> "VLMValidationResult":
             issues=["Empty response"],
         )
 
-    # Check 2: Text transcription detection
-    text_reading = detect_text_reading(response)
-    if text_reading:
-        issues.append("Text transcription detected")
+    # Check 2: Clean first (so we can strip common meta-language before validation)
+    cleaned = clean_vlm_response(response)
+    if not cleaned or not cleaned.strip():
         return VLMValidationResult(
-            is_valid=False, text_reading_detected=True, cleaned_response="", issues=issues
+            is_valid=False,
+            text_reading_detected=False,
+            cleaned_response="",
+            issues=["Empty after cleaning"],
         )
 
-    # Check 3: Generic fallback responses
+    # Check 3: Generic fallback responses (after cleaning)
     fallback_phrases = [
         "unable to describe",
         "cannot describe",
         "no description available",
         "description unavailable",
     ]
-    response_lower = response.lower()
+    response_lower = cleaned.lower()
     if any(phrase in response_lower for phrase in fallback_phrases):
         issues.append("Generic fallback response detected")
         return VLMValidationResult(
             is_valid=False, text_reading_detected=False, cleaned_response="", issues=issues
         )
 
-    # Check 4: Clean response
-    cleaned = clean_vlm_response(response)
+    # Check 4: Text transcription / context leakage detection (on cleaned text)
+    text_reading = detect_text_reading(cleaned)
+    if text_reading:
+        issues.append("Text transcription detected")
+        return VLMValidationResult(
+            is_valid=False, text_reading_detected=True, cleaned_response="", issues=issues
+        )
 
     # Check 5: Response too short after cleaning
     if len(cleaned) < 10:
@@ -489,6 +546,21 @@ def clean_vlm_response(raw_response: str) -> str:
     # Remove trailing meta-commentary
     response = re.sub(
         r",?\s+(?:as shown|as seen|as depicted|as illustrated) (?:in|on) (?:the|this) (?:image|page|figure)\.?$",
+        "",
+        response,
+        flags=re.IGNORECASE,
+    )
+
+    # Remove generic "source" clauses that add retrieval noise.
+    # Keep this narrow to avoid deleting real content.
+    response = re.sub(
+        r",?\s+(?:from|in) (?:a|an|the) (?:technical\s+)?(?:manual|instructional guide|guide|book|document)\.?$",
+        "",
+        response,
+        flags=re.IGNORECASE,
+    )
+    response = re.sub(
+        r",?\s+appears to be from (?:a|an|the) (?:technical\s+)?(?:manual|instructional guide|guide|book|document)\.?$",
         "",
         response,
         flags=re.IGNORECASE,

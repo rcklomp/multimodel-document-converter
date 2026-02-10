@@ -39,7 +39,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple, Any
 
-import cv2
 import numpy as np
 from PIL import Image as PILImage
 
@@ -429,6 +428,22 @@ class LayoutAwareOCRProcessor:
         h, w = page_image.shape[:2]
         regions: List[Region] = []
 
+        try:
+            import cv2  # type: ignore
+        except Exception as e:  # pragma: no cover - optional dependency
+            logger.warning(
+                f"[LAYOUT-OCR] cv2 unavailable; fallback region detection degraded ({e}). "
+                "Treating full page as TEXT."
+            )
+            return [
+                Region(
+                    type="text",
+                    bbox=[0, 0, w, h],
+                    confidence=0.5,
+                    text=None,
+                )
+            ]
+
         # Convert to grayscale for analysis
         gray = cv2.cvtColor(page_image, cv2.COLOR_RGB2GRAY)
 
@@ -608,21 +623,70 @@ class LayoutAwareOCRProcessor:
             logger.warning(f"[LAYOUT-OCR] Empty image crop at {region.bbox}")
             return None
 
+        # If the crop is too tight (ink touches edges), expand slightly to avoid
+        # cutting off diagram lines / labels. This is common when bboxes are a
+        # bit under-estimated on digital manuals.
+        try:
+            from ..utils.image_trim import edge_ink_fractions
+
+            # Iteratively expand up to a small cap.
+            step = 20
+            max_extra = 80
+            expanded = 0
+            cur_x1, cur_y1, cur_x2, cur_y2 = x1, y1, x2, y2
+            while expanded < max_extra:
+                pil_probe = PILImage.fromarray(page_image[cur_y1:cur_y2, cur_x1:cur_x2])
+                fr = edge_ink_fractions(pil_probe)
+                if max(fr.values()) <= 0.02:
+                    break
+                if fr["left"] > 0.02:
+                    cur_x1 = max(0, cur_x1 - step)
+                if fr["right"] > 0.02:
+                    cur_x2 = min(w, cur_x2 + step)
+                if fr["top"] > 0.02:
+                    cur_y1 = max(0, cur_y1 - step)
+                if fr["bottom"] > 0.02:
+                    cur_y2 = min(h, cur_y2 + step)
+                expanded += step
+            if (cur_x1, cur_y1, cur_x2, cur_y2) != (x1, y1, x2, y2):
+                logger.debug(
+                    f"[LAYOUT-OCR][CROP-EXPAND] Page {page_number} region {region_idx}: "
+                    f"expanded crop ({x1},{y1},{x2},{y2}) -> ({cur_x1},{cur_y1},{cur_x2},{cur_y2})"
+                )
+                x1, y1, x2, y2 = cur_x1, cur_y1, cur_x2, cur_y2
+                image_crop = page_image[y1:y2, x1:x2]
+        except Exception as expand_err:
+            logger.debug(f"[LAYOUT-OCR][CROP-EXPAND] Skipped due to error: {expand_err}")
+
         # Save asset to disk
         asset_filename = f"{doc_id}_{page_number:03d}_figure_{region_idx:02d}.png"
         asset_path = self.output_dir / asset_filename
 
-        # Convert RGB to BGR for cv2.imwrite
-        cv2.imwrite(str(asset_path), cv2.cvtColor(image_crop, cv2.COLOR_RGB2BGR))
+        # Prefer PIL for PNG writes (keeps cv2 optional).
+        # Also trim large white margins from page-render crops to produce cleaner assets
+        # (common in digital PDFs with vector diagrams rendered to raster).
+        pil_image = PILImage.fromarray(image_crop)
+        try:
+            from ..utils.image_trim import trim_white_margins
+
+            trim_res = trim_white_margins(pil_image)
+            if trim_res.trimmed:
+                pil_image = trim_res.image
+                logger.debug(
+                    f"[LAYOUT-OCR][TRIM] Page {page_number} region {region_idx}: "
+                    f"trimmed white margins (bbox={trim_res.bbox}, size={pil_image.size})"
+                )
+        except Exception as trim_err:
+            # Trimming is a quality enhancement; never fail extraction due to trimming errors.
+            logger.debug(f"[LAYOUT-OCR][TRIM] Skipped due to error: {trim_err}")
+
+        pil_image.save(str(asset_path))
 
         # Get VLM description if manager available
         visual_description = ""
         if self.vlm_manager:
             try:
-                # Convert numpy array to PIL Image for VisionManager
-                from PIL import Image as PILImageConvert
-
-                pil_image = PILImageConvert.fromarray(image_crop)
+                # Use the same PIL image we saved (post-trim) for VLM enrichment.
 
                 # Check for different VLM manager method signatures
                 if hasattr(self.vlm_manager, "enrich_image"):
@@ -673,8 +737,8 @@ class LayoutAwareOCRProcessor:
             asset_ref={
                 "file_path": f"assets/{asset_filename}",
                 "mime_type": "image/png",
-                "width_px": image_crop.shape[1],
-                "height_px": image_crop.shape[0],
+                "width_px": pil_image.size[0],
+                "height_px": pil_image.size[1],
             },
         )
 
@@ -723,15 +787,33 @@ class LayoutAwareOCRProcessor:
         asset_filename = f"{doc_id}_{page_number:03d}_table_{region_idx:02d}.png"
         asset_path = self.output_dir / asset_filename
 
-        # Convert RGB to BGR for cv2.imwrite
+        # Prefer PIL for PNG writes (keeps cv2 optional).
         try:
-            cv2.imwrite(str(asset_path), cv2.cvtColor(table_crop, cv2.COLOR_RGB2BGR))
+            table_pil = PILImage.fromarray(table_crop)
+            # Apply the same conservative trim used for figures: many Docling bboxes
+            # include large white margins around tables in digital PDFs.
+            try:
+                from ..utils.image_trim import trim_white_margins
+
+                trim_res = trim_white_margins(table_pil)
+                if trim_res.trimmed:
+                    table_pil = trim_res.image
+                    logger.debug(
+                        f"[LAYOUT-OCR][TRIM] Page {page_number} table {region_idx}: "
+                        f"trimmed white margins (bbox={trim_res.bbox}, size={table_pil.size})"
+                    )
+            except Exception as trim_err:
+                logger.debug(f"[LAYOUT-OCR][TRIM] Skipped (table) due to error: {trim_err}")
+
+            table_pil.save(str(asset_path))
             logger.debug(f"[LAYOUT-OCR] Saved table asset: {asset_filename}")
         except Exception as e:
             logger.error(f"[LAYOUT-OCR] Failed to save table asset {asset_filename}: {e}")
             # Continue without asset_ref - validation will catch this
 
         # Run OCR on table to extract text content
+        # Use the raw numpy crop for OCR (keeps existing behavior). Trimming is for
+        # asset cleanliness and doesn't affect the extraction bbox.
         ocr_result = self.ocr_engine.process_page(table_crop)
 
         # Generate chunk ID
@@ -756,8 +838,9 @@ class LayoutAwareOCRProcessor:
             asset_ref={
                 "file_path": f"assets/{asset_filename}",
                 "mime_type": "image/png",
-                "width_px": table_crop.shape[1],
-                "height_px": table_crop.shape[0],
+                # Report the saved asset dimensions (post-trim if applied).
+                "width_px": int(table_pil.size[0]) if "table_pil" in locals() else table_crop.shape[1],
+                "height_px": int(table_pil.size[1]) if "table_pil" in locals() else table_crop.shape[0],
             },
         )
 
