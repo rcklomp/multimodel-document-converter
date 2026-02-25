@@ -31,6 +31,38 @@ All notable changes to this project will be documented in this file. This projec
   for Python keywords anywhere in a long flat string (not just at `^` anchors),
   catching code that had its newlines stripped by a broken PDF generator.
 
+### Fixed
+- **`intelligence_metadata` structural flags TypeError:** `has_flat_text_corruption`,
+  `has_encoding_corruption`, and `geometry_error_rate` were placed inside the
+  `intelligence_metadata` dict in `cli.py`, which is later `**`-unpacked into
+  `create_text_chunk()` / `create_image_chunk()` / `create_table_chunk()`. Those
+  functions don't accept those keyword arguments, causing a `TypeError` at runtime.
+  Fixed in `BatchProcessor.set_intelligence_metadata()`: the three keys are now
+  `pop()`-ed into dedicated instance variables (`self.has_flat_text_corruption` etc.)
+  before the dict is stored, keeping the dict clean for `**`-unpacking.
+- **`chunk_type` invisible to downstream tools:** `IngestionChunk` now exposes
+  `chunk_type` as a Pydantic `@computed_field`, surfacing `metadata.chunk_type` at
+  the root level of every serialised text chunk. Tools reading
+  `chunk["chunk_type"]` no longer get `None`. Image and table chunks return `null`.
+- **OversizeBreaker mid-word hard cuts (three-layer bug):** `_split_nearest_paragraph_breaks()`
+  was producing 73 mid-word 1500-char hard cuts per run due to three independent defects:
+  1. `max_chars // 2` guard discarded valid sentence breaks near the target —
+     lowered to `max_chars // 5`.
+  2. `p_after` / `n_after` positions beyond `max_chars` could win on proximity and
+     then get hard-capped to 1500 — excluded when `> max_chars`.
+  3. `if candidates: … else:` structure blocked the `\n` / sentence-mark fallthrough
+     whenever a `\n\n` existed below the threshold — restructured to an explicit
+     `if split_idx is None:` fallthrough chain (Level 1: `\n\n` → Level 2: `\n` →
+     Level 3: sentence mark). Result: 73 mid-word hard cuts reduced to 0 (2
+     remaining are genuine sentence-boundary splits at `.`).
+- **Dense-typographic zero-value image chunks:** A new `_filter_no_visual_images()`
+  post-processing pass (wired after `_apply_oversize_breaker`) drops image chunks
+  whose `visual_description` contains the sentinel phrase
+  `"no distinct non-text visuals"`. These are shadow-extracted text-only regions
+  where the VLM fallback (after two `text_reading_detected` rejections in
+  `vision_manager.py`) returns this phrase — they add no visual signal to the RAG
+  index.
+
 ### Changed
 - `PhysicalCheckResult` extended with `has_flat_text_corruption: bool`,
   `has_encoding_corruption: bool`, `geometry_error_rate: float`.
