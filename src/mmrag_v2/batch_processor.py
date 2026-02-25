@@ -1766,6 +1766,102 @@ class BatchProcessor:
 
         return page_chunks
 
+    def _flat_code_rescue_legacy_pass(
+        self,
+        chunks: List[IngestionChunk],
+        batch_path: "Path",
+        page_offset: int,
+    ) -> List[IngestionChunk]:
+        """
+        REQ-STRUCT-01 / Flat Code OCR Rescue — legacy-path post-pass (v2.5.0).
+
+        Wraps _flat_code_ocr_rescue() for the standard Docling (legacy) processing path.
+        Groups flat code chunks by page, opens the batch PDF read-only, and dispatches
+        the per-page rescue.  This fires regardless of enable_ocr / ocr_mode settings
+        because it is a targeted per-chunk correction, not a full OCR run.
+
+        Args:
+            chunks: All chunks produced for this batch.
+            batch_path: Path to the split batch PDF file.
+            page_offset: 0-based page offset for this batch in the original document.
+
+        Returns:
+            Updated chunk list with flat code chunks re-extracted where possible.
+        """
+        try:
+            import pytesseract  # noqa: F401 — abort early if not available
+        except ImportError:
+            logger.debug("[FLAT-CODE-RESCUE-LEGACY] pytesseract not available; skipping.")
+            return chunks
+
+        # Collect page numbers that have at least one flat code candidate.
+        def _is_flat_code(ch: IngestionChunk) -> bool:
+            if ch.modality != Modality.TEXT:
+                return False
+            try:
+                is_code = (
+                    ch.metadata.chunk_type == ChunkType.CODE
+                    or ch.metadata.content_classification == "code"
+                )
+            except Exception:
+                is_code = False
+            if not is_code:
+                return False
+            txt = ch.content or ""
+            return len(txt) > 120 and "\n" not in txt
+
+        # Group chunks by page_number (1-based in original doc).
+        pages_with_flat: set = set()
+        for ch in chunks:
+            if _is_flat_code(ch):
+                try:
+                    pn = ch.metadata.page_number
+                    if pn is not None:
+                        pages_with_flat.add(int(pn))
+                except Exception:
+                    pass
+
+        if not pages_with_flat:
+            return chunks
+
+        doc: Optional[fitz.Document] = None
+        try:
+            doc = fitz.open(str(batch_path))
+
+            for page_no in sorted(pages_with_flat):
+                # 0-based index within the batch PDF
+                batch_page_idx = page_no - page_offset - 1
+                if batch_page_idx < 0 or batch_page_idx >= len(doc):
+                    continue
+
+                # Isolate chunks for this page, run rescue, put them back.
+                page_chunks = [ch for ch in chunks if (
+                    ch.metadata is not None
+                    and getattr(ch.metadata, "page_number", None) == page_no
+                )]
+                if not page_chunks:
+                    continue
+
+                rescued = self._flat_code_ocr_rescue(
+                    page_chunks=page_chunks,
+                    pdf_doc=doc,
+                    pdf_page_idx=batch_page_idx,
+                    page_number=page_no,
+                )
+                # The rescue mutates chunks in-place via chunk.content assignment,
+                # so the original `chunks` list is already updated.
+
+        except Exception as exc:
+            logger.debug(f"[FLAT-CODE-RESCUE-LEGACY] Post-pass failed (non-fatal): {exc}")
+        finally:
+            if doc is not None:
+                try:
+                    doc.close()
+                except Exception:
+                    pass
+
+        return chunks
+
     def _process_single_batch(
         self,
         batch_info: BatchInfo,
@@ -1928,6 +2024,19 @@ class BatchProcessor:
             except Exception:
                 pass
             gc.collect()
+
+        # REQ-STRUCT-01: Flat Code OCR Rescue — legacy-path post-pass.
+        # The layout-aware path runs rescue inline (per page). For the legacy Docling path
+        # (digital PDFs, OCR disabled) we do a single targeted pass over all chunks here,
+        # opening the batch PDF read-only just for page rendering.
+        # This fires regardless of enable_ocr/ocr_mode because it is a per-chunk correction,
+        # not a full OCR run.
+        if self._intelligence_metadata.get("has_flat_text_corruption") and chunks:
+            chunks = self._flat_code_rescue_legacy_pass(
+                chunks=chunks,
+                batch_path=batch_info.batch_path,
+                page_offset=batch_info.page_offset,
+            )
 
         # Log batch completion
         breadcrumbs = self._context_state.get_breadcrumb_path() if self._context_state else []
