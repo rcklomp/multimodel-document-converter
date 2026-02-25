@@ -55,6 +55,20 @@ DEEP_SCAN_SAMPLE_PAGES: int = 15  # V16: Deep scan for low confidence cases
 DPI_LOW: int = 72  # Quick analysis
 DPI_HIGH: int = 150  # Detailed analysis
 
+# REQ-STRUCT-01: Line-break health thresholds (v2.5.0)
+# Ratio = words per newline. A healthy page has ~5-20 words per newline.
+# A flat-text corrupted page (newlines stripped by broken PDF generator) has >50.
+FLAT_TEXT_WORDS_PER_NEWLINE: float = 50.0
+# Fraction of sampled pages that must be flat to set has_flat_text_corruption.
+FLAT_TEXT_PAGE_FRACTION: float = 0.5
+
+# REQ-STRUCT-02: Visual-digital delta thresholds (v2.5.0)
+# Jaccard overlap between PyMuPDF word set and Tesseract word set.
+# Below this threshold → encoding is garbage (CIDFont / broken char map).
+ENCODING_DELTA_MIN_OVERLAP: float = 0.50
+# Minimum PyMuPDF words needed to run the test (skip nearly-empty pages).
+ENCODING_DELTA_MIN_WORDS: int = 15
+
 # Confidence thresholds
 HIGH_CONFIDENCE_THRESHOLD: float = 0.85
 LOW_CONFIDENCE_THRESHOLD: float = 0.50
@@ -123,6 +137,7 @@ class PhysicalCheckResult:
     Results from physical/heuristic document analysis.
 
     REQ-DIAG-02: Detect scans without relying on VLM classification.
+    REQ-STRUCT-01/02/03 (v2.5.0): Structural pathology tests on the PDF byte-stream.
     """
 
     file_size_mb: float
@@ -133,6 +148,15 @@ class PhysicalCheckResult:
     scan_confidence: float  # 0.0-1.0
     detected_modality: DocumentModality
     reasoning: str
+    # v2.5.0: Structural pathology flags — set by byte-stream tests, independent of semantic profile.
+    # has_flat_text_corruption: True when the PDF generator stripped newlines from text streams
+    #   (words-per-newline ratio > 50 on most sampled pages). Triggers Flat Code OCR Rescue.
+    has_flat_text_corruption: bool = False
+    # has_encoding_corruption: True when the digital text layer is encoding-garbage
+    #   (PyMuPDF vs Tesseract word-set Jaccard overlap < 0.50). Forces full OCR pathway.
+    has_encoding_corruption: bool = False
+    # geometry_error_rate: MuPDF path-syntax errors per sampled page. Informational/risk signal only.
+    geometry_error_rate: float = 0.0
 
 
 @dataclass
@@ -554,8 +578,32 @@ class DocumentDiagnosticEngine:
             page_indices = self._select_page_indices(total_pages, self.sample_pages)
             pages_analyzed = len(page_indices)
 
+            # REQ-STRUCT-01: Track flat-text pages for line-break health test.
+            flat_page_count = 0
+            text_rich_page_count = 0  # Pages with enough words to measure ratio
+
+            # REQ-STRUCT-03: Cumulative MuPDF geometry warning count.
+            total_geometry_warnings = 0
+
             for page_idx in page_indices:
+                # REQ-STRUCT-03: Reset MuPDF warning buffer before each page load.
+                try:
+                    fitz.TOOLS.reset_mupdf_warnings()
+                except Exception:
+                    pass
+
                 page = doc.load_page(page_idx)
+
+                # REQ-STRUCT-03: Collect geometry warnings after loading the page.
+                try:
+                    warn_str = fitz.TOOLS.mupdf_warnings()
+                    if warn_str and warn_str.strip():
+                        total_geometry_warnings += len(
+                            [w for w in warn_str.strip().split("\n") if w.strip()]
+                        )
+                except Exception:
+                    pass
+
                 page_rect = page.rect
                 page_area = page_rect.width * page_rect.height
 
@@ -563,6 +611,15 @@ class DocumentDiagnosticEngine:
                 text_result = page.get_text()
                 text = str(text_result) if text_result else ""
                 total_text_length += len(text.strip())
+
+                # REQ-STRUCT-01: Line-break health — measure words-per-newline ratio.
+                words_on_page = len(text.split())
+                if words_on_page > 30:
+                    text_rich_page_count += 1
+                    newlines_on_page = text.count("\n")
+                    ratio = words_on_page / max(newlines_on_page, 1)
+                    if ratio > FLAT_TEXT_WORDS_PER_NEWLINE:
+                        flat_page_count += 1
 
                 # Image coverage analysis
                 image_list = page.get_images(full=True)
@@ -914,6 +971,55 @@ class DocumentDiagnosticEngine:
                     f"{avg_image_coverage:.1%} image coverage"
                 )
 
+            # ================================================================
+            # REQ-STRUCT-01: Compute line-break health flag
+            # ================================================================
+            has_flat_text_corruption = False
+            if text_rich_page_count > 0:
+                flat_fraction = flat_page_count / text_rich_page_count
+                has_flat_text_corruption = flat_fraction >= FLAT_TEXT_PAGE_FRACTION
+                if has_flat_text_corruption:
+                    logger.warning(
+                        f"[STRUCT-01] FLAT TEXT CORRUPTION detected: {flat_page_count}/{text_rich_page_count} "
+                        f"text-rich pages have words/newline ratio > {FLAT_TEXT_WORDS_PER_NEWLINE}. "
+                        "PDF generator likely stripped newlines — Flat Code OCR Rescue will activate."
+                    )
+                else:
+                    logger.debug(
+                        f"[STRUCT-01] Line-break health OK: {flat_page_count}/{text_rich_page_count} flat pages "
+                        f"(threshold: {FLAT_TEXT_PAGE_FRACTION:.0%})"
+                    )
+
+            # ================================================================
+            # REQ-STRUCT-02: Visual-digital delta test
+            # Only for digital-like documents; skip scans (expected low overlap).
+            # Runs on one mid-document page to keep cost ~300ms.
+            # ================================================================
+            has_encoding_corruption = False
+            if not is_likely_scan and avg_text_per_page >= SCAN_TEXT_THRESHOLD_CHARS:
+                has_encoding_corruption = self._test_visual_digital_delta(
+                    doc=doc, page_indices=page_indices
+                )
+                if has_encoding_corruption:
+                    logger.warning(
+                        "[STRUCT-02] ENCODING CORRUPTION detected: PyMuPDF text layer word-set overlap "
+                        "with Tesseract OCR < 50%%. Digital text layer is encoding-garbage. "
+                        "Forcing full OCR pathway."
+                    )
+                else:
+                    logger.debug("[STRUCT-02] Visual-digital delta OK: text layer matches OCR output.")
+
+            # ================================================================
+            # REQ-STRUCT-03: Geometry error rate (informational only)
+            # ================================================================
+            geometry_error_rate = total_geometry_warnings / max(pages_analyzed, 1)
+            if geometry_error_rate > 0:
+                logger.info(
+                    f"[STRUCT-03] Geometry errors: {total_geometry_warnings} warnings "
+                    f"across {pages_analyzed} sampled pages "
+                    f"(rate={geometry_error_rate:.1f}/page)"
+                )
+
             return PhysicalCheckResult(
                 file_size_mb=file_size_mb,
                 total_pages=total_pages,
@@ -923,11 +1029,118 @@ class DocumentDiagnosticEngine:
                 scan_confidence=scan_confidence,
                 detected_modality=detected_modality,
                 reasoning=" | ".join(reasoning_parts),
+                has_flat_text_corruption=has_flat_text_corruption,
+                has_encoding_corruption=has_encoding_corruption,
+                geometry_error_rate=geometry_error_rate,
             )
 
         finally:
             if doc is not None:
                 doc.close()
+
+    def _test_visual_digital_delta(
+        self,
+        doc: "fitz.Document",
+        page_indices: List[int],
+    ) -> bool:
+        """
+        REQ-STRUCT-02: Visual-digital delta test.
+
+        Renders one mid-document page as an image, runs Tesseract OCR on it,
+        and compares the resulting word set with the PyMuPDF text layer.
+
+        If the Jaccard overlap between the two word sets is < ENCODING_DELTA_MIN_OVERLAP
+        (50%), the digital text layer is encoding-garbage (CIDFont / broken char map)
+        and the full OCR pathway must be forced.
+
+        Returns True if encoding corruption is detected, False otherwise.
+        Cost: ~300ms on a single page.
+        """
+        import re
+
+        try:
+            import pytesseract
+            from PIL import Image as PILImage
+        except ImportError:
+            logger.debug("[STRUCT-02] pytesseract or PIL not available; skipping visual-digital delta test.")
+            return False
+
+        # Choose a mid-document page that is likely to have text (not the cover).
+        # Prefer the page at index len//2; fall back to first available.
+        candidate_indices = list(page_indices)
+        if len(candidate_indices) >= 2:
+            # Skip the very first page (often a cover/title with few text chars)
+            candidate_indices = candidate_indices[len(candidate_indices) // 2:]
+
+        test_page_idx: Optional[int] = None
+        for pi in candidate_indices:
+            if pi < len(doc):
+                # Quick check: does this page have enough text to be worth comparing?
+                pg = doc.load_page(pi)
+                words = pg.get_text("words")
+                if len(words) >= ENCODING_DELTA_MIN_WORDS:
+                    test_page_idx = pi
+                    break
+
+        if test_page_idx is None:
+            logger.debug("[STRUCT-02] No suitable page found for visual-digital delta test.")
+            return False
+
+        try:
+            page = doc.load_page(test_page_idx)
+
+            # PyMuPDF word set — lower-cased, alpha-only tokens of length >= 3
+            mupdf_words_raw = [w[4] for w in page.get_text("words")]  # field 4 = word text
+            mupdf_set = {
+                re.sub(r"[^a-z]", "", w.lower())
+                for w in mupdf_words_raw
+                if len(w) >= 3
+            }
+            mupdf_set.discard("")
+
+            if len(mupdf_set) < ENCODING_DELTA_MIN_WORDS:
+                logger.debug(
+                    f"[STRUCT-02] Page {test_page_idx}: only {len(mupdf_set)} clean PyMuPDF words; skipping."
+                )
+                return False
+
+            # Render page as image at 72 DPI (fast)
+            mat = fitz.Matrix(1.0, 1.0)  # 72 DPI equivalent
+            pixmap = page.get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
+            img_bytes = pixmap.tobytes("png")
+            pil_img = PILImage.open(__import__("io").BytesIO(img_bytes))
+
+            # Run Tesseract
+            ocr_text = pytesseract.image_to_string(pil_img, lang="eng", config="--psm 3")
+            ocr_set = {
+                re.sub(r"[^a-z]", "", w.lower())
+                for w in ocr_text.split()
+                if len(w) >= 3
+            }
+            ocr_set.discard("")
+
+            if len(ocr_set) < ENCODING_DELTA_MIN_WORDS:
+                logger.debug(
+                    f"[STRUCT-02] Page {test_page_idx}: only {len(ocr_set)} Tesseract words; skipping."
+                )
+                return False
+
+            # Jaccard overlap
+            intersection = mupdf_set & ocr_set
+            union = mupdf_set | ocr_set
+            overlap = len(intersection) / len(union) if union else 1.0
+
+            logger.info(
+                f"[STRUCT-02] Page {test_page_idx}: PyMuPDF={len(mupdf_set)} words, "
+                f"Tesseract={len(ocr_set)} words, overlap={overlap:.2%} "
+                f"(threshold={ENCODING_DELTA_MIN_OVERLAP:.0%})"
+            )
+
+            return overlap < ENCODING_DELTA_MIN_OVERLAP
+
+        except Exception as exc:
+            logger.debug(f"[STRUCT-02] Visual-digital delta test failed (non-fatal): {exc}")
+            return False
 
     def _analyze_sample_pages(self, pdf_path: Path) -> List[PageDiagnostic]:
         """Analyze individual sample pages for detailed diagnostics."""

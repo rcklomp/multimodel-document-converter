@@ -1135,6 +1135,16 @@ class BatchProcessor:
                         page_number=actual_page_no,
                     )
 
+                # REQ-STRUCT-01: Flat Code OCR Rescue — active for ALL profiles when
+                # has_flat_text_corruption=True (broken PDF generator stripped newlines).
+                if self._intelligence_metadata.get("has_flat_text_corruption"):
+                    page_chunks = self._flat_code_ocr_rescue(
+                        page_chunks=page_chunks,
+                        pdf_doc=doc,
+                        pdf_page_idx=batch_page_idx,
+                        page_number=actual_page_no,
+                    )
+
                 all_chunks.extend(page_chunks)
 
                 # Log chunk types
@@ -1634,6 +1644,128 @@ class BatchProcessor:
 
         return merged_chunks
 
+    def _flat_code_ocr_rescue(
+        self,
+        page_chunks: List[IngestionChunk],
+        pdf_doc: "fitz.Document",
+        pdf_page_idx: int,
+        page_number: int,
+    ) -> List[IngestionChunk]:
+        """
+        REQ-STRUCT-01 / Flat Code OCR Rescue (v2.5.0).
+
+        Runs for any profile when has_flat_text_corruption=True in intelligence_metadata.
+        Detects CODE chunks whose content has no embedded newlines and is longer than
+        120 characters (signature of a broken PDF generator that stripped all \\n from
+        the code stream), renders the page crop via PyMuPDF at 150 DPI, runs Tesseract
+        on the crop, and replaces the chunk content if the OCR result is better structured
+        (contains >= 2 newlines).
+
+        Unlike _nuclear_code_fix (which stitches fragmented OCR lines), this method
+        re-reads already-extracted CODE chunks via OCR to restore their internal structure.
+        It does NOT require scanned_degraded profile.
+
+        Args:
+            page_chunks: Chunks produced for this page.
+            pdf_doc: Open fitz.Document (must stay open during this call).
+            pdf_page_idx: 0-based page index within pdf_doc.
+            page_number: 1-based page number for logging.
+
+        Returns:
+            Updated chunk list with flat code chunks re-extracted where possible.
+        """
+        import re
+
+        try:
+            import pytesseract
+            from PIL import Image as PILImage
+        except ImportError:
+            logger.debug("[FLAT-CODE-RESCUE] pytesseract not available; skipping.")
+            return page_chunks
+
+        # Quick pass: any candidates at all?
+        def _is_flat_code_candidate(ch: IngestionChunk) -> bool:
+            if ch.modality != Modality.TEXT:
+                return False
+            try:
+                is_code = (
+                    ch.metadata.chunk_type == ChunkType.CODE
+                    or ch.metadata.content_classification == "code"
+                )
+            except Exception:
+                is_code = False
+            if not is_code:
+                return False
+            txt = ch.content or ""
+            return len(txt) > 120 and "\n" not in txt
+
+        candidates = [ch for ch in page_chunks if _is_flat_code_candidate(ch)]
+        if not candidates:
+            return page_chunks
+
+        # Render the page at 150 DPI for good OCR quality
+        try:
+            fitz_page = pdf_doc.load_page(pdf_page_idx)
+            mat = fitz.Matrix(150 / 72, 150 / 72)
+            pixmap = fitz_page.get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
+            page_h_px = pixmap.height
+            page_w_px = pixmap.width
+            page_pil = PILImage.frombytes("L", [page_w_px, page_h_px], pixmap.samples)
+        except Exception as exc:
+            logger.debug(f"[FLAT-CODE-RESCUE] Page {page_number}: could not render page: {exc}")
+            return page_chunks
+
+        rescued = 0
+        for chunk in candidates:
+            try:
+                bbox = chunk.metadata.spatial.bbox if chunk.metadata and chunk.metadata.spatial else None
+                if not bbox or len(bbox) != 4:
+                    continue
+
+                # Denormalise bbox (stored in COORD_SCALE=1000 units) to pixel coords
+                padding = 12
+                x0 = max(0, int((bbox[0] / COORD_SCALE) * page_w_px) - padding)
+                y0 = max(0, int((bbox[1] / COORD_SCALE) * page_h_px) - padding)
+                x1 = min(page_w_px, int((bbox[2] / COORD_SCALE) * page_w_px) + padding)
+                y1 = min(page_h_px, int((bbox[3] / COORD_SCALE) * page_h_px) + padding)
+
+                if x1 - x0 < 20 or y1 - y0 < 20:
+                    continue
+
+                crop = page_pil.crop((x0, y0, x1, y1))
+                ocr_text = pytesseract.image_to_string(
+                    crop, lang="eng", config="--psm 6 -c preserve_interword_spaces=1"
+                )
+                ocr_text = ocr_text.strip()
+
+                if not ocr_text or ocr_text.count("\n") < 2:
+                    # OCR didn't recover meaningful structure — keep original
+                    continue
+
+                # Accept OCR result only if it's longer or better-structured than original
+                original = chunk.content or ""
+                if len(ocr_text) < len(original) * 0.3:
+                    # OCR result is suspiciously short vs. original — skip
+                    continue
+
+                chunk.content = ocr_text
+                chunk.metadata.extraction_method = "flat_code_ocr_rescue"
+                rescued += 1
+
+            except Exception as exc:
+                logger.debug(f"[FLAT-CODE-RESCUE] Page {page_number}: chunk rescue failed: {exc}")
+
+        if rescued > 0:
+            logger.info(
+                f"[FLAT-CODE-RESCUE] Page {page_number}: rescued {rescued}/{len(candidates)} flat code chunks via Tesseract."
+            )
+        else:
+            logger.debug(
+                f"[FLAT-CODE-RESCUE] Page {page_number}: {len(candidates)} flat candidates found but none improved by OCR."
+            )
+
+        return page_chunks
+
     def _process_single_batch(
         self,
         batch_info: BatchInfo,
@@ -1853,6 +1985,17 @@ class BatchProcessor:
         doc_modality = self._intelligence_metadata.get("document_modality")
         profile_type = (self._intelligence_metadata.get("profile_type") or "").lower()
         is_digital_like = doc_modality in ("native_digital", "image_heavy")
+
+        # REQ-STRUCT-02: Override OCR guard when encoding corruption is detected.
+        # Even if the document looks digital (native_digital), if the text layer is
+        # encoding-garbage (CIDFont / broken char map), we MUST force full OCR.
+        has_encoding_corruption = bool(self._intelligence_metadata.get("has_encoding_corruption"))
+        if has_encoding_corruption and is_digital_like and not self.force_ocr:
+            self.force_ocr = True
+            logger.warning(
+                f"[OCR-GUARD] ENCODING CORRUPTION detected on digital-like PDF "
+                f"(modality={doc_modality}); overriding force_ocr=True to bypass corrupt text layer."
+            )
 
         # Default policy (AGENTS.md): avoid OCR cascade on digital-like PDFs unless user explicitly forces it.
         # This applies to all profiles, including technical_manual.
@@ -4044,6 +4187,18 @@ class BatchProcessor:
                 t,
             ):
                 return True
+            # REQ-STRUCT-01 / _looks_like_code_text flat-code extension:
+            # A broken PDF generator (e.g. Kimothi 2025) strips all \n from code blocks,
+            # producing one very long flat string. The ^ anchors above cannot match
+            # keywords that appear mid-string. Detect flat code by looking for multiple
+            # Python keyword occurrences anywhere in a long single-line string.
+            if len(t) > 80 and "\n" not in t:
+                kw_hits = len(re.findall(
+                    r"\b(import|from|def|class|return|raise|yield|elif|else|except|with|pass|break|continue)\b",
+                    t,
+                ))
+                if kw_hits >= 2 and re.search(r"[=\(\)\[\]\{\}:.,]", t):
+                    return True
             return False
 
         indented = sum(1 for ln in lines if ln.startswith(("    ", "\t")))

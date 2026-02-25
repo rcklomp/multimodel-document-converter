@@ -309,6 +309,14 @@ def _run_intelligent_pipeline(
             console.print(f"  [yellow]⚠ {warning}[/yellow]")
 
     console.print(f"[cyan]Reasoning:[/cyan] {diagnostic_report.physical_check.reasoning}")
+    # v2.5.0: Structural pathology flags
+    pc = diagnostic_report.physical_check
+    if pc.has_flat_text_corruption:
+        console.print("[bold red]⚠ FLAT TEXT CORRUPTION:[/bold red] Newlines stripped by PDF generator → Flat Code OCR Rescue active")
+    if pc.has_encoding_corruption:
+        console.print("[bold red]⚠ ENCODING CORRUPTION:[/bold red] Text layer is encoding-garbage → forcing full OCR pathway")
+    if pc.geometry_error_rate > 0:
+        console.print(f"[yellow]  Geometry errors: {pc.geometry_error_rate:.1f}/page (risk signal)[/yellow]")
     console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
     console.print()
 
@@ -770,6 +778,14 @@ def process_document(
                     console.print(f"  [yellow]⚠ {warning}[/yellow]")
 
             console.print(f"[cyan]Reasoning:[/cyan] {diagnostic_report.physical_check.reasoning}")
+            # v2.5.0: Structural pathology flags
+            _pc = diagnostic_report.physical_check
+            if _pc.has_flat_text_corruption:
+                console.print("[bold red]⚠ FLAT TEXT CORRUPTION:[/bold red] Newlines stripped by PDF generator → Flat Code OCR Rescue active")
+            if _pc.has_encoding_corruption:
+                console.print("[bold red]⚠ ENCODING CORRUPTION:[/bold red] Text layer is encoding-garbage → forcing full OCR pathway")
+            if _pc.geometry_error_rate > 0:
+                console.print(f"[yellow]  Geometry errors: {_pc.geometry_error_rate:.1f}/page (risk signal)[/yellow]")
             console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
             console.print()
 
@@ -960,11 +976,17 @@ def process_document(
                 "confidence_threshold": profile_params.confidence_threshold,
                 "document_domain": diagnostic_report.confidence_profile.detected_domain.value,
                 "document_modality": diagnostic_report.physical_check.detected_modality.value,
+                # v2.5.0: Structural pathology flags (REQ-STRUCT-01, REQ-STRUCT-02, REQ-STRUCT-03)
+                "has_flat_text_corruption": diagnostic_report.physical_check.has_flat_text_corruption,
+                "has_encoding_corruption": diagnostic_report.physical_check.has_encoding_corruption,
+                "geometry_error_rate": diagnostic_report.physical_check.geometry_error_rate,
             }
             logger.info(
                 f"[V2.4-METADATA] Intelligence metadata prepared: "
                 f"profile={intelligence_metadata['profile_type']}, "
-                f"dims={intelligence_metadata['min_image_dims']}"
+                f"dims={intelligence_metadata['min_image_dims']}, "
+                f"flat_corrupt={intelligence_metadata['has_flat_text_corruption']}, "
+                f"encoding_corrupt={intelligence_metadata['has_encoding_corruption']}"
             )
         else:
             # Non-PDF: No intelligence stack available
@@ -1530,13 +1552,19 @@ def batch_process(
                 "confidence_threshold": profile_params.confidence_threshold,
                 "document_domain": diagnostic_report.confidence_profile.detected_domain.value,
                 "document_modality": diagnostic_report.physical_check.detected_modality.value,
+                # v2.5.0: Structural pathology flags (REQ-STRUCT-01, REQ-STRUCT-02, REQ-STRUCT-03)
+                "has_flat_text_corruption": diagnostic_report.physical_check.has_flat_text_corruption,
+                "has_encoding_corruption": diagnostic_report.physical_check.has_encoding_corruption,
+                "geometry_error_rate": diagnostic_report.physical_check.geometry_error_rate,
             }
 
             # Log metadata for parity verification
             logger.info(
                 f"[BATCH-METADATA] Intelligence metadata created: "
                 f"profile={intelligence_metadata['profile_type']}, "
-                f"dims={intelligence_metadata['min_image_dims']}"
+                f"dims={intelligence_metadata['min_image_dims']}, "
+                f"flat_corrupt={intelligence_metadata['has_flat_text_corruption']}, "
+                f"encoding_corrupt={intelligence_metadata['has_encoding_corruption']}"
             )
 
             # ================================================================
