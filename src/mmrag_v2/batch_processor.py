@@ -256,6 +256,13 @@ class BatchProcessor:
         # V2.4: Intelligence Stack Metadata (for observability)
         self._intelligence_metadata: Dict[str, Any] = {}
 
+        # v2.5.0: Structural pathology flags (REQ-STRUCT-01/02/03)
+        # Stored as dedicated instance vars so they are NOT unpacked into
+        # chunk creation functions via **self._intelligence_metadata.
+        self.has_flat_text_corruption: bool = False
+        self.has_encoding_corruption: bool = False
+        self.geometry_error_rate: float = 0.0
+
         # REQ-VLM-02: Track asset counts per page for low-recall trigger
         self._assets_per_page: Dict[int, int] = {}
         self._current_pdf_path: Optional[Path] = None
@@ -367,6 +374,20 @@ class BatchProcessor:
             intelligence_metadata: Dict containing profile_type, min_image_dims,
                                  document_domain, document_modality, etc.
         """
+        # v2.5.0: Extract structural pathology flags into dedicated instance vars BEFORE
+        # storing the dict. The dict is later unpacked with **self._intelligence_metadata
+        # into create_text_chunk() / create_image_chunk() etc., which do NOT accept these
+        # keys — leaving them in the dict would cause TypeError: unexpected keyword argument.
+        self.has_flat_text_corruption = bool(
+            intelligence_metadata.pop("has_flat_text_corruption", False)
+        )
+        self.has_encoding_corruption = bool(
+            intelligence_metadata.pop("has_encoding_corruption", False)
+        )
+        self.geometry_error_rate = float(
+            intelligence_metadata.pop("geometry_error_rate", 0.0)
+        )
+
         self._intelligence_metadata = intelligence_metadata
         # Adjust QA tolerance per profile (digital_magazine is allowed higher variance)
         profile = intelligence_metadata.get("profile_type")
@@ -376,7 +397,9 @@ class BatchProcessor:
             f"[V2.4-OBSERVABILITY] Intelligence metadata set: "
             f"profile={intelligence_metadata.get('profile_type')}, "
             f"dims={intelligence_metadata.get('min_image_dims')}, "
-            f"domain={intelligence_metadata.get('document_domain')}"
+            f"domain={intelligence_metadata.get('document_domain')}, "
+            f"flat_corrupt={self.has_flat_text_corruption}, "
+            f"encoding_corrupt={self.has_encoding_corruption}"
         )
 
     def _compute_doc_hash(self, file_path: Path) -> str:
@@ -1137,7 +1160,7 @@ class BatchProcessor:
 
                 # REQ-STRUCT-01: Flat Code OCR Rescue — active for ALL profiles when
                 # has_flat_text_corruption=True (broken PDF generator stripped newlines).
-                if self._intelligence_metadata.get("has_flat_text_corruption"):
+                if self.has_flat_text_corruption:
                     page_chunks = self._flat_code_ocr_rescue(
                         page_chunks=page_chunks,
                         pdf_doc=doc,
@@ -2031,7 +2054,7 @@ class BatchProcessor:
         # opening the batch PDF read-only just for page rendering.
         # This fires regardless of enable_ocr/ocr_mode because it is a per-chunk correction,
         # not a full OCR run.
-        if self._intelligence_metadata.get("has_flat_text_corruption") and chunks:
+        if self.has_flat_text_corruption and chunks:
             chunks = self._flat_code_rescue_legacy_pass(
                 chunks=chunks,
                 batch_path=batch_info.batch_path,
@@ -2098,8 +2121,7 @@ class BatchProcessor:
         # REQ-STRUCT-02: Override OCR guard when encoding corruption is detected.
         # Even if the document looks digital (native_digital), if the text layer is
         # encoding-garbage (CIDFont / broken char map), we MUST force full OCR.
-        has_encoding_corruption = bool(self._intelligence_metadata.get("has_encoding_corruption"))
-        if has_encoding_corruption and is_digital_like and not self.force_ocr:
+        if self.has_encoding_corruption and is_digital_like and not self.force_ocr:
             self.force_ocr = True
             logger.warning(
                 f"[OCR-GUARD] ENCODING CORRUPTION detected on digital-like PDF "
@@ -2467,6 +2489,7 @@ class BatchProcessor:
             self._log_memory_checkpoint("[TECHMANUAL-FINAL] preflight")
             all_chunks = self._sanitize_technical_manual_final(all_chunks)
         all_chunks = self._apply_oversize_breaker(all_chunks, max_chars=1500)
+        all_chunks = self._filter_no_visual_images(all_chunks)
         all_chunks = self._apply_table_recovery_highlander_dedup(all_chunks)
 
         # Write aggregated output to master JSONL with deduplication
@@ -4060,7 +4083,10 @@ class BatchProcessor:
                         if pos > 0:
                             sentence_marks.append(pos + 1)
                     split_idx = max(sentence_marks) if sentence_marks else target
-                    if split_idx < (max_chars // 2):
+                    # Use max_chars // 5 (not // 2) as the minimum: a sentence break at
+                    # e.g. position 700 out of 1500 is perfectly valid, but the old
+                    # max_chars // 2 = 750 guard would reset it to a mid-word hard cut.
+                    if split_idx < (max_chars // 5):
                         split_idx = target
                     delimiter_len = 0
 
@@ -4068,8 +4094,11 @@ class BatchProcessor:
                 split_idx = target
                 delimiter_len = 0
 
-            # Guard: avoid tiny early splits that can create near-zero progress loops.
-            if split_idx < (max_chars // 2):
+            # Guard: avoid trivially small splits that cause near-zero progress loops.
+            # Threshold is max_chars // 5 (300 for max_chars=1500) rather than the old
+            # max_chars // 2 (750) which was discarding valid sentence/paragraph breaks
+            # found at positions like 720, producing unnecessary hard mid-sentence cuts.
+            if split_idx < (max_chars // 5):
                 split_idx = target
                 delimiter_len = 0
 
@@ -4157,6 +4186,45 @@ class BatchProcessor:
             parts.append("\n".join(current).strip())
 
         return [p for p in parts if p]
+
+    def _filter_no_visual_images(
+        self,
+        chunks: List[IngestionChunk],
+    ) -> List[IngestionChunk]:
+        """
+        Remove image chunks whose VLM description explicitly states there is no
+        distinct visual content (i.e., the shadow extractor captured a text-only
+        region and the VLM correctly identified it as non-visual).
+
+        The sentinel phrase is "no distinct non-text visuals" (case-insensitive).
+        Images with richer "Dense typographic" descriptions that describe actual
+        content (chat interfaces, comparison panels, etc.) are kept.
+
+        These zero-value image chunks add retrieval noise — a query about any topic
+        would weakly match the phrase "no distinct non-text visuals" — without
+        providing information that isn't already in the co-located text chunks.
+        """
+        _SENTINEL = "no distinct non-text visuals"
+        before = len(chunks)
+        out: List[IngestionChunk] = []
+        removed = 0
+        for ch in chunks:
+            if ch.modality == Modality.IMAGE:
+                vd = (ch.metadata.visual_description or "").lower()
+                if _SENTINEL in vd:
+                    logger.info(
+                        f"[VISUAL-FILTER] Dropping zero-value image chunk "
+                        f"p{ch.metadata.page_number} '{ch.metadata.visual_description[:60]}'"
+                    )
+                    removed += 1
+                    continue
+            out.append(ch)
+        if removed:
+            logger.info(
+                f"[VISUAL-FILTER] Removed {removed} no-visual-content image chunks "
+                f"({before} → {len(out)})"
+            )
+        return out
 
     def _apply_oversize_breaker(
         self,

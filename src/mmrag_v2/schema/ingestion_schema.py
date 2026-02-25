@@ -480,6 +480,17 @@ class IngestionChunk(BaseModel):
             return self.metadata.visual_description
         return None
 
+    @computed_field
+    @property
+    def chunk_type(self) -> Optional[ChunkType]:
+        """Top-level accessor for the chunk content type.
+
+        Returns metadata.chunk_type so that the field appears at the root level
+        of the serialised JSON (not just nested in metadata).  Image and table
+        chunks do not have a text-classification type, so they return None.
+        """
+        return self.metadata.chunk_type
+
     @model_validator(mode="after")
     def validate_multimodal_requirements(self) -> "IngestionChunk":
         """
