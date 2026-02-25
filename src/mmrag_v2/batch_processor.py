@@ -4048,52 +4048,63 @@ class BatchProcessor:
             split_idx: Optional[int] = None
             delimiter_len = 2
 
+            # Three-level fallback chain: \n\n → \n → sentence mark.
+            # Each level checks its own minimum-size threshold (max_chars // 5).
+            # When the best candidate at a level is too early (< threshold), that
+            # level sets split_idx = None and the next level is tried.  This avoids
+            # the previous bug where a \n\n at position ~120 blocked the \n at
+            # position ~1100 and the sentence mark at ~1450 from ever being reached,
+            # causing a hard mid-word cut at exactly max_chars.
+            # Candidates beyond max_chars are excluded: they would be clamped by the
+            # hard-cap below, producing a mid-word cut identical to a raw hard split.
+
+            # Level 1: nearest paragraph break (\n\n)
             candidates: List[Tuple[int, int]] = []
             if p_before > 0:
                 candidates.append((abs(target - p_before), p_before))
-            # Only consider p_after if it fits within max_chars — adding a split point
-            # beyond max_chars would just get hard-capped back to max_chars, producing a
-            # mid-word cut identical to a raw hard split. When p_after > max_chars, skip
-            # it so the fallback chain can reach the sentence-mark search.
             if 0 < p_after <= max_chars:
                 candidates.append((abs(p_after - target), p_after))
-
             if candidates:
                 candidates.sort(key=lambda x: x[0])
-                split_idx = candidates[0][1]
-            else:
-                # fallback: nearest single newline
+                best_para = candidates[0][1]
+                if best_para >= (max_chars // 5):
+                    split_idx = best_para
+                # else: too early — fall through to single-newline level
+
+            # Level 2: nearest single newline (only reached when \n\n level failed)
+            if split_idx is None:
+                delimiter_len = 1
                 n_before = remaining.rfind("\n", 0, target + 1)
                 n_after = remaining.find("\n", target, search_end)
                 nl_candidates: List[Tuple[int, int]] = []
                 if n_before > 0:
                     nl_candidates.append((abs(target - n_before), n_before))
-                # Same logic as p_after: only include n_after if it won't require clamping.
                 if 0 < n_after <= max_chars:
                     nl_candidates.append((abs(n_after - target), n_after))
                 if nl_candidates:
                     nl_candidates.sort(key=lambda x: x[0])
-                    split_idx = nl_candidates[0][1]
-                    delimiter_len = 1
+                    best_nl = nl_candidates[0][1]
+                    if best_nl >= (max_chars // 5):
+                        split_idx = best_nl
+                    # else: too early — fall through to sentence-mark level
+
+            # Level 3: sentence-aware fallback (only reached when both \n levels failed)
+            if split_idx is None:
+                delimiter_len = 0
+                sentence_marks = []
+                for marker in (". ", ".\n", "? ", "?\n", "! ", "!\n"):
+                    pos = remaining.rfind(marker, 0, target + 1)
+                    if pos > 0:
+                        sentence_marks.append(pos + 1)  # include punctuation
+                for marker in (".", "?", "!"):
+                    pos = remaining.rfind(marker, 0, target + 1)
+                    if pos > 0:
+                        sentence_marks.append(pos + 1)
+                best_sent = max(sentence_marks) if sentence_marks else target
+                if best_sent >= (max_chars // 5):
+                    split_idx = best_sent
                 else:
-                    # Sentence-aware hard-cap fallback:
-                    # prefer the last sentence boundary before target before raw hard split.
-                    sentence_marks = []
-                    for marker in (". ", ".\n", "? ", "?\n", "! ", "!\n"):
-                        pos = remaining.rfind(marker, 0, target + 1)
-                        if pos > 0:
-                            sentence_marks.append(pos + 1)  # include punctuation
-                    for marker in (".", "?", "!"):
-                        pos = remaining.rfind(marker, 0, target + 1)
-                        if pos > 0:
-                            sentence_marks.append(pos + 1)
-                    split_idx = max(sentence_marks) if sentence_marks else target
-                    # Use max_chars // 5 (not // 2) as the minimum: a sentence break at
-                    # e.g. position 700 out of 1500 is perfectly valid, but the old
-                    # max_chars // 2 = 750 guard would reset it to a mid-word hard cut.
-                    if split_idx < (max_chars // 5):
-                        split_idx = target
-                    delimiter_len = 0
+                    split_idx = target  # genuine hard split: no usable break found
 
             if split_idx is None or split_idx <= 0:
                 split_idx = target
