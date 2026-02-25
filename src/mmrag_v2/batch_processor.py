@@ -4051,7 +4051,11 @@ class BatchProcessor:
             candidates: List[Tuple[int, int]] = []
             if p_before > 0:
                 candidates.append((abs(target - p_before), p_before))
-            if p_after > 0:
+            # Only consider p_after if it fits within max_chars — adding a split point
+            # beyond max_chars would just get hard-capped back to max_chars, producing a
+            # mid-word cut identical to a raw hard split. When p_after > max_chars, skip
+            # it so the fallback chain can reach the sentence-mark search.
+            if 0 < p_after <= max_chars:
                 candidates.append((abs(p_after - target), p_after))
 
             if candidates:
@@ -4064,7 +4068,8 @@ class BatchProcessor:
                 nl_candidates: List[Tuple[int, int]] = []
                 if n_before > 0:
                     nl_candidates.append((abs(target - n_before), n_before))
-                if n_after > 0:
+                # Same logic as p_after: only include n_after if it won't require clamping.
+                if 0 < n_after <= max_chars:
                     nl_candidates.append((abs(n_after - target), n_after))
                 if nl_candidates:
                     nl_candidates.sort(key=lambda x: x[0])
