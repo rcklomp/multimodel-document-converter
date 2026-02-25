@@ -6,7 +6,7 @@ Transform complex, visually-rich documents (magazines, technical manuals, report
 
 [![SRS Compliance](https://img.shields.io/badge/SRS-v2.4.1--stable-blue.svg)]()
 [![Python](https://img.shields.io/badge/Python-3.10-green.svg)]()
-[![Engine](https://img.shields.io/badge/Engine-Docling%20v2.66.0-orange.svg)]()
+[![Engine](https://img.shields.io/badge/Engine-Docling%20pinned-orange.svg)]()
 [![Platform](https://img.shields.io/badge/Platform-Apple%20Silicon%20Native-silver.svg)]()
 
 ---
@@ -18,7 +18,7 @@ Transform complex, visually-rich documents (magazines, technical manuals, report
 - [Quick Start](#-quick-start)
 - [Installation](#-installation)
 - [CLI Reference](#-cli-reference)
-- [Semantic Text Refiner (v18.2)](#-semantic-text-refiner-v182)
+- [Semantic Text Refiner](#-semantic-text-refiner)
 - [Architecture](#-architecture)
 - [Processing Pipeline](#-processing-pipeline)
 - [Smart Vision Orchestration](#-smart-vision-orchestration)
@@ -340,7 +340,7 @@ mmrag-v2 batch ./documents --enable-refiner \
 
 ---
 
-## 🧠 Semantic Text Refiner (v18.2)
+## 🧠 Semantic Text Refiner
 
 The Semantic Text Refiner runs after OCR to fix obvious OCR artifacts while preserving technical integrity. The original `content` is never overwritten; accepted refinements are stored in `metadata.refined_content`.
 
@@ -494,7 +494,7 @@ Each line is a valid JSON object:
     "extraction_method": "docling",
     "created_at": "2025-12-30T14:23:45.123456+00:00"
   },
-  "schema_version": "2.0.0"
+  "schema_version": "2.4.1-stable"
 }
 ```
 
@@ -528,11 +528,11 @@ Each line is a valid JSON object:
     "width_px": 1600,
     "height_px": 800
   },
-  "schema_version": "2.0.0"
+  "schema_version": "2.4.1-stable"
 }
 ```
 
-**Versioning Note:** `metadata.schema_version` is always injected at export time from the central `version.py` (`__schema_version__`). JSONL output will carry the current schema version (e.g., `2.4.1-stable`) even if upstream parsers omit it.
+**Versioning Note:** `schema_version` is injected at export time from `src/mmrag_v2/version.py` (`__schema_version__`). JSONL output will carry the current schema version (e.g., `2.4.1-stable`) even if upstream parsers omit it.
 
 ### Spatial Metadata (REQ-COORD-02)
 
@@ -592,13 +592,14 @@ Strategy: editorial_balanced
 
 The ProfileClassifier analyzes multiple dimensions to select the optimal processing profile:
 
-| Profile | Use Case | VLM Freedom | Scan Hints |
-|---------|----------|-------------|------------|
-| `EditorialProfile` | Modern digital magazines | `discovery` | No |
-| `TechnicalProfile` | Technical manuals, reports | `strict` | No |
-| `ScannedModernProfile` | Clean scans (2000s+) | `guided` | Yes |
-| `ScannedDegradedProfile` | Vintage scans (pre-1970) | `guided` | Yes |
-| `AcademicWhitepaperProfile` | Academic papers, whitepapers | `strict` | No |
+| Profile Type | Use Case | VLM Freedom | Scan Hints |
+|--------------|----------|-------------|------------|
+| `digital_magazine` | Modern digital magazines | `strict` | No |
+| `technical_manual` | Technical manuals, handbooks, procedural documents | `strict` | Yes |
+| `academic_whitepaper` | Academic papers and technical whitepapers | `strict` | No |
+| `scanned_clean` | Clean modern scans with good OCR potential | `strict` | Yes |
+| `scanned_degraded` | Degraded/vintage scans with artifacts | `strict` | Yes |
+| `scanned_magazine` | Scanned editorial magazines with large photo content | `strict` | Yes |
 
 ### Strategy Banner
 
@@ -757,7 +758,7 @@ mmrag-v2 process document.pdf --pages 10 --batch-size 10
 
 ## 🛡️ SRS Compliance
 
-This implementation is fully compliant with **SRS Multimodal Ingestion V2.4**:
+This implementation is fully compliant with **SRS Multimodal Ingestion v2.4.1-stable**:
 
 | Requirement | Status | Implementation |
 |-------------|--------|----------------|
@@ -869,9 +870,7 @@ The test suite is designed to run in CI/CD pipelines:
 ```yaml
 # Example GitHub Actions workflow
 - name: Run Tests
-  run: |
-    conda activate ./env
-    pytest tests/ -v --cov=mmrag_v2
+  run: conda run -p ./env pytest tests/ -v --cov=mmrag_v2
 ```
 
 ### Test Coverage Goals

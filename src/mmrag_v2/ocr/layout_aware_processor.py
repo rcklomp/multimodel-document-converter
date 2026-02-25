@@ -35,6 +35,8 @@ Date: January 3, 2026
 
 import hashlib
 import logging
+import gc
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple, Any
@@ -553,12 +555,18 @@ class LayoutAwareOCRProcessor:
         # Prepare Docling result if text already extracted
         docling_result = None
         if region.text and len(region.text.strip()) > 0:
-            docling_result = OCRResult(
-                text=region.text,
-                confidence=region.confidence,
-                layer_used=OCRLayer.DOCLING,
-                processing_time_ms=0,
-            )
+            if self._is_flat_code_like_text(region.text):
+                logger.debug(
+                    f"[LAYOUT-OCR] Text region {region_idx}: "
+                    "bypassing Docling fast-path for flattened code-like text"
+                )
+            else:
+                docling_result = OCRResult(
+                    text=region.text,
+                    confidence=region.confidence,
+                    layer_used=OCRLayer.DOCLING,
+                    processing_time_ms=0,
+                )
 
         # Run OCR cascade
         ocr_result = self.ocr_engine.process_page(
@@ -585,6 +593,28 @@ class LayoutAwareOCRProcessor:
             ocr_confidence=ocr_result.confidence,
             ocr_layer=ocr_result.layer_used.value,
         )
+
+    def _is_flat_code_like_text(self, text: Optional[str]) -> bool:
+        """
+        Detect flattened code-like Docling text that should bypass Layer-1 acceptance.
+
+        We only bypass when text is single-line and has strong code signals, so prose
+        keeps fast Docling behavior.
+        """
+        if not text:
+            return False
+        t = text.strip()
+        if not t or "\n" in t or len(t) < 24:
+            return False
+        if ">>>" in t or "..." in t:
+            return True
+        has_keywords = re.search(
+            r"\b(def|class|import|from|return|yield|lambda|try|except|finally|with|for|while|if|elif|else)\b",
+            t,
+        )
+        has_symbols = re.search(r"[{}()\[\];=:@]", t)
+        looks_signature = re.search(r"\b(class|def)\s+[A-Za-z_]\w*\s*[:(]", t)
+        return bool((has_keywords and has_symbols) or looks_signature)
 
     def _process_image_region(
         self,
@@ -937,3 +967,20 @@ class LayoutAwareOCRProcessor:
         parts = f"{doc_id}_{page_number}_{modality}_{region_idx}"
         hash_suffix = hashlib.md5(parts.encode()).hexdigest()[:8]
         return f"{doc_id}_{page_number:03d}_{modality}_{hash_suffix}"
+
+    def cleanup(self) -> None:
+        """
+        Release OCR/layout runtime references for long-running jobs.
+        """
+        try:
+            if getattr(self, "ocr_engine", None) is not None:
+                cleanup = getattr(self.ocr_engine, "cleanup", None)
+                if callable(cleanup):
+                    cleanup()
+        except Exception as e:
+            logger.debug(f"[LAYOUT-OCR] ocr_engine cleanup skipped: {e}")
+        finally:
+            self.ocr_engine = None
+            self.vlm_manager = None
+            self._text_buffer.clear()
+            gc.collect()

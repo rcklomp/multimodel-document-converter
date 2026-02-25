@@ -8,6 +8,16 @@ ROOT="${1:-output/acceptance_techmanual_$(date +%Y%m%d_%H%M%S)}"
 PAGES="${PAGES:-20}"
 BATCH_SIZE="${BATCH_SIZE:-3}"
 ENV_NAME="${ENV_NAME:-mmrag-v2}"
+VISION_PROVIDER="${VISION_PROVIDER:-none}"
+VISION_MODEL="${VISION_MODEL:-llama-joycaption-beta-one-hf-llava-mmproj}"
+VISION_BASE_URL="${VISION_BASE_URL:-http://192.168.10.11:1234/v1}"
+VLM_TIMEOUT="${VLM_TIMEOUT:-600}"
+API_KEY="${API_KEY:-lm-studio}"
+SEMANTIC_QA="${SEMANTIC_QA:-1}"
+SEM_MAX_IMAGE_PLACEHOLDER="${SEM_MAX_IMAGE_PLACEHOLDER:-0.05}"
+SEM_MAX_TABLE_PLACEHOLDER="${SEM_MAX_TABLE_PLACEHOLDER:-0.20}"
+SEM_MIN_TABLE_MARKDOWN="${SEM_MIN_TABLE_MARKDOWN:-0.80}"
+SEM_MIN_CODE_INDENT_FIDELITY="${SEM_MIN_CODE_INDENT_FIDELITY:-0.90}"
 
 mkdir -p "$ROOT"
 SUMMARY="$ROOT/_summary.txt"
@@ -17,6 +27,8 @@ now() { date -u "+%Y-%m-%dT%H:%M:%SZ"; }
 
 echo "ROOT=$ROOT" | tee -a "$SUMMARY"
 echo "PAGES=$PAGES BATCH_SIZE=$BATCH_SIZE ENV_NAME=$ENV_NAME" | tee -a "$SUMMARY"
+echo "VISION_PROVIDER=$VISION_PROVIDER" | tee -a "$SUMMARY"
+echo "SEMANTIC_QA=$SEMANTIC_QA image_placeholder<=$SEM_MAX_IMAGE_PLACEHOLDER table_placeholder<=$SEM_MAX_TABLE_PLACEHOLDER table_markdown>=$SEM_MIN_TABLE_MARKDOWN code_indent>=$SEM_MIN_CODE_INDENT_FIDELITY" | tee -a "$SUMMARY"
 echo "start=$(now)" | tee -a "$SUMMARY"
 
 # Representative set:
@@ -43,11 +55,21 @@ run_doc() {
   local -a EXTRA_ARGS
 
   # Uniform extraction settings for blind validation; avoid filename-driven behavior.
-  local DOC_CLASS
   OCR_ARGS=(--enable-ocr --ocr-mode auto --enable-doctr --ocr-confidence-threshold 0.4)
 
   # Keep benchmark stable and lightweight.
-  EXTRA_ARGS=(--vision-provider none --no-refiner --no-cache)
+  EXTRA_ARGS=(--no-refiner --no-cache)
+  if [[ "$VISION_PROVIDER" == "none" ]]; then
+    EXTRA_ARGS+=(--vision-provider none)
+  else
+    EXTRA_ARGS+=(
+      --vision-provider "$VISION_PROVIDER"
+      --vision-model "$VISION_MODEL"
+      --vision-base-url "$VISION_BASE_URL"
+      --vlm-timeout "$VLM_TIMEOUT"
+      --api-key "$API_KEY"
+    )
+  fi
 
   {
     echo ""
@@ -80,17 +102,18 @@ run_doc() {
   local jsonl="$out/ingestion.jsonl"
   conda run -n "$ENV_NAME" python scripts/qa_ingestion_hygiene.py "$jsonl" | tee -a "$SUMMARY"
 
-  DOC_CLASS="$(
-    conda run -n "$ENV_NAME" python -c "import json,sys;from collections import Counter;p=sys.argv[1];mods=Counter();f=open(p,'r',encoding='utf-8');\
-[mods.update([str(((json.loads(line).get('metadata') or {}).get('document_modality') or '')).lower()]) for line in f if str(((json.loads(line).get('metadata') or {}).get('document_modality') or '')).lower()];\
-f.close();\
-print('digital' if (not mods or mods.most_common(1)[0][0] in {'native_digital','image_heavy'}) else 'scanned')" "$jsonl" | grep -E "^(digital|scanned)$" | tail -n 1 | tr -d "[:space:]"
-  )"
-  echo "doc_class=$DOC_CLASS (inferred)" | tee -a "$SUMMARY"
-
   conda run -n "$ENV_NAME" python scripts/evaluate_technical_manual_gates.py \
     "$jsonl" \
-    --doc-class "$DOC_CLASS" | tee -a "$SUMMARY"
+    --doc-class auto | tee -a "$SUMMARY"
+
+  if [[ "$SEMANTIC_QA" == "1" ]]; then
+    conda run -n "$ENV_NAME" python scripts/qa_semantic_fidelity.py \
+      "$jsonl" \
+      --max-image-placeholder-ratio "$SEM_MAX_IMAGE_PLACEHOLDER" \
+      --max-table-placeholder-ratio "$SEM_MAX_TABLE_PLACEHOLDER" \
+      --min-table-markdown-ratio "$SEM_MIN_TABLE_MARKDOWN" \
+      --min-code-indentation-fidelity "$SEM_MIN_CODE_INDENT_FIDELITY" | tee -a "$SUMMARY"
+  fi
 }
 
 for pdf in "${DOCS[@]}"; do

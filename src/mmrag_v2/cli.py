@@ -26,7 +26,9 @@ Updated: 2025-12-29 (Batch Processing Engine)
 
 from __future__ import annotations
 
+import atexit
 import logging
+import multiprocessing as mp
 import os
 from enum import Enum
 from pathlib import Path
@@ -138,6 +140,94 @@ def setup_logging(verbose: bool = False) -> None:
     logging.getLogger("PIL").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+def _configure_multiprocessing_start_method() -> None:
+    """
+    Configure multiprocessing for macOS stability.
+
+    Using `spawn` avoids fork-related deadlocks/leaks in libraries that may
+    create worker processes (OCR/VLM internals).
+    """
+    try:
+        mp.set_start_method("spawn", force=True)
+        logger.debug("[MP] start_method=spawn configured")
+    except RuntimeError:
+        # Already configured in this interpreter; safe to continue.
+        logger.debug("[MP] start_method already configured")
+
+
+def _safe_cleanup_processor(instance: Optional[Any]) -> None:
+    """
+    Best-effort cleanup for processor-owned resources on error/exit.
+
+    This prevents lingering worker/process resources when execution aborts.
+    """
+    if instance is None:
+        return
+
+    # Try processor-level shutdown hooks first.
+    for method_name in ("shutdown", "close"):
+        method = getattr(instance, method_name, None)
+        if callable(method):
+            try:
+                method()
+            except Exception as e:
+                logger.debug(f"[CLEANUP] {method_name}() failed: {e}")
+
+    # Flush/close vision manager if available.
+    vision_manager = getattr(instance, "_vision_manager", None) or getattr(
+        instance, "vision_manager", None
+    )
+    if vision_manager is not None:
+        for method_name in ("flush_cache", "shutdown", "close"):
+            method = getattr(vision_manager, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                except Exception as e:
+                    logger.debug(f"[CLEANUP] vision_manager.{method_name}() failed: {e}")
+
+    # Close/shutdown refiner if it exposes any lifecycle hook.
+    refiner = getattr(instance, "_refiner", None) or getattr(instance, "refiner", None)
+    if refiner is not None:
+        for method_name in ("shutdown", "close"):
+            method = getattr(refiner, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                except Exception as e:
+                    logger.debug(f"[CLEANUP] refiner.{method_name}() failed: {e}")
+
+
+_ACTIVE_PROCESSORS: List[Any] = []
+
+
+def _track_processor(instance: Optional[Any]) -> None:
+    """Track processor instance for atexit cleanup fallback."""
+    if instance is None:
+        return
+    _ACTIVE_PROCESSORS.append(instance)
+
+
+def _untrack_processor(instance: Optional[Any]) -> None:
+    """Remove processor instance from atexit tracking."""
+    if instance is None:
+        return
+    try:
+        _ACTIVE_PROCESSORS.remove(instance)
+    except ValueError:
+        pass
+
+
+def _cleanup_tracked_processors() -> None:
+    """atexit fallback cleanup for any still-tracked processors."""
+    for instance in list(_ACTIVE_PROCESSORS):
+        _safe_cleanup_processor(instance)
+    _ACTIVE_PROCESSORS.clear()
+
+
+atexit.register(_cleanup_tracked_processors)
 
 
 # ============================================================================
@@ -381,6 +471,11 @@ def process_document(
         "--profile-override",
         help="Force a strategy profile (e.g., academic_whitepaper, digital_magazine, scanned_clean, scanned_degraded, scanned_magazine, technical_manual)",
     ),
+    force_table_vlm: bool = typer.Option(
+        False,
+        "--force-table-vlm/--no-force-table-vlm",
+        help="Force table chunks through VLM markdown serialization (fallback to OCR/docling if VLM fails)",
+    ),
     force_ocr: bool = typer.Option(
         False,
         "--force-ocr/--no-force-ocr",
@@ -524,7 +619,10 @@ def process_document(
         VisionProviderType.ANTHROPIC,
         VisionProviderType.HAIKU,
     )
-    if vision_provider in cloud_providers and not resolved_key:
+    openai_local_no_key = (
+        vision_provider == VisionProviderType.OPENAI and bool(vision_base_url)
+    )
+    if vision_provider in cloud_providers and not resolved_key and not openai_local_no_key:
         console.print(
             f"[red]Error:[/red] {vision_provider.value} requires an API key. "
             f"Use --api-key or set the appropriate environment variable.",
@@ -550,10 +648,11 @@ def process_document(
     )
     console.print(f"[cyan]VLM Timeout:[/cyan] {vlm_timeout}s")
     ocr_str = f"Enabled ({ocr_engine.value})" if enable_ocr else "Disabled"
-    console.print(f"[cyan]OCR:[/cyan] {ocr_str}")
+    console.print(f"[cyan]OCR (Requested):[/cyan] {ocr_str}")
     console.print(f"[cyan]Cache:[/cyan] {'Enabled' if enable_cache else 'Disabled'}")
     console.print(f"[cyan]Semantic Overlap:[/cyan] {'Enabled' if semantic_overlap else 'Disabled'}")
     console.print(f"[cyan]VLM Context Depth:[/cyan] {vlm_context_depth}")
+    console.print(f"[cyan]Force Table VLM:[/cyan] {'Enabled' if force_table_vlm else 'Disabled'}")
     console.print(f"[cyan]Strict QA:[/cyan] {'Enabled' if strict_qa else 'Disabled'}")
     # Display OCR mode info
     if ocr_mode == OCRMode.LAYOUT_AWARE:
@@ -564,6 +663,9 @@ def process_document(
         console.print(f"[cyan]Doctr Layer 3:[/cyan] {'Enabled' if enable_doctr else 'Disabled'}")
     else:
         console.print(f"[cyan]OCR Mode:[/cyan] legacy")
+    console.print(
+        "[dim]Note: OCR routing may be overridden by document diagnostics and the digital OCR guard.[/dim]"
+    )
     console.print("[bold blue]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold blue]\n")
 
     # Flush output immediately so user sees feedback
@@ -601,6 +703,7 @@ def process_document(
                 )
                 raise typer.Exit(code=1)
 
+    processor_instance: Optional[Any] = None
     try:
         is_pdf = input_file.suffix.lower() == ".pdf"
         use_batching = batch_size_pages > 0 and is_pdf
@@ -782,12 +885,23 @@ def process_document(
             # ================================================================
             # SMART OCR MODE AUTO-DETECTION (Phase 1B)
             # ================================================================
-            # When ocr_mode == "auto", use diagnostics to select the best mode:
-            # - Scanned/degraded documents → layout-aware (3-layer OCR cascade)
-            # - Digital documents → legacy (shadow extraction)
+            # Hard governance:
+            # - --no-ocr always disables OCR routing (even if --ocr-mode auto/layout-aware).
+            # - --force-ocr only bypasses digital OCR guard when OCR itself is enabled.
             # ================================================================
             effective_ocr_mode = ocr_mode
-            if ocr_mode == OCRMode.AUTO:
+            if not enable_ocr:
+                if force_ocr:
+                    console.print(
+                        "[yellow][OCR-GOVERNANCE] --force-ocr ignored because --no-ocr is set.[/yellow]"
+                    )
+                if ocr_mode != OCRMode.LEGACY:
+                    console.print(
+                        f"[dim][OCR-GOVERNANCE] OCR disabled; overriding --ocr-mode {ocr_mode.value} -> legacy[/dim]"
+                    )
+                effective_ocr_mode = OCRMode.LEGACY
+                enable_doctr = False
+            elif ocr_mode == OCRMode.AUTO:
                 is_scanned = diagnostic_report.physical_check.is_likely_scan
                 detected_modality = diagnostic_report.physical_check.detected_modality.value
 
@@ -807,8 +921,29 @@ def process_document(
                 else:
                     effective_ocr_mode = OCRMode.LEGACY
                     console.print(
-                        f"[dim]🔍 Auto-detected digital document → using legacy OCR mode[/dim]"
+                        f"[dim]🔍 Auto-detected digital document -> using legacy OCR mode[/dim]"
                     )
+
+            resolved_enable_ocr = enable_ocr
+            resolved_enable_doctr = enable_doctr
+            resolved_ocr_mode = effective_ocr_mode.value
+            detected_modality = diagnostic_report.physical_check.detected_modality.value
+            is_digital_like = detected_modality in ("native_digital", "image_heavy")
+            if resolved_enable_ocr and is_digital_like and not force_ocr:
+                resolved_enable_ocr = False
+                resolved_enable_doctr = False
+                resolved_ocr_mode = OCRMode.LEGACY.value
+                console.print(
+                    "[dim][OCR-GOVERNANCE] Digital OCR guard preview: "
+                    "OCR will be disabled unless --force-ocr is set.[/dim]"
+                )
+            console.print(
+                f"[dim][OCR-GOVERNANCE] Effective OCR settings preview: "
+                f"enable_ocr={resolved_enable_ocr}, "
+                f"ocr_mode={resolved_ocr_mode}, "
+                f"enable_doctr={resolved_enable_doctr}, "
+                f"force_ocr={force_ocr}[/dim]"
+            )
 
             # Step 3: Print strategy banner (provides immediate feedback)
             orchestrator.print_strategy_banner(extraction_strategy)
@@ -867,11 +1002,14 @@ def process_document(
                 semantic_overlap=semantic_overlap,
                 vlm_context_depth=vlm_context_depth,
                 semantic_overlap_ratio=semantic_overlap_ratio,
+                force_table_vlm=force_table_vlm,
                 # Layout-aware OCR parameters (Phase 1B) - USE effective_ocr_mode!
                 ocr_mode=effective_ocr_mode.value,
                 ocr_confidence_threshold=ocr_confidence_threshold,
                 enable_doctr=enable_doctr,
             )
+            processor_instance = processor
+            _track_processor(processor_instance)
 
             if enable_refiner:
                 processor.enable_refiner(
@@ -975,7 +1113,10 @@ def process_document(
                 extraction_strategy=extraction_strategy,
                 # V2.4: Pass intelligence metadata for observability
                 intelligence_metadata=intelligence_metadata,
+                force_table_vlm=force_table_vlm,
             )
+            processor_instance = proc
+            _track_processor(processor_instance)
 
             if enable_refiner:
                 proc.enable_refiner(
@@ -1020,6 +1161,9 @@ def process_document(
         if verbose:
             console.print_exception()
         raise typer.Exit(code=1)
+    finally:
+        _safe_cleanup_processor(processor_instance)
+        _untrack_processor(processor_instance)
 
 
 @app.command("batch")
@@ -1208,7 +1352,10 @@ def batch_process(
         VisionProviderType.ANTHROPIC,
         VisionProviderType.HAIKU,
     )
-    if vision_provider in cloud_providers and not resolved_key:
+    openai_local_no_key = (
+        vision_provider == VisionProviderType.OPENAI and bool(vision_base_url)
+    )
+    if vision_provider in cloud_providers and not resolved_key and not openai_local_no_key:
         console.print(
             f"[red]Error:[/red] {vision_provider.value} requires an API key.",
             style="bold red",
@@ -1228,6 +1375,7 @@ def batch_process(
     V2DocumentProcessor = _lazy_import_processor()
 
     for file_path in files:
+        processor_instance: Optional[Any] = None
         try:
             console.print(f"\n[cyan]Processing:[/cyan] {file_path.name}")
             console.print(f"[dim]{'=' * 60}[/dim]")
@@ -1264,6 +1412,8 @@ def batch_process(
                     vision_cache_dir=cache_dir,
                     intelligence_metadata=intelligence_metadata_nonpdf,
                 )
+                processor_instance = processor
+                _track_processor(processor_instance)
 
                 if enable_refiner:
                     processor.enable_refiner(
@@ -1416,6 +1566,8 @@ def batch_process(
                 ocr_confidence_threshold=ocr_confidence_threshold,
                 enable_doctr=enable_doctr,
             )
+            processor_instance = processor
+            _track_processor(processor_instance)
 
             if enable_refiner:
                 processor.enable_refiner(
@@ -1461,6 +1613,9 @@ def batch_process(
             console.print(f"  [red]✗ Error: {e}[/red]")
             errors.append(f"{file_path.name}: {e}")
             error_count += 1
+        finally:
+            _safe_cleanup_processor(processor_instance)
+            _untrack_processor(processor_instance)
 
     console.print(f"\n[bold]Batch Processing Complete[/bold]")
     console.print(f"  [green]Success: {success_count}[/green]")
@@ -1478,7 +1633,7 @@ def batch_process(
 def show_version() -> None:
     """Display version information."""
     console.print("\n[bold]MMRAG V2 Document Processor[/bold]")
-    console.print("Version: 2.0.0")
+    console.print(f"Version: {__engine_version__}")
     console.print("ENGINE_USE: Docling v2.66.0")
     console.print("\n[dim]Vision Providers:[/dim]")
     console.print("  • ollama    - Local llava (localhost:11434) [DEFAULT]")
@@ -1542,6 +1697,7 @@ def check_providers() -> None:
 
 def main() -> None:
     """Main entrypoint for CLI."""
+    _configure_multiprocessing_start_method()
     app()
 
 

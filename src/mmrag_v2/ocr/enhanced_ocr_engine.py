@@ -17,9 +17,11 @@ Date: January 3, 2026
 
 import logging
 import time
+import gc
+import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -97,6 +99,20 @@ class EnhancedOCREngine:
         # Lazy-load OCR engines
         self._tesseract_available: Optional[bool] = None
         self._doctr_model = None
+
+        # Geometric indentation reconstruction (for code-like OCR blocks).
+        self._indent_spaces_per_level = 4
+        self._max_indent_spaces = 20
+        self._doctr_indent_threshold = 0.01  # normalized X offset
+        self._doctr_indent_step = 0.01  # normalized X per indent level
+        self._tesseract_indent_threshold_ratio = 0.02  # relative to crop width
+        self._tesseract_indent_step_ratio = 0.02  # relative to crop width
+        self._doctr_merge_max_vertical_gap = 0.02  # normalized Y gap
+        self._doctr_merge_gap_height_multiplier = 1.25  # relative to line height
+        self._doctr_merge_min_overlap_ratio = 0.35
+        self._doctr_merge_left_tolerance = 0.03
+        self._doctr_merge_max_indent_shift = 0.16
+        self._doctr_merge_max_seed_lines = 4
 
     def process_page(
         self,
@@ -226,26 +242,101 @@ class EnhancedOCREngine:
                 output_type=pytesseract.Output.DICT,
             )
 
-            # Extract text and confidence
-            words = []
+            # Extract text and confidence.
+            # Preserve OCR line boundaries so downstream code chunks can retain indentation/newlines.
+            line_words: Dict[Tuple[int, int, int], List[str]] = {}
+            line_order: List[Tuple[int, int, int]] = []
             confidences = []
 
             for i, conf in enumerate(data["conf"]):
-                conf_int = int(conf)
+                try:
+                    conf_int = int(float(conf))
+                except Exception:
+                    continue
                 text = data["text"][i].strip()
 
                 if conf_int > 0 and text:  # Valid detection
-                    words.append(text)
+                    block_num = int(data.get("block_num", [0])[i])
+                    par_num = int(data.get("par_num", [0])[i])
+                    line_num = int(data.get("line_num", [0])[i])
+                    key = (block_num, par_num, line_num)
+                    if key not in line_words:
+                        line_words[key] = []
+                        line_order.append(key)
+                    line_words[key].append(text)
                     confidences.append(conf_int / 100.0)  # Convert to 0-1
 
             # Calculate average confidence
             avg_confidence = np.mean(confidences) if confidences else 0.0
-            full_text = " ".join(words)
+            line_left_px: Dict[Tuple[int, int, int], int] = {}
+            for i, conf in enumerate(data["conf"]):
+                try:
+                    conf_int = int(float(conf))
+                except Exception:
+                    continue
+                text = data["text"][i].strip()
+                if conf_int <= 0 or not text:
+                    continue
+                block_num = int(data.get("block_num", [0])[i])
+                par_num = int(data.get("par_num", [0])[i])
+                line_num = int(data.get("line_num", [0])[i])
+                key = (block_num, par_num, line_num)
+                left_vals = data.get("left", [0])
+                try:
+                    left = int(float(left_vals[i]))
+                except Exception:
+                    left = 0
+                if key not in line_left_px:
+                    line_left_px[key] = left
+                else:
+                    line_left_px[key] = min(line_left_px[key], left)
+
+            block_lines: Dict[int, List[str]] = {}
+            block_left_px: Dict[int, int] = {}
+            lines: List[str] = []
+            image_width = int(preprocessed.shape[1]) if len(preprocessed.shape) >= 2 else 0
+            for key in line_order:
+                if key not in line_words or not line_words[key]:
+                    continue
+                block_num = key[0]
+                line_text = " ".join(line_words[key]).strip()
+                block_lines.setdefault(block_num, []).append(line_text)
+                if key in line_left_px:
+                    if block_num not in block_left_px:
+                        block_left_px[block_num] = line_left_px[key]
+                    else:
+                        block_left_px[block_num] = min(block_left_px[block_num], line_left_px[key])
+
+            code_like_blocks = {
+                block_num: self._looks_like_code_block_lines(text_lines)
+                for block_num, text_lines in block_lines.items()
+            }
+
+            for key in line_order:
+                if key not in line_words or not line_words[key]:
+                    continue
+                block_num = key[0]
+                line_text = " ".join(line_words[key]).strip()
+                prefix = ""
+                if (
+                    code_like_blocks.get(block_num, False)
+                    and key in line_left_px
+                    and block_num in block_left_px
+                    and image_width > 0
+                ):
+                    offset_px = max(0.0, float(line_left_px[key] - block_left_px[block_num]))
+                    spaces = self._spaces_from_tesseract_offset(offset_px, image_width)
+                    if spaces > 0:
+                        prefix = " " * spaces
+                lines.append(prefix + line_text)
+
+            full_text = "\n".join(lines)
+            word_count = sum(len(line_words[key]) for key in line_order if key in line_words)
 
             elapsed_ms = int((time.perf_counter() - start_time) * 1000)
 
             logger.debug(
-                f"[TESSERACT] Extracted {len(words)} words in {elapsed_ms}ms, "
+                f"[TESSERACT] Extracted {word_count} words in {elapsed_ms}ms, "
                 f"avg confidence: {avg_confidence:.2f}"
             )
 
@@ -255,7 +346,7 @@ class EnhancedOCREngine:
                 layer_used=OCRLayer.TESSERACT,
                 word_confidences=confidences,
                 processing_time_ms=elapsed_ms,
-                word_count=len(words),
+                word_count=word_count,
             )
 
         except Exception as e:
@@ -303,25 +394,42 @@ class EnhancedOCREngine:
             # Run OCR
             result = self._doctr_model([image])
 
-            # Extract text and confidence from result
-            words = []
+            # Extract text and confidence from result.
+            # Keep per-line structure so downstream code handling can preserve block formatting.
+            line_texts: List[str] = []
             confidences = []
+            word_count = 0
 
             for page in result.pages:
-                for block in page.blocks:
-                    for line in block.lines:
-                        for word in line.words:
-                            words.append(word.value)
-                            confidences.append(word.confidence)
+                page_blocks, page_word_count = self._collect_doctr_page_blocks(
+                    page=page,
+                    confidences=confidences,
+                )
+                word_count += page_word_count
+                merged_blocks = self._merge_fragmented_doctr_blocks(page_blocks)
+                for block in merged_blocks:
+                    block_lines: List[Tuple[str, Optional[float]]] = block.get("lines", [])
+                    if not block_lines:
+                        continue
+                    block_left = min((lx for _, lx in block_lines if lx is not None), default=None)
+                    code_like_block = self._looks_like_code_block_lines([lt for lt, _ in block_lines])
+                    for line_text, line_left in block_lines:
+                        prefix = ""
+                        if code_like_block and block_left is not None and line_left is not None:
+                            offset = max(0.0, float(line_left - block_left))
+                            spaces = self._spaces_from_doctr_offset(offset)
+                            if spaces > 0:
+                                prefix = " " * spaces
+                        line_texts.append(prefix + line_text)
 
             # Calculate average confidence
             avg_confidence = np.mean(confidences) if confidences else 0.0
-            full_text = " ".join(words)
+            full_text = "\n".join(line_texts)
 
             elapsed_ms = int((time.perf_counter() - start_time) * 1000)
 
             logger.debug(
-                f"[DOCTR] Extracted {len(words)} words in {elapsed_ms}ms, "
+                f"[DOCTR] Extracted {word_count} words in {elapsed_ms}ms, "
                 f"avg confidence: {avg_confidence:.2f}"
             )
 
@@ -331,7 +439,7 @@ class EnhancedOCREngine:
                 layer_used=OCRLayer.DOCTR,
                 word_confidences=confidences,
                 processing_time_ms=elapsed_ms,
-                word_count=len(words),
+                word_count=word_count,
             )
 
         except Exception as e:
@@ -343,6 +451,316 @@ class EnhancedOCREngine:
                 layer_used=OCRLayer.DOCTR,
                 processing_time_ms=elapsed_ms,
             )
+
+    def _looks_like_code_block_lines(self, lines: List[str]) -> bool:
+        """
+        Heuristic code detector for OCR line groups.
+        """
+        if not lines:
+            return False
+        score = 0
+        for line in lines:
+            t = (line or "").strip()
+            if not t:
+                continue
+            if t.startswith((">>>", "...")):
+                score += 3
+            if re.search(
+                r"\b(def|class|import|from|return|yield|lambda|try|except|finally|with|for|while|if|elif|else|pass)\b",
+                t,
+            ):
+                score += 2
+            if re.search(r"[{}()\[\];=:@]", t):
+                score += 1
+            if t.endswith(":"):
+                score += 1
+        return score >= max(3, len(lines))
+
+    def _collect_doctr_page_blocks(
+        self,
+        page: object,
+        confidences: List[float],
+    ) -> Tuple[List[Dict[str, object]], int]:
+        page_blocks: List[Dict[str, object]] = []
+        page_word_count = 0
+
+        for block in getattr(page, "blocks", []) or []:
+            block_lines: List[Tuple[str, Optional[float]]] = []
+            block_bbox = self._extract_bbox_from_geometry(getattr(block, "geometry", None))
+
+            for line in getattr(block, "lines", []) or []:
+                words_in_line: List[str] = []
+                for word in getattr(line, "words", []) or []:
+                    word_text = (getattr(word, "value", "") or "").strip()
+                    if not word_text:
+                        continue
+                    words_in_line.append(word_text)
+                    word_conf = getattr(word, "confidence", None)
+                    if isinstance(word_conf, (int, float)):
+                        confidences.append(float(word_conf))
+
+                if not words_in_line:
+                    continue
+
+                line_text = " ".join(words_in_line)
+                line_left = self._extract_line_left_x(line)
+                block_lines.append((line_text, line_left))
+                page_word_count += len(words_in_line)
+
+                line_bbox = self._extract_bbox_from_geometry(getattr(line, "geometry", None))
+                if line_bbox is None:
+                    for word in getattr(line, "words", []) or []:
+                        word_bbox = self._extract_bbox_from_geometry(
+                            getattr(word, "geometry", None)
+                        )
+                        line_bbox = self._update_bbox_union(line_bbox, word_bbox)
+                block_bbox = self._update_bbox_union(block_bbox, line_bbox)
+
+            if block_lines:
+                page_blocks.append(
+                    {
+                        "lines": block_lines,
+                        "bbox": block_bbox,
+                    }
+                )
+
+        return page_blocks, page_word_count
+
+    def _merge_fragmented_doctr_blocks(
+        self,
+        block_records: List[Dict[str, object]],
+    ) -> List[Dict[str, object]]:
+        if len(block_records) < 2:
+            return block_records
+
+        # Missing geometry means we cannot safely merge by spatial heuristics.
+        if any(block.get("bbox") is None for block in block_records):
+            return block_records
+
+        sorted_blocks = sorted(
+            block_records,
+            key=lambda block: (block["bbox"][1], block["bbox"][0]),  # type: ignore[index]
+        )
+        merged: List[Dict[str, object]] = []
+        merge_count = 0
+
+        for block in sorted_blocks:
+            if not merged:
+                merged.append(
+                    {
+                        "lines": list(block.get("lines", [])),
+                        "bbox": block.get("bbox"),
+                    }
+                )
+                continue
+
+            current = merged[-1]
+            if self._should_merge_doctr_blocks(current, block):
+                current_lines: List[Tuple[str, Optional[float]]] = current.get("lines", [])
+                next_lines: List[Tuple[str, Optional[float]]] = block.get("lines", [])
+                current_lines.extend(next_lines)
+                current["bbox"] = self._update_bbox_union(
+                    current.get("bbox"),
+                    block.get("bbox"),
+                )
+                merge_count += 1
+            else:
+                merged.append(
+                    {
+                        "lines": list(block.get("lines", [])),
+                        "bbox": block.get("bbox"),
+                    }
+                )
+
+        if merge_count > 0:
+            logger.debug(
+                "[DOCTR] Merged %d fragmented blocks (%d -> %d)",
+                merge_count,
+                len(block_records),
+                len(merged),
+            )
+
+        return merged
+
+    def _should_merge_doctr_blocks(
+        self,
+        current: Dict[str, object],
+        nxt: Dict[str, object],
+    ) -> bool:
+        c_bbox = current.get("bbox")
+        n_bbox = nxt.get("bbox")
+        if not isinstance(c_bbox, tuple) or not isinstance(n_bbox, tuple):
+            return False
+        if len(c_bbox) != 4 or len(n_bbox) != 4:
+            return False
+
+        c_x0, c_y0, c_x1, c_y1 = [float(v) for v in c_bbox]
+        n_x0, n_y0, n_x1, n_y1 = [float(v) for v in n_bbox]
+
+        # Avoid merging overlapping detections that are likely separate columns/regions.
+        if n_y0 < c_y0:
+            return False
+
+        c_h = max(c_y1 - c_y0, 1e-6)
+        n_h = max(n_y1 - n_y0, 1e-6)
+        v_gap = n_y0 - c_y1
+        max_v_gap = max(
+            self._doctr_merge_max_vertical_gap,
+            max(c_h, n_h) * self._doctr_merge_gap_height_multiplier,
+        )
+        if v_gap < -0.01 or v_gap > max_v_gap:
+            return False
+
+        c_w = max(c_x1 - c_x0, 1e-6)
+        n_w = max(n_x1 - n_x0, 1e-6)
+        overlap = max(0.0, min(c_x1, n_x1) - max(c_x0, n_x0))
+        overlap_ratio = overlap / max(min(c_w, n_w), 1e-6)
+
+        c_lines = len(current.get("lines", []))
+        n_lines = len(nxt.get("lines", []))
+        if c_lines > self._doctr_merge_max_seed_lines and n_lines > self._doctr_merge_max_seed_lines:
+            return False
+
+        if overlap_ratio >= self._doctr_merge_min_overlap_ratio:
+            return True
+
+        left_shift = n_x0 - c_x0
+        if -self._doctr_merge_left_tolerance <= left_shift <= self._doctr_merge_max_indent_shift:
+            if n_x0 <= c_x1 + self._doctr_merge_max_indent_shift:
+                return True
+
+        return False
+
+    def _spaces_from_doctr_offset(self, offset: float) -> int:
+        if offset <= self._doctr_indent_threshold:
+            return 0
+        levels = int(offset / max(self._doctr_indent_step, 1e-6))
+        if levels <= 0:
+            return 0
+        return min(levels * self._indent_spaces_per_level, self._max_indent_spaces)
+
+    def _spaces_from_tesseract_offset(self, offset_px: float, image_width: int) -> int:
+        if image_width <= 0:
+            return 0
+        threshold = max(image_width * self._tesseract_indent_threshold_ratio, 1.0)
+        if offset_px <= threshold:
+            return 0
+        step = max(image_width * self._tesseract_indent_step_ratio, 1.0)
+        levels = int(offset_px / step)
+        if levels <= 0:
+            return 0
+        return min(levels * self._indent_spaces_per_level, self._max_indent_spaces)
+
+    def _extract_line_left_x(self, line: object) -> Optional[float]:
+        """
+        Extract normalized left-x from Doctr line geometry.
+        """
+        geometry = getattr(line, "geometry", None)
+        left = self._extract_left_from_geometry(geometry)
+        if left is not None:
+            return left
+        # Fallback to first-word geometry when line geometry is unavailable.
+        words = getattr(line, "words", None) or []
+        for word in words:
+            w_left = self._extract_left_from_geometry(getattr(word, "geometry", None))
+            if w_left is not None:
+                return w_left
+        return None
+
+    def _extract_left_from_geometry(self, geometry: object) -> Optional[float]:
+        if geometry is None:
+            return None
+        if not isinstance(geometry, (list, tuple)):
+            return None
+        xs: List[float] = []
+        for point in geometry:
+            if (
+                isinstance(point, (list, tuple))
+                and len(point) >= 2
+                and isinstance(point[0], (int, float))
+            ):
+                xs.append(float(point[0]))
+        if not xs:
+            return None
+        return min(xs)
+
+    def _extract_bbox_from_geometry(
+        self,
+        geometry: object,
+    ) -> Optional[Tuple[float, float, float, float]]:
+        if geometry is None:
+            return None
+        if not isinstance(geometry, (list, tuple)):
+            return None
+
+        xs: List[float] = []
+        ys: List[float] = []
+        for point in geometry:
+            if (
+                isinstance(point, (list, tuple))
+                and len(point) >= 2
+                and isinstance(point[0], (int, float))
+                and isinstance(point[1], (int, float))
+            ):
+                xs.append(float(point[0]))
+                ys.append(float(point[1]))
+
+        if not xs or not ys:
+            return None
+
+        return (min(xs), min(ys), max(xs), max(ys))
+
+    def _update_bbox_union(
+        self,
+        current_bbox: Optional[Tuple[float, float, float, float]],
+        new_bbox: Optional[Tuple[float, float, float, float]],
+    ) -> Optional[Tuple[float, float, float, float]]:
+        if new_bbox is None:
+            return current_bbox
+        if current_bbox is None:
+            return new_bbox
+        return (
+            min(current_bbox[0], new_bbox[0]),
+            min(current_bbox[1], new_bbox[1]),
+            max(current_bbox[2], new_bbox[2]),
+            max(current_bbox[3], new_bbox[3]),
+        )
+
+    def cleanup(self) -> None:
+        """
+        Release OCR runtime model references and torch caches.
+
+        Doctr loads transformer weights lazily and keeps them resident; this
+        method drops references so long-running jobs can reclaim memory.
+        """
+        doctr_model = self._doctr_model
+        self._doctr_model = None
+        self._tesseract_available = None
+
+        if doctr_model is not None:
+            try:
+                del doctr_model
+            except Exception:
+                pass
+
+        try:
+            import torch  # type: ignore
+
+            try:
+                if hasattr(torch, "cuda") and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+
+            try:
+                if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                    torch.mps.empty_cache()  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+        gc.collect()
 
     def get_layer_status(self) -> dict:
         """

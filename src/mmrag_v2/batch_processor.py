@@ -77,6 +77,7 @@ from .utils.image_hash_registry import (
     create_image_hash_registry,
     create_page1_validator,
 )
+from .utils.coordinate_normalization import ensure_normalized
 from .vision.vision_manager import VisionManager, create_vision_manager
 from .validators.token_validator import (
     TokenValidator,
@@ -101,6 +102,7 @@ DEFAULT_VLM_TIMEOUT: int = (
     180  # Seconds, increased for large vision models like llama3.2-vision (10.7B)
 )
 DEFAULT_VISION_PROVIDER: str = "ollama"
+DEFAULT_EXPORT_WRITE_BATCH_SIZE: int = 25
 
 
 # ============================================================================
@@ -178,6 +180,7 @@ class BatchProcessor:
         ocr_mode: str = "legacy",
         ocr_confidence_threshold: float = 0.7,
         enable_doctr: bool = True,
+        force_table_vlm: bool = False,
     ) -> None:
         """
         Initialize the BatchProcessor.
@@ -202,6 +205,7 @@ class BatchProcessor:
             ocr_mode: OCR processing mode ("legacy" or "layout-aware")
             ocr_confidence_threshold: Minimum OCR confidence for layout-aware mode (0.0-1.0)
             enable_doctr: Enable Doctr Layer 3 for layout-aware OCR
+            force_table_vlm: Force table image -> VLM markdown path (fallback to OCR/docling if needed)
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -234,6 +238,7 @@ class BatchProcessor:
         self.ocr_mode = ocr_mode
         self.ocr_confidence_threshold = ocr_confidence_threshold
         self.enable_doctr = enable_doctr
+        self.force_table_vlm = force_table_vlm
 
         # Will be initialized when processing starts
         self._vision_manager: Optional[VisionManager] = None
@@ -246,6 +251,7 @@ class BatchProcessor:
 
         # REQ-OCR-01: Profile parameters for OCR hints and dynamic DPI
         self._profile_params: Optional["ProfileParameters"] = None
+        self._layout_processor = None
 
         # V2.4: Intelligence Stack Metadata (for observability)
         self._intelligence_metadata: Dict[str, Any] = {}
@@ -267,6 +273,13 @@ class BatchProcessor:
         # when using --pages (max-pages) or specific pages, so QA validation/recovery
         # doesn't scan the entire PDF and trigger massive false recoveries.
         self._processed_pages: Optional[set[int]] = None
+
+        # MEMORY FIX: Cache heavy objects across batches instead of re-creating per batch.
+        # Docling DocumentConverter loads ~500MB+ of ML models (LayoutPredictor,
+        # TableFormer, OCR) into MPS memory. Re-creating it 18× for a 54-page doc
+        # causes catastrophic memory growth.
+        self._docling_converter = None  # Cached Docling DocumentConverter
+        self._shadow_processor = None   # Cached V2DocumentProcessor for shadow extraction
 
         logger.info(
             f"BatchProcessor initialized: "
@@ -373,6 +386,123 @@ class BatchProcessor:
             for chunk in iter(lambda: f.read(8192), b""):
                 hasher.update(chunk)
         return hasher.hexdigest()[:12]
+
+    def _sanitize_chunk_for_export(self, chunk: IngestionChunk) -> Dict[str, Any]:
+        """
+        Build a JSON-safe chunk dict with defensive bbox normalization.
+
+        This prevents export crashes from malformed spatial metadata while keeping
+        REQ-COORD invariants for emitted output.
+        """
+        self._enrich_asset_ref_from_disk(chunk)
+        chunk_dict = chunk.model_dump(mode="json")
+
+        # Ensure schema_version is emitted in metadata for downstream versioning
+        meta = chunk_dict.get("metadata", {})
+        if meta.get("schema_version") is None:
+            meta["schema_version"] = SCHEMA_VERSION
+            chunk_dict["metadata"] = meta
+
+        spatial = meta.get("spatial")
+        if isinstance(spatial, dict):
+            bbox = spatial.get("bbox")
+            if bbox is not None:
+                page_w = spatial.get("page_width") or 612
+                page_h = spatial.get("page_height") or 792
+                context = f"chunk_id={chunk_dict.get('chunk_id', 'unknown')}"
+                try:
+                    spatial["bbox"] = ensure_normalized(
+                        bbox=bbox,
+                        page_width=float(page_w),
+                        page_height=float(page_h),
+                        context=context,
+                    )
+                except Exception as bbox_err:
+                    # Keep pipeline alive: fallback for visual chunks, drop bbox for text.
+                    logger.warning(
+                        f"[FINALIZE] Invalid bbox normalized via fallback ({context}): {bbox_err}"
+                    )
+                    modality = str(chunk_dict.get("modality", "")).lower()
+                    if modality in ("image", "table"):
+                        spatial["bbox"] = [0, 0, COORD_SCALE, COORD_SCALE]
+                    else:
+                        spatial["bbox"] = None
+            chunk_dict["metadata"]["spatial"] = spatial
+
+        return chunk_dict
+
+    def _enrich_asset_ref_from_disk(self, chunk: IngestionChunk) -> None:
+        """Populate missing asset metadata (width/height/file size) from saved file."""
+        asset_ref = getattr(chunk, "asset_ref", None)
+        if not asset_ref or not asset_ref.file_path:
+            return
+
+        if (
+            asset_ref.width_px is not None
+            and asset_ref.height_px is not None
+            and asset_ref.file_size_bytes is not None
+        ):
+            return
+
+        asset_path = self.output_dir / asset_ref.file_path
+        if not asset_path.exists() or not asset_path.is_file():
+            return
+
+        try:
+            if asset_ref.file_size_bytes is None:
+                asset_ref.file_size_bytes = int(asset_path.stat().st_size)
+        except Exception:
+            pass
+
+        if asset_ref.width_px is None or asset_ref.height_px is None:
+            try:
+                with Image.open(asset_path) as img:
+                    w, h = img.size
+                if asset_ref.width_px is None:
+                    asset_ref.width_px = int(w)
+                if asset_ref.height_px is None:
+                    asset_ref.height_px = int(h)
+            except Exception:
+                pass
+
+    def _classify_text_content(self, text: str) -> str:
+        """Deterministic classification for text chunk metadata."""
+        lowered = (text or "").lower()
+        ad_keywords = (
+            "buy now",
+            "special offer",
+            "discount",
+            "order now",
+            "limited time",
+            "subscribe",
+        )
+        if any(tok in lowered for tok in ad_keywords):
+            return "advertisement"
+
+        technical_keywords = (
+            "api",
+            "schema",
+            "algorithm",
+            "function",
+            "class",
+            "module",
+            "pipeline",
+            "configuration",
+            "implementation",
+            "model",
+        )
+        if sum(1 for tok in technical_keywords if tok in lowered) >= 2:
+            return "technical"
+        return "editorial"
+
+    def _classify_recovery_text_content(self, text: str) -> str:
+        """
+        Deterministic non-null classification for recovery-generated TEXT chunks.
+
+        Recovery chunks must always carry content_classification so downstream
+        retrieval filters do not need special null handling.
+        """
+        return "code" if self._looks_like_code_text(text or "") else self._classify_text_content(text or "")
 
     def _initialize_vision_manager(self) -> Optional[VisionManager]:
         """
@@ -521,7 +651,7 @@ class BatchProcessor:
         from .ocr.layout_aware_processor import LayoutAwareOCRProcessor
 
         # Initialize processor (cached for performance)
-        if not hasattr(self, "_layout_processor"):
+        if self._layout_processor is None:
             self._layout_processor = LayoutAwareOCRProcessor(
                 ocr_confidence_threshold=self.ocr_confidence_threshold,
                 enable_doctr=self.enable_doctr,
@@ -669,7 +799,7 @@ class BatchProcessor:
 
             # Classify code-like OCR text (programming manuals/books).
             chunk_type = None
-            content_classification = None
+            content_classification = self._classify_text_content(pc.content or "") if modality == Modality.TEXT else None
             if modality == Modality.TEXT and self._looks_like_code_text(pc.content or ""):
                 chunk_type = ChunkType.CODE
                 content_classification = "code"
@@ -702,6 +832,7 @@ class BatchProcessor:
                     mime_type=pc.asset_ref.get("mime_type", "image/png"),
                     width_px=pc.asset_ref.get("width_px"),
                     height_px=pc.asset_ref.get("height_px"),
+                    file_size_bytes=pc.asset_ref.get("file_size_bytes"),
                 )
 
             # V3.0.0: REQ-MM-03 - Create semantic_context from ProcessedChunk
@@ -759,46 +890,92 @@ class BatchProcessor:
 
         logger.info("[DOCLING-LAYOUT] Running Docling layout analysis on batch...")
 
-        # Configure Docling for layout detection
-        pipeline_options = PdfPipelineOptions()
-        pipeline_options.images_scale = 2.0
-        pipeline_options.generate_page_images = (
-            True  # ✅ REQ-PDF-04: FIXED - Enable page rendering for padding integrity
-        )
-        pipeline_options.generate_picture_images = True
-        pipeline_options.generate_table_images = True
-        pipeline_options.do_ocr = True
+        # MEMORY FIX: Reuse cached DocumentConverter across batches.
+        # Creating a new converter per batch loads ~500MB+ of ML models
+        # (LayoutPredictor, TableFormer, OCR) into MPS memory each time.
+        if self._docling_converter is None:
+            pipeline_options = PdfPipelineOptions()
+            pipeline_options.images_scale = 2.0
+            pipeline_options.generate_page_images = (
+                True  # ✅ REQ-PDF-04: FIXED - Enable page rendering for padding integrity
+            )
+            # MEMORY FIX: Disable picture/table image generation.
+            # We crop regions ourselves in layout_aware_processor using the
+            # PyMuPDF-rendered page image.  Docling's copies are never used
+            # and waste ~5-15 MB per batch that is never freed.
+            pipeline_options.generate_picture_images = False
+            pipeline_options.generate_table_images = False
+            pipeline_options.do_ocr = True
 
-        converter = DocumentConverter(
-            format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
-        )
+            self._docling_converter = DocumentConverter(
+                format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
+            )
+            logger.info("[DOCLING-LAYOUT] Created and cached DocumentConverter (models loaded once)")
+        else:
+            logger.info("[DOCLING-LAYOUT] Reusing cached DocumentConverter")
 
-        result = converter.convert(str(batch_path))
-        doc = result.document
+        result = self._docling_converter.convert(str(batch_path))
+        docling_doc = result.document
 
-        # Group elements by page
+        # Group elements by page — convert to LIGHTWEIGHT dicts immediately
+        # so the heavy Docling Document (with page images) can be freed.
+        from types import SimpleNamespace
+
         elements_per_page: Dict[int, List[Any]] = {}
 
-        for item_tuple in doc.iterate_items():
+        for item_tuple in docling_doc.iterate_items():
             element, _ = item_tuple
 
             # Get page number from provenance
             batch_page_no = 1
+            prov_bbox = None
             if hasattr(element, "prov") and element.prov:
                 prov = element.prov[0] if isinstance(element.prov, list) else element.prov
                 if hasattr(prov, "page_no") and prov.page_no is not None:
                     batch_page_no = prov.page_no
+                # Extract bbox data as lightweight copy
+                if hasattr(prov, "bbox") and prov.bbox:
+                    bbox_obj = prov.bbox
+                    if hasattr(bbox_obj, "l"):
+                        prov_bbox = SimpleNamespace(
+                            l=bbox_obj.l, r=bbox_obj.r,
+                            t=bbox_obj.t, b=bbox_obj.b,
+                        )
 
             actual_page_no = batch_page_no + page_offset
 
+            # Build lightweight element that matches the interface
+            # expected by layout_aware_processor._convert_docling_elements
+            label_obj = getattr(element, "label", None)
+            label_ns = None
+            if label_obj is not None:
+                label_ns = SimpleNamespace(
+                    value=str(label_obj.value) if hasattr(label_obj, "value") else str(label_obj)
+                )
+
+            text_val = str(getattr(element, "text", "")) if hasattr(element, "text") else ""
+
+            light_elem = SimpleNamespace(
+                label=label_ns,
+                prov=[SimpleNamespace(bbox=prov_bbox, page_no=batch_page_no)] if prov_bbox else [],
+                text=text_val,
+            )
+
             if actual_page_no not in elements_per_page:
                 elements_per_page[actual_page_no] = []
-            elements_per_page[actual_page_no].append(element)
+            elements_per_page[actual_page_no].append(light_elem)
 
         total = sum(len(e) for e in elements_per_page.values())
         logger.info(
             f"[DOCLING-LAYOUT] Extracted {total} elements across {len(elements_per_page)} pages"
         )
+
+        # MEMORY FIX: Explicitly break references to Docling's heavy document
+        # object which holds rendered page images (~10 MB per page at 2x scale).
+        # The lightweight elements above have no back-references to docling_doc.
+        del docling_doc
+        del result
+        gc.collect()
 
         return elements_per_page
 
@@ -886,6 +1063,78 @@ class BatchProcessor:
                     render_dpi=dpi,
                 )
 
+                # For digital technical-manual pages, OCR can under-read dense TOC/index
+                # layouts. When extracted text is much shorter than the native text layer,
+                # replace OCR text chunks with a clean PDF-text fallback chunk.
+                profile_type = str(self._intelligence_metadata.get("profile_type", "unknown"))
+                if classification == "digital" and profile_type == "technical_manual":
+                    try:
+                        page_obj = doc.load_page(batch_page_idx)
+                        native_text = (page_obj.get_text("text") or "").strip()
+                        if len(native_text) >= 120:
+                            extracted_text_chars = sum(
+                                len(c.content or "") for c in page_chunks if c.modality == Modality.TEXT
+                            )
+                            native_chars = len(native_text)
+                            if extracted_text_chars < int(native_chars * 0.80):
+                                text_fallback_chunks = [c for c in page_chunks if c.modality != Modality.TEXT]
+                                doc_title = Path(source_file).stem if source_file else "Document"
+                                fallback_parts = self._split_nearest_paragraph_breaks(
+                                    text=native_text,
+                                    max_chars=1200,
+                                    overlap_chars=120,
+                                )
+                                fallback_parts = [p for p in fallback_parts if p and p.strip()]
+                                if not fallback_parts:
+                                    fallback_parts = [native_text]
+
+                                part_total = len(fallback_parts)
+                                for idx, part_text in enumerate(fallback_parts):
+                                    breadcrumb = [
+                                        doc_title,
+                                        f"Page {actual_page_no}",
+                                        "[DIGITAL-TEXT-FALLBACK]",
+                                    ]
+                                    if part_total > 1:
+                                        breadcrumb.append(f"[Part {idx + 1}/{part_total}]")
+
+                                    hierarchy = HierarchyMetadata(
+                                        parent_heading=None,
+                                        breadcrumb_path=breadcrumb,
+                                        level=len(breadcrumb),
+                                    )
+                                    fallback_chunk = create_text_chunk(
+                                        doc_id=self._doc_hash or "unknown",
+                                        content=part_text,
+                                        source_file=source_file,
+                                        file_type=FileType.PDF,
+                                        page_number=actual_page_no,
+                                        hierarchy=hierarchy,
+                                        extraction_method="digital_text_layer_fallback",
+                                        **self._intelligence_metadata,
+                                    )
+                                    text_fallback_chunks.append(fallback_chunk)
+
+                                page_chunks = text_fallback_chunks
+                                logger.info(
+                                    f"[DIGITAL-TEXT-FALLBACK] Page {actual_page_no}: replaced "
+                                    f"OCR text chunks ({extracted_text_chars} chars) with "
+                                    f"{part_total} native text chunk(s) ({native_chars} chars)"
+                                )
+                    except Exception as fallback_err:
+                        logger.debug(
+                            f"[DIGITAL-TEXT-FALLBACK] Page {actual_page_no}: skipped due to error: {fallback_err}"
+                        )
+
+                # Nuclear fallback for scanned_degraded code pages:
+                # stitch fragmented OCR code lines, then optionally re-transcribe via VLM.
+                if self._is_scanned_degraded_profile():
+                    page_chunks = self._nuclear_code_fix(
+                        page_chunks=page_chunks,
+                        page_image=page_image,
+                        page_number=actual_page_no,
+                    )
+
                 all_chunks.extend(page_chunks)
 
                 # Log chunk types
@@ -896,8 +1145,11 @@ class BatchProcessor:
                     flush=True,
                 )
 
-                # Memory cleanup
+                # MEMORY FIX: Release page image AND consumed Docling elements
+                # to avoid accumulating stale references across the page loop.
                 del page_image
+                if actual_page_no in docling_elements_per_page:
+                    del docling_elements_per_page[actual_page_no]
                 gc.collect()
 
             # ================================================================
@@ -910,17 +1162,27 @@ class BatchProcessor:
             # Import processor to access shadow extraction
             from .processor import V2DocumentProcessor
 
-            # Create temporary processor just for shadow extraction
-            temp_processor = V2DocumentProcessor(
-                output_dir=str(self.output_dir),
-                enable_ocr=False,
-                vision_provider="none",
-                external_vision_manager=self._vision_manager,
-                doc_hash_override=self._doc_hash,
-                source_file_override=source_file,
-                extraction_strategy=self.extraction_strategy,
-                intelligence_metadata=self._intelligence_metadata,
-            )
+            # MEMORY FIX: Reuse cached V2DocumentProcessor for shadow extraction.
+            # Creating a new processor per batch re-initializes Docling internals.
+            if self._shadow_processor is None:
+                self._shadow_processor = V2DocumentProcessor(
+                    output_dir=str(self.output_dir),
+                    enable_ocr=False,
+                    vision_provider="none",
+                    external_vision_manager=self._vision_manager,
+                    doc_hash_override=self._doc_hash,
+                    source_file_override=source_file,
+                    extraction_strategy=self.extraction_strategy,
+                    intelligence_metadata=self._intelligence_metadata,
+                    force_table_vlm=self.force_table_vlm,
+                )
+                logger.info("[SHADOW-EXTRACTION] Created and cached shadow processor")
+            else:
+                # Update mutable state that may change between batches
+                self._shadow_processor._doc_hash_override = self._doc_hash
+                self._shadow_processor._source_file_override = source_file
+                logger.info("[SHADOW-EXTRACTION] Reusing cached shadow processor")
+            temp_processor = self._shadow_processor
 
             try:
                 # Prepare page_dims dict from still-open PDF doc
@@ -965,15 +1227,17 @@ class BatchProcessor:
                     docling_processed_pages=set(range(1, len(doc) + 1)),
                 )
 
-                shadow_chunks = list(shadow_chunks_generator)
+                shadow_count = 0
+                for shadow_chunk in shadow_chunks_generator:
+                    all_chunks.append(shadow_chunk)
+                    shadow_count += 1
 
-                if shadow_chunks:
-                    all_chunks.extend(shadow_chunks)
+                if shadow_count > 0:
                     print(
-                        f"    ✓ [SHADOW] Found {len(shadow_chunks)} additional shadow assets",
+                        f"    ✓ [SHADOW] Found {shadow_count} additional shadow assets",
                         flush=True,
                     )
-                    logger.info(f"[SHADOW-EXTRACTION] Added {len(shadow_chunks)} shadow assets")
+                    logger.info(f"[SHADOW-EXTRACTION] Added {shadow_count} shadow assets")
                 else:
                     print("    ✓ [SHADOW] No additional shadow assets found", flush=True)
                     logger.info("[SHADOW-EXTRACTION] No shadow assets needed")
@@ -992,6 +1256,383 @@ class BatchProcessor:
             f"[LAYOUT-OCR] Batch complete: {len(all_chunks)} chunks generated (including shadow)"
         )
         return all_chunks
+
+    def _is_scanned_degraded_profile(self) -> bool:
+        profile = str(self._intelligence_metadata.get("profile_type", "") or "").strip().lower()
+        return profile == "scanned_degraded"
+
+    def _nuclear_code_fix(
+        self,
+        page_chunks: List[IngestionChunk],
+        page_image: np.ndarray,
+        page_number: int,
+    ) -> List[IngestionChunk]:
+        """
+        Stitch fragmented OCR code chunks and optionally transcribe stitched blocks via VLM.
+
+        This is intentionally restricted to scanned_degraded profile pages.
+        """
+        if not page_chunks or self._vision_manager is None:
+            return page_chunks
+
+        import re
+
+        page_h, page_w = page_image.shape[:2] if page_image is not None else (0, 0)
+        if page_h <= 0 or page_w <= 0:
+            return page_chunks
+
+        pil_page: Optional[Image.Image] = None
+        max_vlm_calls_per_page = 3
+        vlm_calls = 0
+        merged_groups = 0
+        transcribed_groups = 0
+        merge_serial = 0
+
+        def _bbox_of(ch: IngestionChunk) -> Optional[List[int]]:
+            try:
+                bb = ch.metadata.spatial.bbox if ch.metadata and ch.metadata.spatial else None
+                if bb and len(bb) == 4:
+                    return [int(bb[0]), int(bb[1]), int(bb[2]), int(bb[3])]
+            except Exception:
+                return None
+            return None
+
+        def _union_bbox(a: Optional[List[int]], b: Optional[List[int]]) -> Optional[List[int]]:
+            if a is None:
+                return b
+            if b is None:
+                return a
+            return [
+                min(a[0], b[0]),
+                min(a[1], b[1]),
+                max(a[2], b[2]),
+                max(a[3], b[3]),
+            ]
+
+        def _to_pixels(bbox_norm: Optional[List[int]], padding: int = 10) -> Optional[Tuple[int, int, int, int]]:
+            if bbox_norm is None:
+                return None
+            x0 = int((bbox_norm[0] / COORD_SCALE) * page_w) - padding
+            y0 = int((bbox_norm[1] / COORD_SCALE) * page_h) - padding
+            x1 = int((bbox_norm[2] / COORD_SCALE) * page_w) + padding
+            y1 = int((bbox_norm[3] / COORD_SCALE) * page_h) + padding
+
+            x0 = max(0, min(page_w - 1, x0))
+            y0 = max(0, min(page_h - 1, y0))
+            x1 = max(1, min(page_w, x1))
+            y1 = max(1, min(page_h, y1))
+            if x1 - x0 < 16 or y1 - y0 < 16:
+                return None
+            return (x0, y0, x1, y1)
+
+        def _is_code_candidate(ch: IngestionChunk) -> bool:
+            if ch.modality != Modality.TEXT:
+                return False
+            txt = (ch.content or "").strip("\n")
+            if not txt.strip():
+                return False
+            line_text = txt.strip()
+            if re.fullmatch(
+                r"(?:from\s+[A-Za-z_][\w\.]*\s+import\s+[A-Za-z_][\w\.,\s]*|import\s+[A-Za-z_][\w\.]*(?:\s*,\s*[A-Za-z_][\w\.]*)*(?:\s+as\s+[A-Za-z_][\w]*)?)",
+                line_text,
+            ):
+                return False
+
+            words = re.findall(r"[A-Za-z]{2,}", txt)
+            if (
+                len(words) >= 12
+                and txt[:1].isupper()
+                and any(p in txt for p in (".", ";", "!", "?"))
+                and not re.search(r"[{}()\[\]=]", txt)
+            ):
+                return False
+
+            try:
+                if (
+                    ch.metadata.chunk_type == ChunkType.CODE
+                    or ch.metadata.content_classification == "code"
+                ):
+                    return True
+            except Exception:
+                pass
+
+            if txt.startswith(("    ", "\t")):
+                return True
+
+            if re.search(
+                r"(?m)^\s*(def|class|if\s+.*:|elif\s+.*:|else:|for\s+.*:|while\s+.*:|try:|except\b.*:|finally:|return\b|with\s+.*:|yield\b|raise\b|pass\b|break\b|continue\b)\s*$",
+                txt,
+            ):
+                return True
+            if re.search(r"(?m)^\s*from\s+[A-Za-z_][\w\.]*\s+import\b", txt):
+                return True
+            if re.search(
+                r"(?m)^\s*import\s+[A-Za-z_][\w\.]*(\s*,\s*[A-Za-z_][\w\.]*)*(\s+as\s+[A-Za-z_][\w]*)?\s*$",
+                txt,
+            ):
+                return True
+            if re.search(r"(?m)^\s*[A-Za-z_][\w\.]*(?:\[[^\]]+\])?\s*=\s*.+$", txt):
+                return True
+            if re.search(r"(?m)^\s*(?:>>>|\.\.\.)\s*", txt):
+                return True
+            if re.search(r"(?m)^\s*#\s*\S+", txt):
+                return True
+            if self._looks_like_code_text(txt) and re.search(r"[=\(\)\[\]\{\}:#]", txt):
+                return True
+            if (
+                re.search(r"[=\(\)\[\]\{\}:#]", txt)
+                and len(txt) <= 140
+                and len(re.findall(r"[A-Za-z]{2,}", txt)) <= 16
+            ):
+                return True
+            return False
+
+        def _looks_like_code_continuation(ch: IngestionChunk) -> bool:
+            if ch.modality != Modality.TEXT:
+                return False
+            txt = (ch.content or "").strip("\n")
+            if not txt.strip():
+                return False
+            if _is_code_candidate(ch):
+                return True
+            if re.search(
+                r"(?m)^\s*(print|assert|del|return|yield|pass|break|continue|raise)\b",
+                txt,
+            ):
+                return True
+            if re.search(
+                r"(?m)^\s*(if|elif|else|for|while|try|except|finally|with)\b.*:?\s*$",
+                txt,
+            ):
+                return True
+            if re.search(r"(?m)^\s*[A-Za-z_][\w\.]*\s*\(.*\)\s*$", txt) and len(txt) <= 160:
+                return True
+            if re.search(r"(?m)^\s*[A-Za-z_][\w\.]*(?:\[[^\]]+\])?\s*=\s*.+$", txt):
+                return True
+            if re.search(r"(?m)^\s*(?:>>>|\.\.\.)\s*", txt):
+                return True
+            if re.search(r"[=\(\)\[\]\{\}:#]", txt) and len(txt) <= 120:
+                return True
+            return False
+
+        def _is_suspicious_code_noise(text: str) -> bool:
+            if not text:
+                return False
+            t = text
+            if re.search(r"[A-Za-z]{2,}\d+[A-Za-z]{2,}", t):
+                return True
+            if re.search(r"[A-Za-z]{2,}[;:,][A-Za-z]{2,}", t):
+                return True
+            if re.search(r"\b(?:initia|intere;|retum|ciass|moduie)\b", t.lower()):
+                return True
+            return False
+
+        def _has_code_signals(text: str) -> bool:
+            if not text:
+                return False
+            return (
+                re.search(
+                    r"(?m)^\s*(def|class|if\s+.*:|elif\s+.*:|else:|for\s+.*:|while\s+.*:|try:|except\b.*:|return\b|with\s+.*:)\s*$",
+                    text,
+                )
+                is not None
+                or re.search(r"(?m)^\s*from\s+[A-Za-z_][\w\.]*\s+import\b", text) is not None
+                or re.search(
+                    r"(?m)^\s*import\s+[A-Za-z_][\w\.]*(\s*,\s*[A-Za-z_][\w\.]*)*(\s+as\s+[A-Za-z_][\w]*)?\s*$",
+                    text,
+                )
+                is not None
+                or re.search(r"(?m)^\s*[A-Za-z_][\w\.]*\s*=\s*.+$", text) is not None
+                or re.search(r"[=\(\)\[\]\{\}:#]", text) is not None
+                or re.search(r"(?m)^\s*>>>", text) is not None
+            )
+
+        def _can_attach(prev_ch: IngestionChunk, cur_ch: IngestionChunk) -> bool:
+            prev_bbox = _bbox_of(prev_ch)
+            cur_bbox = _bbox_of(cur_ch)
+            if prev_bbox is None or cur_bbox is None:
+                return False
+
+            v_gap = cur_bbox[1] - prev_bbox[3]
+            prev_h = max(1, prev_bbox[3] - prev_bbox[1])
+            cur_h = max(1, cur_bbox[3] - cur_bbox[1])
+            max_v_gap = max(140, int(max(prev_h, cur_h) * 4))
+            if v_gap < -10 or v_gap > max_v_gap:
+                return False
+
+            prev_w = max(1, prev_bbox[2] - prev_bbox[0])
+            cur_w = max(1, cur_bbox[2] - cur_bbox[0])
+            overlap = max(0, min(prev_bbox[2], cur_bbox[2]) - max(prev_bbox[0], cur_bbox[0]))
+            overlap_ratio = overlap / float(max(1, min(prev_w, cur_w)))
+
+            if overlap_ratio >= 0.05:
+                return True
+
+            left_shift = cur_bbox[0] - prev_bbox[0]
+            if -70 <= left_shift <= 180 and cur_bbox[0] <= prev_bbox[2] + 180:
+                return True
+
+            return False
+
+        def _should_transcribe(merged_text: str, group_size: int) -> bool:
+            if vlm_calls >= max_vlm_calls_per_page:
+                return False
+            text = (merged_text or "").strip()
+            if not text:
+                return False
+            line_count = max(1, text.count("\n") + 1)
+            has_leading_indent = any(
+                ln.startswith(("    ", "\t")) for ln in text.splitlines() if ln.strip()
+            )
+            if _is_suspicious_code_noise(text):
+                return True
+            if _has_code_signals(text) and len(text) >= 30 and group_size >= 2:
+                return True
+            if (
+                group_size == 1
+                and line_count == 1
+                and _has_code_signals(text)
+                and (text.rstrip().endswith(":") or text.lstrip().startswith(("def ", "class ", ">>>", "...")))
+            ):
+                return True
+            if group_size <= 2 and line_count <= 3 and not has_leading_indent and _has_code_signals(text):
+                return True
+            if line_count >= 4 and not has_leading_indent and _has_code_signals(text):
+                return True
+            return False
+
+        def _transcribe_if_needed(
+            base: IngestionChunk,
+            merged_text: str,
+            merged_bbox: Optional[List[int]],
+            group_size: int,
+        ) -> None:
+            nonlocal vlm_calls, transcribed_groups, pil_page
+
+            if not _should_transcribe(merged_text, group_size):
+                return
+
+            crop_px = _to_pixels(merged_bbox, padding=12)
+            if crop_px is None:
+                return
+
+            x0, y0, x1, y1 = crop_px
+            if group_size == 1 and merged_text.strip().endswith(":"):
+                expand_down = max(80, int(page_h * 0.05))
+                y1 = min(page_h, y1 + expand_down)
+            if group_size == 1 and len(merged_text.strip()) < 40:
+                expand_down = max(60, int(page_h * 0.03))
+                y1 = min(page_h, y1 + expand_down)
+            crop_px = (x0, y0, x1, y1)
+
+            if pil_page is None:
+                pil_page = Image.fromarray(page_image)
+            crop = pil_page.crop(crop_px)
+            transcribed = self._vision_manager.transcribe_code_block(
+                crop,
+                page_number=page_number,
+            )
+            if transcribed:
+                base.content = transcribed
+                base.metadata.extraction_method = "vlm_code_transcribed"
+                vlm_calls += 1
+                transcribed_groups += 1
+
+        def _flush_buffer(buffer: List[IngestionChunk], output: List[IngestionChunk]) -> None:
+            nonlocal merged_groups, merge_serial
+
+            if not buffer:
+                return
+            if len(buffer) == 1:
+                base = buffer[0].model_copy(deep=True)
+                if base.modality == Modality.TEXT:
+                    if base.metadata.chunk_type != ChunkType.CODE:
+                        base.metadata.chunk_type = ChunkType.CODE
+                    base.metadata.content_classification = "code"
+                    if base.metadata.extraction_method == "ocr":
+                        base.metadata.extraction_method = "ocr_code_stitched"
+                single_bbox = _bbox_of(base)
+                _transcribe_if_needed(
+                    base=base,
+                    merged_text=base.content or "",
+                    merged_bbox=single_bbox,
+                    group_size=1,
+                )
+                output.append(base)
+                buffer.clear()
+                return
+
+            merge_serial += 1
+            merged_groups += 1
+
+            base = buffer[0].model_copy(deep=True)
+            merged_bbox: Optional[List[int]] = None
+            merged_lines: List[str] = []
+            for entry in buffer:
+                merged_bbox = _union_bbox(merged_bbox, _bbox_of(entry))
+                line = (entry.content or "").strip("\n")
+                if line:
+                    merged_lines.append(line)
+
+            merged_text = "\n".join(merged_lines).strip("\n")
+            base.content = merged_text
+            base.chunk_id = f"{base.chunk_id}_nc{merge_serial}"
+
+            if base.metadata.spatial is None:
+                base.metadata.spatial = SpatialMetadata(bbox=None)
+            base.metadata.spatial.bbox = merged_bbox
+            base.metadata.chunk_type = ChunkType.CODE
+            base.metadata.content_classification = "code"
+            base.metadata.extraction_method = "ocr_code_stitched"
+
+            if len(buffer) > 1:
+                if base.semantic_context is None:
+                    base.semantic_context = SemanticContext()
+                first_ctx = buffer[0].semantic_context
+                last_ctx = buffer[-1].semantic_context
+                if first_ctx and first_ctx.prev_text_snippet:
+                    base.semantic_context.prev_text_snippet = first_ctx.prev_text_snippet
+                if last_ctx and last_ctx.next_text_snippet:
+                    base.semantic_context.next_text_snippet = last_ctx.next_text_snippet
+
+            _transcribe_if_needed(
+                base=base,
+                merged_text=merged_text,
+                merged_bbox=merged_bbox,
+                group_size=len(buffer),
+            )
+
+            output.append(base)
+            buffer.clear()
+
+        merged_chunks: List[IngestionChunk] = []
+        code_buffer: List[IngestionChunk] = []
+
+        for chunk in page_chunks:
+            if not _is_code_candidate(chunk):
+                if code_buffer and _can_attach(code_buffer[-1], chunk) and _looks_like_code_continuation(chunk):
+                    code_buffer.append(chunk)
+                    continue
+                _flush_buffer(code_buffer, merged_chunks)
+                merged_chunks.append(chunk)
+                continue
+
+            if code_buffer and _can_attach(code_buffer[-1], chunk):
+                code_buffer.append(chunk)
+            else:
+                _flush_buffer(code_buffer, merged_chunks)
+                code_buffer.append(chunk)
+
+        _flush_buffer(code_buffer, merged_chunks)
+
+        if merged_groups > 0 or transcribed_groups > 0:
+            logger.info(
+                f"[NUCLEAR-CODE] Page {page_number}: stitched_groups={merged_groups} "
+                f"vlm_transcribed={transcribed_groups} "
+                f"calls={vlm_calls}/{max_vlm_calls_per_page}"
+            )
+
+        return merged_chunks
 
     def _process_single_batch(
         self,
@@ -1028,7 +1669,7 @@ class BatchProcessor:
         #
         # This is the CRITICAL routing that was missing before!
         # ================================================================
-        if self.ocr_mode == "layout-aware":
+        if self.ocr_mode == "layout-aware" and self.enable_ocr:
             logger.info(
                 f"[BATCH] Layout-aware OCR enabled "
                 f"(threshold={self.ocr_confidence_threshold}, doctr={self.enable_doctr})"
@@ -1056,6 +1697,11 @@ class BatchProcessor:
             )
 
             return chunks
+        elif self.ocr_mode == "layout-aware" and not self.enable_ocr:
+            logger.info(
+                "[BATCH] OCR mode is layout-aware, but OCR is disabled. "
+                "Falling back to legacy pipeline."
+            )
 
         # ================================================================
         # LEGACY MODE: Standard Docling + Shadow extraction
@@ -1079,6 +1725,7 @@ class BatchProcessor:
             source_file_override=source_file,
             extraction_strategy=self.extraction_strategy,
             intelligence_metadata=self._intelligence_metadata,  # BUG-009 FIX: Propagate metadata
+            force_table_vlm=self.force_table_vlm,
         )
 
         if self._refiner_config:
@@ -1127,9 +1774,28 @@ class BatchProcessor:
                 f"Traceback:\n{traceback.format_exc()}"
             )
             raise
+        finally:
+            # CRITICAL: capture state before cleanup so breadcrumb continuity
+            # survives per-batch teardown.
+            try:
+                self._context_state = processor.get_final_state()
+            except Exception as state_err:
+                logger.debug(
+                    f"[BATCH-CLEANUP] Unable to capture final state for batch "
+                    f"{batch_info.batch_index + 1}: {state_err}"
+                )
 
-        # CRITICAL: Capture state for next batch (breadcrumb continuity)
-        self._context_state = processor.get_final_state()
+            # Explicit processor cleanup per batch prevents converter/model buildup
+            # across long runs (e.g. 54-page manuals).
+            try:
+                processor.cleanup()
+            except Exception as cleanup_err:
+                logger.debug(f"[BATCH-CLEANUP] Processor cleanup skipped: {cleanup_err}")
+            try:
+                del processor
+            except Exception:
+                pass
+            gc.collect()
 
         # Log batch completion
         breadcrumbs = self._context_state.get_breadcrumb_path() if self._context_state else []
@@ -1155,6 +1821,7 @@ class BatchProcessor:
         start_time = time.perf_counter()
         errors: List[str] = []
         all_chunks: List[IngestionChunk] = []
+        prefinal_vision_stats: Dict[str, Any] = {}
 
         logger.info(f"Starting batch processing for: {pdf_path.name}")
         print(f"⏳ Starting batch processing for: {pdf_path.name}", flush=True)
@@ -1188,11 +1855,8 @@ class BatchProcessor:
         is_digital_like = doc_modality in ("native_digital", "image_heavy")
 
         # Default policy (AGENTS.md): avoid OCR cascade on digital-like PDFs unless user explicitly forces it.
-        #
-        # Exception: technical manuals / programming books frequently embed code blocks as images or
-        # have empty-text regions where Docling OCR materially improves recall. For profile_type=technical_manual,
-        # keep OCR settings enabled so we can meet token-balance QA targets.
-        if is_digital_like and not self.force_ocr and profile_type != "technical_manual":
+        # This applies to all profiles, including technical_manual.
+        if is_digital_like and not self.force_ocr:
             self.ocr_mode = "legacy"
             self.enable_ocr = False
             self.enable_doctr = False
@@ -1200,12 +1864,6 @@ class BatchProcessor:
                 f"[OCR-GUARD] Digital-like modality={doc_modality} "
                 "(force_ocr=False); "
                 "OCR cascade disabled (legacy mode, enable_ocr=False, enable_doctr=False)"
-            )
-        elif is_digital_like and not self.force_ocr and profile_type == "technical_manual":
-            logger.info(
-                f"[OCR-GUARD] Digital-like modality={doc_modality} BUT profile_type=technical_manual; "
-                f"preserving OCR settings (mode={self.ocr_mode}, enable_ocr={self.enable_ocr}, "
-                f"enable_doctr={self.enable_doctr}) for max-recall technical conversion"
             )
         elif is_digital_like and self.force_ocr:
             # User explicitly wants OCR on digital PDF - respect the flag for recovery phases
@@ -1219,6 +1877,35 @@ class BatchProcessor:
             logger.info(
                 f"[OCR-GUARD] Modality={doc_modality or 'unknown'}; respecting configured OCR settings "
                 f"(mode={self.ocr_mode}, enable_ocr={self.enable_ocr}, enable_doctr={self.enable_doctr})"
+            )
+
+        # Hard governance: if OCR is disabled for this run, force legacy routing.
+        if not self.enable_ocr:
+            if self.force_ocr:
+                logger.warning(
+                    "[OCR-GOVERNANCE] force_ocr=True ignored because enable_ocr=False; "
+                    "forcing force_ocr=False for this run"
+                )
+                self.force_ocr = False
+            if self.ocr_mode != "legacy":
+                logger.info(
+                    f"[OCR-GOVERNANCE] OCR disabled; overriding ocr_mode={self.ocr_mode} -> legacy"
+                )
+            self.ocr_mode = "legacy"
+            self.enable_doctr = False
+
+        # Guardrail: when OCR is disabled for this run, OCR-hint injection must
+        # be disabled as well (it uses EasyOCR runtime and can cause late OOM).
+        if (not self.enable_ocr) and self._profile_params and self._profile_params.enable_ocr_hints:
+            try:
+                from dataclasses import replace
+
+                self._profile_params = replace(self._profile_params, enable_ocr_hints=False)
+            except Exception:
+                self._profile_params.enable_ocr_hints = False
+            logger.info(
+                "[OCR-HINT-GUARD] Disabled profile OCR hints because OCR is disabled "
+                "(enable_ocr=False)"
             )
 
         # [CORE] Page limit enforcement at splitting stage
@@ -1378,8 +2065,15 @@ class BatchProcessor:
                     print(f"    ✗ Error: {e}", flush=True)
 
                 # REQ-PDF-05: Memory hygiene between batches
-                gc.collect()
-                logger.debug(f"gc.collect() after batch {batch_info.batch_index + 1}")
+                # MEMORY FIX: Release MPS/CUDA tensor caches in addition to Python GC.
+                # gc.collect() alone does NOT free Apple MPS memory held by PyTorch.
+                self._release_torch_runtime_memory()
+                self._log_memory_checkpoint(f"after batch {batch_info.batch_index + 1}/{split_result.batch_count}")
+                logger.debug(f"gc.collect() + MPS cache clear after batch {batch_info.batch_index + 1}")
+
+        # Batch extraction is complete; release heavy extraction runtimes before
+        # validation/recovery stages so OCR recovery does not overlap Docling models.
+        self._release_extraction_runtime_models("[MEMORY] post-batch extraction release")
 
         # ====================================================================
         # REQ-COORD-02: Extract page dimensions for UI overlay support
@@ -1390,8 +2084,15 @@ class BatchProcessor:
         # ====================================================================
         # REQ-DEDUP-01: Initialize ImageHashRegistry for pHash deduplication
         # ====================================================================
-        self._image_hash_registry = create_image_hash_registry(threshold=10)
-        print("🔍 [PHASH] Initializing perceptual hash registry...", flush=True)
+        if profile_type == "technical_manual":
+            self._image_hash_registry = None
+            print(
+                "🔍 [PHASH] Disabled for technical_manual profile (stability/performance).",
+                flush=True,
+            )
+        else:
+            self._image_hash_registry = create_image_hash_registry(threshold=10)
+            print("🔍 [PHASH] Initializing perceptual hash registry...", flush=True)
 
         # ====================================================================
         # CLUSTER B: GOVERNANCE & VALIDATION LAYERS
@@ -1501,15 +2202,26 @@ class BatchProcessor:
 
         # Final hygiene pass for technical manuals AFTER recovery (recovery may re-introduce
         # TOC artifacts like control chars / embedded page-number lines).
-        profile_type = str(self._intelligence_metadata.get("profile_type", "unknown"))
         if profile_type == "technical_manual":
+            # IMPORTANT: unload heavy extraction runtimes before final hygiene.
+            # This avoids Docling+EasyOCR overlap in late-stage processing where
+            # macOS can issue hard Killed:9 despite low apparent Python RSS.
+            self._release_extraction_runtime_models("[TECHMANUAL-FINAL] preflight")
+            # Release vision-side runtime state (OCR hint engines + cache payloads)
+            # before final hygiene to reduce end-of-run memory pressure.
+            prefinal_vision_stats = self._release_vision_runtime_models(
+                "[TECHMANUAL-FINAL] preflight vision release"
+            )
+            self._log_memory_checkpoint("[TECHMANUAL-FINAL] preflight")
             all_chunks = self._sanitize_technical_manual_final(all_chunks)
         all_chunks = self._apply_oversize_breaker(all_chunks, max_chars=1500)
+        all_chunks = self._apply_table_recovery_highlander_dedup(all_chunks)
 
         # Write aggregated output to master JSONL with deduplication
         output_jsonl = self.output_dir / "ingestion.jsonl"
         written_chunks = 0
         duplicate_count = 0
+        export_error_count = 0
 
         # PHANTOM BUG FIX: Add defensive logging and error handling
         export_chunks = all_chunks  # Use the latest set (includes recovered chunks if any)
@@ -1519,161 +2231,167 @@ class BatchProcessor:
             flush=True,
         )
 
-        # ✅ IRON-08: Clear file first, then use atomic writes (append + flush)
+        # ✅ IRON-08: Clear file first, then stream write in small batches.
         if output_jsonl.exists():
             output_jsonl.unlink()
 
-        # Process chunks with atomic writes
-        for idx, chunk in enumerate(export_chunks):
-            try:
-                # Log progress every 50 chunks
-                if idx % 50 == 0 and idx > 0:
-                    logger.debug(f"[FINALIZE] Processed {idx}/{len(export_chunks)} chunks")
+        with open(output_jsonl, "a", encoding="utf-8") as f:
+            write_buffer: List[str] = []
 
-                chunk_dict = chunk.model_dump(mode="json")
-                # Ensure schema_version is emitted in metadata for downstream versioning
-                meta = chunk_dict.get("metadata", {})
-                if meta.get("schema_version") is None:
-                    meta["schema_version"] = SCHEMA_VERSION
-                    chunk_dict["metadata"] = meta
-
-                # Safety net: final JSONL-level hygiene for technical manuals.
-                # This catches rare cases where recovery/splitting re-introduces digit-only lines
-                # after earlier passes (page headers, running footers).
+            # Process chunks with streaming writes
+            for idx, chunk in enumerate(export_chunks):
                 try:
-                    if (
-                        chunk_dict.get("modality") == "text"
-                        and chunk_dict.get("metadata", {}).get("profile_type") == "technical_manual"
-                        and chunk_dict.get("metadata", {}).get("chunk_type") != ChunkType.CODE
-                    ):
-                        c = chunk_dict.get("content") or ""
-                        c2 = self._strip_control_chars(c)
-                        c2 = self._remove_standalone_page_number_lines(c2)
-                        c2 = self._remove_all_digit_only_lines(c2)
-                        c2 = self._fix_linebreak_hyphenation(c2)
-                        if c2 != c:
-                            chunk_dict["content"] = c2
-                except Exception:
-                    pass
+                    # Log progress every 50 chunks
+                    if idx % 50 == 0 and idx > 0:
+                        logger.debug(f"[FINALIZE] Processed {idx}/{len(export_chunks)} chunks")
 
-                # ============================================================
-                # REQ-ASSET-01: STRICT FILENAME-METADATA ASSERTION
-                # ============================================================
-                asset_ref = chunk_dict.get("asset_ref")
-                if asset_ref and asset_ref.get("file_path"):
-                    file_path = asset_ref["file_path"]
-                    filename = file_path.split("/")[-1]
-                    parts = filename.split("_")
-                    if len(parts) >= 2:
-                        filename_page = int(parts[1])
-                        metadata_page = chunk_dict.get("metadata", {}).get("page_number")
-                        if filename_page != metadata_page:
-                            error_msg = (
-                                f"[ASSET-METADATA-MISMATCH] FATAL: "
-                                f"Asset '{filename}' page {filename_page} "
-                                f"!= metadata page {metadata_page}. "
-                                f"STOPPING EXPORT."
-                            )
-                            logger.error(error_msg)
-                            raise ValueError(error_msg)
+                    chunk_dict = self._sanitize_chunk_for_export(chunk)
 
-                # ============================================================
-                # REQ-DEDUP-01: pHash Deduplication for IMAGE chunks
-                # ============================================================
-                if chunk.modality == Modality.IMAGE and asset_ref:
-                    asset_file = asset_ref.get("file_path")
-                    if asset_file:
-                        full_asset_path = self.output_dir / asset_file
-                        if full_asset_path.exists():
-                            try:
-                                from PIL import Image
+                    # Safety net: final JSONL-level hygiene for technical manuals.
+                    # This catches rare cases where recovery/splitting re-introduces digit-only lines
+                    # after earlier passes (page headers, running footers).
+                    try:
+                        if (
+                            chunk_dict.get("modality") == "text"
+                            and chunk_dict.get("metadata", {}).get("profile_type")
+                            == "technical_manual"
+                            and chunk_dict.get("metadata", {}).get("chunk_type") != ChunkType.CODE
+                        ):
+                            c = chunk_dict.get("content") or ""
+                            c2 = self._strip_control_chars(c)
+                            c2 = self._remove_standalone_page_number_lines(c2)
+                            c2 = self._remove_all_digit_only_lines(c2)
+                            c2 = self._fix_linebreak_hyphenation(c2)
+                            if c2 != c:
+                                chunk_dict["content"] = c2
+                    except Exception:
+                        pass
 
-                                with Image.open(full_asset_path) as img:
-                                    dup_info = self._image_hash_registry.check_and_register(
-                                        image=img,
-                                        page_number=chunk.metadata.page_number,
-                                        asset_path=asset_file,
-                                    )
+                    # ============================================================
+                    # REQ-ASSET-01: STRICT FILENAME-METADATA ASSERTION
+                    # ============================================================
+                    asset_ref = chunk_dict.get("asset_ref")
+                    if asset_ref and asset_ref.get("file_path"):
+                        file_path = asset_ref["file_path"]
+                        filename = file_path.split("/")[-1]
+                        parts = filename.split("_")
+                        if len(parts) >= 2:
+                            filename_page = int(parts[1])
+                            metadata_page = chunk_dict.get("metadata", {}).get("page_number")
+                            if filename_page != metadata_page:
+                                error_msg = (
+                                    f"[ASSET-METADATA-MISMATCH] "
+                                    f"Asset '{filename}' page {filename_page} "
+                                    f"!= metadata page {metadata_page}. Skipping chunk."
+                                )
+                                logger.error(error_msg)
+                                export_error_count += 1
+                                errors.append(error_msg)
+                                continue
 
-                                    if dup_info.is_duplicate:
-                                        # DUPLICATE_REJECTED - skip this chunk
-                                        duplicate_count += 1
-                                        orig_page = (
-                                            dup_info.original_record.page_number
-                                            if dup_info.original_record
-                                            else "unknown"
+                    # ============================================================
+                    # REQ-DEDUP-01: pHash Deduplication for IMAGE chunks
+                    # ============================================================
+                    if chunk.modality == Modality.IMAGE and asset_ref and self._image_hash_registry:
+                        asset_file = asset_ref.get("file_path")
+                        if asset_file:
+                            full_asset_path = self.output_dir / asset_file
+                            if full_asset_path.exists():
+                                try:
+                                    from PIL import Image
+
+                                    with Image.open(full_asset_path) as img:
+                                        dup_info = self._image_hash_registry.check_and_register(
+                                            image=img,
+                                            page_number=chunk.metadata.page_number,
+                                            asset_path=asset_file,
                                         )
-                                        logger.warning(
-                                            f"[DUPLICATE_REJECTED] Skipping {asset_file} "
-                                            f"(duplicate of page {orig_page})"
+
+                                        if dup_info.is_duplicate:
+                                            # DUPLICATE_REJECTED - skip this chunk
+                                            duplicate_count += 1
+                                            orig_page = (
+                                                dup_info.original_record.page_number
+                                                if dup_info.original_record
+                                                else "unknown"
+                                            )
+                                            logger.warning(
+                                                f"[DUPLICATE_REJECTED] Skipping {asset_file} "
+                                                f"(duplicate of page {orig_page})"
+                                            )
+                                            # Delete the duplicate asset file
+                                            try:
+                                                full_asset_path.unlink()
+                                                logger.info(f"Deleted duplicate asset: {asset_file}")
+                                            except Exception as del_e:
+                                                logger.warning(f"Failed to delete duplicate: {del_e}")
+                                            continue  # Skip writing this chunk
+
+                                        # Log successful registration
+                                        logger.info(
+                                            f"[FINALIZING] Asset {filename} linked to "
+                                            f"Page {chunk.metadata.page_number}"
                                         )
-                                        # Delete the duplicate asset file
-                                        try:
-                                            full_asset_path.unlink()
-                                            logger.info(f"Deleted duplicate asset: {asset_file}")
-                                        except Exception as del_e:
-                                            logger.warning(f"Failed to delete duplicate: {del_e}")
-                                        continue  # Skip writing this chunk
 
-                                    # Log successful registration
-                                    logger.info(
-                                        f"[FINALIZING] Asset {filename} linked to "
-                                        f"Page {chunk.metadata.page_number}"
-                                    )
+                                except Exception as hash_e:
+                                    logger.warning(f"pHash check failed for {asset_file}: {hash_e}")
 
-                            except Exception as hash_e:
-                                logger.warning(f"pHash check failed for {asset_file}: {hash_e}")
-
-                # ✅ IRON-08: Atomic write - open in append mode, write, flush per chunk
-                with open(output_jsonl, "a", encoding="utf-8") as f:
                     json_line = json.dumps(chunk_dict, ensure_ascii=False)
-                    f.write(json_line + "\n")
-                    f.flush()  # Force write to disk immediately
-                written_chunks += 1
+                    write_buffer.append(json_line)
+                    written_chunks += 1
 
-            except IndexError as e:
-                import traceback
+                    if len(write_buffer) >= DEFAULT_EXPORT_WRITE_BATCH_SIZE:
+                        f.write("\n".join(write_buffer) + "\n")
+                        f.flush()
+                        write_buffer.clear()
 
-                logger.error(
-                    f"[PHANTOM-BUG] IndexError at chunk {idx}/{len(filtered_chunks)}!\n"
-                    f"Chunk ID: {chunk.chunk_id if chunk else 'None'}\n"
-                    f"Error: {e}\n"
-                    f"Traceback:\n{traceback.format_exc()}"
-                )
-                raise  # Re-raise to see full stack
-            except Exception as e:
-                import traceback
+                except Exception as e:
+                    import traceback
 
-                logger.error(
-                    f"[FINALIZE-ERROR] Error processing chunk {idx}: {e}\n"
-                    f"Chunk ID: {chunk.chunk_id if chunk else 'None'}\n"
-                    f"Traceback:\n{traceback.format_exc()}"
-                )
-                raise
+                    export_error_count += 1
+                    logger.error(
+                        f"[FINALIZE-ERROR] Error processing chunk {idx}: {e}\n"
+                        f"Chunk ID: {chunk.chunk_id if chunk else 'None'}\n"
+                        f"Traceback:\n{traceback.format_exc()}"
+                    )
+                    errors.append(f"Finalize chunk {idx} failed: {e}")
+                    continue
+
+            if write_buffer:
+                f.write("\n".join(write_buffer) + "\n")
+                f.flush()
 
         # Log deduplication results
-        registry_stats = self._image_hash_registry.get_stats()
-        print(
-            f"\n📊 [PHASH] Deduplication complete: "
-            f"{registry_stats['total_registered']} unique images, "
-            f"{duplicate_count} duplicates rejected",
-            flush=True,
-        )
+        if self._image_hash_registry:
+            registry_stats = self._image_hash_registry.get_stats()
+            print(
+                f"\n📊 [PHASH] Deduplication complete: "
+                f"{registry_stats['total_registered']} unique images, "
+                f"{duplicate_count} duplicates rejected",
+                flush=True,
+            )
+        else:
+            print(
+                "\n📊 [PHASH] Deduplication disabled for this profile.",
+                flush=True,
+            )
         print(
             f"\n📊 [EXPORT] Written {written_chunks} chunks "
             f"({duplicate_count} duplicates rejected, "
-            f"{len(all_chunks) - len(filtered_chunks)} filtered vs. final {len(export_chunks)})",
+            f"{filtered_count} filtered, {export_error_count} export errors, "
+            f"final attempted {len(export_chunks)})",
             flush=True,
         )
         logger.info(
             f"Written {written_chunks} chunks to {output_jsonl} "
             f"({duplicate_count} duplicates rejected, "
-            f"{len(all_chunks) - len(filtered_chunks)} filtered vs. final {len(export_chunks)})"
+            f"{filtered_count} filtered, {export_error_count} export errors, "
+            f"final attempted {len(export_chunks)})"
         )
 
         # Get vision stats and flush cache
         # PHANTOM BUG FIX: Add try-except to catch IndexError during cache operations
-        vision_stats = {}
+        vision_stats = dict(prefinal_vision_stats) if prefinal_vision_stats else {}
         if self._vision_manager:
             try:
                 logger.info("[VISION-STATS] Attempting to get vision stats...")
@@ -1706,7 +2424,7 @@ class BatchProcessor:
         elapsed = time.perf_counter() - start_time
 
         print(f"\n✅ Batch processing complete!", flush=True)
-        print(f"   Total chunks: {len(all_chunks)}", flush=True)
+        print(f"   Total chunks written: {written_chunks}", flush=True)
         print(f"   Time: {elapsed:.1f}s", flush=True)
         print(f"   Output: {output_jsonl}", flush=True)
 
@@ -1716,7 +2434,7 @@ class BatchProcessor:
             original_hash=self._doc_hash,
             total_pages=split_result.total_pages,
             batches_processed=batches_processed,
-            total_chunks=len(all_chunks),
+            total_chunks=written_chunks,
             output_jsonl=output_jsonl,
             assets_dir=self.assets_dir,
             processing_time_seconds=elapsed,
@@ -2004,19 +2722,21 @@ class BatchProcessor:
             "... this set from 2. Brownells ..." -> "... this set from Brownells ..."
 
         IRON-09 COMPLIANCE: Pure regex pattern matching - NO hardcoded word lists.
-        Only removes infix numbers that appear between lowercase words (not citations).
+        Only removes infix numbers that appear between lowercase words.
+        Guardrail: do NOT touch valid section/prose continuations like
+        "chapter 3. Note" (capitalized continuation).
         """
         if not text:
             return text
         import re
 
-        # Pattern: lowercase_word + space + number (1-40) + period + space + word
-        # This avoids citation patterns like "chapter 1. Introduction" or "Figure 2. Diagram"
-        # by only matching when the previous word starts with lowercase (sentence-internal)
+        # Pattern: lowercase_word + number marker + lowercase continuation.
+        # Using lowercase continuation avoids false positives on valid prose
+        # such as "chapter 3. Note".
         pattern = re.compile(
             r"(?P<prev>\b[a-z][a-z'\-]{0,15})\s+"  # lowercase word (1-15 chars to avoid matching "section")
             r"(?P<num>(?:[1-9]|[12]\d|3\d|40))\.\s+"  # number 1-40 followed by period
-            r"(?P<next>[A-Za-z][A-Za-z'\-]*)"  # next word
+            r"(?P<next>[a-z][A-Za-z'\-]*)"  # lowercase continuation only
         )
 
         def repl(match: "re.Match[str]") -> str:
@@ -2049,29 +2769,13 @@ class BatchProcessor:
         import re
 
         t = text
+        # Reflow flattened REPL transcripts.
+        t = re.sub(r"\s+(>>>|\.\.\.)\s+", r"\n\1 ", t)
+
         # If this is a Python def/class signature that's been flattened, split once after the header.
         if re.match(r"^\s*(async def|def|class)\b", t):
             t = re.sub(r"\)\s*:\s*", "):\n", t, count=1)
 
-        # Separate common statement starters.
-        starters = (
-            "def",
-            "class",
-            "import",
-            "from",
-            "return",
-            "yield",
-            "try",
-            "except",
-            "finally",
-            "with",
-            "if",
-            "elif",
-            "else",
-            "for",
-            "while",
-            "async def",
-        )
         # Newline before starters when preceded by non-newline whitespace.
         t = re.sub(
             r"(?<!\n)\s+(async def|def|class|import|from|return|yield|try|except|finally|with|if|elif|else|for|while)\b",
@@ -2089,9 +2793,86 @@ class BatchProcessor:
         t = re.sub(r"\}\s*", "}\n", t)
         # Collapse excessive spaces but keep indentation minimal (no indentation info available).
         t = re.sub(r"[ \t]{2,}", " ", t)
-        # Trim blank lines.
-        lines = [ln.rstrip() for ln in t.splitlines()]
-        return "\n".join([ln for ln in lines if ln.strip()]).strip("\n")
+        lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
+        if not lines:
+            return ""
+
+        # Heuristic indentation reconstruction for flattened Python-like blocks.
+        # Only applies to non-REPL chunks with no existing indentation.
+        has_repl = any(ln.startswith((">>>", "...")) for ln in lines)
+        has_indent = any(ln.startswith(("    ", "\t")) for ln in lines)
+        if not has_repl and not has_indent:
+            opener = re.compile(
+                r"^(async\s+def|def|class|if|elif|else|for|while|try|except|finally|with)\b.*:\s*$"
+            )
+            dedent_before = re.compile(r"^(elif|else|except|finally)\b")
+            dedent_after = re.compile(r"^(return|yield|raise|break|continue|pass)\b")
+
+            rebuilt: List[str] = []
+            indent_level = 0
+            for ln in lines:
+                if dedent_before.match(ln):
+                    indent_level = max(0, indent_level - 1)
+
+                if indent_level > 0:
+                    rebuilt.append(("    " * min(indent_level, 3)) + ln)
+                else:
+                    rebuilt.append(ln)
+
+                if opener.match(ln):
+                    indent_level += 1
+                elif dedent_after.match(ln):
+                    indent_level = max(0, indent_level - 1)
+            lines = rebuilt
+
+        # If we still have flat top-level code (imports/assignments/calls), emit as REPL lines.
+        has_repl = any(ln.startswith((">>>", "...")) for ln in lines)
+        has_indent = any(ln.startswith(("    ", "\t")) for ln in lines)
+        if not has_repl and not has_indent and lines:
+            stmt_like = re.compile(
+                r"^(%pip\s+|!?[A-Za-z_][\w\.]*\s*=|from\s+[A-Za-z_][\w\.]*\s+import\b|import\s+[A-Za-z_][\w\.,\s]*$|[A-Za-z_][\w\.]*\s*\()"
+            )
+            codey_lines = sum(
+                1
+                for ln in lines
+                if stmt_like.search(ln) is not None or re.search(r"[()\[\]{}=]", ln) is not None
+            )
+            if codey_lines >= max(1, int(len(lines) * 0.6)):
+                lines = [f">>> {ln}" for ln in lines]
+
+        return "\n".join(lines).strip("\n")
+
+    def _preserve_or_reflow_code_text(self, text: str) -> str:
+        """
+        Preserve multiline code exactly; best-effort reflow only for flattened one-line code.
+        """
+        import re
+
+        t = (text or "").strip("\n")
+        if not t:
+            return t
+        if "\n" in t:
+            lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
+            if not lines:
+                return t
+            has_repl = any(ln.startswith((">>>", "...")) for ln in lines)
+            has_indent = any(ln.startswith(("    ", "\t")) for ln in lines)
+            if has_repl or has_indent:
+                return t
+            stmt_like = re.compile(
+                r"^(%pip\s+|!?[A-Za-z_][\w\.]*\s*=|from\s+[A-Za-z_][\w\.]*\s+import\b|import\s+[A-Za-z_][\w\.,\s]*|[A-Za-z_][\w\.]*\s*\()"
+            )
+            codey_lines = sum(
+                1
+                for ln in lines
+                if stmt_like.search(ln) is not None or re.search(r"[()\[\]{}=]", ln) is not None
+            )
+            if codey_lines >= max(1, int(len(lines) * 0.6)):
+                return "\n".join(f">>> {ln}" for ln in lines)
+            return t
+        if self._looks_like_code_text(t):
+            return self._reflow_flat_code(t)
+        return t
 
     def _is_toc_or_index_text(self, text: str) -> bool:
         """
@@ -2143,17 +2924,102 @@ class BatchProcessor:
         (e.g., "after the >>> line ..."). Demote obvious prose back to PARAGRAPH.
         """
         try:
-            if ch.modality != Modality.TEXT or ch.metadata.chunk_type != ChunkType.CODE:
+            if ch.modality != Modality.TEXT:
+                return
+            is_marked_code = (
+                ch.metadata.chunk_type == ChunkType.CODE
+                or ch.metadata.content_classification == "code"
+            )
+            if not is_marked_code:
                 return
             txt = (ch.content or "").strip()
-            if not txt or "\n" in txt:
+            if not txt:
                 return
             import re
 
-            # Keep true REPL/code signals.
-            if re.search(r"(?m)^\s*>>>\s", txt) or re.search(r"(?m)^\s*\.\.\.\s", txt):
+            def _demote() -> None:
+                ch.metadata.chunk_type = ChunkType.PARAGRAPH
+                if ch.metadata.content_classification == "code":
+                    ch.metadata.content_classification = None
+
+            lines = [ln.rstrip() for ln in txt.splitlines() if ln.strip()]
+            if not lines:
                 return
-            if re.search(r"(?m)^\s*(def|class|import|from|return|yield|async\s+def)\b", txt):
+            has_repl = any(re.search(r"^\s*(>>>|\.\.\.)\s", ln) for ln in lines)
+            has_indent = any(ln.startswith(("    ", "\t")) for ln in lines)
+
+            # Keep true REPL/code signals.
+            if has_repl:
+                return
+
+            # Scanned-degraded OCR often emits tiny orphan code fragments
+            # (e.g., one-line def/class/import) without body indentation.
+            # Demote these to prose so quality gates measure meaningful code blocks.
+            if self._is_scanned_degraded_profile() and len(lines) <= 2 and not has_indent:
+                _demote()
+                return
+
+            # "import X : explanation..." is typically prose explaining imports, not runnable code.
+            explanatory_import = re.compile(r"^\s*(import|from)\b.+\s:\s+[A-Z]")
+            explanatory_import_lines = sum(1 for ln in lines if explanatory_import.search(ln))
+
+            def is_code_line(ln: str) -> bool:
+                if explanatory_import.search(ln):
+                    return False
+                if re.search(r"^\s*(def|class|return|yield|async\s+def|await|if|elif|else|for|while|try|except|with)\b", ln):
+                    return True
+                if re.search(r"^\s*(from\s+[A-Za-z_][\w\.]*\s+import|import\s+[A-Za-z_][\w\.]*)\b", ln):
+                    return True
+                if ln.startswith(("    ", "\t")):
+                    return True
+                if re.search(r"[{}[\]();=]{2,}", ln):
+                    return True
+                return False
+
+            code_lines = sum(1 for ln in lines if is_code_line(ln))
+            prose_lines = sum(
+                1
+                for ln in lines
+                if (
+                    len(re.findall(r"[A-Za-z]{2,}", ln)) >= 6
+                    and re.search(r"[:.;!?]$", ln.strip()) is not None
+                )
+                or (
+                    not is_code_line(ln)
+                    and len(re.findall(r"[A-Za-z]{2,}", ln)) >= 8
+                    and ln[:1].isupper()
+                )
+            )
+
+            if code_lines == 0:
+                _demote()
+                return
+            # Single-line narrative sentences that happen to contain "import"/"from".
+            if len(lines) == 1 and code_lines <= 1:
+                line = lines[0].strip()
+                # Standalone import lines create noisy one-line code chunks in prose-heavy pages.
+                if re.fullmatch(
+                    r"(?:from\s+[A-Za-z_][\w\.]*\s+import\s+[A-Za-z_][\w\.,\s]*|import\s+[A-Za-z_][\w\.]*(?:\s*,\s*[A-Za-z_][\w\.]*)*(?:\s+as\s+[A-Za-z_][\w]*)?)",
+                    line,
+                ):
+                    _demote()
+                    return
+                if (
+                    len(re.findall(r"[A-Za-z]{2,}", line)) >= 10
+                    and line[:1].isupper()
+                    and any(p in line for p in (".", ";", "!", "?"))
+                    and not re.search(r"[{}()\[\]=]", line)
+                ):
+                    _demote()
+                    return
+            if explanatory_import_lines >= max(1, len(lines) // 2) and code_lines <= 1:
+                _demote()
+                return
+            if code_lines <= 1 and prose_lines >= 2:
+                _demote()
+                return
+            if code_lines <= 1 and prose_lines >= 1 and len(lines) <= 3:
+                _demote()
                 return
 
             lower = txt.lower()
@@ -2162,9 +3028,7 @@ class BatchProcessor:
             prose_markers = ("essentially", "allows you", "consists", "for example", "just after", "in this")
             if word_count >= 25 and any(m in lower for m in prose_markers):
                 if not re.search(r"[{};]", txt) and txt.count("=") <= 1:
-                    ch.metadata.chunk_type = ChunkType.PARAGRAPH
-                    if ch.metadata.content_classification == "code":
-                        ch.metadata.content_classification = None
+                    _demote()
         except Exception:
             return
 
@@ -2206,10 +3070,21 @@ class BatchProcessor:
 
     def _apply_spatial_refiner(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
         """Unified Spatial Refiner - no DPI, no heading branches, geometry only."""
+        MAX_MERGED_CHARS = 8000
+
         def bbox(ch: IngestionChunk) -> List[int]:
             if ch.metadata and ch.metadata.spatial and ch.metadata.spatial.bbox:
                 return ch.metadata.spatial.bbox
             return [0, 0, 0, 0]
+
+        def is_code_chunk(ch: IngestionChunk) -> bool:
+            try:
+                return (
+                    ch.metadata.chunk_type == ChunkType.CODE
+                    or ch.metadata.content_classification == "code"
+                )
+            except Exception:
+                return False
 
         text_chunks = [c for c in chunks if c.modality == Modality.TEXT]
         non_text_chunks = [c for c in chunks if c.modality != Modality.TEXT]
@@ -2235,6 +3110,12 @@ class BatchProcessor:
                 current = nxt
                 continue
 
+            # Never merge code and prose chunks; this destroys code fidelity.
+            if is_code_chunk(current) != is_code_chunk(nxt):
+                refined.append(current)
+                current = nxt
+                continue
+
             box_a = bbox(current)
             box_b = bbox(nxt)
             v_gap = box_b[1] - box_a[3]
@@ -2242,7 +3123,15 @@ class BatchProcessor:
             min_width = max(1, min(box_a[2] - box_a[0], box_b[2] - box_b[0]))
 
             if 0 <= v_gap <= 20 and (h_overlap / float(min_width)) > 0.4:
-                current.content = f"{(current.content or '').rstrip()}\n{(nxt.content or '').lstrip()}".strip()
+                cur_text = (current.content or "").rstrip()
+                nxt_text = (nxt.content or "").lstrip()
+                projected_chars = len(cur_text) + len(nxt_text) + 1
+                if projected_chars > MAX_MERGED_CHARS:
+                    refined.append(current)
+                    current = nxt
+                    continue
+
+                current.content = f"{cur_text}\n{nxt_text}".strip()
                 if current.metadata and current.metadata.spatial:
                     current.metadata.spatial.bbox = [
                         min(box_a[0], box_b[0]),
@@ -2267,6 +3156,215 @@ class BatchProcessor:
 
     def _apply_vertical_proximity_merger(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
         return self._apply_spatial_refiner(chunks)
+
+    def _apply_vertical_proximity_merger_pagewise(
+        self, chunks: List[IngestionChunk], gc_every_pages: int = 20
+    ) -> List[IngestionChunk]:
+        """
+        Run vertical-proximity merging page-by-page to bound peak memory.
+
+        This keeps the same 20-unit merge contract while avoiding large
+        all-document merge passes on long manuals.
+        """
+        page_buckets: Dict[int, List[IngestionChunk]] = {}
+        passthrough: List[IngestionChunk] = []
+
+        for ch in chunks:
+            if ch.modality != Modality.TEXT:
+                passthrough.append(ch)
+                continue
+            page_no = int(ch.metadata.page_number or 0) if ch.metadata else 0
+            page_buckets.setdefault(page_no, []).append(ch)
+
+        merged_text: List[IngestionChunk] = []
+        for idx, page_no in enumerate(sorted(page_buckets.keys())):
+            page_chunks = page_buckets[page_no]
+            if len(page_chunks) <= 1:
+                merged_text.extend(page_chunks)
+            else:
+                merged_text.extend(self._apply_vertical_proximity_merger(page_chunks))
+
+            if gc_every_pages > 0 and (idx + 1) % gc_every_pages == 0:
+                gc.collect()
+
+        all_chunks = merged_text + passthrough
+
+        def _sort_key(ch: IngestionChunk) -> Tuple[int, int, int]:
+            page_no = int(ch.metadata.page_number or 0) if ch.metadata else 0
+            bbox = None
+            if ch.metadata and ch.metadata.spatial and ch.metadata.spatial.bbox:
+                bbox = ch.metadata.spatial.bbox
+            x0 = int(bbox[0]) if bbox and len(bbox) >= 4 else 0
+            y0 = int(bbox[1]) if bbox and len(bbox) >= 4 else 0
+            return (page_no, y0, x0)
+
+        all_chunks.sort(key=_sort_key)
+        return all_chunks
+
+    def _merge_micro_text_chunks(
+        self, chunks: List[IngestionChunk], max_chars: int = 30
+    ) -> List[IngestionChunk]:
+        """
+        Attach tiny non-label text fragments to neighboring text chunks.
+
+        This reduces standalone micro-chunk noise that hurts retrieval quality.
+        """
+
+        def is_code_chunk(ch: IngestionChunk) -> bool:
+            try:
+                return (
+                    ch.metadata.chunk_type == ChunkType.CODE
+                    or ch.metadata.content_classification == "code"
+                )
+            except Exception:
+                return False
+
+        def page_of(ch: IngestionChunk) -> int:
+            return int(ch.metadata.page_number or 0) if ch.metadata else 0
+
+        def sort_key(ch: IngestionChunk) -> Tuple[int, int, int]:
+            page_no = page_of(ch)
+            bbox = None
+            if ch.metadata and ch.metadata.spatial and ch.metadata.spatial.bbox:
+                bbox = ch.metadata.spatial.bbox
+            x0 = int(bbox[0]) if bbox and len(bbox) >= 4 else 0
+            y0 = int(bbox[1]) if bbox and len(bbox) >= 4 else 0
+            return (page_no, y0, x0)
+
+        ordered = sorted(chunks, key=sort_key)
+        page_has_body: Dict[int, bool] = {}
+        for ch in ordered:
+            if ch.modality != Modality.TEXT or is_code_chunk(ch):
+                continue
+            txt = (ch.content or "").strip()
+            if len(txt) >= 20 and not self._is_manual_label_text(txt):
+                page_has_body[page_of(ch)] = True
+
+        out: List[IngestionChunk] = []
+        i = 0
+
+        while i < len(ordered):
+            cur = ordered[i]
+            if (
+                cur.modality != Modality.TEXT
+                or is_code_chunk(cur)
+                or not (cur.content or "").strip()
+            ):
+                out.append(cur)
+                i += 1
+                continue
+
+            cur_text = (cur.content or "").strip()
+            cur_page = page_of(cur)
+            cur_is_label = self._is_manual_label_text(cur_text)
+
+            # Rule 1: Glue heading/label text onto a following code block.
+            if cur_is_label and i + 1 < len(ordered):
+                nxt = ordered[i + 1]
+                if (
+                    nxt.modality == Modality.TEXT
+                    and is_code_chunk(nxt)
+                    and page_of(nxt) == cur_page
+                    and (nxt.content or "").strip()
+                ):
+                    nxt.content = f"{cur_text}\n{(nxt.content or '').lstrip()}".strip()
+                    i += 1
+                    continue
+
+            # Rule 1b: Merge dense short list-item runs (TOC-style lines) to prevent
+            # over-fragmentation and false orphan labels.
+            try:
+                cur_is_list_item = cur.metadata.chunk_type == ChunkType.LIST_ITEM
+            except Exception:
+                cur_is_list_item = False
+            if cur_is_list_item and len(cur_text) <= 90:
+                run_end = i + 1
+                run_parts = [cur_text]
+                while run_end < len(ordered):
+                    cand = ordered[run_end]
+                    if cand.modality != Modality.TEXT or is_code_chunk(cand):
+                        break
+                    if page_of(cand) != cur_page:
+                        break
+                    try:
+                        cand_is_list_item = cand.metadata.chunk_type == ChunkType.LIST_ITEM
+                    except Exception:
+                        cand_is_list_item = False
+                    cand_text = (cand.content or "").strip()
+                    if not cand_is_list_item or not cand_text or len(cand_text) > 90:
+                        break
+                    run_parts.append(cand_text)
+                    run_end += 1
+                    if len(run_parts) >= 8:
+                        break
+
+                if len(run_parts) >= 3:
+                    cur.content = "\n".join(run_parts).strip()
+                    out.append(cur)
+                    i = run_end
+                    continue
+
+            # Rule 1c: If a short label follows body text on the same page, absorb it
+            # into that body chunk so it doesn't become an orphan.
+            if cur_is_label and len(cur_text) <= 60 and out:
+                prev = out[-1]
+                if (
+                    prev.modality == Modality.TEXT
+                    and not is_code_chunk(prev)
+                    and page_of(prev) == cur_page
+                    and (prev.content or "").strip()
+                ):
+                    prev.content = f"{(prev.content or '').rstrip()}\n{cur_text}".strip()
+                    i += 1
+                    continue
+
+            # Rule 1d: Drop standalone label-only pages with no body content.
+            # This removes repeated running headers/blank-page captions.
+            if cur_is_label and not page_has_body.get(cur_page, False):
+                i += 1
+                continue
+
+            is_micro = len(cur_text) < max_chars and not self._is_manual_label_text(cur_text)
+            if not is_micro:
+                out.append(cur)
+                i += 1
+                continue
+
+            attached = False
+
+            # Prefer attaching to the following text chunk on the same page.
+            if i + 1 < len(ordered):
+                nxt = ordered[i + 1]
+                if (
+                    nxt.modality == Modality.TEXT
+                    and not is_code_chunk(nxt)
+                    and page_of(nxt) == cur_page
+                    and (nxt.content or "").strip()
+                ):
+                    nxt.content = f"{cur_text} {(nxt.content or '').lstrip()}".strip()
+                    attached = True
+
+            if attached:
+                i += 1
+                continue
+
+            # Otherwise append to the previous text chunk on the same page.
+            if out:
+                prev = out[-1]
+                if (
+                    prev.modality == Modality.TEXT
+                    and not is_code_chunk(prev)
+                    and page_of(prev) == cur_page
+                    and (prev.content or "").strip()
+                ):
+                    prev.content = f"{(prev.content or '').rstrip()} {cur_text}".strip()
+                    i += 1
+                    continue
+
+            out.append(cur)
+            i += 1
+
+        return out
 
     def _apply_technical_manual_hygiene(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
         """
@@ -2310,8 +3408,8 @@ class BatchProcessor:
             # Also demote obvious false positives.
             self._maybe_demote_false_code_chunk(ch)
 
-            txt2 = self._strip_control_chars(txt)
             if not is_code_chunk(ch):
+                txt2 = self._strip_control_chars(txt)
                 txt2 = self._remove_standalone_page_number_lines(txt2)
                 # Ensure no digit-only lines survive (TOC/index and running headers).
                 txt2 = self._remove_all_digit_only_lines(txt2)
@@ -2321,8 +3419,8 @@ class BatchProcessor:
                     infix_fixed_chunks += 1
                 txt2 = txt3
             else:
-                # Try to re-introduce newlines if it was flattened.
-                txt2 = self._reflow_flat_code(txt2)
+                # Indentation shield: preserve code blocks as-is.
+                txt2 = self._preserve_or_reflow_code_text(txt)
 
             if txt2 != txt:
                 ch.content = txt2
@@ -2334,14 +3432,15 @@ class BatchProcessor:
             except Exception:
                 rc = None
             if isinstance(rc, str) and rc:
-                rc2 = self._strip_control_chars(rc)
                 if not is_code_chunk(ch):
+                    rc2 = self._strip_control_chars(rc)
                     rc2 = self._remove_standalone_page_number_lines(rc2)
                     rc2 = self._remove_all_digit_only_lines(rc2)
                     rc2 = self._fix_linebreak_hyphenation(rc2)
                     rc2 = self._remove_infix_list_numbering(rc2)
                 else:
-                    rc2 = self._reflow_flat_code(rc2)
+                    # Indentation shield: preserve code blocks as-is.
+                    rc2 = self._preserve_or_reflow_code_text(rc)
                 if rc2 != rc:
                     ch.metadata.refined_content = rc2
 
@@ -2378,7 +3477,6 @@ class BatchProcessor:
             nxt = chunks[i + 1]
             if (
                 nxt.modality != Modality.TEXT
-                or is_code_chunk(nxt)
                 or not nxt.content
                 or cur.metadata.page_number != nxt.metadata.page_number
             ):
@@ -2388,19 +3486,40 @@ class BatchProcessor:
 
             cur_s = cur.content.rstrip()
             nxt_s = nxt.content.lstrip()
+            cur_is_label = self._is_manual_label_text(cur_s)
+
+            # Rule 1: heading/label followed by code should stay together.
+            # Keep CODE classification by folding the heading into the next chunk.
+            if cur_is_label and is_code_chunk(nxt):
+                nxt.content = f"{cur_s}\n{nxt_s}".strip()
+                i += 1
+                continue
+
+            if is_code_chunk(nxt):
+                joined.append(cur)
+                i += 1
+                continue
 
             # Heuristic 0: glue short label/headings onto their following paragraph.
             # This reduces retrieval noise from standalone "Summary", "Further reading", etc.
             if (
                 len(cur_s) <= 40
                 and len(nxt_s) >= 80
-                and label_like.fullmatch(cur_s.strip()) is not None
+                and (label_like.fullmatch(cur_s.strip()) is not None or cur_is_label)
                 and not begins_lower.search(nxt_s)
             ):
                 sep = ": " if not cur_s.endswith((".", ":", "?", "!", ";")) else " "
                 cur.content = (cur_s + sep + nxt_s).strip()
                 i += 2
                 joined.append(cur)
+                continue
+
+            # Heuristic 0b: compact short heading/name runs that Docling often emits
+            # as many tiny chunks in front matter and cookbook-like layouts.
+            if cur_is_label and len(nxt_s) <= 120:
+                sep = ": " if not cur_s.endswith((".", ":", "?", "!", ";")) else " "
+                nxt.content = (cur_s + sep + nxt_s).strip()
+                i += 1
                 continue
 
             # Heuristic 1: mid-sentence split (current lacks terminal punctuation; next starts lowercase).
@@ -2460,13 +3579,21 @@ class BatchProcessor:
         The recovery pipeline can introduce raw text blocks containing control chars or
         embedded page numbers (especially from TOC/Index). We sanitize again here, but
         avoid any cross-chunk merging to keep recovery bookkeeping stable.
+        
+        MEMORY OPTIMIZATION: Processes chunks in batches to prevent OOM during final phase.
         """
         import re
+        import gc
 
-        TECHMANUAL_FINAL_MAX_CHARS = 1500  # hard cap per OversizeBreaker
-        TECHMANUAL_FINAL_OVERLAP_CHARS = 120
-
-        logger.info(f"[TECHMANUAL-FINAL] Running final hygiene pass on {len(chunks)} chunks")
+        # MEMORY FIX: Process in batches to avoid holding all processed chunks in memory
+        # This prevents OOM when EasyOCR and other heavy operations are also active
+        BATCH_SIZE = 50  # Process 50 chunks at a time
+        
+        logger.info(f"[TECHMANUAL-FINAL] Running final hygiene pass on {len(chunks)} chunks (batch size: {BATCH_SIZE})")
+        
+        # Force garbage collection before starting final hygiene
+        gc.collect()
+        self._log_memory_checkpoint("[TECHMANUAL-FINAL] start")
 
         page_num_fixed_chunks = 0
         infix_fixed_chunks = 0
@@ -2480,134 +3607,95 @@ class BatchProcessor:
             except Exception:
                 return False
 
-        out: List[IngestionChunk] = []
-        recovery_methods = {
-            "recovery_scan",
-            "recovery_frontpage",
-            "recovery_gap_fill",
-            "recovery_subsurface",
-            "enhanced_frontpage",
-        }
+        # In-place compaction to avoid duplicating the full chunk list in memory.
+        # `read_idx` scans original positions, `write_idx` stores kept items.
+        read_total = len(chunks)
+        write_idx = 0
 
-        for ch in chunks:
-            if ch.modality != Modality.TEXT:
-                out.append(ch)
-                continue
-            txt = ch.content or ""
-            had_digit_line = bool(re.search(r"(?m)^\s*\d{1,4}\s*$", txt))
-            txt2 = self._strip_control_chars(txt)
-            if is_code_chunk(ch):
-                txt2 = self._reflow_flat_code(txt2)
-            else:
-                txt2 = self._remove_standalone_page_number_lines(txt2)
-                txt2 = self._remove_all_digit_only_lines(txt2)
-                txt2 = self._fix_linebreak_hyphenation(txt2)
-                txt3 = self._remove_infix_list_numbering(txt2)
-                if txt3 != txt2:
-                    infix_fixed_chunks += 1
-                txt2 = txt3
-            if txt2 != txt:
-                ch.content = txt2
-                if had_digit_line and not re.search(r"(?m)^\s*\d{1,4}\s*$", txt2):
-                    page_num_fixed_chunks += 1
+        # Process chunks in batches to reduce peak memory pressure.
+        total_batches = (read_total + BATCH_SIZE - 1) // BATCH_SIZE
+        for batch_idx in range(total_batches):
+            start_idx = batch_idx * BATCH_SIZE
+            end_idx = min(start_idx + BATCH_SIZE, read_total)
 
-            # Apply the same final hygiene rules to refined_content, if present.
-            try:
-                rc = ch.metadata.refined_content
-            except Exception:
-                rc = None
-            if isinstance(rc, str) and rc:
-                rc2 = self._strip_control_chars(rc)
-                if is_code_chunk(ch):
-                    rc2 = self._reflow_flat_code(rc2)
-                else:
-                    rc2 = self._remove_standalone_page_number_lines(rc2)
-                    rc2 = self._remove_all_digit_only_lines(rc2)
-                    rc2 = self._fix_linebreak_hyphenation(rc2)
-                    rc2 = self._remove_infix_list_numbering(rc2)
-                if rc2 != rc:
-                    ch.metadata.refined_content = rc2
+            logger.debug(
+                f"[TECHMANUAL-FINAL] Processing batch {batch_idx + 1}/{total_batches} "
+                f"(chunks {start_idx}-{end_idx})"
+            )
 
-            # Re-check code false positives (Docling can mark monospaced prose as CODE).
-            self._maybe_demote_false_code_chunk(ch)
+            self._log_memory_checkpoint(
+                f"[TECHMANUAL-FINAL] batch {batch_idx + 1}/{total_batches} start"
+            )
 
-            # If recovery produced a TOC/Index blob, drop it (it is almost always noise).
-            try:
-                if (
-                    ch.metadata.extraction_method in recovery_methods
-                    and self._is_toc_or_index_text(ch.content or "")
-                    and len((ch.content or "").strip()) >= 120
-                ):
+            for read_idx in range(start_idx, end_idx):
+                ch = chunks[read_idx]
+
+                if ch.modality != Modality.TEXT:
+                    chunks[write_idx] = ch
+                    write_idx += 1
                     continue
-            except Exception:
-                pass
 
-            # Demote TOC/Index even if we keep it.
-            if self._is_toc_or_index_text(ch.content or ""):
-                self._demote_toc_index_chunk(ch)
+                txt = ch.content or ""
+                had_digit_line = bool(re.search(r"(?m)^\s*\d{1,4}\s*$", txt))
+                if is_code_chunk(ch):
+                    # Indentation shield: preserve code blocks as-is.
+                    txt2 = self._preserve_or_reflow_code_text(txt)
+                else:
+                    txt2 = self._strip_control_chars(txt)
+                    txt2 = self._remove_standalone_page_number_lines(txt2)
+                    txt2 = self._remove_all_digit_only_lines(txt2)
+                    txt2 = self._fix_linebreak_hyphenation(txt2)
+                    txt3 = self._remove_infix_list_numbering(txt2)
+                    if txt3 != txt2:
+                        infix_fixed_chunks += 1
+                    txt2 = txt3
+                if txt2 != txt:
+                    ch.content = txt2
+                    if had_digit_line and not re.search(r"(?m)^\s*\d{1,4}\s*$", txt2):
+                        page_num_fixed_chunks += 1
 
-            # Char-based split for overlong non-code chunks (token-based split can miss TOC-like text).
-            if (not is_code_chunk(ch)) and ch.content and len(ch.content) > TECHMANUAL_FINAL_MAX_CHARS:
-                text = ch.content
-                built = self._split_nearest_paragraph_breaks(
-                    text=text,
-                    max_chars=TECHMANUAL_FINAL_MAX_CHARS,
-                    overlap_chars=TECHMANUAL_FINAL_OVERLAP_CHARS,
+                # Apply the same final hygiene rules to refined_content, if present.
+                try:
+                    rc = ch.metadata.refined_content
+                except Exception:
+                    rc = None
+                if isinstance(rc, str) and rc:
+                    if is_code_chunk(ch):
+                        # Indentation shield: preserve code blocks as-is.
+                        rc2 = self._preserve_or_reflow_code_text(rc)
+                    else:
+                        rc2 = self._strip_control_chars(rc)
+                        rc2 = self._remove_standalone_page_number_lines(rc2)
+                        rc2 = self._remove_all_digit_only_lines(rc2)
+                        rc2 = self._fix_linebreak_hyphenation(rc2)
+                        rc2 = self._remove_infix_list_numbering(rc2)
+                    if rc2 != rc:
+                        ch.metadata.refined_content = rc2
+
+                # Re-check code false positives (Docling can mark monospaced prose as CODE).
+                self._maybe_demote_false_code_chunk(ch)
+
+                # Demote TOC/Index chunks instead of dropping them entirely.
+                # Keeping low-priority TOC text helps token parity and recall.
+                if self._is_toc_or_index_text(ch.content or ""):
+                    self._demote_toc_index_chunk(ch)
+
+                chunks[write_idx] = ch
+                write_idx += 1
+
+            self._log_memory_checkpoint(
+                f"[TECHMANUAL-FINAL] batch {batch_idx + 1}/{total_batches} end"
+            )
+            if batch_idx < total_batches - 1:
+                gc.collect()
+                self._log_memory_checkpoint(
+                    f"[TECHMANUAL-FINAL] batch {batch_idx + 1}/{total_batches} post-gc"
                 )
 
-                # Materialize as new chunks (keep metadata; adjust ids).
-                for idx, sub in enumerate([b for b in built if b.strip()]):
-                    if idx == 0:
-                        ch.content = sub
-                        out.append(ch)
-                        continue
-                    try:
-                        new_id = f"{ch.chunk_id}_c{idx+1}"
-                        # Copy hierarchy but annotate split.
-                        new_h = HierarchyMetadata(
-                            parent_heading=(
-                                ch.metadata.hierarchy.parent_heading if ch.metadata.hierarchy else None
-                            ),
-                            breadcrumb_path=(
-                                (ch.metadata.hierarchy.breadcrumb_path if ch.metadata.hierarchy else [])
-                                + [f"[Split {idx+1}/{len(built)}]"]
-                            ),
-                            level=(
-                                (ch.metadata.hierarchy.level or 2) + 1
-                                if ch.metadata and ch.metadata.hierarchy
-                                else 3
-                            ),
-                        )
-                        new_chunk = create_text_chunk(
-                            doc_id=ch.doc_id,
-                            content=sub,
-                            source_file=ch.metadata.source_file,
-                            file_type=ch.metadata.file_type,
-                            page_number=ch.metadata.page_number,
-                            hierarchy=new_h,
-                            chunk_type=ch.metadata.chunk_type,
-                            bbox=(ch.metadata.spatial.bbox if ch.metadata.spatial else None),
-                            extraction_method=ch.metadata.extraction_method,
-                            prev_text=(ch.semantic_context.prev_text_snippet if ch.semantic_context else None),
-                            next_text=(ch.semantic_context.next_text_snippet if ch.semantic_context else None),
-                            content_classification=getattr(ch.metadata, "content_classification", None),
-                            **{k: v for k, v in self._intelligence_metadata.items() if v is not None},
-                        )
-                        new_chunk.chunk_id = new_id
-                        # Preserve page dimension metadata if present.
-                        if ch.metadata.spatial:
-                            if new_chunk.metadata.spatial is None:
-                                new_chunk.metadata.spatial = SpatialMetadata(bbox=None)
-                            new_chunk.metadata.spatial.page_width = ch.metadata.spatial.page_width
-                            new_chunk.metadata.spatial.page_height = ch.metadata.spatial.page_height
-                        out.append(new_chunk)
-                    except Exception:
-                        # If split materialization fails, keep original chunk.
-                        out.append(ch)
-                        break
-                continue
-
-            out.append(ch)
+        # Trim dropped items after in-place compaction.
+        if write_idx < len(chunks):
+            del chunks[write_idx:]
+        self._log_memory_checkpoint("[TECHMANUAL-FINAL] after compaction")
 
         if page_num_fixed_chunks:
             logger.info(
@@ -2618,7 +3706,20 @@ class BatchProcessor:
                 f"[TECHMANUAL-FINAL] Removed infix list numbering in {infix_fixed_chunks} chunks"
             )
         # Final spatial consolidation after recovery/splitting.
-        return self._apply_vertical_proximity_merger(out)
+        gc.collect()
+        self._log_memory_checkpoint("[TECHMANUAL-FINAL] before final spatial merge")
+        # Stability guard: run merge page-wise on large final sets to keep
+        # memory bounded while preserving final label/paragraph consolidation.
+        if len(chunks) > 250:
+            logger.warning(
+                f"[TECHMANUAL-FINAL] Using page-wise final spatial merge for large chunk set "
+                f"({len(chunks)} chunks) to preserve runtime stability"
+            )
+            merged = self._apply_vertical_proximity_merger_pagewise(chunks)
+            return self._merge_micro_text_chunks(merged, max_chars=30)
+
+        merged = self._apply_vertical_proximity_merger(chunks)
+        return self._merge_micro_text_chunks(merged, max_chars=30)
 
     def _split_nearest_paragraph_breaks(
         self,
@@ -2634,17 +3735,40 @@ class BatchProcessor:
         if not text or len(text) <= max_chars:
             return [text]
 
+        # Code-aware shield: keep line boundaries intact for multiline code-ish text.
+        # This avoids fragmenting indented blocks into retrieval-hostile snippets.
+        if "\n" in text and self._looks_like_code_text(text):
+            return self._split_preserve_line_boundaries(text=text, max_chars=max_chars)
+
         pieces: List[str] = []
         remaining = text.strip()
+        max_iters = max(32, (len(remaining) // max(1, max_chars - overlap_chars)) * 4)
+        iters = 0
 
         while remaining:
+            iters += 1
+            if iters > max_iters:
+                logger.warning(
+                    f"[OVERSIZE-BREAKER] Split loop guard triggered after {iters} iterations; "
+                    "falling back to hard split for remaining text"
+                )
+                hard = remaining[:max_chars].strip()
+                if hard:
+                    pieces.append(hard)
+                remaining = remaining[max_chars:].lstrip()
+                continue
+
             if len(remaining) <= max_chars:
                 pieces.append(remaining.strip())
                 break
 
             target = max_chars
+            # Bound forward searches to a local window around the split target.
+            # Unbounded `.find(..., target)` on very large chunks creates
+            # quadratic behavior in late-stage splitting.
+            search_end = min(len(remaining), target + max_chars)
             p_before = remaining.rfind("\n\n", 0, target + 1)
-            p_after = remaining.find("\n\n", target)
+            p_after = remaining.find("\n\n", target, search_end)
 
             split_idx: Optional[int] = None
             delimiter_len = 2
@@ -2661,7 +3785,7 @@ class BatchProcessor:
             else:
                 # fallback: nearest single newline
                 n_before = remaining.rfind("\n", 0, target + 1)
-                n_after = remaining.find("\n", target)
+                n_after = remaining.find("\n", target, search_end)
                 nl_candidates: List[Tuple[int, int]] = []
                 if n_before > 0:
                     nl_candidates.append((abs(target - n_before), n_before))
@@ -2672,11 +3796,36 @@ class BatchProcessor:
                     split_idx = nl_candidates[0][1]
                     delimiter_len = 1
                 else:
-                    split_idx = target
+                    # Sentence-aware hard-cap fallback:
+                    # prefer the last sentence boundary before target before raw hard split.
+                    sentence_marks = []
+                    for marker in (". ", ".\n", "? ", "?\n", "! ", "!\n"):
+                        pos = remaining.rfind(marker, 0, target + 1)
+                        if pos > 0:
+                            sentence_marks.append(pos + 1)  # include punctuation
+                    for marker in (".", "?", "!"):
+                        pos = remaining.rfind(marker, 0, target + 1)
+                        if pos > 0:
+                            sentence_marks.append(pos + 1)
+                    split_idx = max(sentence_marks) if sentence_marks else target
+                    if split_idx < (max_chars // 2):
+                        split_idx = target
                     delimiter_len = 0
 
             if split_idx is None or split_idx <= 0:
                 split_idx = target
+                delimiter_len = 0
+
+            # Guard: avoid tiny early splits that can create near-zero progress loops.
+            if split_idx < (max_chars // 2):
+                split_idx = target
+                delimiter_len = 0
+
+            # Hard cap: OversizeBreaker must never emit a head segment above max_chars.
+            # A nearest paragraph/newline break after the target is useful for semantics,
+            # but we cannot violate the configured chunk ceiling.
+            if split_idx > max_chars:
+                split_idx = max_chars
                 delimiter_len = 0
 
             head = remaining[:split_idx].strip()
@@ -2691,9 +3840,71 @@ class BatchProcessor:
             if tail and "\n" in tail:
                 tail = tail[tail.find("\n") + 1 :].lstrip()
             next_start = split_idx + delimiter_len
-            remaining = (tail + ("\n\n" if tail else "") + remaining[next_start:].lstrip("\n")).strip()
+            candidate = (tail + ("\n\n" if tail else "") + remaining[next_start:].lstrip("\n")).strip()
+
+            # Enforce monotonic progress in all cases.
+            if len(candidate) >= len(remaining):
+                candidate = remaining[next_start:].lstrip("\n").strip()
+            if len(candidate) >= len(remaining):
+                # Last-resort hard advancement to avoid infinite loops.
+                hard_next = min(len(remaining), max_chars)
+                candidate = remaining[hard_next:].lstrip("\n").strip()
+
+            remaining = candidate
 
         return [p for p in pieces if p.strip()]
+
+    def _split_preserve_line_boundaries(
+        self,
+        text: str,
+        max_chars: int = 1500,
+    ) -> List[str]:
+        """
+        Split multiline code-ish text by complete lines only.
+
+        Never split in the middle of an indented/code line.
+        """
+        lines = text.splitlines()
+        if not lines:
+            return [text]
+
+        parts: List[str] = []
+        current: List[str] = []
+        current_len = 0
+
+        for line in lines:
+            # Force split very long single lines with hard caps only.
+            # Do not apply sentence tokenization to code paths.
+            if len(line) > max_chars:
+                if current:
+                    parts.append("\n".join(current).strip())
+                    current = []
+                    current_len = 0
+
+                rem = line
+                while rem:
+                    if len(rem) <= max_chars:
+                        parts.append(rem.strip())
+                        rem = ""
+                        continue
+                    split_idx = max_chars
+                    parts.append(rem[:split_idx].rstrip())
+                    rem = rem[split_idx:]
+                continue
+
+            add_len = len(line) + (1 if current else 0)
+            if current and current_len + add_len > max_chars:
+                parts.append("\n".join(current).strip())
+                current = [line]
+                current_len = len(line)
+            else:
+                current.append(line)
+                current_len += add_len
+
+        if current:
+            parts.append("\n".join(current).strip())
+
+        return [p for p in parts if p]
 
     def _apply_oversize_breaker(
         self,
@@ -2701,7 +3912,10 @@ class BatchProcessor:
         max_chars: int = 1500,
     ) -> List[IngestionChunk]:
         """
-        Apply OversizeBreaker to non-code TEXT chunks so retrieval granularity stays stable.
+        Apply OversizeBreaker to TEXT chunks.
+
+        - prose: split at nearest paragraph/newline/sentence boundaries.
+        - code: split strictly on line boundaries.
         """
         split_count = 0
         out: List[IngestionChunk] = []
@@ -2720,23 +3934,39 @@ class BatchProcessor:
             except Exception:
                 is_code = False
 
-            if is_code or len(ch.content) <= max_chars:
+            if len(ch.content) <= max_chars:
                 out.append(ch)
                 continue
 
-            parts = self._split_nearest_paragraph_breaks(
-                text=ch.content,
-                max_chars=max_chars,
-                overlap_chars=120,
-            )
+            if is_code:
+                parts = self._split_preserve_line_boundaries(
+                    text=ch.content,
+                    max_chars=max_chars,
+                )
+            else:
+                parts = self._split_nearest_paragraph_breaks(
+                    text=ch.content,
+                    max_chars=max_chars,
+                    overlap_chars=120,
+                )
             if len(parts) <= 1:
                 out.append(ch)
                 continue
 
             split_count += 1
             for idx, sub in enumerate(parts):
+                if is_code:
+                    sub_is_code = self._looks_like_code_text(sub)
+                    sub_chunk_type = ChunkType.CODE if sub_is_code else ChunkType.PARAGRAPH
+                    sub_content_classification = "code" if sub_is_code else None
+                else:
+                    sub_chunk_type = ch.metadata.chunk_type
+                    sub_content_classification = getattr(ch.metadata, "content_classification", None)
+
                 if idx == 0:
                     ch.content = sub
+                    ch.metadata.chunk_type = sub_chunk_type
+                    ch.metadata.content_classification = sub_content_classification
                     out.append(ch)
                     continue
                 try:
@@ -2761,12 +3991,12 @@ class BatchProcessor:
                         file_type=ch.metadata.file_type,
                         page_number=ch.metadata.page_number,
                         hierarchy=new_h,
-                        chunk_type=ch.metadata.chunk_type,
+                        chunk_type=sub_chunk_type,
                         bbox=(ch.metadata.spatial.bbox if ch.metadata.spatial else None),
                         extraction_method=ch.metadata.extraction_method,
                         prev_text=(ch.semantic_context.prev_text_snippet if ch.semantic_context else None),
                         next_text=(ch.semantic_context.next_text_snippet if ch.semantic_context else None),
-                        content_classification=getattr(ch.metadata, "content_classification", None),
+                        content_classification=sub_content_classification,
                         **{k: v for k, v in self._intelligence_metadata.items() if v is not None},
                     )
                     new_chunk.chunk_id = f"{ch.chunk_id}_o{idx+1}"
@@ -2802,12 +4032,17 @@ class BatchProcessor:
             # not when they're merely mentioned in prose (e.g., "after the >>> line").
             if re.search(r"(?m)^\s*>>>\s", t) or re.search(r"(?m)^\s*\.\.\.\s", t):
                 return True
-            if re.search(r"^\s*(def|class|import|from)\b", t):
+            if re.search(r"^\s*(import|from)\b.+\s:\s+[A-Z]", t):
+                return False
+            if re.search(r"^\s*(def|class)\b", t):
                 return True
             # Avoid false positives on English "from ..."; require Python import syntax.
-            if re.search(r"\bfrom\s+[A-Za-z_][\w\.]*\s+import\b", t):
+            if re.search(r"^\s*from\s+[A-Za-z_][\w\.]*\s+import\b", t):
                 return True
-            if re.search(r"\bimport\s+[A-Za-z_][\w\.]*(\s*,\s*[A-Za-z_][\w\.]*)*", t):
+            if re.search(
+                r"^\s*import\s+[A-Za-z_][\w\.]*(\s*,\s*[A-Za-z_][\w\.]*)*(\s+as\s+[A-Za-z_][\w]*)?\s*$",
+                t,
+            ):
                 return True
             return False
 
@@ -2818,7 +4053,22 @@ class BatchProcessor:
         if any(ln.lstrip().startswith((">>>", "...")) for ln in lines):
             return True
 
-        if re.search(r"^\\s*(def|class|import|from|return|yield)\\b", t, flags=re.MULTILINE):
+        explanatory_import_lines = sum(
+            1 for ln in lines if re.search(r"^\s*(import|from)\b.+\s:\s+[A-Z]", ln)
+        )
+        if explanatory_import_lines >= max(1, len(lines) // 2):
+            return False
+
+        if re.search(r"^\s*(def|class|return|yield)\b", t, flags=re.MULTILINE):
+            return True
+
+        if re.search(r"(?m)^\s*from\s+[A-Za-z_][\w\.]*\s+import\b", t):
+            return True
+
+        if re.search(
+            r"(?m)^\s*import\s+[A-Za-z_][\w\.]*(\s*,\s*[A-Za-z_][\w\.]*)*(\s+as\s+[A-Za-z_][\w]*)?\s*$",
+            t,
+        ):
             return True
 
         return False
@@ -2860,20 +4110,23 @@ class BatchProcessor:
         # Step 2: Post-process OCR text
         for chunk in valid_chunks:
             if chunk.modality == Modality.TEXT:
-                # Avoid mutating code syntax/indentation.
-                if (
+                is_marked_code = bool(
                     chunk.metadata
                     and (
                         chunk.metadata.content_classification == "code"
                         or chunk.metadata.chunk_type == ChunkType.CODE
                     )
-                ):
-                    continue
-                original = chunk.content
-                cleaned = self._post_process_ocr_text(original)
-                if original != cleaned:
-                    chunk.content = cleaned
-                    logger.debug(f"[OCR-CLEAN] Fixed technical values in chunk {chunk.chunk_id}")
+                )
+                # Avoid mutating code syntax/indentation.
+                if not is_marked_code:
+                    original = chunk.content
+                    cleaned = self._post_process_ocr_text(original)
+                    if original != cleaned:
+                        chunk.content = cleaned
+                        logger.debug(f"[OCR-CLEAN] Fixed technical values in chunk {chunk.chunk_id}")
+
+                # Always run false-code demotion, including scanned_degraded profile.
+                self._maybe_demote_false_code_chunk(chunk)
 
         # Step 3: Profile-specific text hygiene (technical manuals are sensitive to
         # embedded page numbers, control chars, hyphenation, and broken chunk joins).
@@ -2985,6 +4238,7 @@ class BatchProcessor:
             Dict mapping page_number (1-indexed) to (width_px, height_px)
         """
         page_dims: Dict[int, Tuple[int, int]] = {}
+        doc: Optional[fitz.Document] = None
 
         try:
             doc = fitz.open(pdf_path)
@@ -2999,10 +4253,15 @@ class BatchProcessor:
                 height_px = int(rect.height)
                 page_dims[page_no] = (width_px, height_px)
 
-            doc.close()
             logger.info(f"[REQ-COORD-02] Extracted page dimensions for {len(page_dims)} pages")
         except Exception as e:
             logger.warning(f"[REQ-COORD-02] Failed to extract page dimensions: {e}")
+        finally:
+            if doc is not None:
+                try:
+                    doc.close()
+                except Exception:
+                    pass
 
         return page_dims
 
@@ -3115,6 +4374,9 @@ class BatchProcessor:
         profile_type = str(self._intelligence_metadata.get("profile_type", "unknown"))
         RECOVERY_THRESHOLD = -8.0 if profile_type == "technical_manual" else -10.0
         MIN_ORPHAN_LENGTH = 50  # Minimum chars to rescue (can be lowered on front pages)
+        MAX_TOC_LINE_RESCUES = 8
+        MAX_TOTAL_RECOVERY_CHUNKS = 48 if profile_type == "technical_manual" else 200
+        ocr_recovery_allowed = bool(self.enable_ocr or self.force_ocr)
 
         if variance_percent >= RECOVERY_THRESHOLD:
             logger.info(
@@ -3122,11 +4384,17 @@ class BatchProcessor:
             )
             return chunks
 
-        # Phase 3: Attempt image→text reclassification for mis-ID'd front-matter images
-        try:
-            chunks = self._reclassify_text_images(chunks)
-        except Exception as e:
-            logger.warning(f"[RECOVERY] Image→text reclassification skipped due to error: {e}")
+        if not ocr_recovery_allowed:
+            logger.info(
+                "[RECOVERY] OCR-assisted image recovery disabled "
+                "(enable_ocr=False and force_ocr=False); using text-layer recovery only"
+            )
+        else:
+            # Phase 3: Attempt image→text reclassification for mis-ID'd front-matter images
+            try:
+                chunks = self._reclassify_text_images(chunks)
+            except Exception as e:
+                logger.warning(f"[RECOVERY] Image→text reclassification skipped due to error: {e}")
 
         logger.info(
             f"[RECOVERY] ⚠️ Variance {variance_percent:.1f}% exceeds threshold ({RECOVERY_THRESHOLD}%). "
@@ -3159,36 +4427,42 @@ class BatchProcessor:
                         )
 
             # Step 1: Extract raw text per page from PDF (TEXT-LAYER ONLY; NO OCR)
-            doc = fitz.open(self._current_pdf_path)
+            doc: Optional[fitz.Document] = None
             raw_text_per_page: Dict[int, str] = {}
             text_blocks_per_page: Dict[int, List[Tuple[List[float], str]]] = {}
             page_size_per_page: Dict[int, Tuple[float, float]] = {}
             has_text_layer = False
 
-            for page_idx in range(len(doc)):
-                page_no = page_idx + 1
-                if self._processed_pages is not None and page_no not in self._processed_pages:
-                    continue
+            try:
+                doc = fitz.open(self._current_pdf_path)
+                for page_idx in range(len(doc)):
+                    page_no = page_idx + 1
+                    if self._processed_pages is not None and page_no not in self._processed_pages:
+                        continue
 
-                page = doc.load_page(page_idx)
-                page_size_per_page[page_no] = (float(page.rect.width), float(page.rect.height))
-                page_text = page.get_text("text")
-                if page_text and page_text.strip():
-                    raw_text_per_page[page_no] = page_text.strip()
-                    has_text_layer = True
+                    page = doc.load_page(page_idx)
+                    page_size_per_page[page_no] = (float(page.rect.width), float(page.rect.height))
+                    page_text = page.get_text("text")
+                    if page_text and page_text.strip():
+                        raw_text_per_page[page_no] = page_text.strip()
+                        has_text_layer = True
 
-                # Capture positional text blocks for code-aware recovery
-                blocks = page.get_text("blocks")
-                page_blocks: List[Tuple[List[float], str]] = []
-                for b in blocks:
-                    # b: (x0, y0, x1, y1, text, block_no, block_type, block_flags?)
-                    if len(b) >= 5 and isinstance(b[4], str) and b[4].strip():
-                        bbox = [float(b[0]), float(b[1]), float(b[2]), float(b[3])]
-                        page_blocks.append((bbox, b[4]))
-                if page_blocks:
-                    text_blocks_per_page[page_no] = page_blocks
-
-            doc.close()
+                    # Capture positional text blocks for code-aware recovery
+                    blocks = page.get_text("blocks")
+                    page_blocks: List[Tuple[List[float], str]] = []
+                    for b in blocks:
+                        # b: (x0, y0, x1, y1, text, block_no, block_type, block_flags?)
+                        if len(b) >= 5 and isinstance(b[4], str) and b[4].strip():
+                            bbox = [float(b[0]), float(b[1]), float(b[2]), float(b[3])]
+                            page_blocks.append((bbox, b[4]))
+                    if page_blocks:
+                        text_blocks_per_page[page_no] = page_blocks
+            finally:
+                if doc is not None:
+                    try:
+                        doc.close()
+                    except Exception:
+                        pass
 
             if has_text_layer:
                 logger.info(
@@ -3204,6 +4478,7 @@ class BatchProcessor:
 
             # Step 2: Build "covered text" set from existing chunks (per page)
             covered_text_per_page: Dict[int, List[str]] = {}
+            primary_text_chars_per_page: Dict[int, int] = {}
 
             for chunk in chunks:
                 if chunk.modality != Modality.TEXT:
@@ -3211,12 +4486,17 @@ class BatchProcessor:
 
                 page_no = chunk.metadata.page_number
                 content = chunk.content.strip()
+                extraction_method = str(getattr(chunk.metadata, "extraction_method", "") or "").lower()
 
                 if page_no not in covered_text_per_page:
                     covered_text_per_page[page_no] = []
 
                 if content and len(content) >= 10:
                     covered_text_per_page[page_no].append(content.lower())
+                    if not extraction_method.startswith("recovery_"):
+                        primary_text_chars_per_page[page_no] = (
+                            primary_text_chars_per_page.get(page_no, 0) + len(content)
+                        )
 
             # Helper: bbox IoU
             def _bbox_iou(b1: List[float], b2: List[int]) -> float:
@@ -3258,17 +4538,32 @@ class BatchProcessor:
                     return [0, 0, COORD_SCALE, COORD_SCALE]
                 return [x0, y0, x1, y1]
 
-            code_pattern = re.compile(
-                r"(def\s+\w+\(|class\s+\w+|import\s+\w+|from\s+\w+|if\s+__name__|async\s+def|return\s|try:|except\s|with\s|self\.|@[\w_]+)"
-            )
-
             def _clean_recovery_text(s: str, is_code: bool = False) -> str:
-                s2 = self._strip_control_chars(s or "")
-                if not is_code:
-                    s2 = self._remove_standalone_page_number_lines(s2)
-                    s2 = self._remove_all_digit_only_lines(s2)
-                    s2 = self._fix_linebreak_hyphenation(s2)
+                raw = s or ""
+                if is_code:
+                    # Indentation shield for recovery path as well.
+                    return self._preserve_or_reflow_code_text(raw)
+                s2 = self._strip_control_chars(raw)
+                s2 = self._remove_standalone_page_number_lines(s2)
+                s2 = self._remove_all_digit_only_lines(s2)
+                s2 = self._fix_linebreak_hyphenation(s2)
                 return s2.strip()
+
+            def _apply_toc_recovery_policy(
+                chunk: IngestionChunk,
+                toc_like_page: bool,
+            ) -> None:
+                if not toc_like_page:
+                    return
+                try:
+                    # Keep recovered TOC/index text for recall, but make it low-priority.
+                    self._demote_toc_index_chunk(chunk)
+                    chunk.metadata.search_priority = "low"
+                except Exception:
+                    pass
+
+            def _has_recovery_capacity() -> bool:
+                return len(recovery_chunks) < MAX_TOTAL_RECOVERY_CHUNKS
 
             # Step 3: Find orphaned text blocks per page
             total_rescued = 0
@@ -3276,20 +4571,36 @@ class BatchProcessor:
             flagged_front_pages: List[int] = []
 
             for page_no, raw_text in raw_text_per_page.items():
+                if not _has_recovery_capacity():
+                    logger.info(
+                        f"[RECOVERY] Recovery cap reached ({MAX_TOTAL_RECOVERY_CHUNKS} chunks); "
+                        "stopping additional rescue."
+                    )
+                    break
+
+                # Recovery is intended for pages where primary extraction is effectively blank.
+                # If we already extracted enough native text on this page, skip noisy rescue passes.
+                primary_chars = primary_text_chars_per_page.get(page_no, 0)
+                if primary_chars >= 50:
+                    logger.debug(
+                        f"[RECOVERY] Skipping page {page_no}: primary extraction already has "
+                        f"{primary_chars} chars"
+                    )
+                    continue
+
                 # Front pages are allowed a lower threshold and stricter coverage target
                 is_front_page = page_no <= 2
                 page_min_orphan = 20 if is_front_page else MIN_ORPHAN_LENGTH
 
-                # Do not "rescue" TOC/Index pages into the main corpus for technical manuals.
-                # These pages are high-noise and tend to create huge list-like chunks that
-                # degrade retrieval quality.
+                toc_like_page = False
                 try:
                     profile_type = self._intelligence_metadata.get("profile_type", "unknown")
                     if profile_type == "technical_manual" and self._is_toc_or_index_text(raw_text):
+                        toc_like_page = True
                         logger.info(
-                            f"[RECOVERY] Skipping TOC/Index-like page {page_no} for technical_manual recovery"
+                            f"[RECOVERY] TOC/Index-like page {page_no}: "
+                            "allowing recovery with low-priority demotion"
                         )
-                        continue
                 except Exception:
                     pass
 
@@ -3328,6 +4639,8 @@ class BatchProcessor:
                         return False
 
                     for bbox, block_text in text_blocks_per_page.get(page_no, []):
+                        if not _has_recovery_capacity():
+                            break
                         text_clean = _clean_recovery_text(block_text.strip())
                         if len(text_clean) < 20:
                             continue
@@ -3360,8 +4673,10 @@ class BatchProcessor:
                             hierarchy=hierarchy,
                             bbox=_normalize_bbox_pdf_points(page_no, bbox),
                             extraction_method="recovery_frontpage",
+                            content_classification=self._classify_recovery_text_content(text_clean),
                             **self._intelligence_metadata,
                         )
+                        _apply_toc_recovery_policy(recovery_chunk, toc_like_page)
                         recovery_chunks.append(recovery_chunk)
                         total_rescued += 1
                         covered_texts.append(para_lower)
@@ -3370,15 +4685,25 @@ class BatchProcessor:
                 raw_text = _clean_recovery_text(raw_text)
 
                 # Split raw text into paragraphs/blocks
-                paragraphs = re.split(r"\n\s*\n|\n{2,}", raw_text)
+                if toc_like_page:
+                    # TOC/index pages often become one giant paragraph; recover bounded line units instead.
+                    paragraphs = [ln for ln in (raw_text or "").splitlines() if ln.strip()]
+                else:
+                    paragraphs = re.split(r"\n\s*\n|\n{2,}", raw_text)
                 covered_texts = covered_text_per_page.get(page_no, covered_texts)
+                toc_rescued = 0
 
                 for para_idx, para in enumerate(paragraphs):
+                    if not _has_recovery_capacity():
+                        break
                     para_clean = _clean_recovery_text(para.strip())
 
                     # Skip short paragraphs
                     if len(para_clean) < page_min_orphan:
                         continue
+
+                    if toc_like_page and toc_rescued >= MAX_TOC_LINE_RESCUES:
+                        break
 
                     # Check if this paragraph is covered by any chunk
                     para_lower = para_clean.lower()
@@ -3423,17 +4748,25 @@ class BatchProcessor:
                             page_number=page_no,
                             hierarchy=hierarchy,
                             extraction_method="recovery_scan",  # Marks as rescued text
+                            content_classification=self._classify_recovery_text_content(para_clean),
                             **self._intelligence_metadata,
                         )
+                        _apply_toc_recovery_policy(recovery_chunk, toc_like_page)
 
                         recovery_chunks.append(recovery_chunk)
                         total_rescued += 1
+                        if toc_like_page:
+                            toc_rescued += 1
 
                 # Step 3b: Code-aware recovery for text blocks overlapping figures (subsurface extraction)
-                if page_no in figure_bboxes_per_page and page_no in text_blocks_per_page:
+                if (not toc_like_page) and page_no in figure_bboxes_per_page and page_no in text_blocks_per_page:
                     existing_texts = covered_text_per_page.get(page_no, [])
                     for fig_bbox, fig_chunk in figure_bboxes_per_page[page_no]:
+                        if not _has_recovery_capacity():
+                            break
                         for bbox, block_text in text_blocks_per_page[page_no]:
+                            if not _has_recovery_capacity():
+                                break
                             if len(block_text) < 50:
                                 continue
                             if _bbox_iou(bbox, fig_bbox) < 0.1:
@@ -3448,16 +4781,14 @@ class BatchProcessor:
                                 if para_lower[:50] in covered or covered[:50] in para_lower:
                                     is_covered = True
                                     break
-                                ratio = SequenceMatcher(
-                                    None, para_lower[:200], covered[:200]
-                                ).ratio()
+                                ratio = SequenceMatcher(None, para_lower[:200], covered[:200]).ratio()
                                 if ratio > 0.8:
                                     is_covered = True
                                     break
                             if is_covered:
                                 continue
 
-                            classification = "code" if code_pattern.search(block_text) else None
+                            classification = self._classify_recovery_text_content(block_text)
                             label = "[RECOVERED-CODE]" if classification == "code" else "[RECOVERED-FIGURE]"
 
                             logger.info(
@@ -3488,13 +4819,14 @@ class BatchProcessor:
                                 content_classification=classification,
                                 **self._intelligence_metadata,
                             )
+                            _apply_toc_recovery_policy(recovery_chunk, toc_like_page)
                             recovery_chunks.append(recovery_chunk)
                             total_rescued += 1
                             existing_texts.append(para_lower)
 
                 # Step 3c: Low-coverage gap fill (spatial gap filling beyond figures)
 
-                if coverage_ratio < 0.6 and page_no in text_blocks_per_page:
+                if (not toc_like_page) and coverage_ratio < 0.6 and page_no in text_blocks_per_page:
                     # Build covered bboxes (text/image/table) to find gaps
                     covered_bboxes = []
                     for ch in chunks:
@@ -3517,6 +4849,8 @@ class BatchProcessor:
                     ]
 
                     for bbox, block_text in text_blocks_per_page[page_no]:
+                        if not _has_recovery_capacity():
+                            break
                         text_clean = _clean_recovery_text(block_text.strip())
                         if len(text_clean) < 60:  # lowered threshold to widen gap-fill net
                             continue
@@ -3547,7 +4881,7 @@ class BatchProcessor:
                         if is_covered_gap:
                             continue
 
-                        classification = "code" if code_pattern.search(text_clean) else None
+                        classification = self._classify_recovery_text_content(text_clean)
                         label = "[RECOVERED-CODE]" if classification == "code" else "[RECOVERED-GAP]"
 
                         logger.info(
@@ -3572,6 +4906,7 @@ class BatchProcessor:
                             content_classification=classification,
                             **self._intelligence_metadata,
                         )
+                        _apply_toc_recovery_policy(recovery_chunk, toc_like_page)
                         recovery_chunks.append(recovery_chunk)
                         total_rescued += 1
                         covered_texts.append(para_lower)
@@ -3596,12 +4931,18 @@ class BatchProcessor:
 
             # Phase 4: Enhanced front-page processing if coverage still low
             if flagged_front_pages:
-                try:
-                    chunks = self._process_front_pages_enhanced(
-                        chunks, flagged_front_pages, covered_text_per_page
+                if ocr_recovery_allowed:
+                    try:
+                        chunks = self._process_front_pages_enhanced(
+                            chunks, flagged_front_pages, covered_text_per_page
+                        )
+                    except Exception as e:
+                        logger.warning(f"[RECOVERY] Enhanced front-page processing skipped: {e}")
+                else:
+                    logger.info(
+                        "[RECOVERY] Skipping enhanced front-page OCR pass "
+                        "(enable_ocr=False and force_ocr=False)"
                     )
-                except Exception as e:
-                    logger.warning(f"[RECOVERY] Enhanced front-page processing skipped: {e}")
 
         except Exception as e:
             logger.error(f"[RECOVERY] TextIntegrityScout failed: {e}")
@@ -3609,11 +4950,303 @@ class BatchProcessor:
 
         return chunks
 
+    def _apply_table_recovery_highlander_dedup(
+        self,
+        chunks: List[IngestionChunk],
+    ) -> List[IngestionChunk]:
+        """
+        Drop recovery text chunks that duplicate forced VLM table chunks on the same page.
+
+        Rule set ("Highlander"):
+        1. Identify table chunks extracted via `vlm_table_markdown_forced`.
+        2. For recovery chunks (`recovery_gap_fill` / `recovery_scan`) on the same page:
+           - If both bboxes exist, drop recovery chunk when intersection area
+             covers >50% of the recovery bbox.
+           - If either bbox is missing, fallback to token-overlap and drop when
+             >30% of recovery unique tokens are present in the VLM table text.
+        """
+        table_method = "vlm_table_markdown_forced"
+        zombie_methods = {"recovery_gap_fill", "recovery_scan"}
+
+        tables_by_page: Dict[int, List[IngestionChunk]] = {}
+        for chunk in chunks:
+            try:
+                method = str(getattr(chunk.metadata, "extraction_method", "") or "").lower()
+                if chunk.modality == Modality.TABLE and method == table_method:
+                    page_no = int(getattr(chunk.metadata, "page_number", 0) or 0)
+                    if page_no > 0:
+                        tables_by_page.setdefault(page_no, []).append(chunk)
+            except Exception:
+                continue
+
+        if not tables_by_page:
+            return chunks
+
+        def _safe_bbox(ch: IngestionChunk) -> Optional[List[int]]:
+            try:
+                spatial = getattr(ch.metadata, "spatial", None)
+                bbox = getattr(spatial, "bbox", None)
+                if not bbox or len(bbox) != 4:
+                    return None
+                x0, y0, x1, y1 = [int(v) for v in bbox]
+                if x1 <= x0 or y1 <= y0:
+                    return None
+                return [x0, y0, x1, y1]
+            except Exception:
+                return None
+
+        def _intersection_ratio_of_first(b1: List[int], b2: List[int]) -> float:
+            x0 = max(b1[0], b2[0])
+            y0 = max(b1[1], b2[1])
+            x1 = min(b1[2], b2[2])
+            y1 = min(b1[3], b2[3])
+            if x1 <= x0 or y1 <= y0:
+                return 0.0
+            inter = float((x1 - x0) * (y1 - y0))
+            area1 = float((b1[2] - b1[0]) * (b1[3] - b1[1]))
+            if area1 <= 0:
+                return 0.0
+            return inter / area1
+
+        def _unique_tokens(text: str) -> set[str]:
+            import re
+
+            tokens = re.findall(r"[A-Za-z0-9]{3,}", (text or "").lower())
+            return set(tokens)
+
+        def _token_overlap_ratio(recovery_text: str, table_text: str) -> float:
+            rec_tokens = _unique_tokens(recovery_text)
+            if not rec_tokens:
+                return 0.0
+            tbl_tokens = _unique_tokens(table_text)
+            if not tbl_tokens:
+                return 0.0
+            return len(rec_tokens & tbl_tokens) / max(1, len(rec_tokens))
+
+        kept: List[IngestionChunk] = []
+        dropped_total = 0
+        dropped_spatial = 0
+        dropped_text = 0
+
+        for chunk in chunks:
+            try:
+                page_no = int(getattr(chunk.metadata, "page_number", 0) or 0)
+                method = str(getattr(chunk.metadata, "extraction_method", "") or "").lower()
+            except Exception:
+                kept.append(chunk)
+                continue
+
+            if (
+                chunk.modality != Modality.TEXT
+                or method not in zombie_methods
+                or page_no not in tables_by_page
+            ):
+                kept.append(chunk)
+                continue
+
+            should_drop = False
+            drop_reason = ""
+            recovery_bbox = _safe_bbox(chunk)
+
+            for table_chunk in tables_by_page[page_no]:
+                table_bbox = _safe_bbox(table_chunk)
+                if recovery_bbox is not None and table_bbox is not None:
+                    overlap_ratio = _intersection_ratio_of_first(recovery_bbox, table_bbox)
+                    if overlap_ratio > 0.50:
+                        should_drop = True
+                        dropped_spatial += 1
+                        drop_reason = f"spatial_overlap={overlap_ratio:.2f}"
+                        break
+                else:
+                    token_ratio = _token_overlap_ratio(chunk.content, table_chunk.content)
+                    if token_ratio > 0.30:
+                        should_drop = True
+                        dropped_text += 1
+                        drop_reason = f"text_overlap={token_ratio:.2f}"
+                        break
+
+            if should_drop:
+                dropped_total += 1
+                logger.info(
+                    f"[HIGHLANDER] Dropping recovery chunk {chunk.chunk_id} "
+                    f"(page={page_no}, method={method}, reason={drop_reason})"
+                )
+                continue
+
+            kept.append(chunk)
+
+        if dropped_total > 0:
+            logger.info(
+                f"[HIGHLANDER] Dedup complete: dropped {dropped_total} recovery duplicates "
+                f"(spatial={dropped_spatial}, text={dropped_text})"
+            )
+            print(
+                f"🗡️ [HIGHLANDER] Dropped {dropped_total} recovery duplicates "
+                f"(spatial={dropped_spatial}, text={dropped_text})",
+                flush=True,
+            )
+
+        return kept
+
+    def _release_torch_runtime_memory(self) -> None:
+        """
+        Best-effort release of OCR runtime memory after EasyOCR phases.
+
+        EasyOCR pulls in PyTorch internals; clearing caches here reduces
+        peak-memory overlap with the final technical-manual hygiene pass.
+        """
+        try:
+            import torch  # type: ignore
+
+            try:
+                if hasattr(torch, "cuda") and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+
+            try:
+                if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                    torch.mps.empty_cache()  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+        gc.collect()
+
+    def _release_extraction_runtime_models(self, label: str = "[MEMORY] extraction release") -> None:
+        """
+        Release heavy extraction/runtime objects no longer needed after batch extraction.
+
+        This proactively frees model-backed objects (Docling converter + shadow processor)
+        before recovery/finalization phases to avoid late hard-kill OOM conditions.
+        """
+        released_any = False
+
+        # Shadow processor can retain runtime/model state; give it a chance to cleanup.
+        if self._shadow_processor is not None:
+            try:
+                cleanup = getattr(self._shadow_processor, "cleanup", None)
+                if callable(cleanup):
+                    cleanup()
+            except Exception as e:
+                logger.debug(f"[MEMORY] shadow processor cleanup skipped: {e}")
+            finally:
+                self._shadow_processor = None
+                released_any = True
+
+        # Docling converter holds heavy ML models in memory.
+        if self._docling_converter is not None:
+            try:
+                for method_name in ("cleanup", "close", "shutdown"):
+                    method = getattr(self._docling_converter, method_name, None)
+                    if callable(method):
+                        method()
+            except Exception as e:
+                logger.debug(f"[MEMORY] docling converter cleanup skipped: {e}")
+            finally:
+                self._docling_converter = None
+                released_any = True
+
+        # Layout-aware OCR processor can retain OCR runtime models.
+        layout_processor = getattr(self, "_layout_processor", None)
+        if layout_processor is not None:
+            try:
+                for method_name in ("cleanup", "close", "shutdown"):
+                    method = getattr(layout_processor, method_name, None)
+                    if callable(method):
+                        method()
+            except Exception as e:
+                logger.debug(f"[MEMORY] layout processor cleanup skipped: {e}")
+            finally:
+                self._layout_processor = None
+                released_any = True
+
+        # Always clear OCR-runtime caches, even when no object needed explicit teardown.
+        self._release_torch_runtime_memory()
+
+        if released_any:
+            self._log_memory_checkpoint(label)
+
+    def _release_vision_runtime_models(
+        self, label: str = "[MEMORY] vision release"
+    ) -> Dict[str, Any]:
+        """
+        Release vision-side runtime state before finalize-heavy phases.
+
+        Returns:
+            Best-effort vision stats snapshot captured before release.
+        """
+        stats: Dict[str, Any] = {}
+        if self._vision_manager is None:
+            return stats
+
+        try:
+            stats = self._vision_manager.get_stats()
+        except Exception as e:
+            logger.debug(f"[MEMORY] vision stats snapshot skipped: {e}")
+
+        try:
+            self._vision_manager.flush_cache()
+        except Exception as e:
+            logger.debug(f"[MEMORY] vision cache flush skipped: {e}")
+        finally:
+            # Drop reference so cache payloads can be reclaimed before finalize.
+            self._vision_manager = None
+
+        self._release_torch_runtime_memory()
+        self._log_memory_checkpoint(label)
+        return stats
+
+    def _get_process_rss_mb(self) -> Tuple[Optional[float], Optional[float]]:
+        """
+        Return (current_rss_mb, peak_rss_mb) when available.
+
+        - current_rss_mb: best-effort via psutil (optional dependency)
+        - peak_rss_mb: ru_maxrss via stdlib resource
+        """
+        current_rss_mb: Optional[float] = None
+        peak_rss_mb: Optional[float] = None
+
+        # Current RSS (optional; psutil may not be installed in all environments).
+        try:
+            import os
+            import psutil  # type: ignore
+
+            proc = psutil.Process(os.getpid())
+            current_rss_mb = proc.memory_info().rss / (1024.0 * 1024.0)
+        except Exception:
+            pass
+
+        # Peak RSS (stdlib; available on macOS/Linux).
+        try:
+            import resource
+
+            raw = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+            # macOS reports bytes; Linux reports KB.
+            if raw > 10_000_000:
+                peak_rss_mb = raw / (1024.0 * 1024.0)
+            else:
+                peak_rss_mb = raw / 1024.0
+        except Exception:
+            pass
+
+        return current_rss_mb, peak_rss_mb
+
+    def _log_memory_checkpoint(self, label: str) -> None:
+        """Emit a standardized memory checkpoint log line."""
+        current_rss_mb, peak_rss_mb = self._get_process_rss_mb()
+        cur_str = f"{current_rss_mb:.1f}MB" if current_rss_mb is not None else "n/a"
+        peak_str = f"{peak_rss_mb:.1f}MB" if peak_rss_mb is not None else "n/a"
+        logger.info(f"[MEMORY] {label}: rss={cur_str}, peak_rss={peak_str}")
+
     def _reclassify_text_images(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
         """
         Phase 3: Reclassify IMAGE chunks that likely contain text (front pages only).
         Uses EasyOCR if available. Guardrails: max 5 images per page, pages 1-2 only.
         """
+        import gc
+        
         try:
             import easyocr  # type: ignore
             from PIL import Image
@@ -3632,7 +5265,34 @@ class BatchProcessor:
             "text",
         ]
 
-        reader = easyocr.Reader(["en"], gpu=False)  # small, CPU-safe
+        # EARLY-EXIT GUARD: Check if there are any images that might need OCR
+        # before loading EasyOCR models into memory
+        images_by_page: Dict[int, List[IngestionChunk]] = {}
+        for ch in chunks:
+            if ch.modality != Modality.IMAGE:
+                continue
+            page_no = ch.metadata.page_number if ch.metadata else None
+            if not page_no:
+                continue
+            if page_no > 2:  # front-matter only
+                continue
+            desc = ""
+            if ch.metadata and hasattr(ch.metadata, "visual_description"):
+                desc = (ch.metadata.visual_description or "").lower()
+            if not any(k in desc for k in KEYWORDS):
+                continue
+            images_by_page.setdefault(page_no, []).append(ch)
+        
+        # Early exit if no candidates found
+        if not images_by_page:
+            logger.debug("[RECOVERY] No text-like image candidates found; skipping EasyOCR load")
+            return chunks
+        
+        # Log memory before loading EasyOCR
+        logger.info(f"[MEMORY] Loading EasyOCR for {sum(len(v) for v in images_by_page.values())} candidate images...")
+        self._log_memory_checkpoint("[RECOVERY] image->text before EasyOCR load")
+
+        reader = None
         max_per_page = 5
         updated = 0
 
@@ -3650,56 +5310,53 @@ class BatchProcessor:
                 return p
             return self.output_dir / p
 
-        # Group image chunks by page
-        images_by_page: Dict[int, List[IngestionChunk]] = {}
-        for ch in chunks:
-            if ch.modality != Modality.IMAGE:
-                continue
-            page_no = ch.metadata.page_number if ch.metadata else None
-            if not page_no:
-                continue
-            if page_no > 2:  # front-matter only
-                continue
-            desc = ""
-            if ch.metadata and hasattr(ch.metadata, "visual_description"):
-                desc = (ch.metadata.visual_description or "").lower()
-            if not any(k in desc for k in KEYWORDS):
-                continue
-            images_by_page.setdefault(page_no, []).append(ch)
+        try:
+            reader = easyocr.Reader(["en"], gpu=False)  # small, CPU-safe
+            gc.collect()  # MEMORY FIX: Force GC after EasyOCR model load
+            self._log_memory_checkpoint("[RECOVERY] image->text after EasyOCR load")
 
-        for page_no, page_imgs in images_by_page.items():
-            attempts = 0
-            for img_chunk in page_imgs:
-                if attempts >= max_per_page:
-                    break
-                if not img_chunk.asset_ref or not getattr(img_chunk.asset_ref, "file_path", None):
-                    continue
-                attempts += 1
+            for page_no, page_imgs in images_by_page.items():
+                attempts = 0
+                for img_chunk in page_imgs:
+                    if attempts >= max_per_page:
+                        break
+                    if not img_chunk.asset_ref or not getattr(img_chunk.asset_ref, "file_path", None):
+                        continue
+                    attempts += 1
+                    try:
+                        asset_path = _resolve_asset_path(img_chunk.asset_ref.file_path)
+                        if not asset_path.exists():
+                            continue
+                        with Image.open(asset_path) as img:
+                            width, height = img.size
+                        if width < 40 or height < 40:
+                            continue
+                        result = reader.readtext(str(asset_path), detail=0)
+                        ocr_text = "\n".join([r.strip() for r in result if r.strip()])
+                        if len(ocr_text) < 20:
+                            continue
+                        alpha_ratio = sum(c.isalpha() for c in ocr_text) / max(len(ocr_text), 1)
+                        if alpha_ratio < 0.6:
+                            continue
+
+                        # Reclassify
+                        img_chunk.modality = Modality.TEXT
+                        img_chunk.content = ocr_text
+                        if img_chunk.metadata:
+                            img_chunk.metadata.extraction_method = "image_to_text_recovery"
+                            img_chunk.metadata.content_classification = self._classify_recovery_text_content(ocr_text)
+                        updated += 1
+                    except Exception as e:  # pragma: no cover
+                        logger.debug(f"[RECOVERY] OCR failed for page {page_no} image: {e}")
+                        continue
+        finally:
+            if reader is not None:
                 try:
-                    asset_path = _resolve_asset_path(img_chunk.asset_ref.file_path)
-                    if not asset_path.exists():
-                        continue
-                    img = Image.open(asset_path)
-                    width, height = img.size
-                    if width < 40 or height < 40:
-                        continue
-                    result = reader.readtext(str(asset_path), detail=0)
-                    ocr_text = "\n".join([r.strip() for r in result if r.strip()])
-                    if len(ocr_text) < 20:
-                        continue
-                    alpha_ratio = sum(c.isalpha() for c in ocr_text) / max(len(ocr_text), 1)
-                    if alpha_ratio < 0.6:
-                        continue
-
-                    # Reclassify
-                    img_chunk.modality = Modality.TEXT
-                    img_chunk.content = ocr_text
-                    if img_chunk.metadata:
-                        img_chunk.metadata.extraction_method = "image_to_text_recovery"
-                    updated += 1
-                except Exception as e:  # pragma: no cover
-                    logger.debug(f"[RECOVERY] OCR failed for page {page_no} image: {e}")
-                    continue
+                    del reader
+                except Exception:
+                    pass
+            self._release_torch_runtime_memory()
+            self._log_memory_checkpoint("[RECOVERY] image->text after EasyOCR release")
 
         if updated:
             print(f"    ✓ [RECOVERY] Reclassified {updated} text-like images on front pages", flush=True)
@@ -3717,14 +5374,32 @@ class BatchProcessor:
         - OCR all images on flagged pages (regardless of VLM description) with EasyOCR if available.
         - Re-run PyMuPDF block extraction with lower threshold and dedup by hash.
         """
+        import gc
+        
         try:
             import easyocr  # type: ignore
         except Exception as e:  # pragma: no cover
             logger.info(f"[RECOVERY] EasyOCR not available for enhanced pass: {e}")
             return chunks
+        
+        # EARLY-EXIT GUARD: Check if there are any images on the flagged pages
+        # before loading EasyOCR models into memory
+        images_on_flagged_pages = []
+        for ch in chunks:
+            if ch.modality == Modality.IMAGE and ch.metadata and ch.metadata.page_number in pages:
+                images_on_flagged_pages.append(ch)
+        
+        # Early exit if no images on flagged pages
+        if not images_on_flagged_pages:
+            logger.debug("[RECOVERY] No images on flagged front pages; skipping EasyOCR load")
+            return chunks
+        
+        # Log memory before loading EasyOCR
+        logger.info(f"[MEMORY] Loading EasyOCR for enhanced front-page recovery on {len(pages)} pages...")
+        self._log_memory_checkpoint("[RECOVERY] enhanced frontpage before EasyOCR load")
 
-        reader = easyocr.Reader(["en"], gpu=False)  # CPU-safe
-        doc = fitz.open(self._current_pdf_path)
+        reader = None
+        doc = None
         new_chunks: List[IngestionChunk] = []
         seen_hashes = set()
 
@@ -3734,99 +5409,121 @@ class BatchProcessor:
                 return p
             return self.output_dir / p
 
-        # seed dedup with existing text chunks
-        for ch in chunks:
-            if ch.modality == Modality.TEXT and ch.content:
-                h = hashlib.md5(ch.content.strip().lower().encode("utf-8")).hexdigest()
-                seen_hashes.add(h)
+        try:
+            reader = easyocr.Reader(["en"], gpu=False)  # CPU-safe
+            gc.collect()  # MEMORY FIX: Force GC after EasyOCR model load
+            self._log_memory_checkpoint("[RECOVERY] enhanced frontpage after EasyOCR load")
 
-        for page_no in pages:
-            page_idx = page_no - 1
-            if page_idx < 0 or page_idx >= len(doc):
-                continue
+            doc = fitz.open(self._current_pdf_path)
 
-            # 1) OCR every image chunk on this page
-            page_imgs = [c for c in chunks if c.modality == Modality.IMAGE and c.metadata.page_number == page_no]
-            ocr_count = 0
-            for img_chunk in page_imgs:
-                if not img_chunk.asset_ref or not getattr(img_chunk.asset_ref, "file_path", None):
+            # seed dedup with existing text chunks
+            for ch in chunks:
+                if ch.modality == Modality.TEXT and ch.content:
+                    h = hashlib.md5(ch.content.strip().lower().encode("utf-8")).hexdigest()
+                    seen_hashes.add(h)
+
+            for page_no in pages:
+                page_idx = page_no - 1
+                if page_idx < 0 or page_idx >= len(doc):
                     continue
-                if ocr_count >= 5:
-                    break
-                try:
-                    asset_path = _resolve_asset_path(img_chunk.asset_ref.file_path)
-                    if not asset_path.exists():
+
+                # 1) OCR every image chunk on this page
+                page_imgs = [
+                    c for c in chunks if c.modality == Modality.IMAGE and c.metadata.page_number == page_no
+                ]
+                ocr_count = 0
+                for img_chunk in page_imgs:
+                    if not img_chunk.asset_ref or not getattr(img_chunk.asset_ref, "file_path", None):
                         continue
-                    result = reader.readtext(str(asset_path), detail=0)
-                    ocr_text = "\n".join([r.strip() for r in result if r.strip()])
-                    if len(ocr_text) < 20:
+                    if ocr_count >= 5:
+                        break
+                    try:
+                        asset_path = _resolve_asset_path(img_chunk.asset_ref.file_path)
+                        if not asset_path.exists():
+                            continue
+                        result = reader.readtext(str(asset_path), detail=0)
+                        ocr_text = "\n".join([r.strip() for r in result if r.strip()])
+                        if len(ocr_text) < 20:
+                            continue
+                        alpha_ratio = sum(c.isalpha() for c in ocr_text) / max(len(ocr_text), 1)
+                        if alpha_ratio < 0.6:
+                            continue
+                        h = hashlib.md5(ocr_text.strip().lower().encode("utf-8")).hexdigest()
+                        if h in seen_hashes:
+                            continue
+                        seen_hashes.add(h)
+                        img_chunk.modality = Modality.TEXT
+                        img_chunk.content = ocr_text
+                        if img_chunk.metadata:
+                            img_chunk.metadata.extraction_method = "enhanced_image_ocr"
+                            img_chunk.metadata.content_classification = self._classify_recovery_text_content(ocr_text)
+                        ocr_count += 1
+                    except Exception as e:  # pragma: no cover
+                        logger.debug(f"[RECOVERY] Enhanced OCR failed for page {page_no}: {e}")
                         continue
-                    alpha_ratio = sum(c.isalpha() for c in ocr_text) / max(len(ocr_text), 1)
-                    if alpha_ratio < 0.6:
+
+                # 2) Re-run PyMuPDF block extraction with low threshold
+                page = doc.load_page(page_idx)
+                blocks = page.get_text("blocks")
+                for b in blocks:
+                    if len(b) < 5 or not isinstance(b[4], str):
                         continue
-                    h = hashlib.md5(ocr_text.strip().lower().encode("utf-8")).hexdigest()
+                    text_clean = b[4].strip()
+                    if len(text_clean) < 20:
+                        continue
+                    h = hashlib.md5(text_clean.lower().encode("utf-8")).hexdigest()
                     if h in seen_hashes:
                         continue
                     seen_hashes.add(h)
-                    img_chunk.modality = Modality.TEXT
-                    img_chunk.content = ocr_text
-                    if img_chunk.metadata:
-                        img_chunk.metadata.extraction_method = "enhanced_image_ocr"
-                    ocr_count += 1
-                except Exception as e:  # pragma: no cover
-                    logger.debug(f"[RECOVERY] Enhanced OCR failed for page {page_no}: {e}")
-                    continue
 
-            # 2) Re-run PyMuPDF block extraction with low threshold
-            page = doc.load_page(page_idx)
-            blocks = page.get_text("blocks")
-            for b in blocks:
-                if len(b) < 5 or not isinstance(b[4], str):
-                    continue
-                text_clean = b[4].strip()
-                if len(text_clean) < 20:
-                    continue
-                h = hashlib.md5(text_clean.lower().encode("utf-8")).hexdigest()
-                if h in seen_hashes:
-                    continue
-                seen_hashes.add(h)
-
-                doc_title = self._current_pdf_path.stem
-                hierarchy = HierarchyMetadata(
-                    parent_heading=None,
-                    breadcrumb_path=[doc_title, f"Page {page_no}", "[ENHANCED]"],
-                    level=3,
-                )
-                # Normalize PyMuPDF block bbox (PDF points) to REQ-COORD-01 scale.
-                page_w = float(page.rect.width)
-                page_h = float(page.rect.height)
-                if page_w > 0 and page_h > 0:
-                    x0 = int(round((float(b[0]) / page_w) * COORD_SCALE))
-                    y0 = int(round((float(b[1]) / page_h) * COORD_SCALE))
-                    x1 = int(round((float(b[2]) / page_w) * COORD_SCALE))
-                    y1 = int(round((float(b[3]) / page_h) * COORD_SCALE))
-                    bbox = [
-                        max(0, min(COORD_SCALE, x0)),
-                        max(0, min(COORD_SCALE, y0)),
-                        max(0, min(COORD_SCALE, x1)),
-                        max(0, min(COORD_SCALE, y1)),
-                    ]
-                else:
-                    bbox = [0, 0, COORD_SCALE, COORD_SCALE]
-                new_chunk = create_text_chunk(
-                    doc_id=self._doc_hash or "unknown",
-                    content=text_clean,
-                    source_file=str(self._current_pdf_path.name),
-                    file_type=FileType.PDF,
-                    page_number=page_no,
-                    hierarchy=hierarchy,
-                    bbox=bbox,
-                    extraction_method="enhanced_frontpage",
-                    **self._intelligence_metadata,
-                )
-                new_chunks.append(new_chunk)
-
-        doc.close()
+                    doc_title = self._current_pdf_path.stem
+                    hierarchy = HierarchyMetadata(
+                        parent_heading=None,
+                        breadcrumb_path=[doc_title, f"Page {page_no}", "[ENHANCED]"],
+                        level=3,
+                    )
+                    # Normalize PyMuPDF block bbox (PDF points) to REQ-COORD-01 scale.
+                    page_w = float(page.rect.width)
+                    page_h = float(page.rect.height)
+                    if page_w > 0 and page_h > 0:
+                        x0 = int(round((float(b[0]) / page_w) * COORD_SCALE))
+                        y0 = int(round((float(b[1]) / page_h) * COORD_SCALE))
+                        x1 = int(round((float(b[2]) / page_w) * COORD_SCALE))
+                        y1 = int(round((float(b[3]) / page_h) * COORD_SCALE))
+                        bbox = [
+                            max(0, min(COORD_SCALE, x0)),
+                            max(0, min(COORD_SCALE, y0)),
+                            max(0, min(COORD_SCALE, x1)),
+                            max(0, min(COORD_SCALE, y1)),
+                        ]
+                    else:
+                        bbox = [0, 0, COORD_SCALE, COORD_SCALE]
+                    new_chunk = create_text_chunk(
+                        doc_id=self._doc_hash or "unknown",
+                        content=text_clean,
+                        source_file=str(self._current_pdf_path.name),
+                        file_type=FileType.PDF,
+                        page_number=page_no,
+                        hierarchy=hierarchy,
+                        bbox=bbox,
+                        extraction_method="enhanced_frontpage",
+                        content_classification=self._classify_recovery_text_content(text_clean),
+                        **self._intelligence_metadata,
+                    )
+                    new_chunks.append(new_chunk)
+        finally:
+            if doc is not None:
+                try:
+                    doc.close()
+                except Exception:
+                    pass
+            if reader is not None:
+                try:
+                    del reader
+                except Exception:
+                    pass
+            self._release_torch_runtime_memory()
+            self._log_memory_checkpoint("[RECOVERY] enhanced frontpage after EasyOCR release")
 
         if new_chunks:
             chunks.extend(new_chunks)
@@ -3898,17 +5595,24 @@ class BatchProcessor:
             source_text = ""
             if self._current_pdf_path and self._current_pdf_path.exists():
                 try:
-                    doc = fitz.open(self._current_pdf_path)
+                    doc: Optional[fitz.Document] = None
                     all_text_parts = []
-                    for page_idx in range(len(doc)):
-                        page_no = page_idx + 1
-                        if self._processed_pages is not None and page_no not in self._processed_pages:
-                            continue
-                        page = doc.load_page(page_idx)
-                        page_text = page.get_text("text")
-                        if page_text:
-                            all_text_parts.append(page_text.strip())
-                    doc.close()
+                    try:
+                        doc = fitz.open(self._current_pdf_path)
+                        for page_idx in range(len(doc)):
+                            page_no = page_idx + 1
+                            if self._processed_pages is not None and page_no not in self._processed_pages:
+                                continue
+                            page = doc.load_page(page_idx)
+                            page_text = page.get_text("text")
+                            if page_text:
+                                all_text_parts.append(page_text.strip())
+                    finally:
+                        if doc is not None:
+                            try:
+                                doc.close()
+                            except Exception:
+                                pass
                     source_text = "\n".join(all_text_parts)
                     logger.info(
                         f"[QA-CHECK-01] Extracted {len(source_text)} chars from PDF for validation "
@@ -4515,6 +6219,66 @@ class BatchProcessor:
 
         return filtered
 
+    def process_to_jsonl(self, file_path: str) -> str:
+        """
+        Compatibility wrapper for CLI integration.
+
+        The CLI expects a process_to_jsonl method. For BatchProcessor,
+        this maps to process_pdf.
+        """
+        result = self.process_pdf(file_path)
+        if not result.success:
+            error_msg = "; ".join(result.errors)
+            raise RuntimeError(f"Batch processing failed for {file_path}: {error_msg}")
+        return str(result.output_jsonl)
+
+    def process_to_jsonl_atomic(self, file_path: str) -> str:
+        """Alias for process_to_jsonl (BatchProcessor is already atomic)."""
+        return self.process_to_jsonl(file_path)
+
+    def cleanup(self) -> None:
+        """
+        Best-effort resource cleanup for graceful shutdown paths.
+
+        This is safe to call multiple times and helps reduce leaked worker
+        resources when a run exits with errors.
+        """
+        try:
+            if self._vision_manager:
+                try:
+                    self._vision_manager.flush_cache()
+                except Exception as e:
+                    logger.debug(f"[CLEANUP] vision cache flush failed: {e}")
+
+            if self._image_hash_registry:
+                clear_fn = getattr(self._image_hash_registry, "clear", None)
+                if callable(clear_fn):
+                    try:
+                        clear_fn()
+                    except Exception as e:
+                        logger.debug(f"[CLEANUP] image hash registry clear failed: {e}")
+
+            if self._refiner:
+                for method_name in ("shutdown", "close"):
+                    method = getattr(self._refiner, method_name, None)
+                    if callable(method):
+                        try:
+                            method()
+                        except Exception as e:
+                            logger.debug(f"[CLEANUP] refiner.{method_name} failed: {e}")
+
+            # Drop large references to help GC reclaim memory quickly.
+            self._image_hash_registry = None
+            self._context_state = None
+            self._vision_manager = None
+
+            # Release cached extraction runtimes (Docling converter, shadow processor)
+            # and clear torch caches.
+            self._release_extraction_runtime_models("[CLEANUP] extraction runtime release")
+            logger.debug("[CLEANUP] BatchProcessor cleanup complete")
+        except Exception as e:
+            logger.debug(f"[CLEANUP] BatchProcessor cleanup skipped due to error: {e}")
+
 
 # ============================================================================
 # FACTORY FUNCTION
@@ -4528,6 +6292,7 @@ def create_batch_processor(
     vision_model: Optional[str] = None,
     vision_api_key: Optional[str] = None,
     vlm_timeout: int = DEFAULT_VLM_TIMEOUT,
+    force_table_vlm: bool = False,
 ) -> BatchProcessor:
     """
     Factory function to create a BatchProcessor.
@@ -4539,6 +6304,7 @@ def create_batch_processor(
         vision_model: VLM model name (optional for Ollama - auto-detects if not specified)
         vision_api_key: API key for cloud providers
         vlm_timeout: VLM read timeout in seconds (default: 90)
+        force_table_vlm: Force table image -> VLM markdown path (fallback to OCR/docling if needed)
 
     Returns:
         Configured BatchProcessor instance
@@ -4559,4 +6325,5 @@ def create_batch_processor(
         vision_model=vision_model,
         vision_api_key=vision_api_key,
         vlm_timeout=vlm_timeout,
+        force_table_vlm=force_table_vlm,
     )

@@ -1,18 +1,19 @@
 # 🏗️ Universal Multi-Format RAG Pipeline Architecture
 
-**Version:** 3.0.0  
+**Version:** v2.4.1-stable  
 **Date:** January 2026  
-**Status:** PRODUCTION DESIGN  
-**Supersedes:** Legacy shadow-first approach
-**Policy Update (2.4.1-stable):** Native-digital PDFs bypass the OCR cascade (Docling text layer + recovery only). Layout-aware OCR (Tesseract/Doctr) is reserved for scanned/unknown modalities. Gap-fill recovery on academic whitepapers uses a 60-character minimum block to fill low-coverage pages with strict deduplication and noise filters.
+**Status:** ACTIVE BASELINE  
+**Policy Update (v2.4.1-stable):** Native-digital PDFs bypass the OCR cascade (Docling text layer + recovery only). Layout-aware OCR (Tesseract/Doctr) is reserved for scanned/unknown modalities. Gap-fill recovery on academic whitepapers uses a 60-character minimum block to fill low-coverage pages with strict deduplication and noise filters.
 
 ---
 
-**Versioning Note:** All chunks emit `metadata.schema_version` from the central version.py to guarantee downstream compatibility.
+**Versioning Note:** `schema_version` is sourced from `src/mmrag_v2/version.py` (`__schema_version__`) and emitted as the top-level `schema_version` field for each chunk. The export layer may also mirror it in `metadata.schema_version` for downstream compatibility.
+
+**Scope Note:** This document is branch-canonical for `MM-Converter-V2.4.1`; file paths and module inventory reflect the current branch. Optional engines such as `src/mmrag_v2/engines/epub_engine.py` and `src/mmrag_v2/engines/html_engine.py` may exist in sibling repos, but are not required in this branch.
 
 ## 1. Executive Summary
 
-This document describes the redesigned MM-Converter-V2 architecture that solves the critical scanned document problem while maintaining generalizability across all input formats.
+This document describes the current MM-Converter-V2.4.1-stable architecture for robust multimodal ingestion across supported formats.
 
 ### Problem Statement
 
@@ -71,7 +72,7 @@ A **Universal Intermediate Representation (UIR)** that decouples format-specific
 │  │           UNIVERSAL INTERMEDIATE REPRESENTATION             │            │
 │  │                                                             │            │
 │  │  UniversalDocument                                          │            │
-│  │    ├── doc_id: str (MD5 hash)                               │            │
+│  │    ├── doc_id: str (first 12 chars of MD5 hash)             │            │
 │  │    ├── source_file: str                                     │            │
 │  │    ├── file_type: FileType                                  │            │
 │  │    └── pages: List[UniversalPage]                           │            │
@@ -123,16 +124,24 @@ A **Universal Intermediate Representation (UIR)** that decouples format-specific
 
 ### 2.2 Component Responsibilities
 
-| Component | Responsibility | Input | Output |
-|-----------|---------------|-------|--------|
-| **FormatRouter** | Detect file format, route to engine | File path | FormatEngine |
-| **PDFEngine** | Extract from PDF via Docling | PDF file | UniversalDocument |
-| **EpubEngine** | Extract from ePub via EbookLib | ePub file | UniversalDocument |
-| **HTMLEngine** | Extract from HTML via Trafilatura | HTML file | UniversalDocument |
-| **QualityClassifier** | Assess page/element quality | UniversalPage | Classification |
-| **ElementProcessor** | Route elements by quality | Element | IngestionChunk |
-| **EnhancedOCREngine** | 3-layer OCR cascade | Image region | OCR text |
-| **VisionManager** | Visual description | Image | Description |
+| Component | Responsibility | Input | Output | Implementation File |
+|-----------|---------------|-------|--------|---------------------|
+| **FormatRouter** | Detect file format, route to engine | File path | FormatEngine | `src/mmrag_v2/universal/router.py` |
+| **PDFEngine** | Extract from PDF via Docling | PDF file | UniversalDocument | `src/mmrag_v2/engines/pdf_engine.py` |
+| **EpubEngine** | Extract from ePub via EbookLib | ePub file | UniversalDocument | `src/mmrag_v2/engines/epub_engine.py` (optional module, not present in this branch) |
+| **HTMLEngine** | Extract from HTML via Trafilatura | HTML file | UniversalDocument | `src/mmrag_v2/engines/html_engine.py` (optional module, not present in this branch) |
+| **QualityClassifier** | Assess page/element quality | UniversalPage | Classification | `src/mmrag_v2/universal/quality_classifier.py` |
+| **ConfidenceNormalizer** | Normalize cross-format confidence to universal 0.0-1.0 scale | Format-specific confidence metrics | Normalized score + quality tier/OCR trigger decisions | `src/mmrag_v2/universal/quality_classifier.py` |
+| **ElementProcessor** | Route elements by quality | Element | IngestionChunk | `src/mmrag_v2/universal/element_processor.py` |
+| **EnhancedOCREngine** | 3-layer OCR cascade | Image region | OCR text | `src/mmrag_v2/ocr/enhanced_ocr_engine.py` |
+| **VisionManager** | Visual description | Image | Description | `src/mmrag_v2/vision/vision_manager.py` |
+| **SmartConfigProvider** | Profile document characteristics before extraction | PDF path | DocumentProfile | `src/mmrag_v2/orchestration/smart_config.py` |
+| **DocumentDiagnosticEngine** | Pre-flight modality/domain diagnostics | PDF path | DiagnosticReport | `src/mmrag_v2/orchestration/document_diagnostic.py` |
+| **ProfileClassifier** | Select profile using weighted feature scoring | DocumentProfile + DiagnosticReport | ProfileType | `src/mmrag_v2/orchestration/profile_classifier.py` |
+| **StrategyOrchestrator** | Convert profile into extraction strategy parameters | DocumentProfile + ProfileParameters | ExtractionStrategy | `src/mmrag_v2/orchestration/strategy_orchestrator.py` |
+| **MagazineSectionDetector** | Detect section headers for breadcrumb enrichment | Text element + page context | SectionDetectionResult | `src/mmrag_v2/state/magazine_section_detector.py` |
+| **SpatialPropagator** | Propagate/normalize spatial metadata to 0-1000 | Docling element + page dimensions | SpatialExtractionResult | `src/mmrag_v2/utils/advanced_spatial_propagator.py` |
+| **QualityFilterTracker** | Track filtered tokens/chunks for QA accounting | Filtered chunks | QualityFilterSummary | `src/mmrag_v2/validators/quality_filter_tracker.py` |
 
 ---
 
@@ -181,7 +190,7 @@ class UniversalPage:
 @dataclass
 class UniversalDocument:
     """Format-agnostic document representation."""
-    doc_id: str                            # MD5 hash of source file
+    doc_id: str                            # first 12 chars of MD5 hash of source file
     source_file: str                       # Original filename
     file_type: str                         # pdf, epub, html, docx, etc.
     pages: List[UniversalPage] = field(default_factory=list)
@@ -253,7 +262,9 @@ class UniversalDocument:
 - Trafilatura: Measures content extraction quality (0-100)
 - EbookLib: Binary success/failure with text length heuristic
 
-**Solution**: `ConfidenceNormalizer` maps all scores to a universal 0.0-1.0 scale:
+**Solution**: `ConfidenceNormalizer` maps all scores to a universal 0.0-1.0 scale.
+Implementation module: `src/mmrag_v2/universal/quality_classifier.py` (exported via `src/mmrag_v2/universal/__init__.py`).
+Runtime placement: UIR quality layer; consumed by `ElementConfidenceCalculator` and `PageQualityClassifier` in the same module.
 
 ```python
 from mmrag_v2.universal import ConfidenceNormalizer
@@ -299,7 +310,7 @@ doctr_conf = ConfidenceNormalizer.normalize_ocr_doctr(doctr_conf=0.9)  # → 0.9
 | Tesseract | 0-100 | Divide by 100, penalize short results |
 | Doctr | 0.0-1.0 | Use as-is, slight boost for non-empty |
 
-### 4.3 OCR Cascade Priority
+### 4.4 OCR Cascade Priority
 
 **IMPORTANT: Docling ALWAYS runs first for layout analysis.**
 
@@ -313,7 +324,7 @@ Layer 2: Tesseract 5.x + Preprocessing (fast fallback)
 Layer 3: Doctr (transformer-based, final fallback)
 ```
 
-**Context:** Docling v2.66.0 is the primary layout analyzer, not just an OCR engine. It performs both layout detection AND text extraction. The cascade starts by evaluating Docling's existing result, then falls back to Tesseract/Doctr only if needed.
+**Context:** The pinned Docling release is the primary layout analyzer, not just an OCR engine. It performs both layout detection AND text extraction. The cascade starts by evaluating Docling's existing result, then falls back to Tesseract/Doctr only if needed.
 
 **Performance Benefit:** For digital PDFs (90% of documents), Docling extracts text directly from embedded fonts at ~100ms/page. Running Tesseract first would waste ~2500ms/page on unnecessary OCR.
 
@@ -352,7 +363,7 @@ class FormatEngine(ABC):
 ```python
 class PDFEngine(FormatEngine):
     """
-    PDF extraction using Docling v2.66.0.
+    PDF extraction using the pinned Docling release.
     
     Key Features:
     - Per-page classification (digital vs scanned)
@@ -428,35 +439,66 @@ class HTMLEngine(FormatEngine):
 
 ## 6. Integration Points
 
-### 6.1 Existing Components to Preserve
+### 6.1 Core Components in Use
 
 | Module | Status | Integration |
 |--------|--------|-------------|
-| `ocr/enhanced_ocr_engine.py` | ✅ Keep | Called by ElementProcessor for low-confidence TEXT |
-| `ocr/image_preprocessor.py` | ✅ Keep | Called before OCR cascade |
-| `vision/vision_manager.py` | ✅ Keep | Called by ElementProcessor for IMAGE elements |
-| `schema/ingestion_schema.py` | ✅ Keep | Output schema unchanged |
-| `state/context_state.py` | ✅ Keep | Breadcrumb tracking unchanged |
+| `src/mmrag_v2/ocr/enhanced_ocr_engine.py` | ✅ Keep | Called by ElementProcessor for low-confidence TEXT |
+| `src/mmrag_v2/ocr/image_preprocessor.py` | ✅ Keep | Called before OCR cascade |
+| `src/mmrag_v2/vision/vision_manager.py` | ✅ Keep | Called by ElementProcessor for IMAGE elements |
+| `src/mmrag_v2/schema/ingestion_schema.py` | ✅ Keep | Output schema unchanged |
+| `src/mmrag_v2/state/context_state.py` | ✅ Keep | Breadcrumb tracking unchanged |
+| `src/mmrag_v2/state/magazine_section_detector.py` | ✅ Keep | Magazine breadcrumb enrichment during text processing |
+| `src/mmrag_v2/validators/quality_filter_tracker.py` | ✅ Keep | Feeds filtered-token analytics into token validation |
 
-### 6.2 Components to Update
+### 6.2 Pipeline-Critical Components
 
 | Module | Change |
 |--------|--------|
-| `batch_processor.py` | Route through FormatRouter → UIR → ElementProcessor |
-| `layout_aware_processor.py` | Proper layout detection (not full-page fallback) |
-| `vision/vision_prompts.py` | Add VISUAL_ONLY_PROMPT |
+| `src/mmrag_v2/batch_processor.py` | Route through FormatRouter → UIR → ElementProcessor |
+| `src/mmrag_v2/ocr/layout_aware_processor.py` | Proper layout detection (not full-page fallback) |
+| `src/mmrag_v2/vision/vision_prompts.py` | Defines VISUAL_ONLY_PROMPT policy and response validation helpers |
+| `src/mmrag_v2/refiner.py` | Optional post-OCR text repair layer with edit-budget guardrails |
 
-### 6.3 New Components
+### 6.3 UIR Components
 
 | Module | Purpose |
 |--------|---------|
-| `universal/intermediate.py` | UIR data structures |
-| `universal/router.py` | Format detection and engine routing |
-| `universal/element_processor.py` | Quality-based element processing |
-| `engines/base.py` | FormatEngine ABC |
-| `engines/pdf_engine.py` | PDF → UIR conversion |
-| `engines/epub_engine.py` | ePub → UIR conversion |
-| `engines/html_engine.py` | HTML → UIR conversion |
+| `src/mmrag_v2/universal/intermediate.py` | UIR data structures |
+| `src/mmrag_v2/universal/router.py` | Format detection and engine routing |
+| `src/mmrag_v2/universal/quality_classifier.py` | Quality classifiers and `ConfidenceNormalizer` for cross-format confidence normalization |
+| `src/mmrag_v2/universal/element_processor.py` | Quality-based element processing |
+| `src/mmrag_v2/engines/base.py` | FormatEngine ABC |
+| `src/mmrag_v2/engines/pdf_engine.py` | PDF → UIR conversion |
+| `src/mmrag_v2/engines/epub_engine.py` | Optional ePub engine plugin (not present in this branch) |
+| `src/mmrag_v2/engines/html_engine.py` | Optional HTML engine plugin (not present in this branch) |
+| `src/mmrag_v2/processor.py` | Current non-PDF extraction path (epub/html/docx/pptx/xlsx) |
+
+### 6.4 Orchestration & Profile Intelligence
+
+| Module | Purpose |
+|--------|---------|
+| `src/mmrag_v2/orchestration/smart_config.py` | Fast pre-analysis (text/image density, median image sizes) to build DocumentProfile |
+| `src/mmrag_v2/orchestration/document_diagnostic.py` | Pre-flight modality/domain diagnostics and confidence profiling |
+| `src/mmrag_v2/orchestration/profile_classifier.py` | Weighted profile selection (e.g., academic_whitepaper, digital_magazine) |
+| `src/mmrag_v2/orchestration/strategy_profiles.py` | Profile parameter sets and adaptive profile behavior |
+| `src/mmrag_v2/orchestration/strategy_orchestrator.py` | Converts selected profile into concrete extraction strategy knobs |
+
+### 6.5 Utility & QA Extensions
+
+| Module | Purpose |
+|--------|---------|
+| `src/mmrag_v2/utils/advanced_spatial_propagator.py` | Extracts Docling provenance bbox and normalizes for all modalities |
+| `src/mmrag_v2/utils/image_trim.py` | Margin trim and anti-clipping crop expansion utilities for visual assets |
+| `src/mmrag_v2/utils/image_quality.py` | Lightweight blur metrics used for CLI/QA diagnostics |
+| `src/mmrag_v2/validators/quality_filter_tracker.py` | Tracks token impact of quality filters by category |
+
+### 6.6 Adjacent Modules (Not on Default Ingestion Path)
+
+| Module | Purpose |
+|--------|---------|
+| `src/mmrag_v2/adapters/vision_providers.py` | Alternate pluggable VLM provider abstraction layer |
+| `src/mmrag_v2/rag/advanced_pipeline.py` | Downstream multimodal retrieval/indexing pipeline over `ingestion.jsonl` |
 
 ---
 
@@ -497,7 +539,7 @@ Describe ONLY the visual/mechanical aspects of this image:
 
 ### 7.3 Enforcement
 
-The `ElementProcessor` will:
+The `ElementProcessor`:
 1. Send IMAGE elements to VLM with VISUAL_ONLY_PROMPT
 2. Post-process response to detect/reject text transcription
 3. Retry with stricter prompt if text detected
@@ -633,84 +675,93 @@ def test_scanned_pdf_produces_text():
 
 ---
 
-## 11. Migration Plan
+## 11. Compatibility Notes
 
 ### 11.1 Backward Compatibility
 
 - Old CLI flags continue to work
-- Legacy "shadow" extraction available via `--legacy-mode` flag
 - Output schema unchanged
-
-### 11.2 Deprecation Schedule
-
-| Version | Deprecation |
-|---------|-------------|
-| 3.0.0 | Legacy shadow-first mode deprecated (warning) |
-| 3.1.0 | Legacy mode hidden from help |
-| 4.0.0 | Legacy mode removed |
 
 ---
 
-## 12. Appendix: File Structure
+## 12. Appendix: File Structure (Current Branch)
+
+This snapshot reflects files currently present under `src/mmrag_v2/` in this branch.
 
 ```
 src/mmrag_v2/
 ├── __init__.py
-├── batch_processor.py              # UPDATE: Use universal pipeline
-├── cli.py                          # UPDATE: Add --legacy-mode flag
-├── processor.py                    # DEPRECATE: Keep for backward compat
+├── batch_processor.py              # Batch orchestration pipeline
+├── cli.py                          # Command-line entrypoints
+├── mapper.py                       # DoclingDocument -> IngestionChunk mapper
+├── processor.py                    # Core document processor
+├── refiner.py                      # OCR text refinement layer (optional)
+├── version.py                      # Central schema/engine version constants
 │
-├── universal/                      # NEW: Universal Intermediate Layer
+├── adapters/                       # Pluggable provider adapters
+│   ├── __init__.py
+│   └── vision_providers.py         # Alternate VLM provider interfaces
+│
+├── chunking/                       # Text chunking helpers
+│   └── semantic_overlap_manager.py
+│
+├── universal/                      # Universal Intermediate Layer
 │   ├── __init__.py
 │   ├── intermediate.py             # Core UIR data structures
 │   ├── router.py                   # Format detection and routing
-│   ├── quality_classifier.py       # Page/element quality assessment
+│   ├── quality_classifier.py       # Page/element quality + ConfidenceNormalizer
 │   └── element_processor.py        # Quality-based element processing
 │
-├── engines/                        # NEW: Format-specific engines
+├── engines/                        # Format-specific engines
 │   ├── __init__.py
 │   ├── base.py                     # FormatEngine ABC
-│   ├── pdf_engine.py               # PDF → UIR (Docling-based)
-│   ├── epub_engine.py              # ePub → UIR
-│   └── html_engine.py              # HTML → UIR
+│   └── pdf_engine.py               # PDF → UIR (Docling-based)
 │
-├── ocr/                            # EXISTING: Enhanced OCR (keep)
+├── ocr/                            # Enhanced OCR components
 │   ├── __init__.py
 │   ├── enhanced_ocr_engine.py      # 3-layer cascade
 │   ├── image_preprocessor.py       # Deskew, denoise, contrast
-│   └── layout_aware_processor.py   # UPDATE: Integrate with UIR
+│   └── layout_aware_processor.py   # Layout-aware OCR integration
 │
-├── vision/                         # EXISTING: VLM integration
+├── vision/                         # VLM integration
 │   ├── __init__.py
-│   ├── vision_manager.py           # Keep as-is
-│   ├── vision_prompts.py           # UPDATE: Add VISUAL_ONLY_PROMPT
-│   └── ocr_hint_engine.py          # Keep for hybrid mode
+│   ├── vision_manager.py           # Provider abstraction + inference
+│   ├── vision_prompts.py           # VISUAL_ONLY_PROMPT policy
+│   └── ocr_hint_engine.py          # OCR assistance utilities
 │
-├── schema/                         # EXISTING: Output schema
+├── schema/                         # Output schema
 │   ├── __init__.py
-│   └── ingestion_schema.py         # Keep as-is
+│   └── ingestion_schema.py         # Ingestion chunk contracts
 │
-├── state/                          # EXISTING: Context tracking
+├── state/                          # Context tracking
 │   ├── __init__.py
-│   ├── context_state.py            # Keep as-is
-│   └── magazine_section_detector.py
+│   ├── context_state.py            # Breadcrumb/context state
+│   └── magazine_section_detector.py # Magazine section header detection
 │
-├── orchestration/                  # EXISTING: Strategy patterns
+├── orchestration/                  # Strategy + profile intelligence
 │   ├── __init__.py
-│   ├── strategy_orchestrator.py
-│   ├── strategy_profiles.py
-│   └── shadow_extractor.py         # Keep for legacy mode
+│   ├── document_diagnostic.py      # Pre-flight diagnostics
+│   ├── profile_classifier.py       # Multi-dimensional profile selection
+│   ├── smart_config.py             # Fast document profiling
+│   ├── strategy_orchestrator.py    # Strategy synthesis from profile
+│   └── strategy_profiles.py        # Profile parameter definitions
 │
-├── chunking/                       # EXISTING: Text chunking
-│   ├── semantic_overlap_manager.py
-│   └── shadow_content_splitter.py
+├── rag/                            # Downstream multimodal retrieval
+│   ├── __init__.py
+│   └── advanced_pipeline.py
 │
-├── utils/                          # EXISTING: Utilities
+├── utils/                          # Utilities
+│   ├── __init__.py
+│   ├── advanced_spatial_propagator.py
 │   ├── coordinate_normalization.py
 │   ├── image_hash_registry.py
+│   ├── image_quality.py
+│   ├── image_trim.py
 │   └── pdf_splitter.py
 │
-└── validators/                     # EXISTING: QA checks
+└── validators/                     # QA checks
+    ├── __init__.py
+    ├── quality_filter_tracker.py
     └── token_validator.py
 ```
 

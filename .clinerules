@@ -1,28 +1,39 @@
 # 🚨 EXECUTION LAW: V2.4 MM RAG CORPUS CONVERTER
 
-YOU are the Senior Architect. This is an Apple Silicon (M-series) environment. There is ZERO ROOM for error.
+YOU are the Senior Architect. [cite_start]This is an Apple Silicon (M-series) environment. [cite: 1]
+There is ZERO ROOM for error. [cite_start]Hallucinations or ignoring documentation hierarchy equals failure. [cite: 2]
+
+## 🏗️ TRUTH & DOCUMENTATION HIERARCHY (ANTI-HALLUCINATION)
+1. **CANONICAL SOURCE**: If instructions conflict, follow this order: 
+   `SRS_Multimodal_Ingestion_V2.4.md` > `.clinerules` > `ARCHITECTURE.md` > `README.md`.
+2. **SCHEMA TRUTH**: The current schema version is **2.4.1-stable**. Ignore any references to 2.0.0 or 2.3.0 in examples.
+3. **STRICT ISOLATION**: 
+   - NEVER read or reference files in `docs/archive/`. 
+   - NEVER reference absolute paths like `/Users/ronald/...`. Use relative paths only.
+4. **VERIFICATION**: Before implementing a fix, check `docs/DECISIONS.md` to ensure you aren't reverting a conscious architectural choice.
 
 ## 💻 HARDWARE & ENVIRONMENT COMMANDMENTS
-1. **ARCHITECTURE**: Prefer native ARM64. If a process is slow, verify it is NOT running via Rosetta.
-2. **GPU/MPS**: Use MPS when available; verify with `torch.backends.mps.is_available()` before forcing.
-3. **CONDA**: Use the local environment in `./env`. NEVER create `.venv` or use system Python.
-4. **ACTIVATION**: Always ensure `conda activate ./env` is effective before execution.
-5. **INSTALLATION**: Use `environment.yml` for base dependencies. Use `pip install -e .` for the local package.
-6. **PYTHON**: Version 3.10 ONLY. Avoid 3.11+ specific syntax.
+1. [cite_start]**ARCHITECTURE**: Prefer native ARM64. [cite: 3]
+2. [cite_start]**GPU/MPS**: Use MPS when available; verify with `torch.backends.mps.is_available()`. [cite: 4]
+3. **CONDA**: Use the local environment in `./env`. [cite_start]NEVER create `.venv`. [cite: 5]
+4. [cite_start]**ACTIVATION**: Ensure `conda activate ./env` is effective before execution. [cite: 5]
+5. [cite_start]**INSTALLATION**: Use `environment.yml` and `pip install -e .`. [cite: 6]
+6. [cite_start]**PYTHON**: Version 3.10 ONLY. [cite: 6]
 
-## !! PROJECT REQUIREMENTS
-1. **SRS COMPLIANCE**: All code must meet requirements in `SRS_Multimodal_Ingestion_V2.4.md`.
-2. **PINNING**: Follow the pinned Docling version from `environment.yml`/lockfile. Do not deviate without updating pins.
-3. **CLI**: The command `mmrag-v2` is the primary entry point (linked to `mmrag_v2.cli:main`).
-4. **SCHEMA**: Every output MUST validate against the `ingestion.jsonl` Pydantic model.
-5. **NO PLACEHOLDERS**: Write full implementations. 'TODO' or '...' equals failure.
+## 🎯 PROJECT REQUIREMENTS
+1. [cite_start]**SRS COMPLIANCE**: Meet all requirements in `SRS_Multimodal_Ingestion_V2.4.md`. 
+2. [cite_start]**PINNING**: Use the exact Docling pin from `pyproject.toml` (`project.dependencies`) via `pip install -e .`; do not deviate. [cite: 8]
+3. [cite_start]**CLI**: `mmrag-v2` is the entry point (linked to `mmrag_v2.cli:main`). [cite: 9]
+4. [cite_start]**SCHEMA**: Outputs MUST validate against the `ingestion.jsonl` Pydantic model. [cite: 9]
+5. **NO PLACEHOLDERS**: Write full implementations. [cite_start]No 'TODO' or '...'. [cite: 10]
 
 ## 🔍 PRE-FLIGHT & PROCESSING RULES
-- **LOGGING**: Always log "Using Docling v2.66.0" at start.
-- **INTEGRITY**: Verify SHA256 of any input file before processing.
-- **ASSETS**: Enforce 10px padding on all crops (REQ-MM-01). No full-page PNGs.
-- **DATA**: Test documents are in `data/raw/`. Do NOT move, modify, or delete them.
+- [cite_start]**LOGGING**: Log `Using Docling v{docling.__version__}` at start and verify it matches the exact pin in `pyproject.toml`. [cite: 11]
+- [cite_start]**INTEGRITY**: Verify SHA256 of any input file before processing (integrity check only; `doc_id` remains MD5-based). [cite: 11]
+- [cite_start]**ASSETS**: Enforce 10px padding on all crops (REQ-MM-01). [cite: 12]
+- **DATA**: Test documents are in `data/raw/`. [cite_start]Do NOT modify them. [cite: 13]
 
 ## 🛠️ TROUBLESHOOTING
-- If library conflicts occur, prioritize `environment.yml` and the Apple-specific channels.
-- If `import torch` takes > 2 seconds, investigate environment corruption immediately.
+- [cite_start]Prioritize `environment.yml` and Apple-specific channels for conflicts. [cite: 14]
+- [cite_start]If `import torch` takes > 2 seconds, investigate environment corruption. [cite: 14]
+- If a file referenced in ARCHITECTURE.md is missing, STOP and ask for clarification.

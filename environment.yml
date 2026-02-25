@@ -11,4 +11,4 @@ dependencies:
       - torchvision
       - torchaudio
       - python-Levenshtein>=0.21.0
-      - -e .  # Dit installeert alles uit pyproject.toml
+      - -e .  # Installs dependencies from pyproject.toml, including the exact Docling pin

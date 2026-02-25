@@ -1,9 +1,29 @@
 # Quality Gates and Known Warnings
 
 ## Required Checks
-- QA-CHECK-01: token balance variance within tolerance (default 10%).
+- QA-CHECK-01: token balance variance within profile-specific gate tolerance (standard target: 10%).
+- QA-CHECK-02: every `asset_ref.file_path` must exist on disk.
+- QA-CHECK-03: `breadcrumb_path` depth must match `hierarchy.level`.
+- QA-CHECK-04: all `bbox` values must be integer coordinates in range `[0,1000]` (REQ-COORD-01 compliance).
 - QA-CHECK-05: image/table chunks must have `asset_ref`.
 - REQ-COORD-02: `page_width`/`page_height` present for spatial metadata.
+
+## QA-CHECK-01 Tolerance Policy (Pass/Fail Source)
+
+Use this section for gate decisions when evaluating token variance.
+This operational policy does not change the SRS QA-CHECK-01 target of 10%; it only defines current pass/fail handling for known debt.
+
+| Scope | Tolerance | Gate Decision | Policy |
+|------|-----------|---------------|--------|
+| All profiles (standard) | 10% (`0.10`) | Pass | Baseline gate and end-state target. |
+| `digital_magazine` only (temporary waiver) | 18% (`0.18`) | Pass (temporary debt waiver) | Allowed only for known text-in-graphics debt; still record a debt note and remediation follow-up. |
+| Any non-`digital_magazine` profile above `0.10` | >10% | Fail | No waiver allowed. |
+| `digital_magazine` above `0.18` | >18% | Fail | Out of temporary tolerance. |
+
+Sunset intent:
+- The temporary `digital_magazine` waiver exists to keep current runs operational.
+- Target state remains `<= 0.10` for **all** profiles, including `digital_magazine`.
+- Retire the waiver as soon as representative `digital_magazine` acceptance runs consistently stay within 10%.
 
 ## Chunk Quality Policy (Principle-Based)
 - Chunk-size quality is profile-specific and empirically validated.
@@ -48,7 +68,7 @@
 ### Token variance warnings (QA-CHECK-01)
 - Symptom: token variance around -15% seen in some runs.
 - Behavior: Logs critical warning but continues (unless strict mode enabled).
-- Action: Investigate only if content loss is suspected; not tied to metadata propagation.
+- Action: Apply pass/fail using the tolerance policy above. For `digital_magazine` values between 10% and 18%, treat as temporary tolerated debt and track remediation toward 10%.
 
 ### imagehash missing
 - Symptom: `imagehash not installed, using fallback hash`.

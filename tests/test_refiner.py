@@ -86,3 +86,76 @@ def test_semantic_refiner_uses_technical_density(monkeypatch):
     assert called["value"] is True
     assert result.refinement_applied is True
 
+
+def test_semantic_refiner_blocks_layout_disorder_before_llm(monkeypatch):
+    config = RefinerConfig(
+        min_refine_threshold=0.1,
+        layout_disorder_block_threshold=0.6,
+        llm_provider="ollama",
+        llm_model="dummy",
+    )
+    refiner = SemanticRefiner(config)
+
+    called = {"value": False}
+
+    def fake_scan(*_args, **_kwargs):
+        return 0.95
+
+    def fake_layout(*_args, **_kwargs):
+        return 0.9
+
+    def fake_refine(*_args, **_kwargs):
+        called["value"] = True
+        return "SHOULD_NOT_BE_USED"
+
+    monkeypatch.setattr(refiner.scanner, "calculate_corruption_score", fake_scan)
+    monkeypatch.setattr(refiner.scanner, "calculate_layout_disorder_score", fake_layout)
+    monkeypatch.setattr(refiner.refiner, "refine_with_context", fake_refine)
+
+    raw = "INT-KLCD\nINT-KLCDR\n5.3 Section"
+    result = refiner.process(raw_text=raw, visual_description=None, semantic_context=None)
+
+    assert called["value"] is False
+    assert result.refinement_applied is False
+    assert result.refined_text == raw
+    assert result.rejection_reason == "Layout disorder detected"
+
+
+def test_semantic_refiner_high_corruption_technical_dense_uses_conservative_path(monkeypatch):
+    config = RefinerConfig(
+        min_refine_threshold=0.1,
+        high_corruption_threshold=0.7,
+        technical_no_summarize_threshold=0.3,
+        layout_disorder_block_threshold=0.95,  # ensure this branch does not pre-empt
+        llm_provider="ollama",
+        llm_model="dummy",
+    )
+    refiner = SemanticRefiner(config)
+
+    called = {"value": False}
+
+    def fake_scan(*_args, **_kwargs):
+        return 0.9
+
+    def fake_layout(*_args, **_kwargs):
+        return 0.0
+
+    def fake_refine(*_args, **_kwargs):
+        called["value"] = True
+        return "SHOULD_NOT_BE_USED"
+
+    monkeypatch.setattr(refiner.scanner, "calculate_corruption_score", fake_scan)
+    monkeypatch.setattr(refiner.scanner, "calculate_layout_disorder_score", fake_layout)
+    monkeypatch.setattr(refiner.refiner, "refine_with_context", fake_refine)
+
+    raw = "ECU-001-A  ,  SN: ABC123   P/N: ZX-900"
+    result = refiner.process(raw_text=raw, visual_description=None, semantic_context=None)
+
+    assert called["value"] is False
+    assert result.refinement_applied is True
+    assert result.provider == "conservative_guardrail"
+    assert result.model == "whitespace_punctuation_only"
+    assert "  " not in result.refined_text
+    assert " ," not in result.refined_text
+    assert "ECU-001-A" in result.refined_text
+

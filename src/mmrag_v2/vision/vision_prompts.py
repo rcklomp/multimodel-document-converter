@@ -48,9 +48,10 @@ You are a VISUAL CATALOGER. Your ONLY job is to describe what you SEE in the ima
 CRITICAL RULES:
 1. Describe ONLY visual elements: objects, colors, shapes, layouts, diagrams
 2. NEVER use meta-language like "This image shows..." or "The page contains..."
-3. NEVER quote, transcribe, or paraphrase readable text - OCR already captured it
-4. You MAY describe typographic/layout structure at a high level (e.g., "two-column layout", "numbered list", "dense typographic layout") without quoting any words
-5. Start DIRECTLY with the subject: "Exploded diagram...", "Technical schematic...", "Vintage advertisement..."
+3. NEVER transcribe readable text - OCR already captured it
+4. NEVER quote or paraphrase readable text
+5. You MAY describe typographic/layout structure at a high level (e.g., "two-column layout", "numbered list", "dense typographic layout") without quoting any words
+6. Start DIRECTLY with the subject: "Exploded diagram...", "Technical schematic...", "Vintage advertisement..."
 
 ALLOWED DESCRIPTORS:
 ✓ "Exploded view diagram of bolt action assembly"
@@ -302,11 +303,9 @@ def detect_text_reading(response: str) -> bool:
     # "numbered list", "dense typographic layout"), but we reject anything that
     # looks like quoting/reading/paraphrasing specific words.
 
-    # Pattern 0: Meta-language that violates visual-only constraints
-    # (even without explicit transcription).
-    #
-    # Keep this conservative but strict: these phrases almost always indicate
-    # the model is referencing document/page context instead of describing pixels.
+    # Pattern 0: Meta-language that violates visual-only constraints.
+    # Keep this phrase-based (not word-based) to avoid false positives such as
+    # "PDF document layout" or "text-only page".
     meta_terms = [
         # Context leakage
         "surrounding text",
@@ -315,21 +314,20 @@ def detect_text_reading(response: str) -> bool:
         "in the text",
         "mentioned in the text",
         "as described in the text",
-        # Document/page meta (banned by VISUAL_ONLY_PROMPT)
+        # Explicit document/page meta (banned by VISUAL_ONLY_PROMPT)
         "this document",
         "the document",
-        "document",
         "this page",
         "the page",
         "on page",
-        "page ",
-        "pages ",
-        "book",
-        "manual",
-        "instructional guide",
-        "guide",
-        "article",
-        "chapter",
+        "a page from",
+        "pages from",
+        "the document discusses",
+        "this document discusses",
+        "the page discusses",
+        "this page discusses",
+        "the page contains",
+        "this page contains",
     ]
     if any(t in response_lower for t in meta_terms):
         return True
@@ -350,7 +348,8 @@ def detect_text_reading(response: str) -> bool:
         return True
 
     # Pattern 3: "text visible" patterns
-    # Not necessarily transcription; allow as a weak signal (do not reject).
+    if re.search(r"\btext\s+visible\b", response_lower):
+        return True
 
     # Pattern 4: Excessive quotes (more than 2 pairs = transcription)
     quote_count = response.count('"') + response.count("'")

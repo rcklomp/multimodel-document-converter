@@ -23,14 +23,16 @@ Date: 2025-12-29
 from __future__ import annotations
 
 import base64
+import gc
 import hashlib
 import io
 import json
 import logging
+import re
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Dict, Optional, TYPE_CHECKING, Tuple
 
 from PIL import Image
 
@@ -224,31 +226,67 @@ class VisionCache:
 
     Uses image content hash as key to avoid redundant VLM calls
     for identical or duplicate images.
+
+    Model-aware: if the configured model differs from what was used to
+    populate the cache, the stale cache is discarded and VLM is called fresh.
     """
 
-    def __init__(self, cache_dir: Path) -> None:
-        """Initialize cache with directory."""
+    # Reserved key used to store metadata inside the flat cache dict.
+    _META_KEY = "_model"
+
+    def __init__(self, cache_dir: Path, model_name: str = "") -> None:
+        """Initialize cache with directory.
+
+        Args:
+            cache_dir: Directory for cache file storage.
+            model_name: Name of the VLM model being used.  When non-empty,
+                the cache is invalidated if the stored model differs from this
+                value, ensuring model changes always trigger fresh VLM calls.
+        """
         self.cache_dir = cache_dir
         self.cache_file = cache_dir / ".vision_cache.json"
         self._cache: Dict[str, str] = {}
+        self._model_name = model_name
         self._load()
 
     def _load(self) -> None:
-        """Load cache from disk."""
+        """Load cache from disk, invalidating it when the VLM model changed."""
         if self.cache_file.exists():
             try:
                 with open(self.cache_file, "r") as f:
-                    self._cache = json.load(f)
-                logger.debug(f"Loaded {len(self._cache)} cached descriptions")
+                    data: Dict[str, str] = json.load(f)
+
+                # Extract metadata embedded in the flat cache dict.
+                cached_model = data.pop(self._META_KEY, None)
+
+                if self._model_name and cached_model and cached_model != self._model_name:
+                    # Model changed → stale cache; discard and call VLM fresh.
+                    logger.info(
+                        f"[VISION-CACHE] Model changed: '{cached_model}' → '{self._model_name}'. "
+                        f"Discarding {len(data)} stale cached descriptions so fresh VLM calls are made."
+                    )
+                    self._cache = {}
+                else:
+                    self._cache = data
+                    if self._cache:
+                        logger.info(
+                            f"[VISION-CACHE] Loaded {len(self._cache)} cached descriptions "
+                            f"(model: {cached_model or 'unknown'}). "
+                            f"VLM will NOT be called for these images. "
+                            f"Use --no-cache to force fresh VLM calls."
+                        )
             except Exception as e:
                 logger.warning(f"Failed to load cache: {e}")
                 self._cache = {}
 
     def _save(self) -> None:
-        """Save cache to disk."""
+        """Save cache to disk, embedding the model name for future validation."""
         try:
+            data = dict(self._cache)
+            if self._model_name:
+                data[self._META_KEY] = self._model_name
             with open(self.cache_file, "w") as f:
-                json.dump(self._cache, f)
+                json.dump(data, f)
         except Exception as e:
             logger.warning(f"Failed to save cache: {e}")
 
@@ -291,6 +329,7 @@ class VisionProvider(ABC):
         self,
         image: Image.Image,
         context: str,
+        max_chars: Optional[int] = MAX_DESCRIPTION_CHARS,
     ) -> str:
         """Generate description for image."""
         pass
@@ -395,9 +434,16 @@ class OllamaProvider(VisionProvider):
         self,
         image: Image.Image,
         context: str,
+        max_chars: Optional[int] = MAX_DESCRIPTION_CHARS,
     ) -> str:
         """Generate description using Ollama."""
         import requests
+
+        limit = (
+            max_chars
+            if isinstance(max_chars, int) and max_chars > 0
+            else MAX_DESCRIPTION_CHARS
+        )
 
         # Convert image to base64
         buffer = io.BytesIO()
@@ -426,6 +472,10 @@ class OllamaProvider(VisionProvider):
             },
             "keep_alive": "30m",  # Houd het model 30 minuten vast na de laatste aanroep
         }
+        if limit > MAX_DESCRIPTION_CHARS:
+            payload["options"]["num_predict"] = max(
+                OLLAMA_NUM_PREDICT, min(3000, limit // 2)
+            )
         request_id = self._next_request_id()
         t0 = time.perf_counter()
 
@@ -448,7 +498,7 @@ class OllamaProvider(VisionProvider):
                 f"chars={len(description)}"
             )
             logger.debug(f"[OLLAMA] Response received: {len(description)} chars")
-            return description[:MAX_DESCRIPTION_CHARS]
+            return description[:limit]
 
         except requests.exceptions.Timeout as e:
             elapsed = time.perf_counter() - t0
@@ -525,6 +575,9 @@ class OpenAIProvider(VisionProvider):
         self.timeout = timeout
         self.base_url = base_url
         self._request_seq = 0
+        self._resolved_model: Optional[str] = None
+        self._model_cache: Optional[Tuple[float, list[str]]] = None
+        self._model_cache_ttl_sec: float = 120.0
 
         if base_url:
             logger.info(f"OpenAIProvider: model={model}, base_url={base_url}")
@@ -536,13 +589,165 @@ class OpenAIProvider(VisionProvider):
         self._request_seq += 1
         return self._request_seq
 
+    def _normalized_base_url(self) -> Optional[str]:
+        """Normalize custom base_url to include /v1 once for OpenAI-compatible APIs."""
+        if not self.base_url:
+            return None
+        base = self.base_url.rstrip("/")
+        if base.endswith("/v1"):
+            return base
+        return f"{base}/v1"
+
+    @staticmethod
+    def _canonical_model_name(name: str) -> str:
+        """Canonicalize model names for fuzzy matching."""
+        return re.sub(r"[^a-z0-9]+", "", (name or "").lower())
+
+    @staticmethod
+    def _model_tokens(name: str) -> set[str]:
+        """Tokenize model names into lexical hints for fuzzy matching."""
+        return {t for t in re.split(r"[^a-z0-9]+", (name or "").lower()) if t}
+
+    def _list_local_models(self, headers: Dict[str, str], refresh: bool = False) -> list[str]:
+        """Fetch model IDs from /v1/models with a short TTL cache."""
+        import requests
+
+        api_base = self._normalized_base_url()
+        if not api_base:
+            return []
+        now = time.time()
+        if (
+            not refresh
+            and self._model_cache is not None
+            and (now - self._model_cache[0]) < self._model_cache_ttl_sec
+        ):
+            return list(self._model_cache[1])
+
+        models_url = f"{api_base}/models"
+        try:
+            response = requests.get(models_url, headers=headers, timeout=min(20, self.timeout))
+            response.raise_for_status()
+            payload = response.json() or {}
+            rows = payload.get("data", [])
+            model_ids = []
+            for row in rows:
+                if isinstance(row, dict):
+                    model_id = str(row.get("id", "")).strip()
+                    if model_id:
+                        model_ids.append(model_id)
+            self._model_cache = (now, model_ids)
+            return model_ids
+        except Exception as e:
+            logger.debug(f"[VLM-MODELS] Failed to fetch local model list: {e}")
+            return []
+
+    def _resolve_local_model_id(
+        self,
+        requested_model: str,
+        headers: Dict[str, str],
+        refresh: bool = False,
+    ) -> str:
+        """
+        Resolve HuggingFace-style aliases to the actual model ID exposed by local OpenAI APIs.
+        Example: 'numind/NuMarkdown-8B-Thinking' -> 'numarkdown-8b-thinking-mlxs'
+        """
+        if not self.base_url:
+            return requested_model
+        if self._resolved_model and not refresh:
+            return self._resolved_model
+
+        available = self._list_local_models(headers=headers, refresh=refresh)
+        if not available:
+            return requested_model
+        if requested_model in available:
+            self._resolved_model = requested_model
+            return requested_model
+
+        req_lower = requested_model.lower()
+        for model_id in available:
+            if model_id.lower() == req_lower:
+                self._resolved_model = model_id
+                return model_id
+
+        requested_tail = requested_model.split("/")[-1]
+        tail_lower = requested_tail.lower()
+        for model_id in available:
+            if model_id.lower() == tail_lower:
+                self._resolved_model = model_id
+                return model_id
+
+        req_canon = self._canonical_model_name(requested_model)
+        tail_canon = self._canonical_model_name(requested_tail)
+        req_tokens = self._model_tokens(requested_model) | self._model_tokens(requested_tail)
+
+        best_score = -1
+        best_model = requested_model
+        for model_id in available:
+            model_canon = self._canonical_model_name(model_id)
+            model_tokens = self._model_tokens(model_id)
+            score = 0
+            if model_canon == req_canon or model_canon == tail_canon:
+                score += 100
+            if tail_canon and tail_canon in model_canon:
+                score += 60
+            if req_canon and req_canon in model_canon:
+                score += 60
+            if model_canon.startswith(tail_canon) and tail_canon:
+                score += 20
+            if model_canon.startswith(req_canon) and req_canon:
+                score += 20
+            overlap = req_tokens & model_tokens
+            score += 8 * len(overlap)
+            if score > best_score:
+                best_score = score
+                best_model = model_id
+
+        if best_score >= 60 and best_model != requested_model:
+            self._resolved_model = best_model
+            logger.warning(
+                f"[VLM-MODEL-ALIAS] Requested model '{requested_model}' not found on local endpoint. "
+                f"Using '{best_model}'."
+            )
+            return best_model
+        return requested_model
+
+    @staticmethod
+    def _extract_openai_content(result: Dict[str, Any]) -> str:
+        """Extract assistant text from OpenAI-style responses with string or segment-list content."""
+        choices = result.get("choices", [])
+        if not choices:
+            return ""
+        message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
+        content = message.get("content", "")
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, dict):
+                    text = item.get("text")
+                    if isinstance(text, str) and text.strip():
+                        parts.append(text.strip())
+            return "\n".join(parts).strip()
+        return ""
+
     def describe_image(
         self,
         image: Image.Image,
         context: str,
+        max_chars: Optional[int] = MAX_DESCRIPTION_CHARS,
     ) -> str:
         """Generate description using OpenAI or OpenAI-compatible API (LM Studio, etc.)."""
         import requests
+
+        limit = (
+            max_chars
+            if isinstance(max_chars, int) and max_chars > 0
+            else MAX_DESCRIPTION_CHARS
+        )
+        max_tokens = 200
+        if limit > MAX_DESCRIPTION_CHARS:
+            max_tokens = min(2000, max(600, limit // 3))
 
         # Convert image to base64
         buffer = io.BytesIO()
@@ -556,8 +761,9 @@ class OpenAIProvider(VisionProvider):
             "Content-Type": "application/json",
         }
 
+        model_for_request = self._resolve_local_model_id(self.model, headers=headers)
         payload = {
-            "model": self.model,
+            "model": model_for_request,
             "messages": [
                 {
                     "role": "user",
@@ -573,13 +779,14 @@ class OpenAIProvider(VisionProvider):
                     ],
                 }
             ],
-            "max_tokens": 200,
+            "max_tokens": max_tokens,
         }
 
         # Use custom base_url if provided, otherwise default to OpenAI
+        local_base = self._normalized_base_url()
         api_url = (
-            f"{self.base_url.rstrip('/')}/chat/completions"
-            if self.base_url
+            f"{local_base}/chat/completions"
+            if local_base
             else "https://api.openai.com/v1/chat/completions"
         )
         request_id = self._next_request_id()
@@ -587,7 +794,7 @@ class OpenAIProvider(VisionProvider):
 
         try:
             logger.info(
-                f"[VLM-REQ {request_id}] provider=openai model={self.model} "
+                f"[VLM-REQ {request_id}] provider=openai model={payload['model']} "
                 f"timeout={self.timeout}s endpoint={api_url}"
             )
             response = requests.post(
@@ -598,18 +805,60 @@ class OpenAIProvider(VisionProvider):
             )
             response.raise_for_status()
             result = response.json()
-            description = result["choices"][0]["message"]["content"].strip()
+            description = self._extract_openai_content(result)
             elapsed = time.perf_counter() - t0
             logger.info(
                 f"[VLM-RES {request_id}] provider=openai elapsed={elapsed:.2f}s "
                 f"chars={len(description)}"
             )
-            return description[:MAX_DESCRIPTION_CHARS]
+            return description[:limit]
         except requests.Timeout:
             elapsed = time.perf_counter() - t0
             logger.error(
                 f"[VLM-TIMEOUT {request_id}] provider=openai elapsed={elapsed:.2f}s "
                 f"timeout={self.timeout}s endpoint={api_url}"
+            )
+            raise
+        except requests.HTTPError as e:
+            elapsed = time.perf_counter() - t0
+            status = e.response.status_code if e.response is not None else "unknown"
+            body = ""
+            if e.response is not None:
+                try:
+                    body = (e.response.text or "")[:1200]
+                except Exception:
+                    body = ""
+            is_model_not_found = "model_not_found" in body or "Invalid model identifier" in body
+            if status == 400 and local_base and is_model_not_found:
+                resolved = self._resolve_local_model_id(
+                    self.model,
+                    headers=headers,
+                    refresh=True,
+                )
+                if resolved != payload["model"]:
+                    retry_payload = dict(payload)
+                    retry_payload["model"] = resolved
+                    logger.warning(
+                        f"[VLM-RETRY {request_id}] provider=openai model_not_found, retrying with model={resolved}"
+                    )
+                    retry_response = requests.post(
+                        api_url,
+                        headers=headers,
+                        json=retry_payload,
+                        timeout=self.timeout,
+                    )
+                    retry_response.raise_for_status()
+                    retry_result = retry_response.json()
+                    description = self._extract_openai_content(retry_result)
+                    logger.info(
+                        f"[VLM-RES {request_id}] provider=openai elapsed={time.perf_counter() - t0:.2f}s "
+                        f"chars={len(description)}"
+                    )
+                    return description[:limit]
+
+            logger.error(
+                f"[VLM-ERROR {request_id}] provider=openai elapsed={elapsed:.2f}s "
+                f"url={api_url} status={status} error={e} body={body}"
             )
             raise
         except Exception as e:
@@ -649,9 +898,19 @@ class AnthropicProvider(VisionProvider):
         self,
         image: Image.Image,
         context: str,
+        max_chars: Optional[int] = MAX_DESCRIPTION_CHARS,
     ) -> str:
         """Generate description using Anthropic."""
         import requests
+
+        limit = (
+            max_chars
+            if isinstance(max_chars, int) and max_chars > 0
+            else MAX_DESCRIPTION_CHARS
+        )
+        max_tokens = 200
+        if limit > MAX_DESCRIPTION_CHARS:
+            max_tokens = min(2000, max(600, limit // 3))
 
         # Convert image to base64
         buffer = io.BytesIO()
@@ -668,7 +927,7 @@ class AnthropicProvider(VisionProvider):
 
         payload = {
             "model": self.model,
-            "max_tokens": 200,
+            "max_tokens": max_tokens,
             "messages": [
                 {
                     "role": "user",
@@ -697,7 +956,7 @@ class AnthropicProvider(VisionProvider):
             response.raise_for_status()
             result = response.json()
             description = result["content"][0]["text"].strip()
-            return description[:MAX_DESCRIPTION_CHARS]
+            return description[:limit]
         except Exception as e:
             logger.error(f"Anthropic request failed: {e}")
             raise
@@ -724,6 +983,7 @@ class VisionManager:
         self,
         provider: VisionProvider,
         cache_dir: Optional[Path] = None,
+        model_name: str = "",
     ) -> None:
         """
         Initialize VisionManager.
@@ -731,15 +991,20 @@ class VisionManager:
         Args:
             provider: Configured VisionProvider instance
             cache_dir: Directory for caching (None = no caching)
+            model_name: Model name used for cache invalidation when the model
+                changes between runs.
         """
         self._provider = provider
         self._cache: Optional[VisionCache] = None
         self._processed_count = 0
+        # Cache OCR hint engines by (min_confidence, languages) to avoid
+        # repeatedly reloading EasyOCR models for every image.
+        self._ocr_hint_engines: Dict[Tuple[float, Tuple[str, ...]], Any] = {}
 
         if cache_dir:
             cache_dir = Path(cache_dir)
             cache_dir.mkdir(parents=True, exist_ok=True)
-            self._cache = VisionCache(cache_dir)
+            self._cache = VisionCache(cache_dir, model_name=model_name)
 
     def enrich_image(
         self,
@@ -860,6 +1125,235 @@ class VisionManager:
             logger.warning(f"VLM enrichment failed: {e}")
             # Return fallback - keep it visual-only (no page/document meta-language).
             return "Unverified visual element."
+
+    def extract_table_markdown(
+        self,
+        image: Image.Image,
+        page_number: Optional[int] = None,
+    ) -> str:
+        """
+        Extract table content as markdown from an image.
+
+        This is a fallback path for table chunks when native table extraction and OCR
+        are insufficient.
+        """
+        if image is None:
+            return ""
+
+        prompt_primary = (
+            "You are a technical documentation expert.\n"
+            "Convert the table in this image into a clean Markdown table.\n"
+            "Rules:\n"
+            "1. Output ONLY Markdown table text (no commentary).\n"
+            "2. Preserve headers and row values exactly when readable.\n"
+            "3. If merged cells exist, repeat the merged value in each applicable row.\n"
+            "4. If a cell is unreadable, write [unreadable] in that cell.\n"
+            "5. Keep table orientation and column order as shown."
+        )
+        prompt_retry = (
+            "Retry extraction: read the table image carefully and output ONLY one Markdown table.\n"
+            "No prose, no bullets, no JSON, no code fences."
+        )
+
+        try:
+            import re
+
+            def _clean_to_markdown(raw: str) -> str:
+                cleaned = (raw or "").strip()
+                if not cleaned:
+                    return ""
+                # Strip chain-of-thought / reasoning tags emitted by thinking models.
+                cleaned = re.sub(
+                    r"(?is)<(think|analysis|reasoning)>.*?</\1>\s*",
+                    "",
+                    cleaned,
+                ).strip()
+                if cleaned.startswith("```"):
+                    cleaned = re.sub(r"^```[a-zA-Z0-9_-]*\s*\n?", "", cleaned).strip()
+                    cleaned = re.sub(r"\n?```$", "", cleaned).strip()
+                fence_match = re.search(
+                    r"```(?:markdown|md|text)?\s*([\s\S]*?)\s*```",
+                    cleaned,
+                    flags=re.IGNORECASE,
+                )
+                if fence_match:
+                    cleaned = fence_match.group(1).strip()
+                lowered = cleaned.lower()
+                if "unable to read" in lowered or lowered in {"unreadable", "n/a", "none"}:
+                    return ""
+                if lowered in {"[not_a_table]", "not_a_table"}:
+                    return ""
+
+                # If markdown rows exist, keep only pipe rows to strip accidental commentary.
+                if "|" in cleaned:
+                    pipe_lines = [ln.strip() for ln in cleaned.splitlines() if "|" in ln and ln.strip()]
+                    if len(pipe_lines) >= 2:
+                        cleaned = "\n".join(pipe_lines)
+
+                # Fallback: preserve raw lines in a one-column markdown table.
+                if "|" not in cleaned:
+                    lines = [ln.strip() for ln in cleaned.splitlines() if ln.strip()]
+                    if not lines:
+                        return ""
+                    md_lines = ["| Table Content |", "| --- |"]
+                    for line in lines:
+                        escaped_line = line.replace("|", "\\|")
+                        md_lines.append(f"| {escaped_line} |")
+                    cleaned = "\n".join(md_lines)
+
+                # Ensure a header separator exists.
+                lines = [ln for ln in cleaned.splitlines() if ln.strip()]
+                if len(lines) >= 2 and not re.search(r"\|\s*-{2,}", lines[1]):
+                    if "|" in lines[0]:
+                        columns = max(1, lines[0].count("|") - 1)
+                        separator = "| " + " | ".join(["---"] * columns) + " |"
+                        lines.insert(1, separator)
+                        cleaned = "\n".join(lines)
+
+                if len(cleaned) > 8000:
+                    cleaned = cleaned[:8000]
+                return cleaned
+
+            page_info = f" page {page_number}" if page_number is not None else ""
+            # Two attempts: base prompt + retry prompt, with slightly larger resize on retry.
+            attempts = (
+                (prompt_primary, 1800),
+                (prompt_retry, 2200),
+            )
+            for attempt_idx, (prompt, max_dim) in enumerate(attempts, start=1):
+                table_image = self._resize_image_for_vlm(image, max_dimension=max_dim)
+                raw_response = self._provider.describe_image(
+                    table_image,
+                    prompt,
+                    max_chars=14000,
+                )
+                self._processed_count += 1
+                cleaned = _clean_to_markdown(raw_response or "")
+                if cleaned:
+                    logger.info(
+                        f"[TABLE-VLM]{page_info}: extracted markdown ({len(cleaned)} chars) "
+                        f"attempt={attempt_idx}"
+                    )
+                    return cleaned
+                logger.debug(
+                    f"[TABLE-VLM]{page_info}: empty/unusable response on attempt {attempt_idx}"
+                )
+            return ""
+        except Exception as e:
+            page_info = f" page {page_number}" if page_number is not None else ""
+            logger.debug(f"[TABLE-VLM]{page_info}: extraction failed: {e}")
+            return ""
+
+    def transcribe_code_block(
+        self,
+        image: Image.Image,
+        page_number: Optional[int] = None,
+    ) -> str:
+        """
+        Transcribe code from an image region with strict formatting constraints.
+
+        This is an opt-in fallback path for severely degraded scanned code blocks.
+        """
+        if image is None:
+            return ""
+
+        prompt_primary = (
+            "You are transcribing source code from an image.\n"
+            "Output ONLY code text.\n"
+            "Rules:\n"
+            "1. Preserve indentation and line breaks exactly.\n"
+            "2. Do not add commentary.\n"
+            "3. Do not add Markdown fences.\n"
+            "4. If a token is unreadable, write [unreadable_token]."
+        )
+        prompt_retry = (
+            "Retry transcription carefully.\n"
+            "Output ONLY raw code with exact indentation and line breaks.\n"
+            "No explanations. No markdown fences."
+        )
+
+        def _clean_code(raw: str) -> str:
+            cleaned = (raw or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+            if not cleaned:
+                return ""
+
+            # Remove reasoning traces from thinking models.
+            cleaned = re.sub(r"(?is)<think>.*?</think>\s*", "", cleaned).strip()
+            cleaned = re.sub(r"(?is)<analysis>.*?</analysis>\s*", "", cleaned).strip()
+            cleaned = re.sub(r"(?is)<reasoning>.*?</reasoning>\s*", "", cleaned).strip()
+
+            if cleaned.startswith("```"):
+                cleaned = re.sub(r"^```[a-zA-Z0-9_-]*\s*\n?", "", cleaned).strip()
+                cleaned = re.sub(r"\n?```$", "", cleaned).strip()
+            fenced = re.search(r"```(?:python|py|text)?\s*([\s\S]*?)\s*```", cleaned, re.IGNORECASE)
+            if fenced:
+                cleaned = fenced.group(1).strip()
+
+            # Drop common chatty prefixes while keeping code lines untouched.
+            cleaned = re.sub(
+                r"(?im)^\s*(here(?:'s| is)\s+(?:the\s+)?(?:code|transcription)\s*:)\s*$",
+                "",
+                cleaned,
+            ).strip()
+
+            # Keep indentation intact, just trim trailing whitespace per line.
+            lines = [ln.rstrip() for ln in cleaned.split("\n")]
+            while lines and not lines[0].strip():
+                lines.pop(0)
+            while lines and not lines[-1].strip():
+                lines.pop()
+            cleaned = "\n".join(lines).strip()
+
+            # If the model returns flat top-level statements without indentation,
+            # normalize to REPL-style lines to preserve executable semantics.
+            if lines:
+                has_repl = any(re.match(r"^\s*(>>>|\.\.\.)\s", ln) for ln in lines)
+                has_indent = any(ln.startswith(("    ", "\t")) for ln in lines if ln.strip())
+                if not has_repl and not has_indent and 2 <= len(lines) <= 12:
+                    stmt_like = re.compile(
+                        r"^\s*(?:from\s+[A-Za-z_][\w\.]*\s+import\b|import\s+[A-Za-z_][\w\.]*(?:\s*,\s*[A-Za-z_][\w\.]*)*(?:\s+as\s+[A-Za-z_][\w]*)?|[A-Za-z_][\w\.]*(?:\[[^\]]+\])?\s*=|[A-Za-z_][\w\.]*\s*\(|if\b|elif\b|else:|for\b|while\b|try:|except\b|with\b|return\b|yield\b|raise\b|assert\b|pass\b|break\b|continue\b)"
+                    )
+                    codey_lines = sum(
+                        1
+                        for ln in lines
+                        if stmt_like.search(ln) is not None or re.search(r"[=\(\)\[\]\{\}:#]", ln)
+                    )
+                    if codey_lines >= max(1, int(len(lines) * 0.6)):
+                        lines = [f">>> {ln.lstrip()}" for ln in lines]
+                        cleaned = "\n".join(lines).strip()
+
+            if len(cleaned) > 12000:
+                cleaned = cleaned[:12000].rstrip()
+            return cleaned
+
+        page_info = f" page {page_number}" if page_number is not None else ""
+        attempts = (
+            (prompt_primary, 2200),
+            (prompt_retry, 2600),
+        )
+        try:
+            for attempt_idx, (prompt, max_dim) in enumerate(attempts, start=1):
+                code_image = self._resize_image_for_vlm(image, max_dimension=max_dim)
+                raw_response = self._provider.describe_image(
+                    code_image,
+                    prompt,
+                    max_chars=16000,
+                )
+                self._processed_count += 1
+                cleaned = _clean_code(raw_response or "")
+                if cleaned:
+                    logger.info(
+                        f"[CODE-VLM]{page_info}: transcribed ({len(cleaned)} chars) "
+                        f"attempt={attempt_idx}"
+                    )
+                    return cleaned
+                logger.debug(
+                    f"[CODE-VLM]{page_info}: empty/unusable response on attempt {attempt_idx}"
+                )
+            return ""
+        except Exception as e:
+            logger.debug(f"[CODE-VLM]{page_info}: transcription failed: {e}")
+            return ""
 
     def _extract_clean_description(
         self,
@@ -1377,9 +1871,8 @@ class VisionManager:
 
         PAGE ISOLATION (REQ-OCR-ISOLATION):
         ===================================
-        - Each page gets a FRESH OCRHintEngine instance
-        - Hints are LOCAL to this method call - no accumulation
-        - Explicit logging confirms isolation between pages
+        - Hints are LOCAL to this method call (no cross-page hint accumulation)
+        - OCR engine runtime may be reused for performance/memory stability
 
         Args:
             image: PIL Image to describe
@@ -1412,57 +1905,15 @@ class VisionManager:
                 return cached
 
         # ================================================================
-        # OCR HINT EXTRACTION (Only for scanned profiles)
-        # REQ-OCR-ISOLATION: Fresh engine per page - NO state accumulation
+        # OCR-HINT BYPASS: visual-only prompts intentionally avoid OCR hint
+        # injection to enforce modality boundaries (Source Sanctity).
         # ================================================================
-        # CRITICAL: ocr_hint_section is a LOCAL variable, initialized to empty
-        # This ensures NO hints from previous pages can leak into this call
-        ocr_hint_section = ""  # FRESH - no accumulated state
-        current_page_hints_count = 0  # Track hints for THIS page only
-
+        ocr_hint_section = ""
         if use_ocr_hints:
-            try:
-                from .ocr_hint_engine import (
-                    create_ocr_hint_engine,
-                    build_ocr_hint_prompt_section,
-                )
-
-                # REQ-OCR-ISOLATION: Create FRESH OCR engine for each page
-                # This is NOT reused between pages - ensures no state leakage
-                # profile_params is guaranteed to be non-None here since use_ocr_hints is True
-                assert profile_params is not None
-                ocr_engine = create_ocr_hint_engine(
-                    min_confidence=profile_params.ocr_min_confidence,
-                    languages=profile_params.ocr_languages,
-                )
-                logger.debug(
-                    f"[OCR-ISOLATION] Page {page_number}: Created FRESH OCRHintEngine instance"
-                )
-
-                # Extract hints for THIS page ONLY
-                ocr_result = ocr_engine.extract_hints(image)
-                current_page_hints_count = len(ocr_result.hints)
-
-                if ocr_result.has_meaningful_content:
-                    ocr_hint_section = build_ocr_hint_prompt_section(ocr_result)
-                    logger.info(
-                        f"[OCR-HINT-VLM] Page {page_number}: "
-                        f"Injecting {current_page_hints_count} OCR hints (THIS PAGE ONLY), "
-                        f"high-value terms: {ocr_result.high_value_terms}"
-                    )
-                    # Log the actual hints being sent to VLM for this page
-                    logger.debug(
-                        f"[OCR-ISOLATION] Page {page_number} hints content: "
-                        f"{ocr_result.raw_text[:100]}..."
-                    )
-                else:
-                    logger.debug(
-                        f"[OCR-HINT-VLM] Page {page_number}: No meaningful OCR content found"
-                    )
-
-            except Exception as e:
-                logger.warning(f"[OCR-HINT-VLM] OCR extraction failed: {e}")
-                # Continue without OCR hints - don't fail the VLM call
+            logger.info(
+                f"[OCR-HINT-VLM] Page {page_number}: profile requested OCR hints, "
+                "but visual-only prompt isolation is active; skipping OCR hint extraction."
+            )
 
         # ================================================================
         # BUILD VISUAL-ONLY PROMPT (scan-aware, no OCR/breadcrumb/page injection)
@@ -1595,6 +2046,17 @@ class VisionManager:
         if self._cache:
             self._cache.flush()
             logger.debug("Vision cache flushed")
+        if self._ocr_hint_engines:
+            for ocr_engine in self._ocr_hint_engines.values():
+                try:
+                    cleanup = getattr(ocr_engine, "cleanup", None)
+                    if callable(cleanup):
+                        cleanup()
+                except Exception as e:
+                    logger.debug(f"OCR hint engine cleanup skipped: {e}")
+            self._ocr_hint_engines.clear()
+            gc.collect()
+            logger.debug("OCR hint engine cache cleared")
 
     def verify_shadow_integrity(
         self,
@@ -2037,7 +2499,19 @@ def create_vision_manager(
     else:
         raise ValueError(f"Unsupported vision provider: {provider}")
 
+    # Resolve the effective model name for cache invalidation tracking.
+    # For Ollama without an explicit model, the name is auto-detected at call
+    # time so we leave it blank to avoid spurious cache invalidations.
+    effective_model_name: str = ""
+    if provider_lower == "openai":
+        effective_model_name = model or DEFAULT_OPENAI_MODEL
+    elif provider_lower in ("anthropic", "haiku"):
+        effective_model_name = model or DEFAULT_ANTHROPIC_MODEL
+    elif provider_lower == "ollama" and model:
+        effective_model_name = model
+
     return VisionManager(
         provider=vision_provider,
         cache_dir=cache_dir,
+        model_name=effective_model_name,
     )

@@ -25,6 +25,7 @@ Date: 2025-01-03
 
 from __future__ import annotations
 
+import gc
 import logging
 import re
 from dataclasses import dataclass
@@ -476,6 +477,43 @@ class OCRHintEngine:
                 was_executed=False,
                 error=str(e),
             )
+
+    def cleanup(self) -> None:
+        """
+        Release EasyOCR runtime references for graceful shutdown.
+
+        EasyOCR allocates PyTorch-backed resources that should be dropped
+        explicitly between large runs to avoid late memory pressure.
+        """
+        reader = self._reader
+        self._reader = None
+        self._current_page = None
+        self._last_hints_count = 0
+
+        if reader is not None:
+            try:
+                del reader
+            except Exception:
+                pass
+
+        try:
+            import torch  # type: ignore
+
+            try:
+                if hasattr(torch, "cuda") and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+
+            try:
+                if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                    torch.mps.empty_cache()  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+        gc.collect()
 
 
 # ============================================================================

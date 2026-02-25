@@ -12,7 +12,7 @@ and our "Gold Standard" output format for downstream RAG systems.
 
 REQ Compliance:
 - REQ-SCHEMA-01: All output conforms to IngestionChunk Pydantic model
-- REQ-COORD-01: All bounding boxes normalized to 0.0-1.0 scale
+- REQ-COORD-01: All bounding boxes normalized to 0-1000 integer scale
 - REQ-STATE: Hierarchical breadcrumb tracking via ContextStateV2
 - REQ-MM-02: Asset naming [DocHash]_[Page]_[Type]_[Index].png
 - REQ-CHUNK-03: Content truncated to 400 chars max
@@ -43,6 +43,7 @@ from .schema.ingestion_schema import (
     HierarchyMetadata,
     IngestionChunk,
     Modality,
+    SemanticContext,
     COORD_SCALE,
     create_image_chunk,
     create_table_chunk,
@@ -124,7 +125,7 @@ class DoclingToV2Mapper:
     This mapper:
     1. Iterates through Docling document elements
     2. Maintains hierarchical state (ContextStateV2) for breadcrumbs
-    3. Normalizes all coordinates to 0.0-1.0 scale
+    3. Normalizes all coordinates to 0-1000 integer scale
     4. Creates properly validated IngestionChunk objects
     5. Extracts and saves image/table assets
 
@@ -461,7 +462,7 @@ class DoclingToV2Mapper:
         # REQ-COORD-02: Get page dimensions for UI overlay support
         page_w, page_h = self._page_dims.get(page_no, (DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT))
 
-        yield create_image_chunk(
+        chunk = create_image_chunk(
             doc_id=self.doc_hash,
             content=visual_description,
             source_file=self.source_file,
@@ -479,6 +480,17 @@ class DoclingToV2Mapper:
             page_height=int(page_h),
             **self.intelligence_metadata,  # BUG-006 FIX: Propagate intelligence metadata
         )
+
+        # REQ-MM-03: Manually populate semantic context if factory doesn't support it
+        if (prev_text or next_text) and chunk.semantic_context is None:
+            chunk.semantic_context = SemanticContext(
+                prev_text_snippet=prev_text,
+                next_text_snippet=next_text,
+                parent_heading=hierarchy.parent_heading,
+                breadcrumb_path=hierarchy.breadcrumb_path,
+            )
+
+        yield chunk
 
     def _map_table_element(
         self,
@@ -503,16 +515,22 @@ class DoclingToV2Mapper:
 
         # Save table image
         batch_page_no = page_no - self.page_offset
-        self._save_asset(
+        saved_table_image = self._save_asset(
             element=element,
             asset_path=asset_path,
             bbox=bbox,
             page_images=page_images,
             page_no=batch_page_no,
         )
+        if saved_table_image is None:
+            asset_path = None
 
         # Table content
-        content = text if text else f"[Table on page {page_no}]"
+        content = (text or "").strip()
+        extraction_method = "docling"
+        if not content or re.match(r"^\[table on page \d+\]$", content, flags=re.IGNORECASE):
+            content = f"[Table extraction unavailable on page {page_no}]"
+            extraction_method = "table_image_only"
 
         # FIX #3: REQ-MM-03 - Get semantic context (prev + next text snippets) SAME AS IMAGES
         prev_text = " ".join(self._text_buffer[-3:]) if self._text_buffer else None
@@ -531,7 +549,7 @@ class DoclingToV2Mapper:
         # REQ-COORD-02: Get page dimensions for UI overlay support
         page_w, page_h = self._page_dims.get(page_no, (DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT))
 
-        yield create_table_chunk(
+        chunk = create_table_chunk(
             doc_id=self.doc_hash,
             content=content,
             source_file=self.source_file,
@@ -540,12 +558,22 @@ class DoclingToV2Mapper:
             bbox=table_bbox,
             hierarchy=hierarchy,
             asset_path=asset_path,
-            prev_text=prev_text,  # FIX #3: Add prev_text context parity with images
-            next_text=next_text,  # FIX #3: Add next_text context parity with images
             page_width=int(page_w),
             page_height=int(page_h),
+            extraction_method=extraction_method,
             **self.intelligence_metadata,  # BUG-006 FIX: Propagate intelligence metadata
         )
+
+        # REQ-MM-03: Manually populate semantic context if factory doesn't support it
+        if prev_text or next_text:
+            chunk.semantic_context = SemanticContext(
+                prev_text_snippet=prev_text,
+                next_text_snippet=next_text,
+                parent_heading=hierarchy.parent_heading,
+                breadcrumb_path=hierarchy.breadcrumb_path,
+            )
+
+        yield chunk
 
     def _map_text_element(
         self,
@@ -780,14 +808,36 @@ class DoclingToV2Mapper:
             # Try to crop from page image
             if bbox and page_no in page_images:
                 page_img = page_images[page_no]
-                scale = 2.0  # REQ-PDF-04: High-fidelity rendering
+                img_w, img_h = page_img.size
 
-                crop_box = (
-                    int(bbox[0] * scale),
-                    int(bbox[1] * scale),
-                    int(bbox[2] * scale),
-                    int(bbox[3] * scale),
-                )
+                # BBox emitted by _extract_provenance is normalized to 0-1000.
+                # Convert normalized coordinates to actual image pixels.
+                x0, y0, x1, y1 = [float(v) for v in bbox[:4]]
+                if 0.0 <= min(x0, y0, x1, y1) and max(x0, y0, x1, y1) <= COORD_SCALE:
+                    crop_box = (
+                        int((x0 / COORD_SCALE) * img_w),
+                        int((y0 / COORD_SCALE) * img_h),
+                        int((x1 / COORD_SCALE) * img_w),
+                        int((y1 / COORD_SCALE) * img_h),
+                    )
+                else:
+                    # Backward-compat fallback for raw page-space coordinates.
+                    page_w, page_h = self._page_dims.get(page_no, (DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT))
+                    scale_x = img_w / max(float(page_w), 1.0)
+                    scale_y = img_h / max(float(page_h), 1.0)
+                    crop_box = (
+                        int(x0 * scale_x),
+                        int(y0 * scale_y),
+                        int(x1 * scale_x),
+                        int(y1 * scale_y),
+                    )
+
+                # Clamp to image bounds and ensure valid crop.
+                left = max(0, min(crop_box[0], img_w - 1))
+                top = max(0, min(crop_box[1], img_h - 1))
+                right = max(left + 1, min(crop_box[2], img_w))
+                bottom = max(top + 1, min(crop_box[3], img_h))
+                crop_box = (left, top, right, bottom)
 
                 saved_image = page_img.crop(crop_box)
                 saved_image.save(str(full_path), "PNG")

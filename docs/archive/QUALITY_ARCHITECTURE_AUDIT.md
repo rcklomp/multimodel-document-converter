@@ -1,5 +1,5 @@
 # QUALITY ARCHITECTURE AUDIT: MM-Converter-V2
-**Version:** 2.4.1-stable  
+**Version:** v2.4.1-stable  
 **Date:** 2026-01-17  
 **Status:** CRITICAL - QUALITY REGRESSION IDENTIFIED  
 **Compliance:** SRS v2.4 Deviations Documented

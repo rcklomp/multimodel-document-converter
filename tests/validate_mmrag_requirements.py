@@ -6,8 +6,7 @@ for Multimodal RAG corpus quality.
 
 Usage:
     python tests/validate_mmrag_requirements.py \
-        --input Firearms.pdf \
-        --output output/ingestion.jsonl \
+        --input output/ingestion.jsonl \
         --assets output/assets/
 
 Success Criteria:
@@ -494,13 +493,66 @@ class MMRAGValidator:
 
 
 @click.command()
-@click.option("--input", "input_pdf", required=True, type=click.Path(exists=True))
-@click.option("--output", "output_jsonl", required=True, type=click.Path(exists=True))
-@click.option("--assets", "assets_dir", required=True, type=click.Path(exists=True))
-def main(input_pdf, output_jsonl, assets_dir):
+@click.option(
+    "--input",
+    "input_path",
+    required=True,
+    type=click.Path(exists=True),
+    help="Path to ingestion.jsonl (preferred). Legacy mode accepts source PDF when --output points to ingestion.jsonl.",
+)
+@click.option(
+    "--output",
+    "output_path",
+    required=False,
+    type=click.Path(exists=True),
+    help="Legacy path to ingestion.jsonl or output directory containing ingestion.jsonl.",
+)
+@click.option(
+    "--assets",
+    "assets_dir",
+    required=False,
+    type=click.Path(exists=True),
+    help="Assets directory. Defaults to <jsonl_dir>/assets.",
+)
+def main(input_path, output_path, assets_dir):
     """Run MM-RAG requirements validation."""
 
-    validator = MMRAGValidator(jsonl_path=Path(output_jsonl), assets_dir=Path(assets_dir))
+    input_p = Path(input_path)
+    output_p = Path(output_path) if output_path else None
+
+    # Resolve JSONL path (support both corrected and legacy invocation patterns).
+    jsonl_path: Path
+    if input_p.is_file() and input_p.suffix.lower() == ".jsonl":
+        jsonl_path = input_p
+    elif output_p is not None:
+        if output_p.is_file() and output_p.suffix.lower() == ".jsonl":
+            jsonl_path = output_p
+        elif output_p.is_dir() and (output_p / "ingestion.jsonl").exists():
+            jsonl_path = output_p / "ingestion.jsonl"
+        else:
+            raise click.UsageError(
+                "Could not resolve ingestion JSONL. Provide --input <ingestion.jsonl> "
+                "or --output <ingestion.jsonl|output_dir_with_ingestion.jsonl>."
+            )
+    else:
+        raise click.UsageError(
+            "--input must point to ingestion.jsonl, or provide legacy --output "
+            "with ingestion.jsonl location."
+        )
+
+    # Resolve assets directory.
+    if assets_dir:
+        assets_path = Path(assets_dir)
+    else:
+        default_assets = jsonl_path.parent / "assets"
+        if default_assets.exists():
+            assets_path = default_assets
+        else:
+            raise click.UsageError(
+                "Could not resolve assets directory. Provide --assets <assets_dir>."
+            )
+
+    validator = MMRAGValidator(jsonl_path=jsonl_path, assets_dir=assets_path)
 
     passed, failed, total, exit_code = validator.run_all_tests()
 

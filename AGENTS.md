@@ -33,10 +33,12 @@ Companion docs:
 ## 🛑 1. TECHNICAL INVARIANTS (Hard Constraints)
 1. **Runtime Integrity:** Python **3.10** only. Avoid 3.11+ syntax/features.
 2. **Hardware Bound:** Optimize for **Apple Silicon (MPS)**; prefer `mps` for torch when available.
-3. **Library Lockdown:** `docling` **v2.66.0** pinned; do not bump without impact review.
+3. **Library Lockdown:** `docling` must be exact-pinned in `pyproject.toml`; do not bump without impact review.
 4. **Resource Ceiling:** Target **≤8GB RAM** during runs; keep batch sizes ≤10 pages and call `gc.collect()` between batches.
-5. **IRON-09 (Blind Test Validation):** A code change is only valid if the full `acceptance_suite` yields a `GATE_PASS`. This MUST include at least one "Blind Test" document (Greenhouse Design and Control by Pedro Ponce) that was not part of the dev-loop. Any pass based on hardcoded filenames or word-lists is a system failure.
-6. **IRON-10:** Refinement logic must rely on a single `20-unit` vertical threshold. No profile-specific or heading-specific branches allowed.
+5. **AGENT-VAL-01 (Blind Test Validation):** A code change is only valid if the full `acceptance_suite` yields a `GATE_PASS`. This MUST include at least one "Blind Test" document (Greenhouse Design and Control by Pedro Ponce) that was not part of the dev-loop. Any pass based on hardcoded filenames or word-lists is a system failure.
+6. **AGENT-SPATIAL-20:** Refinement logic must rely on a single `20-unit` vertical threshold. No profile-specific or heading-specific branches allowed.
+
+**Numbering Note:** SRS IRON IDs remain canonical. Agent-local constraints use `AGENT-*` IDs to avoid collisions.
 
 ---
 
@@ -68,7 +70,7 @@ Companion docs:
 
 ## 🧬 3. CLASSIFICATION & UIR CONTRACT (V2.4.1 scope)
 - **Do NOT enable the V2.4.2 DocumentClassifier**; stay on the V2.4.1 multi-dimensional profile classifier (e.g., `academic_whitepaper`, `digital_magazine`).
-- Prefer manual profile overrides when certainty is high (planned flag: `--profile-override`).
+- Prefer manual profile overrides when certainty is high (use `--profile-override`).
 - BBoxes must be normalized to **int [0,1000]** before emission.
 - Shadow assets: promote to `IMAGE` if visual signal exists; otherwise drop before final JSONL.
 
@@ -86,14 +88,17 @@ Companion docs:
 **Recent Finding:** Significant token variance on AIOS PDF; recovery pipeline rescues missing text, but OCR guard disabled layout-aware OCR on digital PDFs.  
 **Known debt:** `digital_magazine` → "Combat Aircraft - August 2025 UK" stabilizes around **-16% token variance** due to heavy text-in-graphics; treat as tolerated debt (see QA guidance below).
 **Decision (known debt):** Do not add/maintain extra "text-in-graphics" complexity (digital-magazine layout-OCR / image-region OCR). Keep the digital PDF path simple and stable; only run OCR on digital-like PDFs when the user explicitly sets `--force-ocr`.
-**QA policy update:** For `digital_magazine` only, QA tolerance is 18% (0.18). Do not raise tolerances for other profiles.
+**QA policy update:** For `digital_magazine` only, QA tolerance is temporarily 18% (0.18). Do not raise tolerances for other profiles; target remains 10% (0.10) for all profiles.
 
-### Priority TODOs
-1. Add **`--force-ocr`** override to bypass the digital-modality OCR guard.  
-2. Expose **QA strictness knobs** (`--qa-tolerance`, `--qa-noise-allowance`, or preset `--strict-qa`).  
-3. Fix **finalize chunk-count mismatch** (log vs. written JSONL).  
-4. Optional: add **profile override** flag to sidestep classifier drift without pulling in v2.4.2 classifier.
-5. Keep chunk sizing profile-driven and acceptance-tested (no universal hard min/max invariant).
+### Priority TODOs (Open)
+1. Fix **finalize chunk-count mismatch** (log vs. written JSONL).
+2. Bring `digital_magazine` token variance back under the standard 10% QA target and retire the temporary 18% waiver.
+3. Keep chunk sizing profile-driven and acceptance-tested (no universal hard min/max invariant).
+
+### Recently Completed (Do Not Reopen)
+1. `--force-ocr` override is implemented.
+2. QA strictness knobs are implemented (`--qa-tolerance`, `--qa-noise-allowance`, `--strict-qa`).
+3. `--profile-override` is implemented.
 
 ---
 

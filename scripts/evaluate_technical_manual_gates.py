@@ -8,6 +8,7 @@ Prints metrics and one explicit `GATE_PASS`/`GATE_FAIL` line.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import json
 import re
 from pathlib import Path
@@ -22,8 +23,59 @@ INFIX_RE = re.compile(
     r"(?<![\n\r])(?<!^)"
     r"\b(?P<prev>[a-z][a-z'\-]{0,24})\s+"
     r"(?P<num>(?:[1-9]|[12]\d|3\d|40))\.\s+"
-    r"(?P<next>[A-Za-z][A-Za-z'\-]*)"
+    # Lowercase continuation only to avoid false positives on valid prose like
+    # "chapter 3. Note" or section labels.
+    r"(?P<next>[a-z][A-Za-z'\-]*)"
 )
+
+
+def _compact_counter(counter: Counter[str], limit: int = 4) -> str:
+    if not counter:
+        return "<none>"
+    return ", ".join(f"{k}:{v}" for k, v in counter.most_common(limit))
+
+
+def infer_doc_class(path: Path) -> tuple[str, str, Counter[str], Counter[str]]:
+    digital_modalities = {"native_digital", "image_heavy"}
+    modality_counts: Counter[str] = Counter()
+    extraction_counts: Counter[str] = Counter()
+
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            o = json.loads(line)
+            md = o.get("metadata") or {}
+            modality = str(md.get("document_modality") or "").strip().lower()
+            extraction = str(md.get("extraction_method") or "").strip().lower()
+            if modality:
+                modality_counts[modality] += 1
+            if extraction:
+                extraction_counts[extraction] += 1
+
+    if modality_counts:
+        top_modality = modality_counts.most_common(1)[0][0]
+        scanned_votes = sum(
+            count
+            for modality, count in modality_counts.items()
+            if modality.startswith("scanned")
+        )
+        digital_votes = sum(
+            count for modality, count in modality_counts.items() if modality in digital_modalities
+        )
+
+        if top_modality.startswith("scanned"):
+            return "scanned", f"top_document_modality={top_modality}", modality_counts, extraction_counts
+        if top_modality in digital_modalities:
+            return "digital", f"top_document_modality={top_modality}", modality_counts, extraction_counts
+        if scanned_votes > digital_votes:
+            return "scanned", "scanned_modality_votes>digital_modality_votes", modality_counts, extraction_counts
+        if digital_votes > 0:
+            return "digital", "digital_modality_votes>=scanned_modality_votes", modality_counts, extraction_counts
+
+    ocr_votes = sum(count for method, count in extraction_counts.items() if "ocr" in method)
+    docling_votes = extraction_counts.get("docling", 0)
+    if ocr_votes > docling_votes:
+        return "scanned", "ocr_extraction_votes>docling_votes", modality_counts, extraction_counts
+    return "digital", "fallback_default_digital", modality_counts, extraction_counts
 
 
 def is_label_like(s: str) -> bool:
@@ -66,14 +118,23 @@ def main() -> int:
     parser.add_argument("ingestion_jsonl", type=Path)
     parser.add_argument(
         "--doc-class",
-        choices=("digital", "scanned"),
-        required=True,
-        help="Profile class for threshold selection",
+        choices=("digital", "scanned", "auto"),
+        default="auto",
+        help="Profile class for threshold selection; use 'auto' to infer from ingestion metadata",
     )
     args = parser.parse_args()
 
     path = args.ingestion_jsonl
     doc_class = args.doc_class
+
+    if doc_class == "auto":
+        doc_class, reason, modality_counts, extraction_counts = infer_doc_class(path)
+        print(f"doc_class={doc_class} (inferred)")
+        print(f"doc_class_inference={reason}")
+        print(f"document_modality_top={_compact_counter(modality_counts)}")
+        print(f"extraction_method_top={_compact_counter(extraction_counts)}")
+    else:
+        print(f"doc_class={doc_class} (explicit)")
 
     strict = 0
     ref_bad = 0

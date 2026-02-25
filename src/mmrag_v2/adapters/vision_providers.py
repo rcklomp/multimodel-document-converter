@@ -909,6 +909,11 @@ def create_vision_provider(
         )
 
     elif provider_type == "openai":
+        if not api_key and kwargs.get("base_url"):
+            # OpenAI-compatible local endpoints (e.g., LM Studio) generally accept
+            # any non-empty bearer token; allow keyless local usage.
+            api_key = "lm-studio"
+
         if not api_key:
             raise ValueError("OpenAI provider requires api_key")
         return OpenAIProvider(

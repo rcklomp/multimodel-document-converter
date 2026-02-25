@@ -66,7 +66,7 @@ def render_page(pdf_path: Path, page_num: int, dpi: int = 300) -> np.ndarray:
     return img
 
 
-def test_single_page(
+def run_single_page(
     pdf_path: Path,
     page_num: int,
     output_dir: Path,
@@ -153,7 +153,7 @@ def test_single_page(
     return results
 
 
-def test_multiple_pages(
+def run_multiple_pages(
     pdf_path: Path,
     page_numbers: List[int],
     output_dir: Path,
@@ -165,7 +165,7 @@ def test_multiple_pages(
 
     for page_num in page_numbers:
         try:
-            result = test_single_page(pdf_path, page_num, output_dir, enable_doctr)
+            result = run_single_page(pdf_path, page_num, output_dir, enable_doctr)
             results.append(result)
         except Exception as e:
             logger.error(f"Failed on page {page_num}: {e}")
@@ -255,13 +255,13 @@ def main(
 
         if page is not None:
             # Single page test
-            result = test_single_page(pdf_path, page, output_dir, enable_doctr)
+            result = run_single_page(pdf_path, page, output_dir, enable_doctr)
             print(json.dumps(result, indent=2))
 
         elif pages:
             # Multiple specific pages
             page_numbers = [int(p.strip()) for p in pages.split(",")]
-            df = test_multiple_pages(pdf_path, page_numbers, output_dir, enable_doctr)
+            df = run_multiple_pages(pdf_path, page_numbers, output_dir, enable_doctr)
             compare_with_baseline(df, baseline_confidence)
 
         else:
@@ -277,7 +277,7 @@ def main(
             ).tolist()
 
             logger.info(f"Testing random pages: {page_numbers}")
-            df = test_multiple_pages(pdf_path, page_numbers, output_dir, enable_doctr)
+            df = run_multiple_pages(pdf_path, page_numbers, output_dir, enable_doctr)
             compare_with_baseline(df, baseline_confidence)
 
     elif pdf_dir:
@@ -302,7 +302,7 @@ def main(
                 total_pages, min(sample_pages, total_pages), replace=False
             ).tolist()
 
-            df = test_multiple_pages(pdf_path, page_numbers, output_dir, enable_doctr)
+            df = run_multiple_pages(pdf_path, page_numbers, output_dir, enable_doctr)
 
             all_results.append(df)
 

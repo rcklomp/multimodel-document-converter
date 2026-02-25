@@ -1,6 +1,6 @@
-# SOFTWARE REQUIREMENTS SPECIFICATION: Multimodal RAG Ingestion Engine (v2.4.1)
+# SOFTWARE REQUIREMENTS SPECIFICATION: Multimodal RAG Ingestion Engine (v2.4.1-stable)
 
-**Version:** 2.4.1-stable (PRODUCTION SPEC)
+**Version:** v2.4.1-stable (PRODUCTION SPEC)
 **Target Agent:** Cline (Python 3.10)
 **Output:** JSONL Canonical Schema + Asset Directory
 **Platform:** Apple Silicon (ARM64 Native)
@@ -9,7 +9,7 @@
 
 ---
 
-**Versioning Note:** `metadata.schema_version` is injected during export from the central version.py (`__schema_version__`), ensuring JSONL always carries the current schema version (e.g., 2.4.1-stable).
+**Versioning Note:** `schema_version` is injected during export from `src/mmrag_v2/version.py` (`__schema_version__`), ensuring JSONL always carries the current schema version (e.g., `2.4.1-stable`).
 
 ## Document Control
 
@@ -38,7 +38,7 @@ These rules are **INVIOLABLE**. Any implementation that violates these rules is 
 | **IRON-05** | **Disk-First Persistence:** Data for each document MUST be written to disk immediately after conversion. Keeping multiple documents in memory is STRICTLY PROHIBITED. | Prevents OOM on 16GB systems |
 | **IRON-06** | **Fail-Safe Asset Extraction:** If a document reports visual elements but the image buffer is null, processing MUST HALT and trigger a configuration audit. Silent failures are unacceptable. | Guarantees asset integrity |
 | **IRON-07** | **Full-Page Guard (NEW):** Shadow-extracted assets with `area_ratio > 0.95` (covering >95% of page area) require VLM verification before inclusion. Assets confirmed as UI/navigation elements MUST be discarded. | Prevents accidental full-page captures via shadow extraction |
-| **IRON-08** | **Atomic Writes:** he ingestion engine MUST use atomic write operations (append + flush) to ensure data integrity during network or process interruptions. |
+| **IRON-08** | **Atomic Writes:** The ingestion engine MUST use atomic write operations (append + flush) to ensure data integrity during network or process interruptions. |
 | **IRON-09** | **Text Primacy:** Scanned documents MUST NOT result in 0 text chunks. At least one OCR pass is mandatory before concluding a region is empty. |
 
 **Clarification on IRON-03 vs Shadow Extraction:**
@@ -55,8 +55,8 @@ The engine routes input files to specific processing pipelines based on MIME typ
 
 ### 2.1 PDF (Portable Document Format)
 
-* **Pipeline:** `Docling v2.66.0` (Layout Analysis + Structure Extraction via IBM LayoutModels)
-* **Note:** Standalone Surya-OCR is **DEPRECATED** and MUST NOT be used. Docling v2.66.0 includes all required layout analysis capabilities.
+* **Pipeline:** `Docling` (exact runtime pin is defined in `pyproject.toml`, see Section 9.2)
+* **Note:** Standalone Surya-OCR is **DEPRECATED** and MUST NOT be used. The pinned Docling release includes required layout analysis capabilities.
 
 | Requirement ID | Requirement | Priority |
 |----------------|-------------|----------|
@@ -246,7 +246,7 @@ Every line in `ingestion.jsonl` MUST validate against this schema. **No other ou
 ```json
 {
   "chunk_id": "string (UUID_v4 or composite hash)",
-  "doc_id": "string (12-char hex from file SHA256)",
+  "doc_id": "string (12-char hex from file MD5)",
   "modality": "text | image | table",
   "content": "string (actual text, markdown, or VLM description)",
   "metadata": {
@@ -280,7 +280,7 @@ Every line in `ingestion.jsonl` MUST validate against this schema. **No other ou
     "prev_text_snippet": "string|null (max 300 chars)",
     "next_text_snippet": "string|null (max 300 chars)"
   },
-  "schema_version": "string (2.3.0)"
+  "schema_version": "string (2.4.1-stable)"
 }
 ```
 
@@ -399,20 +399,14 @@ Every line in `ingestion.jsonl` MUST validate against this schema. **No other ou
 
 ### 9.2 Engineering Imperatives
 
-**Dependency Pinning (EXACT VERSIONS):**
+**Dependency Pinning (Authoritative Source):**
 
-```toml
-# pyproject.toml - AUTHORITATIVE SOURCE
-docling==2.66.0                 # EXACT - Core layout engine with IBM models
-docling-core>=2.0.0             # Minimum version
-sentence-transformers>=3.0.0    # Chunking embeddings
-pymupdf>=1.24.0                 # PDF rendering & shadow extraction
-pytesseract>=0.3.10             # OCR fallback
-numpy>=1.24.4,<2.0.0            # NumPy 1.x shield (Docling/PyTorch compatibility)
-```
+- `pyproject.toml` (`[project].dependencies`) is the single source of truth for Python dependency versions.
+- `docling` MUST be exact-pinned using `==` in `pyproject.toml` (no lower-bound-only pins for Docling).
+- `environment.yml` MUST install with `pip install -e .` and MUST NOT introduce a conflicting Docling version.
 
 **DEPRECATED Dependencies (DO NOT USE):**
-- ❌ `surya-ocr` — Replaced by Docling v2.66.0 internal models
+- ❌ `surya-ocr` — Replaced by Docling internal models
 - ❌ `paddleocr` — Not compatible with Apple Silicon
 - ❌ `numpy>=2.0.0` — Breaks Docling/PyTorch compatibility
 
@@ -422,7 +416,7 @@ numpy>=1.24.4,<2.0.0            # NumPy 1.x shield (Docling/PyTorch compatibilit
 |----------------|-------------|
 | **REQ-ERR-01** | Use `try-except` block per file. Single corrupt file MUST NOT crash batch. |
 | **REQ-ERR-02** | Log all errors to `ingestion_errors.log` with timestamp, filename, and stack trace. |
-| **REQ-ERR-03** | On startup, log: `"Using Docling v2.66.0"` to confirm correct engine. |
+| **REQ-ERR-03** | On startup, log: `"Using Docling v{docling.__version__}"` and verify it matches the exact pin in `pyproject.toml`. |
 
 **Platform Optimization:**
 

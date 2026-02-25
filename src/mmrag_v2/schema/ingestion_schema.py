@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import List, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 # Centralized versioning (single source of truth)
 from ..version import __schema_version__
@@ -457,7 +457,7 @@ class IngestionChunk(BaseModel):
     """
 
     chunk_id: str = Field(..., description="UUID_v4 or composite hash")
-    doc_id: str = Field(..., description="12-char hex from file SHA256")
+    doc_id: str = Field(..., description="12-char hex from file MD5")
     modality: Modality = Field(..., description="text|image|table")
     content: str = Field(..., description="Text content or VLM description")
     metadata: ChunkMetadata = Field(...)
@@ -466,6 +466,19 @@ class IngestionChunk(BaseModel):
         default=None, description="REQ-MM-03: Contextual anchoring with surrounding text"
     )
     schema_version: str = Field(default=SCHEMA_VERSION)
+
+    @computed_field
+    @property
+    def visual_description(self) -> Optional[str]:
+        """Top-level accessor for the VLM image description.
+
+        Returns metadata.visual_description for image chunks so that the field
+        appears at the root level of the serialised JSON (not just nested in metadata).
+        Non-image chunks return None.
+        """
+        if self.modality == Modality.IMAGE:
+            return self.metadata.visual_description
+        return None
 
     @model_validator(mode="after")
     def validate_multimodal_requirements(self) -> "IngestionChunk":
@@ -499,8 +512,9 @@ class IngestionChunk(BaseModel):
             path = " > ".join(self.metadata.hierarchy.breadcrumb_path)
             parts.append(f"[{path}]")
         parts.append(self.content)
-        if self.modality == Modality.IMAGE and self.metadata.visual_description:
-            parts.append(f"[Visual: {self.metadata.visual_description}]")
+        # NOTE: For image chunks, content IS already the VLM description (set by all
+        # ingestion code paths). Do not append [Visual: ...] here — it would duplicate
+        # the description, inflating the embedding vector for no benefit.
         return " ".join(parts)
 
 

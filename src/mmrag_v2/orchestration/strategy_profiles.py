@@ -88,6 +88,7 @@ class ProfileParameters:
 
     # VLM parameters
     vlm_freedom: VLMFreedom = VLMFreedom.MODERATE
+    vlm_table_enabled: bool = True
     inject_scan_hints: bool = False
     inject_historical_hints: bool = False
     confidence_threshold: float = 0.7
@@ -943,6 +944,7 @@ class TechnicalManualProfile(BaseProfile):
             enable_shadow_extraction=True,  # Catch embedded schematics
             # VLM - STRICT technical mode
             vlm_freedom=VLMFreedom.STRICT,  # Technical accuracy is paramount
+            vlm_table_enabled=False,  # Prevent table hallucinations; use docling/OCR path
             inject_scan_hints=True,  # Handle potential scan artifacts
             inject_historical_hints=False,  # Not historical (unless detected)
             confidence_threshold=0.8,  # High bar for technical descriptions

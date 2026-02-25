@@ -3,7 +3,7 @@ MMRAG V2 - Multimodal RAG Document Converter
 =============================================
 ENGINE_USE: Docling v2.66.0 (Native Layout Analysis)
 
-V3.0.0 Architecture:
+v2.4.1-stable Architecture:
 - Universal Intermediate Representation (UIR)
 - TEXT regions -> OCR cascade -> modality: "text"
 - IMAGE regions -> VLM visual description -> modality: "image"
@@ -28,12 +28,12 @@ Usage:
 
 Author: Claude 4.5 Opus (Architect)
 Date: 2025-12-28
-Version: 3.0.0
+Version: v2.4.1-stable
 """
 
 from __future__ import annotations
 
-__version__ = "3.0.0"
+__version__ = "v2.4.1-stable"
 __author__ = "Claude 4.5 Opus (Architect)"
 
 # Core processor
@@ -45,7 +45,7 @@ from .batch_processor import BatchProcessor, create_batch_processor
 # Mapper
 from .mapper import DoclingToV2Mapper, create_mapper
 
-# Schema (V3.0.0: No shadow imports)
+# Schema
 from .schema import (
     BoundingBox,
     ChunkType,
@@ -72,7 +72,7 @@ from .utils import (
 # Vision
 from .vision import VisionManager, create_vision_manager
 
-# Orchestration (V3.0.0: Shadow extraction removed)
+# Orchestration
 from .orchestration import (
     DocumentProfile,
     SmartConfigProvider,

@@ -2,6 +2,8 @@
 
 All notable changes to this project will be documented in this file. This project adheres to the functional requirements defined in **SRS v2.4.1**.
 
+> **Versioning note:** Historical entries before the `v2.4.x` line used an internal `v18.x` milestone scheme during rapid iteration and test/fix cycles. Only stable or decision-worthy checkpoints were recorded, so intermediate builds are intentionally omitted. From `v2.4` onward, entries follow the current public semantic line.
+
 ## [v2.4.1] - 2026-01-18 stable
 
 ### Changed
@@ -16,6 +18,16 @@ All notable changes to this project will be documented in this file. This projec
 - **Parity bug (process vs batch profile mismatch):** domain detection now prioritizes content features with a low-weight filename hint, preventing filename-renaming from flipping `profile_type`.
 - **Batch parity diagnostics:** added combined content/filename score logging in domain detection for traceability.
 - **Fail-fast intelligence metadata wiring:** batch path raises if the intelligence stack returns `None` values instead of silently falling back.
+
+## [v18.2] - 2026-01-15 (internal milestone)
+
+### Added
+- **Semantic Text Refiner:** Introduced the post-OCR refinement layer with staged processing (diagnostic triage -> contextual refinement -> integrity validation).
+- **Refiner CLI controls:** Added operational flags for enabling/tuning refiner providers and endpoints (`--enable-refiner`, `--refiner-provider`, `--refiner-model`, `--refiner-base-url`).
+
+### Changed
+- **Non-destructive refinement storage:** Refined output is recorded in `metadata.refined_content`, while original `content` remains preserved.
+- **Integrity guardrails:** Protected-token handling and edit-budget validation were enforced to prevent aggressive LLM rewrites.
 
 ## [v18.1.1] - 2026-01-13
 

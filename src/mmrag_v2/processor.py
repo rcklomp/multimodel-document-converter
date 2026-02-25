@@ -26,6 +26,7 @@ Updated: 2025-12-29 (Vision Enrichment Layer)
 
 from __future__ import annotations
 
+import math
 import hashlib
 import io
 import logging
@@ -161,6 +162,24 @@ AD_KEYWORDS = [
     "act now",
 ]
 
+TECHNICAL_KEYWORDS = [
+    "algorithm",
+    "architecture",
+    "api",
+    "class",
+    "function",
+    "method",
+    "parameter",
+    "configuration",
+    "schema",
+    "pipeline",
+    "module",
+    "implementation",
+    "dataset",
+    "model",
+    "token",
+]
+
 
 # ============================================================================
 # V2DocumentProcessor
@@ -213,6 +232,8 @@ class V2DocumentProcessor:
         extraction_strategy: Optional["ExtractionStrategy"] = None,
         # V2.4 Intelligence Stack Metadata (Observability)
         intelligence_metadata: Optional[Dict[str, Any]] = None,
+        # Force table serialization through VLM route (when available)
+        force_table_vlm: bool = False,
     ) -> None:
         """
         Initialize V2DocumentProcessor.
@@ -232,6 +253,7 @@ class V2DocumentProcessor:
             doc_hash_override: Override document hash (for batch processing)
             source_file_override: Override source filename (for batch processing)
             extraction_strategy: Dynamic extraction strategy from StrategyOrchestrator
+            force_table_vlm: Force table image -> VLM markdown path (fallback to OCR/docling if needed)
         """
         # Store extraction strategy for dynamic thresholds
         self._extraction_strategy = extraction_strategy
@@ -268,6 +290,7 @@ class V2DocumentProcessor:
         self._page_offset = page_offset
         self._doc_hash_override = doc_hash_override
         self._source_file_override = source_file_override
+        self._force_table_vlm = force_table_vlm
         self._final_state: Optional[ContextStateV2] = None
 
         self.output_dir = Path(output_dir)
@@ -341,6 +364,15 @@ class V2DocumentProcessor:
         )
         pipeline_options.generate_picture_images = True  # Extract figures
         pipeline_options.generate_table_images = True  # Extract tables
+        if hasattr(pipeline_options, "sort_by_reading_order"):
+            pipeline_options.sort_by_reading_order = True
+            logger.info("Docling reading-order sort enabled: sort_by_reading_order=True")
+        # Prefer structured table extraction so table content is emitted as text/markdown,
+        # not as image-only placeholders.
+        if hasattr(pipeline_options, "do_table_structure"):
+            pipeline_options.do_table_structure = True
+        if hasattr(pipeline_options, "do_cell_matching"):
+            pipeline_options.do_cell_matching = True
 
         # REQ: ZERO-LATENCY PARAMETER ENFORCEMENT
         # Note: Page limiting is enforced at the batch splitting stage,
@@ -373,6 +405,130 @@ class V2DocumentProcessor:
 
         logger.info("ENGINE_USE: Using Docling v2.66.0 with REQ-PDF-04 compliance")
         return converter
+
+    def _extract_page_no_from_element(self, element: Any) -> int:
+        """Best-effort page number extraction from element provenance."""
+        if hasattr(element, "prov") and element.prov:
+            prov = element.prov[0] if isinstance(element.prov, list) else element.prov
+            if hasattr(prov, "page_no") and prov.page_no is not None:
+                return int(prov.page_no)
+            if hasattr(prov, "page") and prov.page is not None:
+                return int(prov.page)
+        return 1
+
+    def _extract_bbox_from_element(self, element: Any) -> Optional[Tuple[float, float, float, float]]:
+        """Best-effort bbox extraction as (x0, y0, x1, y1)."""
+        if hasattr(element, "prov") and element.prov:
+            prov = element.prov[0] if isinstance(element.prov, list) else element.prov
+            bbox_obj = getattr(prov, "bbox", None)
+            if bbox_obj is None:
+                return None
+
+            if hasattr(bbox_obj, "l"):
+                x0, x1 = min(float(bbox_obj.l), float(bbox_obj.r)), max(
+                    float(bbox_obj.l), float(bbox_obj.r)
+                )
+                y0, y1 = min(float(bbox_obj.t), float(bbox_obj.b)), max(
+                    float(bbox_obj.t), float(bbox_obj.b)
+                )
+                return (x0, y0, x1, y1) if x1 > x0 and y1 > y0 else None
+
+            if hasattr(bbox_obj, "as_tuple"):
+                raw = bbox_obj.as_tuple()
+                if raw and len(raw) >= 4:
+                    x0, x1 = min(float(raw[0]), float(raw[2])), max(float(raw[0]), float(raw[2]))
+                    y0, y1 = min(float(raw[1]), float(raw[3])), max(float(raw[1]), float(raw[3]))
+                    return (x0, y0, x1, y1) if x1 > x0 and y1 > y0 else None
+
+        return None
+
+    def _order_items_for_page(self, records: List[Dict[str, Any]], page_width: float) -> List[Dict[str, Any]]:
+        """
+        Order page records in reading order.
+
+        Strategy:
+        - Detect two-column layouts using bbox x-center clustering.
+        - Sort within column by y_min then x_min.
+        - Keep elements without bbox at the end in original order.
+        """
+        with_bbox = [r for r in records if r["bbox"] is not None]
+        if not with_bbox:
+            return sorted(records, key=lambda r: r["orig_index"])
+
+        two_column = False
+        split_x = None
+
+        # Only try split when we have enough evidence.
+        if len(with_bbox) >= 6:
+            x_centers = sorted((r["bbox"][0] + r["bbox"][2]) / 2.0 for r in with_bbox)
+            mid = len(x_centers) // 2
+            if mid > 0:
+                split_x = (x_centers[mid - 1] + x_centers[mid]) / 2.0
+                left = [r for r in with_bbox if ((r["bbox"][0] + r["bbox"][2]) / 2.0) <= split_x]
+                right = [r for r in with_bbox if ((r["bbox"][0] + r["bbox"][2]) / 2.0) > split_x]
+
+                if len(left) >= 3 and len(right) >= 3:
+                    left_max = max(r["bbox"][2] for r in left)
+                    right_min = min(r["bbox"][0] for r in right)
+                    gap = right_min - left_max
+                    inferred_width = max(
+                        max(r["bbox"][2] for r in with_bbox) - min(r["bbox"][0] for r in with_bbox),
+                        1.0,
+                    )
+                    width_ref = page_width if page_width > 1 else inferred_width
+                    two_column = gap > width_ref * 0.04
+
+        def _sort_key(rec: Dict[str, Any]) -> Tuple[int, float, float, int]:
+            bbox = rec["bbox"]
+            if bbox is None:
+                return (99, math.inf, math.inf, rec["orig_index"])
+
+            x0, y0, x1, _ = bbox
+            if two_column and split_x is not None:
+                x_center = (x0 + x1) / 2.0
+                col = 0 if x_center <= split_x else 1
+            else:
+                col = 0
+
+            return (col, y0, x0, rec["orig_index"])
+
+        return sorted(records, key=_sort_key)
+
+    def _get_ordered_doc_items(self, doc: Any) -> List[Tuple[Any, Any]]:
+        """Return doc items ordered by page and reading order within page."""
+        raw_items = list(doc.iterate_items())
+        if not raw_items:
+            return []
+
+        page_widths: Dict[int, float] = {}
+        if hasattr(doc, "pages") and doc.pages:
+            pages_iter = doc.pages.values() if isinstance(doc.pages, dict) else doc.pages
+            for page in pages_iter:
+                pg_no = getattr(page, "page_no", 1) or 1
+                width = float(getattr(page, "width", 0.0) or 0.0)
+                page_widths[int(pg_no)] = width
+
+        by_page: Dict[int, List[Dict[str, Any]]] = {}
+        for orig_index, item_tuple in enumerate(raw_items):
+            element, _ = item_tuple
+            page_no = self._extract_page_no_from_element(element)
+            bbox = self._extract_bbox_from_element(element)
+            by_page.setdefault(page_no, []).append(
+                {
+                    "item": item_tuple,
+                    "orig_index": orig_index,
+                    "bbox": bbox,
+                }
+            )
+
+        ordered_items: List[Tuple[Any, Any]] = []
+        for page_no in sorted(by_page.keys()):
+            page_records = by_page[page_no]
+            page_width = page_widths.get(page_no, 0.0)
+            ordered_page_records = self._order_items_for_page(page_records, page_width)
+            ordered_items.extend(r["item"] for r in ordered_page_records)
+
+        return ordered_items
 
     def _compute_doc_hash(self, file_path: Path) -> str:
         """Compute MD5 hash of document for unique identification."""
@@ -818,7 +974,7 @@ class V2DocumentProcessor:
 
         try:
             # REQ-OCR-01: Use OCR-hint-aware enrichment when profile enables it
-            if profile_params and profile_params.enable_ocr_hints:
+            if self.enable_ocr and profile_params and profile_params.enable_ocr_hints:
                 logger.info(
                     f"[HYBRID-VLM] Using OCR-hint enrichment for page {page_no} "
                     f"(profile: enable_ocr_hints=True)"
@@ -863,6 +1019,281 @@ class V2DocumentProcessor:
 
         description = " | ".join(parts)
         return description[:MAX_CHUNK_CHARS]
+
+    @staticmethod
+    def _is_table_placeholder_text(text: Optional[str], page_no: int) -> bool:
+        """Detect placeholder table content that is unusable for retrieval."""
+        if not text:
+            return True
+        t = text.strip()
+        if not t:
+            return True
+        if re.match(r"^\[table on page \d+\]$", t, flags=re.IGNORECASE):
+            return True
+        if re.match(r"^\[table extraction unavailable on page \d+\]$", t, flags=re.IGNORECASE):
+            return True
+        if t.lower() in {"[table]", "table", f"[table on page {page_no}]"}:
+            return True
+        return False
+
+    @staticmethod
+    def _is_markdown_table(text: str) -> bool:
+        """Check whether text is a structured markdown table."""
+        t = (text or "").strip()
+        if not t:
+            return False
+        lines = [ln for ln in t.splitlines() if ln.strip()]
+        if len(lines) < 2:
+            return False
+        if "|" not in lines[0]:
+            return False
+        return any(re.search(r"\|\s*-{2,}", ln) for ln in lines[1:3])
+
+    def _is_valid_vlm_table_markdown(self, markdown: str, page_no: int) -> bool:
+        """Post-hoc quality gate for VLM table markdown before acceptance."""
+        text = (markdown or "").strip()
+        if not text or not self._is_markdown_table(text):
+            return False
+
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        if len(lines) < 3:
+            return False
+
+        try:
+            row_cols = [max(0, ln.count("|") - 1) for ln in lines]
+            if min(row_cols) < 2:
+                return False
+            if max(row_cols) - min(row_cols) > 2:
+                logger.warning(
+                    f"[TABLE-QUALITY] Page {page_no}: inconsistent VLM markdown columns "
+                    f"(min={min(row_cols)}, max={max(row_cols)})"
+                )
+                return False
+        except Exception:
+            return False
+
+        # Reject prose-like cells: a strong hallucination signal for table extraction.
+        sentence_punct = re.compile(r"[.!?]")
+        for ln in lines:
+            if "|" not in ln:
+                continue
+            cells = [c.strip().strip("`*_ ") for c in ln.split("|")[1:-1]]
+            for cell in cells:
+                if len(cell) > 60 and len(sentence_punct.findall(cell)) >= 2:
+                    logger.warning(
+                        f"[TABLE-QUALITY] Page {page_no}: rejected prose-like cell in VLM table"
+                    )
+                    return False
+
+        lowered = text.lower()
+        suspicious = [
+            "lorem ipsum",
+            "placeholder",
+            "example row",
+            "sample data",
+            "generated content",
+            "the matrix",
+            "movie",
+            "findwindowexa",
+            "was passing",
+            "htrm",
+            "pulse length",
+        ]
+        if any(tok in lowered for tok in suspicious):
+            logger.warning(f"[TABLE-QUALITY] Page {page_no}: rejected suspicious VLM table content")
+            return False
+
+        return True
+
+    def _is_unstructured_table_text(self, text: str, page_no: int) -> bool:
+        """
+        Detect table "text soup" that should trigger image-based VLM/OCR fallback.
+
+        Criteria are intentionally conservative: if it's already markdown, keep it.
+        """
+        t = (text or "").strip()
+        if self._is_table_placeholder_text(t, page_no):
+            return True
+        if self._is_markdown_table(t):
+            return False
+        lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
+        if len(lines) < 2:
+            return True
+        # Number-heavy line lists usually indicate degraded TOC-like dumps.
+        numbery = sum(1 for ln in lines if re.match(r"^\d+(\.\d+)?\b", ln))
+        shortish = sum(1 for ln in lines if len(ln) <= 120)
+        if numbery >= max(2, len(lines) // 3):
+            return True
+        if shortish >= max(3, int(len(lines) * 0.8)):
+            return True
+        return False
+
+    @staticmethod
+    def _strip_markdown_fences(text: str) -> str:
+        """Remove markdown code fences from model output."""
+        cleaned = (text or "").strip()
+        m = re.match(r"^```(?:markdown|md|text)?\s*([\s\S]*?)\s*```$", cleaned, re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+        return cleaned
+
+    def _table_text_to_markdown(self, text: str) -> str:
+        """
+        Convert table-like text to markdown.
+
+        If the text already appears to be markdown, return it as-is.
+        Otherwise fallback to a one-column markdown table to preserve content.
+        """
+        raw = self._strip_markdown_fences(text)
+        lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+        if not lines:
+            return ""
+
+        # Already markdown-like table.
+        if sum(1 for ln in lines if "|" in ln) >= 2:
+            return "\n".join(lines)
+
+        # Try simple columnization for TSV / multi-space aligned rows.
+        parsed_rows: List[List[str]] = []
+        for ln in lines:
+            cols = [c.strip() for c in re.split(r"\t+|\s{2,}", ln) if c.strip()]
+            if len(cols) >= 2:
+                parsed_rows.append(cols)
+
+        if parsed_rows:
+            max_cols = max(len(r) for r in parsed_rows)
+            header = parsed_rows[0] + [""] * (max_cols - len(parsed_rows[0]))
+            md_lines = [
+                "| " + " | ".join(header) + " |",
+                "| " + " | ".join(["---"] * max_cols) + " |",
+            ]
+            for row in parsed_rows[1:]:
+                row_padded = row + [""] * (max_cols - len(row))
+                md_lines.append("| " + " | ".join(row_padded) + " |")
+            return "\n".join(md_lines)
+
+        # Single-column fallback: still serializes all table text for retrieval.
+        md_lines = ["| Table Content |", "| --- |"]
+        for ln in lines:
+            md_lines.append("| " + ln.replace("|", "\\|") + " |")
+        return "\n".join(md_lines)
+
+    def _extract_docling_table_text(self, element: Any, page_no: int) -> str:
+        """
+        Best-effort extraction of richer table text from Docling table elements.
+
+        Some Docling table elements expose markdown/structured export methods while
+        `element.text` may contain only placeholders. This helper probes common
+        export APIs and falls back safely.
+        """
+        method_names = (
+            "export_to_markdown",
+            "to_markdown",
+            "as_markdown",
+            "to_md",
+        )
+
+        for method_name in method_names:
+            method = getattr(element, method_name, None)
+            if not callable(method):
+                continue
+            try:
+                value = method()
+            except TypeError:
+                # Some implementations may require keyword args; skip silently.
+                continue
+            except Exception as e:
+                logger.debug(
+                    f"[TABLE-DOC-LING] Page {page_no}: {method_name} failed: {e}"
+                )
+                continue
+
+            text = (value or "").strip() if isinstance(value, str) else ""
+            if text and not self._is_table_placeholder_text(text, page_no):
+                logger.info(
+                    f"[TABLE-DOC-LING] Page {page_no}: recovered table text via {method_name}"
+                )
+                return text
+
+        return ""
+
+    def _extract_table_markdown_with_ocr(
+        self,
+        table_image: Optional[Image.Image],
+        page_no: int,
+    ) -> str:
+        """OCR-based fallback for table chunks when Docling table text is missing."""
+        if table_image is None:
+            return ""
+        if not self.enable_ocr:
+            return ""
+
+        try:
+            ocr_engine = getattr(self, "_ocr_engine", None)
+            if ocr_engine is None:
+                ocr_engine = EnhancedOCREngine(
+                    confidence_threshold=0.4,
+                    enable_tesseract=True,
+                    enable_doctr=True,
+                )
+                self._ocr_engine = ocr_engine
+
+            np_img = np.array(table_image.convert("RGB"))
+            ocr_result = ocr_engine.process_page(np_img)
+            ocr_text = (ocr_result.text or "").strip()
+            if len(ocr_text) < 10:
+                return ""
+
+            markdown = self._table_text_to_markdown(ocr_text)
+            if markdown:
+                logger.info(
+                    f"[TABLE-FALLBACK] Page {page_no}: OCR recovered table text "
+                    f"({len(ocr_text)} chars, layer={ocr_result.layer_used.value})"
+                )
+            return markdown
+        except Exception as e:
+            logger.debug(f"[TABLE-FALLBACK] Page {page_no}: OCR table fallback failed: {e}")
+            return ""
+
+    def _extract_table_markdown_with_vlm(
+        self,
+        table_image: Optional[Image.Image],
+        page_no: int,
+    ) -> str:
+        """VLM fallback for table markdown extraction when OCR/docling are insufficient."""
+        if table_image is None or self._vision_manager is None:
+            return ""
+
+        try:
+            if hasattr(self._vision_manager, "extract_table_markdown"):
+                markdown = self._vision_manager.extract_table_markdown(
+                    image=table_image,
+                    page_number=page_no,
+                )
+            else:
+                markdown = ""
+            markdown = self._strip_markdown_fences(markdown or "")
+            if not markdown:
+                return ""
+            lowered = markdown.strip().lower()
+            # Accept markdown tables that contain some [unreadable] cells; reject only
+            # fully-empty sentinel responses.
+            if lowered in {"unreadable", "[unreadable]", "n/a", "none", "unable to read"}:
+                return ""
+            if not self._is_valid_vlm_table_markdown(markdown, page_no):
+                logger.warning(
+                    f"[TABLE-QUALITY] Page {page_no}: VLM table markdown failed quality gate, "
+                    "falling back to OCR/docling"
+                )
+                return ""
+            logger.info(
+                f"[TABLE-FALLBACK] Page {page_no}: VLM recovered table markdown "
+                f"({len(markdown)} chars)"
+            )
+            return markdown
+        except Exception as e:
+            logger.debug(f"[TABLE-FALLBACK] Page {page_no}: VLM table fallback failed: {e}")
+            return ""
 
     def _run_shadow_extraction(
         self,
@@ -914,6 +1345,7 @@ class V2DocumentProcessor:
 
         logger.info(f"[SHADOW-EXTRACTION] Scanning {file_path.name} for missed visual assets...")
 
+        pdf_doc = None
         try:
             pdf_doc = fitz.open(str(file_path))
             shadow_count = 0
@@ -1122,8 +1554,6 @@ class V2DocumentProcessor:
                         )
                         continue
 
-            pdf_doc.close()
-
             if shadow_count > 0:
                 logger.info(
                     f"[SHADOW-EXTRACTION] Extracted {shadow_count} shadow assets "
@@ -1136,6 +1566,12 @@ class V2DocumentProcessor:
 
         except Exception as e:
             logger.error(f"[SHADOW-EXTRACTION] Failed to scan {file_path.name}: {e}")
+        finally:
+            if pdf_doc is not None:
+                try:
+                    pdf_doc.close()
+                except Exception:
+                    pass
 
     def _chunk_text_with_overlap(
         self,
@@ -1361,13 +1797,24 @@ class V2DocumentProcessor:
         Args:
             profile_params: Profile parameters from profile
         """
-        self._profile_params = profile_params
+        # Guardrail: when OCR is disabled by CLI/governance, OCR hint extraction
+        # must also be disabled to avoid loading EasyOCR runtimes.
+        if (not self.enable_ocr) and profile_params.enable_ocr_hints:
+            from dataclasses import replace
 
-        if profile_params.enable_ocr_hints:
+            self._profile_params = replace(profile_params, enable_ocr_hints=False)
+            logger.info(
+                "[OCR-HINTS] Disabled for this processor because OCR is off "
+                "(enable_ocr=False)"
+            )
+        else:
+            self._profile_params = profile_params
+
+        if self._profile_params.enable_ocr_hints:
             logger.info(
                 f"[OCR-HINTS] Enabled for profile. "
-                f"DPI: {profile_params.render_dpi}, "
-                f"min_confidence: {profile_params.ocr_min_confidence}"
+                f"DPI: {self._profile_params.render_dpi}, "
+                f"min_confidence: {self._profile_params.ocr_min_confidence}"
             )
 
     def enable_refiner(
@@ -1413,6 +1860,58 @@ class V2DocumentProcessor:
         if self._vision_manager:
             return self._vision_manager.get_stats()
         return {}
+
+    def cleanup(self) -> None:
+        """
+        Best-effort resource cleanup for graceful shutdown paths.
+
+        Safe to call multiple times.
+        """
+        try:
+            if getattr(self, "_converter", None) is not None:
+                try:
+                    for method_name in ("cleanup", "close", "shutdown"):
+                        method = getattr(self._converter, method_name, None)
+                        if callable(method):
+                            method()
+                except Exception as e:
+                    logger.debug(f"[CLEANUP] converter cleanup skipped: {e}")
+                finally:
+                    self._converter = None
+
+            if self._vision_manager and self._external_vision_manager is None:
+                try:
+                    self._vision_manager.flush_cache()
+                except Exception as e:
+                    logger.debug(f"[CLEANUP] vision cache flush failed: {e}")
+
+            ocr_engine = getattr(self, "_ocr_engine", None)
+            if ocr_engine is not None:
+                try:
+                    for method_name in ("cleanup", "close", "shutdown"):
+                        method = getattr(ocr_engine, method_name, None)
+                        if callable(method):
+                            method()
+                except Exception as e:
+                    logger.debug(f"[CLEANUP] ocr_engine cleanup skipped: {e}")
+                finally:
+                    self._ocr_engine = None
+
+            if self._refiner:
+                for method_name in ("shutdown", "close"):
+                    method = getattr(self._refiner, method_name, None)
+                    if callable(method):
+                        try:
+                            method()
+                        except Exception as e:
+                            logger.debug(f"[CLEANUP] refiner.{method_name} failed: {e}")
+
+            self._refiner = None
+            if self._external_vision_manager is None:
+                self._vision_manager = None
+            logger.debug("[CLEANUP] V2DocumentProcessor cleanup complete")
+        except Exception as e:
+            logger.debug(f"[CLEANUP] V2DocumentProcessor cleanup skipped due to error: {e}")
 
     def get_final_state(self) -> ContextStateV2:
         """
@@ -1516,7 +2015,7 @@ class V2DocumentProcessor:
         # next_text_snippet is filled with the subsequent text content.
         pending_visual_chunks: List[IngestionChunk] = []
 
-        for item_tuple in doc.iterate_items():
+        for item_tuple in self._get_ordered_doc_items(doc):
             element, _ = item_tuple
 
             for chunk in self._process_element_v2(
@@ -2024,7 +2523,118 @@ class V2DocumentProcessor:
             )
             asset_path = asset_path if saved_table_image is not None else None
 
-            table_content = text if text else f"[Table on page {page_no}]"
+            # Last-resort crop if save path failed but we still have page buffers.
+            if saved_table_image is None and bbox is not None:
+                try:
+                    recovered = self._extract_raw_image(
+                        element=element,
+                        bbox_normalized=bbox,
+                        page_images=page_images,
+                        page_no=batch_page_no,
+                        page_dims=(tbl_page_w, tbl_page_h),
+                    )
+                    if recovered is not None:
+                        full_path = self.assets_dir / Path(asset_name).name
+                        recovered.save(str(full_path), "PNG")
+                        saved_table_image = recovered
+                        asset_path = f"assets/{Path(asset_name).name}"
+                        logger.info(
+                            f"[TABLE-FALLBACK] Page {page_no}: recovered table asset via raw crop"
+                        )
+                except Exception as asset_err:
+                    logger.debug(
+                        f"[TABLE-FALLBACK] Page {page_no}: failed raw-crop table asset recovery: {asset_err}"
+                    )
+
+            table_content = (text or "").strip()
+            if self._is_table_placeholder_text(table_content, page_no):
+                recovered_table_text = self._extract_docling_table_text(element, page_no)
+                if recovered_table_text:
+                    table_content = recovered_table_text
+
+            table_extraction_method = "docling"
+            docling_markdown = ""
+            if table_content and not self._is_table_placeholder_text(table_content, page_no):
+                docling_markdown = self._table_text_to_markdown(table_content)
+                if self._is_markdown_table(docling_markdown):
+                    table_content = docling_markdown
+                    table_extraction_method = "docling_table_markdown"
+
+            # Guard against placeholder or text-soup table output:
+            # Prefer VLM table serialization, then OCR, then docling markdown fallback.
+            vlm_attempted = False
+            vlm_table_enabled = (
+                self._profile_params.vlm_table_enabled if self._profile_params is not None else True
+            )
+
+            # Emergency guardrail: if profile disables table-VLM but we have no usable
+            # table text and OCR is unavailable, allow one strict VLM attempt as a
+            # last resort to avoid guaranteed table_image_only collapse.
+            emergency_vlm_allowed = (
+                (not vlm_table_enabled)
+                and (not self.enable_ocr)
+                and self._is_table_placeholder_text(table_content, page_no)
+                and not docling_markdown
+                and (saved_table_image is not None)
+            )
+
+            if self._force_table_vlm and not vlm_table_enabled:
+                logger.info(
+                    f"[TABLE-VLM] Page {page_no}: forced VLM table serialization requested but "
+                    "disabled by profile. Falling back to OCR/docling path."
+                )
+
+            if self._force_table_vlm and vlm_table_enabled:
+                vlm_attempted = True
+                vlm_markdown = self._extract_table_markdown_with_vlm(saved_table_image, page_no)
+                if vlm_markdown:
+                    table_content = (
+                        vlm_markdown
+                        if self._is_markdown_table(vlm_markdown)
+                        else self._table_text_to_markdown(vlm_markdown)
+                    )
+                    table_extraction_method = "vlm_table_markdown_forced"
+                else:
+                    logger.warning(
+                        f"[TABLE-VLM] Page {page_no}: forced VLM serialization returned empty, "
+                        "falling back to OCR/docling path."
+                    )
+
+            if self._is_unstructured_table_text(table_content, page_no):
+                if not vlm_attempted and (vlm_table_enabled or emergency_vlm_allowed):
+                    vlm_markdown = self._extract_table_markdown_with_vlm(saved_table_image, page_no)
+                else:
+                    vlm_markdown = ""
+                if vlm_markdown:
+                    table_content = (
+                        vlm_markdown
+                        if self._is_markdown_table(vlm_markdown)
+                        else self._table_text_to_markdown(vlm_markdown)
+                    )
+                    table_extraction_method = (
+                        "vlm_table_markdown_emergency"
+                        if emergency_vlm_allowed and not vlm_table_enabled
+                        else "vlm_table_markdown"
+                    )
+                else:
+                    ocr_markdown = self._extract_table_markdown_with_ocr(saved_table_image, page_no)
+                    if ocr_markdown:
+                        table_content = (
+                            ocr_markdown
+                            if self._is_markdown_table(ocr_markdown)
+                            else self._table_text_to_markdown(ocr_markdown)
+                        )
+                        table_extraction_method = "ocr_table_markdown"
+                    elif docling_markdown:
+                        table_content = docling_markdown
+                        table_extraction_method = "docling_table_markdown_fallback"
+
+            if self._is_table_placeholder_text(table_content, page_no):
+                table_content = f"[Table extraction unavailable on page {page_no}]"
+                table_extraction_method = "table_image_only"
+                logger.warning(
+                    f"[TABLE-FALLBACK] Page {page_no}: table text unavailable after all fallbacks"
+                )
 
             # REQ-COORD-01: bbox is REQUIRED for table modality
             # Provide fallback full-page bbox if not available
@@ -2054,8 +2664,7 @@ class V2DocumentProcessor:
                 asset_path=asset_path,
                 page_width=int(tbl_page_w),
                 page_height=int(tbl_page_h),
-                prev_text=prev_text_table,  # REQ-MM-03: Context parity with images
-                next_text=None,  # Will be filled by next TEXT chunk in pending queue
+                extraction_method=table_extraction_method,
                 # V2.4: Intelligence Stack Metadata
                 **self._intelligence_metadata,
             )
@@ -2321,10 +2930,26 @@ class V2DocumentProcessor:
                         corruption_score=corruption_score,
                         refinement_provider=refinement_provider,
                         refinement_model=refinement_model,
-                        content_classification=("code" if chunk_type == ChunkType.CODE else None),
+                        content_classification=self._classify_text_content(
+                            chunk_text,
+                            chunk_type,
+                        ),
                         # V2.4: Intelligence Stack Metadata
                         **self._intelligence_metadata,
                     )
+
+    def _classify_text_content(self, text: str, chunk_type: ChunkType) -> str:
+        """Deterministic metadata classification for emitted text chunks."""
+        if chunk_type == ChunkType.CODE or self._looks_like_code(text):
+            return "code"
+        if self._is_advertisement(text):
+            return "advertisement"
+
+        lowered = (text or "").lower()
+        technical_hits = sum(1 for kw in TECHNICAL_KEYWORDS if kw in lowered)
+        if technical_hits >= 2:
+            return "technical"
+        return "editorial"
 
     def process_to_jsonl(
         self,

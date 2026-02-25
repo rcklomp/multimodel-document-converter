@@ -29,6 +29,7 @@ from __future__ import annotations
 import gc
 import hashlib
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, TYPE_CHECKING
@@ -470,15 +471,39 @@ class ElementProcessor:
 
         OUTPUT: modality="table" with markdown or OCR'd content
         """
-        content = element.content
+        content = (element.content or "").strip()
         extraction_method = element.extraction_method.value
 
-        # If no content, try OCR
-        if not content and element.has_image_data and self.ocr_engine:
-            ocr_result = self._run_ocr(element.raw_image)
-            if ocr_result:
-                content = ocr_result.get("text", "")
-                extraction_method = "ocr_table"
+        # Normalize existing table text when possible.
+        if content and not self._is_table_placeholder(content, page.page_number):
+            docling_md = self._table_text_to_markdown(content)
+            if self._is_markdown_table(docling_md):
+                content = docling_md
+                extraction_method = "docling_table_markdown"
+
+        # If content is missing/placeholder/text-soup, use image-based fallbacks.
+        needs_fallback = self._is_unstructured_table_text(content, page.page_number)
+        if needs_fallback and element.has_image_data:
+            # Prefer VLM table serialization first when available.
+            vlm_markdown = self._extract_table_markdown_with_vlm(element.raw_image, page.page_number)
+            if vlm_markdown:
+                content = (
+                    vlm_markdown
+                    if self._is_markdown_table(vlm_markdown)
+                    else self._table_text_to_markdown(vlm_markdown)
+                )
+                extraction_method = "vlm_table_markdown"
+            elif self.ocr_engine:
+                ocr_result = self._run_ocr(element.raw_image)
+                if ocr_result:
+                    ocr_text = (ocr_result.get("text", "") or "").strip()
+                    if ocr_text:
+                        content = self._table_text_to_markdown(ocr_text)
+                        extraction_method = "ocr_table_markdown"
+
+        if self._is_table_placeholder(content, page.page_number):
+            content = f"[Table extraction unavailable on page {page.page_number}]"
+            extraction_method = "table_image_only"
 
         # Save asset
         asset_path = self._save_image_asset(
@@ -498,7 +523,7 @@ class ElementProcessor:
             chunk_id=chunk_id,
             doc_id=doc_id,
             modality="table",  # ALWAYS "table"
-            content=content or f"[Table on page {page.page_number}]",
+            content=content,
             page_number=page.page_number,
             bbox=element.get_bbox_list(),
             extraction_method=extraction_method,
@@ -511,6 +536,159 @@ class ElementProcessor:
                 "page_height": page.height,
             },
         )
+
+    @staticmethod
+    def _is_table_placeholder(text: str, page_number: int) -> bool:
+        """Detect empty/placeholder table text that is unusable for retrieval."""
+        t = (text or "").strip()
+        if not t:
+            return True
+        if re.match(r"^\[table on page \d+\]$", t, flags=re.IGNORECASE):
+            return True
+        if re.match(r"^\[table extraction unavailable on page \d+\]$", t, flags=re.IGNORECASE):
+            return True
+        if t.lower() in {"[table]", "table", f"[table on page {page_number}]"}:
+            return True
+        return False
+
+    @staticmethod
+    def _is_markdown_table(text: str) -> bool:
+        """Check whether text appears to be a structured markdown table."""
+        t = (text or "").strip()
+        if not t:
+            return False
+        lines = [ln for ln in t.splitlines() if ln.strip()]
+        if len(lines) < 2:
+            return False
+        if "|" not in lines[0]:
+            return False
+        return any(re.search(r"\|\s*-{2,}", ln) for ln in lines[1:3])
+
+    def _is_valid_vlm_table_markdown(self, markdown: str, page_number: int) -> bool:
+        """Post-hoc quality gate for VLM table markdown before accepting it."""
+        text = (markdown or "").strip()
+        if not text or not self._is_markdown_table(text):
+            return False
+
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        if len(lines) < 3:
+            return False
+
+        try:
+            row_cols = [max(0, ln.count("|") - 1) for ln in lines]
+            if min(row_cols) < 2:
+                return False
+            if max(row_cols) - min(row_cols) > 2:
+                logger.warning(
+                    f"[TABLE-QUALITY] Page {page_number}: inconsistent VLM markdown columns "
+                    f"(min={min(row_cols)}, max={max(row_cols)})"
+                )
+                return False
+        except Exception:
+            return False
+
+        lowered = text.lower()
+        suspicious_tokens = [
+            "lorem ipsum",
+            "placeholder",
+            "example row",
+            "sample data",
+            "generated content",
+        ]
+        if any(tok in lowered for tok in suspicious_tokens):
+            logger.warning(
+                f"[TABLE-QUALITY] Page {page_number}: rejected suspicious VLM table content"
+            )
+            return False
+
+        return True
+
+    def _is_unstructured_table_text(self, text: str, page_number: int) -> bool:
+        """
+        Detect table content that is not yet usable for retrieval.
+        """
+        t = (text or "").strip()
+        if self._is_table_placeholder(t, page_number):
+            return True
+        if self._is_markdown_table(t):
+            return False
+        lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
+        if len(lines) < 2:
+            return True
+        numbery = sum(1 for ln in lines if re.match(r"^\d+(\.\d+)?\b", ln))
+        shortish = sum(1 for ln in lines if len(ln) <= 120)
+        if numbery >= max(2, len(lines) // 3):
+            return True
+        if shortish >= max(3, int(len(lines) * 0.8)):
+            return True
+        return False
+
+    @staticmethod
+    def _table_text_to_markdown(text: str) -> str:
+        """Convert OCR table text to markdown format with lossless single-column fallback."""
+        lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+        if not lines:
+            return ""
+
+        if sum(1 for line in lines if "|" in line) >= 2:
+            return "\n".join(lines)
+
+        parsed_rows: List[List[str]] = []
+        for line in lines:
+            cols = [col.strip() for col in re.split(r"\t+|\s{2,}", line) if col.strip()]
+            if len(cols) >= 2:
+                parsed_rows.append(cols)
+
+        if parsed_rows:
+            max_cols = max(len(row) for row in parsed_rows)
+            header = parsed_rows[0] + [""] * (max_cols - len(parsed_rows[0]))
+            md_lines = [
+                "| " + " | ".join(header) + " |",
+                "| " + " | ".join(["---"] * max_cols) + " |",
+            ]
+            for row in parsed_rows[1:]:
+                row_padded = row + [""] * (max_cols - len(row))
+                md_lines.append("| " + " | ".join(row_padded) + " |")
+            return "\n".join(md_lines)
+
+        md_lines = ["| Table Content |", "| --- |"]
+        for line in lines:
+            escaped_line = line.replace("|", "\\|")
+            md_lines.append(f"| {escaped_line} |")
+        return "\n".join(md_lines)
+
+    def _extract_table_markdown_with_vlm(
+        self,
+        image: Optional[np.ndarray],
+        page_number: int,
+    ) -> str:
+        """Use VLM table serializer when available."""
+        if self.vision_manager is None or image is None or image.size == 0:
+            return ""
+        if not hasattr(self.vision_manager, "extract_table_markdown"):
+            return ""
+
+        try:
+            from PIL import Image as PILImage
+
+            pil_image = PILImage.fromarray(image)
+            markdown = self.vision_manager.extract_table_markdown(
+                image=pil_image,
+                page_number=page_number,
+            )
+            markdown = (markdown or "").strip()
+            if not markdown:
+                return ""
+            if not self._is_valid_vlm_table_markdown(markdown, page_number):
+                logger.warning(
+                    f"[TABLE-QUALITY] Page {page_number}: VLM table markdown failed quality gate, "
+                    "falling back to OCR/docling"
+                )
+                return ""
+            return markdown
+        except Exception as e:
+            logger.debug(f"VLM table fallback failed on page {page_number}: {e}")
+            return ""
 
     def _run_ocr(self, image: np.ndarray) -> Optional[Dict[str, Any]]:
         """Run OCR cascade on image."""

@@ -135,6 +135,9 @@ class RefinerConfig:
     language_hint: Optional[str] = None  # "en", "de", "nl", or None for auto-detect
     technical_density_trigger: float = 0.08  # Protected-token density to lower threshold
     technical_density_threshold_delta: float = 0.05  # Threshold reduction when dense
+    high_corruption_threshold: float = 0.70  # Above this, treat as severe corruption
+    technical_no_summarize_threshold: float = 0.30  # technical_tokens / all_tokens
+    layout_disorder_block_threshold: float = 0.60  # Avoid refinement when layout disorder is likely
 
     # Stage B: LLM Layer
     llm_provider: str = "ollama"  # ollama | openai | anthropic
@@ -261,6 +264,45 @@ class NoiseScanner:
             )
 
         return normalized_score
+
+    def calculate_layout_disorder_score(self, text: str) -> float:
+        """
+        Estimate whether corruption is likely layout-order disorder, not OCR noise.
+
+        High score indicates likely reading-order/structure issues where refinement
+        should be avoided to preserve verbatim technical content.
+        """
+        if not text:
+            return 0.0
+
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        if len(lines) < 3:
+            return 0.0
+
+        score = 0.0
+
+        # Many short list-like lines often indicate column/list extraction artifacts.
+        short_lines = sum(1 for ln in lines if len(ln) <= 42)
+        if short_lines / len(lines) >= 0.6:
+            score += 0.25
+
+        # Section/header marker at the end of a block is a strong inversion signal.
+        heading_tail = re.search(r"\b(?:section|chapter)\b", lines[-1], flags=re.IGNORECASE)
+        numbered_tail = re.match(r"^\d+(?:\.\d+)*\s+", lines[-1])
+        if heading_tail or numbered_tail:
+            score += 0.45
+
+        # High uppercase abbreviation density across lines can indicate technical lists.
+        abbr_hits = 0
+        token_total = 0
+        for ln in lines:
+            tokens = re.findall(r"\b[\w\-/]+\b", ln)
+            token_total += len(tokens)
+            abbr_hits += sum(1 for t in tokens if re.match(r"^[A-Z]{2,}(?:-[A-Z0-9]{1,})+$", t))
+        if token_total > 0 and (abbr_hits / token_total) >= 0.2:
+            score += 0.2
+
+        return min(score, 1.0)
 
 
 def _levenshtein_distance(text_a: str, text_b: str) -> int:
@@ -489,6 +531,20 @@ class ContextualRefiner:
             logger.error(
                 f"[REFINER-TIMEOUT {request_id}] provider=openai elapsed={elapsed:.2f}s "
                 f"timeout={self.config.llm_timeout} endpoint={endpoint}"
+            )
+            return None
+        except requests.HTTPError as e:
+            elapsed = time.perf_counter() - t0
+            status = e.response.status_code if e.response is not None else "unknown"
+            body = ""
+            if e.response is not None:
+                try:
+                    body = (e.response.text or "")[:500]
+                except Exception:
+                    body = ""
+            logger.error(
+                f"[REFINER-ERROR {request_id}] provider=openai elapsed={elapsed:.2f}s "
+                f"status={status} error={e} body={body}"
             )
             return None
         except Exception as e:
@@ -744,15 +800,111 @@ class SemanticRefiner:
         Returns:
             RefinementResult with refinement status and metadata
         """
+        def _technical_token_ratio(text: str) -> float:
+            tokens = re.findall(r"\b[\w\-/]+\b", text)
+            if not tokens:
+                return 0.0
+
+            technical_hits = 0
+            for tok in tokens:
+                # Codes/IDs/part numbers/abbreviations are "technical tokens"
+                if re.match(r"^[A-Z]{2,}(?:-[A-Z0-9]{1,})+$", tok):
+                    technical_hits += 1
+                    continue
+                if re.match(r"^[A-Z]{2,}\d+[A-Z0-9-]*$", tok):
+                    technical_hits += 1
+                    continue
+                if re.match(r"^(?:P/N|SN|ID|ECU)$", tok):
+                    technical_hits += 1
+                    continue
+                if re.search(r"\d", tok) and re.search(r"[A-Za-z]", tok):
+                    technical_hits += 1
+                    continue
+
+            return technical_hits / len(tokens)
+
+        def _minimal_whitespace_punctuation_repair(text: str) -> str:
+            """Conservative cleanup only (no summarization/rephrasing)."""
+            out = text
+            # Normalize inner spacing (keep newlines for structure)
+            out = re.sub(r"[ \t]{2,}", " ", out)
+            # Remove spaces before punctuation
+            out = re.sub(r"\s+([.,;:!?])", r"\1", out)
+            # Normalize around hyphens used as separators (not touching code tokens)
+            out = re.sub(r"\s+-\s+", " - ", out)
+            # Trim trailing spaces per line
+            out = "\n".join(ln.rstrip() for ln in out.splitlines())
+            return out.strip()
+
         # Stage A: Diagnostic Triage
         corruption_score = self.scanner.calculate_corruption_score(
             raw_text,
             language_hint=self.config.language_hint,
         )
+        layout_disorder_score = self.scanner.calculate_layout_disorder_score(raw_text)
+        technical_token_ratio = _technical_token_ratio(raw_text)
 
         word_count = len(re.findall(r"\b\w+\b", raw_text))
         token_hits = self.validator.count_protected_token_hits(raw_text)
         technical_density = token_hits / word_count if word_count > 0 else 0.0
+
+        # R2: Distinguish layout disorder from OCR noise.
+        # If disorder is high, preserve verbatim and skip refinement.
+        if layout_disorder_score >= self.config.layout_disorder_block_threshold:
+            logger.info(
+                f"[SemanticRefiner] Layout disorder detected ({layout_disorder_score:.2f}) - "
+                "preserving verbatim text (no refinement)."
+            )
+            return RefinementResult(
+                original_text=raw_text,
+                refined_text=raw_text,
+                refinement_applied=False,
+                corruption_score=corruption_score,
+                edit_distance=0,
+                edit_ratio=0.0,
+                protected_tokens_preserved=True,
+                rejection_reason="Layout disorder detected",
+            )
+
+        # R2: Technical-density guardrail.
+        # For high corruption + technical-dense text, cap to conservative cleanup only.
+        if (
+            corruption_score >= self.config.high_corruption_threshold
+            and technical_token_ratio >= self.config.technical_no_summarize_threshold
+        ):
+            conservative = _minimal_whitespace_punctuation_repair(raw_text)
+            validation = self.validator.validate(raw_text, conservative)
+            if validation.is_valid and conservative != raw_text:
+                logger.info(
+                    "[SemanticRefiner] Applied conservative-only repair "
+                    f"(corruption={corruption_score:.2f}, technical_ratio={technical_token_ratio:.2f})"
+                )
+                return RefinementResult(
+                    original_text=raw_text,
+                    refined_text=conservative,
+                    refinement_applied=True,
+                    corruption_score=corruption_score,
+                    edit_distance=validation.edit_distance,
+                    edit_ratio=validation.edit_ratio,
+                    protected_tokens_preserved=validation.protected_tokens_preserved,
+                    rejection_reason=None,
+                    provider="conservative_guardrail",
+                    model="whitespace_punctuation_only",
+                )
+
+            logger.info(
+                "[SemanticRefiner] Conservative-only path produced no safe edit; preserving original"
+            )
+            return RefinementResult(
+                original_text=raw_text,
+                refined_text=raw_text,
+                refinement_applied=False,
+                corruption_score=corruption_score,
+                edit_distance=0,
+                edit_ratio=0.0,
+                protected_tokens_preserved=True,
+                rejection_reason="Conservative guardrail no-op",
+            )
 
         effective_threshold = self.config.min_refine_threshold
         if technical_density >= self.config.technical_density_trigger:
@@ -855,7 +1007,7 @@ def create_refiner(
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     threshold: float = 0.15,
-    max_edit: float = 0.15,
+    max_edit: float = DEFAULT_MAX_EDIT_RATIO,
     **kwargs,
 ) -> SemanticRefiner:
     """
