@@ -1,6 +1,6 @@
 # SOFTWARE REQUIREMENTS SPECIFICATION: Multimodal RAG Ingestion Engine (v2.4.1-stable)
 
-**Version:** v2.4.1-stable (PRODUCTION SPEC)
+**Version:** v2.5.0-dev (IN DEVELOPMENT) / v2.4.2-stable (CURRENT PRODUCTION)
 **Target Agent:** Cline (Python 3.10)
 **Output:** JSONL Canonical Schema + Asset Directory
 **Platform:** Apple Silicon (ARM64 Native)
@@ -15,6 +15,8 @@
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 2.5.0 | 2026-02-25 | System | Structural Diagnostic Router: three pre-flight byte-stream tests replace semantic-only routing |
+| 2.4.2 | 2026-02-25 | System | VisionCache model-awareness; visual_description top-level field; image_description_coverage QA gate |
 | 2.4.1 | 2026-01-18 | System | Updated schema_version to 2.4.1-stable; enforced metadata emission and digital OCR policy |
 | 2.3.0 | 2026-01-02 | System | Surya-OCR verwijderd, coördinatensysteem gedocumenteerd, Shadow Extraction aangescherpt, hiërarchiestandaard toegevoegd |
 | 2.2.1 | 2025-12-xx | System | Initial PDF spec |
@@ -396,6 +398,30 @@ Every line in `ingestion.jsonl` MUST validate against this schema. **No other ou
 | **QA-CHECK-03** | Verify `breadcrumb_path` depth matches `hierarchy.level` value. |
 | **QA-CHECK-04** | Verify all `bbox` values conform to REQ-COORD-01 (integers 0-1000). |
 | **QA-CHECK-05** | Verify no chunks have `modality: "image"` with missing `asset_ref`. |
+
+### 9.3 Structural Diagnostic Requirements (v2.5.0)
+
+These requirements formalise the pre-flight byte-stream health tests introduced in v2.5.0. They run **before** Docling processes any page and drive extraction pathway decisions independently of the semantic content profile.
+
+| Requirement ID | Requirement |
+|----------------|-------------|
+| **REQ-STRUCT-01** | The `DocumentDiagnosticEngine._perform_physical_check` MUST compute a **line-break health score** on 3–5 sample pages: `words_per_newline = word_count / max(newline_count, 1)`. If the average ratio across sample pages exceeds 50, the flag `has_flat_text_corruption = True` MUST be set on `PhysicalCheckResult`. |
+| **REQ-STRUCT-02** | The engine MUST perform a **visual-digital delta check** on one representative page (default: page 10 or the median page). Render the page to a PIL image, run Tesseract OCR, and compute the word-set Jaccard overlap with the PyMuPDF text layer. If overlap < 0.50 AND the PyMuPDF text layer is non-empty (> 50 chars), the flag `has_encoding_corruption = True` MUST be set. |
+| **REQ-STRUCT-03** | The engine SHOULD capture the MuPDF path-syntax error count via `fitz.TOOLS.mupdf_warnings()` and store it as `geometry_error_rate` (errors per page) in `PhysicalCheckResult`. This field is informational only and does not drive routing decisions. |
+| **REQ-STRUCT-04** | When `has_flat_text_corruption = True`, the `BatchProcessor` MUST run the **Flat Code OCR Rescue** post-processing step after page chunks are assembled, for all semantic profiles. |
+| **REQ-STRUCT-05** | When `has_encoding_corruption = True`, the `BatchProcessor` MUST upgrade the extraction pathway to forced full OCR, equivalent to `force_ocr = True`. |
+| **REQ-STRUCT-06** | Structural flags MUST be logged at INFO level with the pre-flight results: line-break ratio, delta overlap score, and geometry error rate. |
+| **REQ-STRUCT-07** | The structural diagnostic test MUST complete within 2 seconds for documents up to 300 pages (excluding the visual-delta Tesseract pass which is bounded to 1 page). |
+
+**Flat Code OCR Rescue (REQ-STRUCT-04 implementation contract):**
+
+| Sub-requirement | Detail |
+|-----------------|--------|
+| **Trigger condition** | `chunk_type == CODE` AND `"\n" not in content` AND `len(content) > 120` |
+| **Crop source** | `page_image` already rendered in memory for the current batch page |
+| **OCR engine** | Tesseract (psm 6 — uniform block of text) at 300 DPI crop |
+| **Acceptance condition** | OCR result has ≥ 2 newlines AND passes `_looks_like_code_text()` |
+| **Fallback** | If OCR fails or produces no improvement, keep original content unchanged |
 
 ### 9.2 Engineering Imperatives
 

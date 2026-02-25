@@ -4,6 +4,69 @@ All notable changes to this project will be documented in this file. This projec
 
 > **Versioning note:** Historical entries before the `v2.4.x` line used an internal `v18.x` milestone scheme during rapid iteration and test/fix cycles. Only stable or decision-worthy checkpoints were recorded, so intermediate builds are intentionally omitted. From `v2.4` onward, entries follow the current public semantic line.
 
+## [v2.5.0] - TBD (in development)
+
+### Added
+- **Structural Diagnostic Router** (`document_diagnostic.py`): Three hardware-level
+  pathology tests run on 3–5 sample pages before any extraction begins:
+  - **Test 1 — Line-Break Health:** Measures words-per-newline ratio. A ratio > 50
+    consistently across pages means the PDF generator stripped all newlines from the
+    character stream, corrupting code blocks and structured text.
+    Flags: `has_flat_text_corruption = True` → triggers Flat Code OCR Rescue.
+  - **Test 2 — Visual-Digital Delta:** Renders one page as image, runs Tesseract,
+    compares word-set overlap with the PyMuPDF text layer. Overlap < 50% means the
+    digital text layer is encoding-garbage (CIDFont, broken character maps) and
+    cannot be trusted at all.
+    Flags: `has_encoding_corruption = True` → forces full OCR pathway.
+  - **Test 3 — Geometry Error Rate:** Captures MuPDF path-syntax error count per page.
+    Signals a broken PDF compiler (cosmetic for extraction, but useful for risk
+    logging and downstream triage).
+    Adds: `geometry_error_rate` to `PhysicalCheckResult`.
+- **Flat Code OCR Rescue** (`batch_processor.py`): Post-processing step for all
+  profiles (not just `scanned_degraded`) that detects CODE chunks with suspiciously
+  flat content (no `\n`, length > 120 chars), renders the page crop via PyMuPDF, runs
+  Tesseract on the crop, and replaces the content if the OCR result is better
+  structured. Directly fixes the Kimothi-class broken-PDF-generator problem.
+- **`_looks_like_code_text` flat-code extension**: Single-line branch now searches
+  for Python keywords anywhere in a long flat string (not just at `^` anchors),
+  catching code that had its newlines stripped by a broken PDF generator.
+
+### Changed
+- `PhysicalCheckResult` extended with `has_flat_text_corruption: bool`,
+  `has_encoding_corruption: bool`, `geometry_error_rate: float`.
+- OCR pathway decision in `batch_processor.py` now reads `has_encoding_corruption`
+  in addition to the existing `is_likely_scan` flag.
+
+---
+
+## [v2.4.2] - 2026-02-25 stable
+
+### Fixed
+- **VLM cache silent reuse (critical):** `VisionCache` is now model-aware. At load
+  time it reads the `_model` key embedded in the cache JSON. If the configured model
+  differs from the cached model, the stale entries are discarded and fresh VLM calls
+  are made. An INFO-level log message explains the decision so the user always knows
+  whether VLM is being called or served from cache.
+- **`visual_description` invisible to downstream tools:** `IngestionChunk` now exposes
+  `visual_description` as a Pydantic `@computed_field`, surfacing `metadata.visual_description`
+  at the root level of every serialised image chunk. Tools reading
+  `chunk["visual_description"]` no longer get `None`.
+- **Embedding text duplication:** `to_embedding_text()` no longer appends
+  `[Visual: …]` after `content` for image chunks. Since `content` for image chunks
+  already IS the VLM description, appending it a second time was inflating embedding
+  vectors with no benefit.
+
+### Added
+- **`image_description_coverage` QA gate** (`qa_semantic_fidelity.py`): Explicit
+  metric counting image chunks that carry a non-null visual description. Gate fails
+  if coverage < 80 %, making VLM description regressions automatically detectable.
+
+### Changed
+- Version bumped `2.4.1-stable` → `2.4.2-stable` in `version.py` and `pyproject.toml`.
+- Docs: historical planning artefacts moved from `docs/` root to `docs/archive/`.
+
+---
+
 ## [v2.4.1] - 2026-01-18 stable
 
 ### Changed

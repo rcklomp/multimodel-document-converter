@@ -1,8 +1,10 @@
 # 🏗️ Universal Multi-Format RAG Pipeline Architecture
 
-**Version:** v2.4.1-stable  
-**Date:** January 2026  
-**Status:** ACTIVE BASELINE  
+**Version:** v2.5.0-dev
+**Date:** February 2026
+**Status:** IN DEVELOPMENT (v2.4.2-stable is the current production baseline)
+**Policy Update (v2.5.0):** PDF extraction pathway is now determined by **structural integrity tests** on the byte-stream, not by semantic content type. Three pre-flight checks (line-break health, visual-digital delta, geometry error rate) run before extraction and drive pathway decisions independently of the semantic profile. See `docs/DECISIONS.md` — "Structural Pathology over Semantic Profiling".
+**Policy Update (v2.4.2-stable):** `IngestionChunk.visual_description` is now a top-level computed field in the serialised JSON. `VisionCache` is model-aware and discards stale entries when the VLM model changes.
 **Policy Update (v2.4.1-stable):** Native-digital PDFs bypass the OCR cascade (Docling text layer + recovery only). Layout-aware OCR (Tesseract/Doctr) is reserved for scanned/unknown modalities. Gap-fill recovery on academic whitepapers uses a 60-character minimum block to fill low-coverage pages with strict deduplication and noise filters.
 
 ---
@@ -203,6 +205,57 @@ class UniversalDocument:
 2. **Quality Embedded**: Confidence scores enable intelligent routing
 3. **OCR Ready**: `raw_image` fields allow deferred OCR processing
 4. **Coordinate Normalized**: All bboxes in 0-1000 range (SRS REQ-COORD-01)
+
+---
+
+## 3b. Structural Diagnostic Router (v2.5.0)
+
+The extraction pathway is determined by **two orthogonal axes**: structural integrity of the PDF byte-stream, and semantic content type. The structural integrity check runs in `_perform_physical_check` before Docling processes a single page.
+
+### 3b.1 Pre-flight Pathology Tests
+
+| Test | Method | Cost | Output flag |
+|------|--------|------|-------------|
+| **Line-break health** | `words / newline_count` on 3–5 sample pages. Ratio > 50 consistently → PDF generator stripped newlines. | ~1 ms/page | `has_flat_text_corruption` |
+| **Visual-digital delta** | Render page 10 → Tesseract OCR → word-set overlap with PyMuPDF text. Overlap < 50 % → encoding-corrupt text layer. | ~300 ms (1 page only) | `has_encoding_corruption` |
+| **Geometry error rate** | Count MuPDF path-syntax errors via `fitz.TOOLS.mupdf_warnings()` on open. | ~0 ms | `geometry_error_rate` (float, logging only) |
+
+### 3b.2 Routing Decision Matrix
+
+```
+                     STRUCTURAL INTEGRITY (pre-flight)
+                     ┌────────────┬─────────────┬───────────────┐
+                     │  HEALTHY   │ FLAT TEXT   │   ENCODING    │
+                     │            │  CORRUPTED  │   CORRUPTED   │
+  ───────────────────┼────────────┼─────────────┼───────────────┤
+  S  native_digital  │ Docling    │ Docling +   │ Force full    │
+  E                  │ direct     │ flat-code   │ OCR pathway   │
+  M                  │            │ OCR rescue  │               │
+  A  ────────────────┼────────────┼─────────────┼───────────────┤
+  N  scanned /       │ Nuclear    │ Nuclear +   │ Force full    │
+  T  image_heavy     │ OCR        │ flat rescue │ OCR pathway   │
+  I  ────────────────┴────────────┴─────────────┴───────────────┘
+  C
+    ↑ determined by DocumentDiagnosticEngine._perform_physical_check()
+    ↑ (existing scan detection)
+```
+
+### 3b.3 Flat Code OCR Rescue (activates on `has_flat_text_corruption`)
+
+Post-processing step that runs for **all profiles** after page chunks are assembled:
+
+1. Scan page chunks for `chunk_type == CODE` where `"\n" not in content` and `len(content) > 120`.
+2. Use the chunk's `spatial.bbox` to crop the rendered `page_image` (already in memory).
+3. Run Tesseract on the crop at 300 DPI.
+4. If OCR result has ≥ 2 newlines and passes `_looks_like_code_text`, replace content.
+
+This directly fixes the "Kimothi class" problem: born-digital PDFs from broken PDF generators that strip all line breaks from code blocks.
+
+### 3b.4 Separation of Concerns
+
+- **Structural integrity tests** → drive extraction *pathway* (how to extract).
+- **Semantic profile** (`AcademicWhitepaperProfile`, `TechnicalManualProfile`, etc.) → drive VLM *behaviour* and sensitivity (what to describe, how aggressively to capture images).
+- These are **orthogonal** — a `technical_manual` profile can have any structural health category.
 
 ---
 

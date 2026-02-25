@@ -27,6 +27,46 @@
 - Forcing digital_magazine as a “safe” fallback for scans.
 - Treating metadata as ground-truth instead of diagnostic evidence.
 
+## Structural Pathology over Semantic Profiling (v2.5.0)
+
+**Decision:** PDF extraction pathway (use digital text / flat-code OCR rescue / force full OCR) is determined by **structural integrity tests** on the PDF byte-stream, not by the semantic content type (e.g., "technical_manual", "academic_whitepaper").
+
+**Rationale:**
+- Semantic content type has zero correlation with technical PDF integrity. A technical manual can be a perfectly structured PDF or a newline-stripped disaster from a broken PDF generator (e.g., Kimothi 2025, Python Distilled). Routing on semantic labels causes silent quality failures.
+- Three structural tests are sufficient to classify PDF health before any extraction begins:
+  1. **Line-break health** (words/`\n` ratio on sample pages) — free, < 1 ms/page.
+  2. **Visual-digital delta** (PyMuPDF text vs Tesseract OCR word-set overlap on one page) — definitive, ~300 ms.
+  3. **Geometry error rate** (MuPDF path-syntax error count) — logging and risk signal only.
+- Semantic profiles continue to govern VLM prompt context, extraction sensitivity, and image thresholds — they remain useful for *what to describe*, not for *how to extract*.
+
+**The two-axis model:**
+```
+                  STRUCTURAL INTEGRITY
+                  Healthy  │ Flat text  │ Encoding
+                           │ corrupted  │ corrupted
+  ────────────────┼──────────┼────────────┼───────────
+  S digital       │ Docling  │ +flat code │ force OCR
+  E               │ direct   │ OCR rescue │
+  M ────────────────┼──────────┼────────────┼───────────
+  A scanned       │ nuclear  │ nuclear +  │ force OCR
+  N               │ OCR      │ flat rescue│
+  T ────────────────┴──────────┴────────────┴───────────
+  I
+  C
+```
+
+**Operationalization:**
+- `_perform_physical_check` in `document_diagnostic.py` runs the three tests.
+- Flags `has_flat_text_corruption` and `has_encoding_corruption` added to `PhysicalCheckResult`.
+- `batch_processor.py` reads these flags to activate flat-code OCR rescue and/or upgrade to forced OCR.
+- Semantic profile selection is unaffected; it runs in parallel and drives VLM/sensitivity settings only.
+
+**Anti-patterns now explicitly forbidden:**
+- Using `profile_type == "technical_manual"` to decide whether OCR is needed.
+- Assuming `native_digital` modality means all text is correctly encoded and formatted.
+
+---
+
 ## Chunk Size Governance
 **Decision:** Chunk length is governed per profile and verified with acceptance metrics; no universal hard min/max.
 
