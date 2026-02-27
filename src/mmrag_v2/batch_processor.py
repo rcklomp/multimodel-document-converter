@@ -2490,6 +2490,7 @@ class BatchProcessor:
             all_chunks = self._sanitize_technical_manual_final(all_chunks)
         all_chunks = self._apply_oversize_breaker(all_chunks, max_chars=1500)
         all_chunks = self._filter_no_visual_images(all_chunks)
+        all_chunks = self._filter_repetition_garbage(all_chunks)
         all_chunks = self._apply_table_recovery_highlander_dedup(all_chunks)
 
         # Write aggregated output to master JSONL with deduplication
@@ -2987,6 +2988,9 @@ class BatchProcessor:
             return text
         import re
 
+        # Pass 1: soft hyphen (U+00AD) at line break — join WITHOUT hyphen.
+        text = re.sub(r"([A-Za-z0-9])\xad\s*\n\s*([a-z])", r"\1\2", text)
+        # Pass 2: hard hyphen at line break — join WITH hyphen preserved.
         return re.sub(r"([A-Za-z0-9])-\s*\n\s*([a-z])", r"\1-\2", text)
 
     def _remove_infix_list_numbering(self, text: str) -> str:
@@ -3641,6 +3645,124 @@ class BatchProcessor:
 
         return out
 
+    # Common English word suffixes that can appear at the START of a chunk when a
+    # two-column PDF splits a hyphenated word across a column boundary (Packt books).
+    # Only suffixes in this whitelist trigger cross-chunk rejoining (conservative).
+    _WORD_FRAGMENT_SUFFIXES: frozenset = frozenset({
+        "ment", "ments", "ness", "tion", "tions", "sion", "sions",
+        "ing", "ings", "ated", "ates", "ized", "izes",
+        "ance", "ences", "ence", "ances", "ible", "able",
+        "ward", "wards", "wise", "ure", "ures", "ive", "ives",
+        "ary", "ory", "ery", "nge", "uce", "rames", "ted", "ent",
+        "ers", "ler", "ding", "king", "ling", "ring", "sing", "ting",
+        "ched", "shed", "ies", "ied",
+    })
+
+    def _rejoin_leading_word_fragments(
+        self,
+        chunks: List[IngestionChunk],
+    ) -> List[IngestionChunk]:
+        """
+        Rejoin cross-chunk word fragments caused by Packt two-column hyphenation.
+
+        When Docling extracts two-column PDFs, a word split at a column break
+        sometimes lands in two separate chunks:
+          chunk[i]   ends: "... introd"    (no terminal punctuation, ends lowercase)
+          chunk[i+1] starts: "uce to..."   (≤6 lowercase chars in whitelist)
+
+        Guards (ALL must pass):
+        1. chunk[i]   is TEXT, non-code, ends with a lowercase letter (no terminal punct).
+        2. chunk[i+1] is TEXT, non-code, on the same page as chunk[i].
+        3. Leading token of chunk[i+1] is ≤6 lowercase chars AND in suffix whitelist.
+        4. chunk[i+1] has more content beyond the leading fragment (≥2 tokens total).
+        """
+        import re
+
+        def _is_code(ch: IngestionChunk) -> bool:
+            try:
+                return (
+                    ch.metadata.chunk_type == ChunkType.CODE
+                    or ch.metadata.content_classification == "code"
+                )
+            except Exception:
+                return False
+
+        _ends_lower = re.compile(r"[a-z]$")
+        result: List[IngestionChunk] = []
+        rejoined = 0
+        i = 0
+
+        while i < len(chunks):
+            cur = chunks[i]
+            if (
+                i == len(chunks) - 1
+                or cur.modality != Modality.TEXT
+                or _is_code(cur)
+                or not cur.content
+            ):
+                result.append(cur)
+                i += 1
+                continue
+
+            nxt = chunks[i + 1]
+            if (
+                nxt.modality != Modality.TEXT
+                or _is_code(nxt)
+                or not nxt.content
+            ):
+                result.append(cur)
+                i += 1
+                continue
+
+            try:
+                same_page = cur.metadata.page_number == nxt.metadata.page_number
+            except Exception:
+                same_page = False
+
+            if not same_page or not _ends_lower.search(cur.content.rstrip()):
+                result.append(cur)
+                i += 1
+                continue
+
+            nxt_tokens = nxt.content.lstrip().split()
+            if len(nxt_tokens) < 2:
+                result.append(cur)
+                i += 1
+                continue
+
+            leading_alpha = nxt_tokens[0].rstrip(".,;:!?")
+            if not (
+                1 <= len(leading_alpha) <= 6
+                and leading_alpha.islower()
+                and leading_alpha in self._WORD_FRAGMENT_SUFFIXES
+            ):
+                result.append(cur)
+                i += 1
+                continue
+
+            # All guards passed: append fragment directly — no space, continues the word.
+            cur.content = cur.content.rstrip() + nxt.content.lstrip()
+            try:
+                if (
+                    cur.semantic_context
+                    and nxt.semantic_context
+                    and nxt.semantic_context.next_text_snippet
+                ):
+                    cur.semantic_context.next_text_snippet = (
+                        nxt.semantic_context.next_text_snippet
+                    )
+            except Exception:
+                pass
+            rejoined += 1
+            i += 2
+            result.append(cur)
+
+        if rejoined:
+            logger.info(
+                f"[FRAGMENT-REJOIN] Rejoined {rejoined} cross-chunk word fragments"
+            )
+        return result
+
     def _apply_technical_manual_hygiene(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
         """
         Technical-manual-specific cleanup to improve RAG quality:
@@ -3727,6 +3849,9 @@ class BatchProcessor:
             logger.info(
                 f"[TECHMANUAL-HYGIENE] Removed infix list numbering in {infix_fixed_chunks} chunks"
             )
+
+        # Step A.5: Rejoin cross-chunk word fragments from two-column column-break hyphenation.
+        chunks = self._rejoin_leading_word_fragments(chunks)
 
         # Step B: join broken chunk boundaries (conservative)
         joined: List[IngestionChunk] = []
@@ -4242,6 +4367,63 @@ class BatchProcessor:
             )
         return out
 
+    def _filter_repetition_garbage(
+        self,
+        chunks: List[IngestionChunk],
+    ) -> List[IngestionChunk]:
+        """
+        Remove TEXT chunks that are token-repetition garbage from broken UI/callout
+        extraction — e.g. "down: down: down: down:" or "today: today: today:".
+
+        A short token (2-15 chars) repeated 5+ times with only separator characters
+        (': ', ', ', '; ', ' ') between repetitions is classified as garbage.
+        CODE and TABLE chunks are never touched.
+        """
+        import re
+
+        _SEP = r"(?::\s+|,\s+|;\s+|\s+)"
+        _TOKEN = r"[A-Za-z0-9'\-]{2,15}"
+        _REPETITION_RE = re.compile(
+            r"^(?P<tok>" + _TOKEN + r")" + _SEP +
+            r"(?P=tok)" + _SEP + r"(?P=tok)" + _SEP +
+            r"(?P=tok)" + _SEP + r"(?P=tok)",
+            re.IGNORECASE,
+        )
+
+        before = len(chunks)
+        out: List[IngestionChunk] = []
+        removed = 0
+
+        for ch in chunks:
+            if ch.modality != Modality.TEXT:
+                out.append(ch)
+                continue
+            try:
+                if (
+                    ch.metadata.chunk_type == ChunkType.CODE
+                    or ch.metadata.content_classification == "code"
+                ):
+                    out.append(ch)
+                    continue
+            except Exception:
+                pass
+            txt = (ch.content or "").strip()
+            if txt and _REPETITION_RE.search(txt):
+                logger.info(
+                    f"[REPETITION-FILTER] Dropping garbage-repetition chunk "
+                    f"p{ch.metadata.page_number} '{txt[:60]}'"
+                )
+                removed += 1
+                continue
+            out.append(ch)
+
+        if removed:
+            logger.info(
+                f"[REPETITION-FILTER] Removed {removed} token-repetition garbage chunks "
+                f"({before} → {len(out)})"
+            )
+        return out
+
     def _apply_oversize_breaker(
         self,
         chunks: List[IngestionChunk],
@@ -4363,10 +4545,30 @@ class BatchProcessor:
             return True
 
         lines = [ln for ln in t.splitlines() if ln.strip()]
+
+        # Fix 2: Index-entry guard for >>> used as cross-reference symbol in book indexes.
+        # Pattern: content after >>> has no Python operators (=, (, [, {) before the first
+        # page-number reference (comma + 2-4 digits, optionally a range like 50-51).
+        # Real REPL lines contain =, (, [, or { early in the expression; index entries don't.
+        _idx_re = re.compile(
+            r">>>\s+\S[^=(\[{]*(?:,\s*\d{1,4}(?:-\d{1,4})?)"
+        )
+
+        def _prompt_lines_are_index(prompt_lines: list) -> bool:
+            """Return True when ALL >>> lines look like index cross-references."""
+            if not prompt_lines:
+                return False
+            index_count = sum(1 for ln in prompt_lines if _idx_re.search(ln))
+            return index_count == len(prompt_lines)
+
         if len(lines) < 2:
             # Only treat REPL prompts as code when they appear as actual prompts,
             # not when they're merely mentioned in prose (e.g., "after the >>> line").
-            if re.search(r"(?m)^\s*>>>\s", t) or re.search(r"(?m)^\s*\.\.\.\s", t):
+            prompt_lines = re.findall(r"(?m)^\s*>>>\s.*$", t)
+            if prompt_lines:
+                if not _prompt_lines_are_index(prompt_lines):
+                    return True
+            elif re.search(r"(?m)^\s*\.\.\.\s", t):
                 return True
             if re.search(r"^\s*(import|from)\b.+\s:\s+[A-Z]", t):
                 return False
@@ -4392,13 +4594,28 @@ class BatchProcessor:
                 ))
                 if kw_hits >= 2 and re.search(r"[=\(\)\[\]\{\}:.,]", t):
                     return True
+            # Fix 4a (single-line): snake_case variable = function_call(...).
+            if re.search(r"^\s*[a-z_][a-z_\d]*\s*=\s*[A-Za-z_][\w.]*\(", t):
+                return True
+            # Fix 4b (single-line): dict literal opening {"key": ...}.
+            if re.search(r'^\s*\{["\'][\w\s]+["\']\s*:', t):
+                return True
+            # Fix 4c (single-line): shebang line.
+            if re.search(r"^#!", t):
+                return True
             return False
 
         indented = sum(1 for ln in lines if ln.startswith(("    ", "\t")))
         if indented / max(len(lines), 1) >= 0.3:
             return True
 
-        if any(ln.lstrip().startswith((">>>", "...")) for ln in lines):
+        # Fix 2 (multi-line): guard >>> lines that are index cross-references.
+        prompt_lines_ml = [ln for ln in lines if ln.lstrip().startswith(">>>")]
+        has_continuation = any(ln.lstrip().startswith("...") for ln in lines)
+        if prompt_lines_ml:
+            if not _prompt_lines_are_index(prompt_lines_ml):
+                return True
+        elif has_continuation:
             return True
 
         explanatory_import_lines = sum(
@@ -4417,6 +4634,63 @@ class BatchProcessor:
             r"(?m)^\s*import\s+[A-Za-z_][\w\.]*(\s*,\s*[A-Za-z_][\w\.]*)*(\s+as\s+[A-Za-z_][\w]*)?\s*$",
             t,
         ):
+            return True
+
+        # Fix 4a (multi-line): snake_case assignment + function call.
+        # Requires at least one other code-like line to avoid prose false positives.
+        snake_assign = sum(
+            1 for ln in lines
+            if re.search(r"^\s*[a-z_][a-z_\d]*\s*=\s*[A-Za-z_][\w.]*\(", ln)
+        )
+        if snake_assign >= 1 and len(lines) >= 2:
+            other_code = sum(
+                1 for ln in lines
+                if re.search(
+                    r"^\s*(import|from|def|class|return|if|for|while|with|try|except"
+                    r"|elif|else|raise|yield|pass|break|continue|print\(|assert)\b",
+                    ln,
+                )
+                or ln.startswith(("    ", "\t"))
+                or re.search(r"[=\(\)\[\]\{\}]", ln)
+            )
+            if other_code >= 1:
+                return True
+
+        # Fix 4b (multi-line): dict literal block (≥2 "key": value lines, ≥50% of chunk).
+        dict_entry_lines = sum(
+            1 for ln in lines
+            if re.search(r'^\s*["\'][\w\s]+["\']\s*:\s*\S', ln)
+            or re.search(r'^\s*\{["\'][\w\s]+["\']\s*:', ln)
+        )
+        if dict_entry_lines >= 2 and dict_entry_lines / max(len(lines), 1) >= 0.5:
+            return True
+
+        # Fix 4c (multi-line): comment-first code block ("# filename.py" or shebang).
+        if lines and re.search(r"^#\s*[\w./]+\.py\b|^#!\s*/", lines[0].lstrip()):
+            subsequent = sum(
+                1 for ln in lines[1:]
+                if re.search(
+                    r"^\s*(import|from|def|class|return|if|for|while|with"
+                    r"|try|except|elif|else|raise|async)\b",
+                    ln,
+                )
+                or ln.startswith(("    ", "\t"))
+            )
+            if subsequent >= 1:
+                return True
+
+        # Fix 4d (multi-line): general comment + structural code lines in same chunk.
+        comment_lines = sum(1 for ln in lines if re.search(r"^\s*#\s+\S", ln))
+        structural_lines = sum(
+            1 for ln in lines
+            if re.search(
+                r"^\s*(import|from|def|class|return|if|for|while|with"
+                r"|try|except|elif|else|raise|yield|pass|async)\b",
+                ln,
+            )
+            or ln.startswith(("    ", "\t"))
+        )
+        if comment_lines >= 1 and structural_lines >= 2:
             return True
 
         return False
