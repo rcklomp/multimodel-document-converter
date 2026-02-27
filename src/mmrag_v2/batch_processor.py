@@ -3260,7 +3260,8 @@ class BatchProcessor:
                 1
                 for ln in lines
                 if (
-                    len(re.findall(r"[A-Za-z]{2,}", ln)) >= 6
+                    not is_code_line(ln)
+                    and len(re.findall(r"[A-Za-z]{2,}", ln)) >= 6
                     and re.search(r"[:.;!?]$", ln.strip()) is not None
                 )
                 or (

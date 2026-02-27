@@ -375,3 +375,70 @@ class TestLooksLikeCodeTextEnhanced:
         assert bp._looks_like_code_text(
             "# This book uses Python 3.10 and requires pip install."
         ) is False
+
+
+# ===========================================================================
+# Fix 5 — _maybe_demote_false_code_chunk: prose_lines guard
+# ===========================================================================
+
+class TestMaybeDemoteFalseCodeChunkProseGuard:
+    """
+    prose_lines must NOT count lines that is_code_line() already identifies as code.
+    A def/import line ending in punctuation (e.g. trailing ...) must remain CODE.
+    """
+
+    def test_def_with_trailing_ellipsis_stays_code(self, tmp_path):
+        """
+        'def connect(hostname, port, timeout=300): # Function body ...'
+        Previously counted as both code_line AND prose_line → wrongly demoted.
+        After fix: is_code_line guard prevents prose count → stays CODE.
+        """
+        bp = _bp(tmp_path)
+        chunk = _text(
+            "def connect(hostname, port, timeout=300): # Function body ...",
+            chunk_type=ChunkType.CODE,
+            content_classification="code",
+        )
+        # Simulate what _apply_technical_manual_hygiene does: mark as CODE, then
+        # call the demotion guard.  We call the guard directly.
+        from mmrag_v2.schema.ingestion_schema import ChunkType as CT
+        chunk.metadata.chunk_type = CT.CODE
+        bp._maybe_demote_false_code_chunk(chunk)
+        assert chunk.metadata.chunk_type == CT.CODE, (
+            "def line with trailing '...' must NOT be demoted to paragraph"
+        )
+
+    def test_import_statement_alone_is_demoted(self, tmp_path):
+        """
+        A standalone import line with no other code context is correctly demoted
+        (existing behaviour that must be preserved).
+        """
+        bp = _bp(tmp_path)
+        chunk = _text(
+            "import os",
+            chunk_type=ChunkType.CODE,
+            content_classification="code",
+        )
+        from mmrag_v2.schema.ingestion_schema import ChunkType as CT
+        chunk.metadata.chunk_type = CT.CODE
+        bp._maybe_demote_false_code_chunk(chunk)
+        assert chunk.metadata.chunk_type != CT.CODE, (
+            "Standalone import line should be demoted to paragraph"
+        )
+
+    def test_genuine_prose_with_punctuation_is_demoted(self, tmp_path):
+        """
+        A real prose sentence classified as code by accident must be demoted.
+        """
+        bp = _bp(tmp_path)
+        chunk = _text(
+            "The connect function establishes a TCP connection to the remote host.",
+            chunk_type=ChunkType.CODE,
+            content_classification="code",
+        )
+        from mmrag_v2.schema.ingestion_schema import ChunkType as CT
+        chunk.metadata.chunk_type = CT.CODE
+        bp._maybe_demote_false_code_chunk(chunk)
+        assert chunk.metadata.chunk_type != CT.CODE, (
+            "Prose sentence must be demoted back to paragraph"
+        )
