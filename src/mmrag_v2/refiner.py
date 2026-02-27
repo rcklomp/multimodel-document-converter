@@ -108,7 +108,7 @@ PROTECTED_PATTERNS: List[str] = [
     r"\b[A-Z]{2,}-\d{2,}[A-Z0-9-]*\b",  # ABC-123, ECU-001-A
     r"\b[A-Z]{2,}\d{2,}[A-Z0-9-]*\b",  # ABC123, ECU001A
     r"P/N:?\s*\S+",  # P/N: 12345 or P/N:ABC-123
-    r"ECU-\S+",  # ECU-001-A
+    r"ECU-[A-Z0-9-]+",  # ECU-001-A (word chars + hyphens only, no trailing punctuation)
     r"SN:?\s*\S+",  # SN: 12345 or SN:ABC123
     r"ID:?\s*\S+",  # ID: 12345
     r"https?://[^\s)\\]\\}>;,]+",  # URLs (exclude trailing punctuation)

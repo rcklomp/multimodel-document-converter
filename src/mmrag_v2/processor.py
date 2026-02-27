@@ -459,7 +459,7 @@ class V2DocumentProcessor:
         split_x = None
 
         # Only try split when we have enough evidence.
-        if len(with_bbox) >= 6:
+        if len(with_bbox) >= 2:
             x_centers = sorted((r["bbox"][0] + r["bbox"][2]) / 2.0 for r in with_bbox)
             mid = len(x_centers) // 2
             if mid > 0:
@@ -467,7 +467,7 @@ class V2DocumentProcessor:
                 left = [r for r in with_bbox if ((r["bbox"][0] + r["bbox"][2]) / 2.0) <= split_x]
                 right = [r for r in with_bbox if ((r["bbox"][0] + r["bbox"][2]) / 2.0) > split_x]
 
-                if len(left) >= 3 and len(right) >= 3:
+                if len(left) >= 1 and len(right) >= 1:
                     left_max = max(r["bbox"][2] for r in left)
                     right_min = min(r["bbox"][0] for r in right)
                     gap = right_min - left_max
