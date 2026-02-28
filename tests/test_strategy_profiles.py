@@ -513,3 +513,126 @@ class TestIntegrationSmoke:
 
         # Should fallback to digital for safety
         assert isinstance(profile, DigitalMagazineProfile)
+
+
+# ============================================================================
+# EDITORIAL TECHNICAL BOOK CLASSIFICATION TESTS
+# ============================================================================
+
+
+class TestEditorialTechBookClassification:
+    """
+    Verify that digital editorial books with low image density are routed to
+    TechnicalManualProfile rather than DigitalMagazineProfile.
+
+    Root cause: Python coding books (Fluent Python, Python Cookbook, etc.) contain
+    code screenshots on many pages. The domain detector labels them 'editorial'
+    because the diagnostic heuristics see images. But they are NOT magazines —
+    magazines require high image density (0.5+ images/page).
+
+    The fix adds 'is_editorial_tech_book' to _score_technical_manual:
+      editorial + digital + image_density < 0.5 + page_count > 100 → tech book.
+    """
+
+    def _make_features(
+        self,
+        text_density=840,
+        image_density=0.10,
+        median_dim=1353,
+        page_count=365,
+        domain="editorial",
+        is_scan=False,
+    ):
+        from mmrag_v2.orchestration.profile_classifier import (
+            ProfileClassifier,
+            ClassificationFeatures,
+        )
+        return ClassificationFeatures(
+            text_density=text_density,
+            has_extractable_text=True,
+            image_density=image_density,
+            median_dim=median_dim,
+            image_count=int(image_density * 20),
+            page_count=page_count,
+            is_scan=is_scan,
+            scan_confidence=0.0,
+            domain=domain,
+            modality="native_digital",
+        )
+
+    def _classify(self, **kw):
+        from mmrag_v2.orchestration.profile_classifier import (
+            ProfileClassifier,
+            ProfileType,
+        )
+        clf = ProfileClassifier()
+        f = self._make_features(**kw)
+        tm = clf._score_technical_manual(f)
+        dm = clf._score_digital_magazine(f)
+        aw = clf._score_academic_whitepaper(f)
+        best = max([tm, dm, aw], key=lambda s: s.score * s.confidence)
+        return best.profile_type
+
+    def test_python_cookbook_profile(self):
+        """Python Cookbook (low img density, many pages) → technical_manual."""
+        from mmrag_v2.orchestration.profile_classifier import ProfileType
+        result = self._classify(
+            text_density=495, image_density=0.10, median_dim=1920, page_count=477
+        )
+        assert result == ProfileType.TECHNICAL_MANUAL
+
+    def test_fluent_python_profile(self):
+        """Fluent Python (moderate img density, many pages, high text) → technical_manual."""
+        from mmrag_v2.orchestration.profile_classifier import ProfileType
+        result = self._classify(
+            text_density=2750, image_density=0.20, median_dim=8853, page_count=766
+        )
+        assert result == ProfileType.TECHNICAL_MANUAL
+
+    def test_arcgis_python_profile(self):
+        """ArcGIS Python Cookbook (very low img density, many pages) → technical_manual."""
+        from mmrag_v2.orchestration.profile_classifier import ProfileType
+        result = self._classify(
+            text_density=1353, image_density=0.05, median_dim=1650, page_count=366
+        )
+        assert result == ProfileType.TECHNICAL_MANUAL
+
+    def test_devlin_llm_agents_profile(self):
+        """Devlin LLM Agents book → technical_manual."""
+        from mmrag_v2.orchestration.profile_classifier import ProfileType
+        result = self._classify(
+            text_density=840, image_density=0.10, median_dim=1353, page_count=365
+        )
+        assert result == ProfileType.TECHNICAL_MANUAL
+
+    def test_bourne_rag_profile(self):
+        """Bourne RAG book → technical_manual."""
+        from mmrag_v2.orchestration.profile_classifier import ProfileType
+        result = self._classify(
+            text_density=1631, image_density=0.10, median_dim=2775, page_count=346
+        )
+        assert result == ProfileType.TECHNICAL_MANUAL
+
+    def test_real_magazine_still_digital_magazine(self):
+        """A real magazine (high img density, 80 pages) → digital_magazine (no regression)."""
+        from mmrag_v2.orchestration.profile_classifier import ProfileType
+        result = self._classify(
+            text_density=900, image_density=1.0, median_dim=500, page_count=80
+        )
+        assert result == ProfileType.DIGITAL_MAGAZINE
+
+    def test_short_editorial_digital_not_boosted(self):
+        """A short editorial digital doc (< 100 pages) → stays digital_magazine."""
+        from mmrag_v2.orchestration.profile_classifier import ProfileType
+        result = self._classify(
+            text_density=900, image_density=0.15, median_dim=400, page_count=60
+        )
+        assert result == ProfileType.DIGITAL_MAGAZINE
+
+    def test_high_image_density_editorial_stays_magazine(self):
+        """Editorial with high img density (0.6) stays digital_magazine even if many pages."""
+        from mmrag_v2.orchestration.profile_classifier import ProfileType
+        result = self._classify(
+            text_density=900, image_density=0.6, median_dim=500, page_count=200
+        )
+        assert result == ProfileType.DIGITAL_MAGAZINE

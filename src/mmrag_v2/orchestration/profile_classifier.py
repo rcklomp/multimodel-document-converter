@@ -974,6 +974,19 @@ class ProfileClassifier:
             )
             confidence = 1.0  # HIGH confidence for this combination
 
+        # EDITORIAL TECHNICAL BOOK: digital + editorial + low image density + many pages.
+        # Technical reference books (coding books, handbooks) are classified as "editorial"
+        # by the domain detector because they contain screenshots and figures. However they
+        # are NOT magazines. Magazines require high image density (0.5+ images/page) with
+        # large editorial photos. A digital editorial document with low image density and
+        # many pages (>100) is a technical reference book, not a glossy magazine.
+        is_editorial_tech_book = (
+            f.domain == "editorial"
+            and not f.is_scan
+            and f.image_density < self.IMAGE_DENSITY_HIGH  # < 0.5; magazines need dense images
+            and f.page_count > 100  # Long reference books; short works may genuinely be magazines
+        )
+
         # DOMAIN: Technical is the PRIMARY signal (weight: 0.35 if not already boosted)
         if f.domain == "technical":
             if not is_scanned_technical_manual:
@@ -983,6 +996,13 @@ class ProfileClassifier:
             score += 0.15
             reasoning.append("Unknown domain - could be technical manual")
             confidence *= 0.7
+        elif is_editorial_tech_book:
+            score += 0.25
+            reasoning.append(
+                f"Editorial technical book: digital + editorial + "
+                f"low image density ({f.image_density:.2f}) + {f.page_count} pages"
+            )
+            # No confidence penalty — these are legitimate technical reference books
         else:
             score += 0.0
             reasoning.append(f"Non-technical domain ({f.domain})")
