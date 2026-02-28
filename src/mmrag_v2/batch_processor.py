@@ -4535,8 +4535,32 @@ class BatchProcessor:
         return out
 
     def _looks_like_code_text(self, text: str) -> bool:
-        """Heuristic code detector for technical manuals (used in layout-aware OCR mode)."""
-        import re
+        """Determine whether *text* looks like source code rather than prose.
+
+        Strategy (in order of precedence):
+
+        1. Fenced-code marker → True immediately.
+        2. AST parse — if the text is valid Python with a non-empty body it is
+           definitively code.  A file consisting only of comments produces an
+           empty body and is NOT counted as code here.
+        3. REPL session — strip ``>>> ``/``... `` prefixes and re-parse.
+           Falls back to assignment (``=``) check or compound-keyword
+           verification via ``ast.parse``.  Index entries that use ``>>>`` as a
+           cross-reference symbol never contain ``=`` and their stripped content
+           does not parse as Python, so they fall through as non-code.
+        4. Incomplete definition guard — any line starting with ``def``,
+           ``class``, or ``async def`` is code even when the body is absent.
+        5. Shebang guard — ``#!`` on the first line is code.
+        6. Structural scoring — no regex; just counts of indentation, per-line
+           keyword usage (each keyword verified by a mini ``ast.parse``), and
+           bracket/assignment density.  Prose sentences accumulate a negative
+           offset.  Score ÷ line_count ≥ 2.0 → code.
+        7. Flat-code detection — a single long line (> 80 chars, no newlines)
+           with ≥ 2 Python keywords and at least one code operator is treated
+           as flattened code from a broken PDF generator.
+        """
+        import ast
+        import keyword
 
         if not text:
             return False
@@ -4546,153 +4570,126 @@ class BatchProcessor:
             return True
 
         lines = [ln for ln in t.splitlines() if ln.strip()]
-
-        # Fix 2: Index-entry guard for >>> used as cross-reference symbol in book indexes.
-        # Pattern: content after >>> has no Python operators (=, (, [, {) before the first
-        # page-number reference (comma + 2-4 digits, optionally a range like 50-51).
-        # Real REPL lines contain =, (, [, or { early in the expression; index entries don't.
-        _idx_re = re.compile(
-            r">>>\s+\S[^=(\[{]*(?:,\s*\d{1,4}(?:-\d{1,4})?)"
-        )
-
-        def _prompt_lines_are_index(prompt_lines: list) -> bool:
-            """Return True when ALL >>> lines look like index cross-references."""
-            if not prompt_lines:
-                return False
-            index_count = sum(1 for ln in prompt_lines if _idx_re.search(ln))
-            return index_count == len(prompt_lines)
-
-        if len(lines) < 2:
-            # Only treat REPL prompts as code when they appear as actual prompts,
-            # not when they're merely mentioned in prose (e.g., "after the >>> line").
-            prompt_lines = re.findall(r"(?m)^\s*>>>\s.*$", t)
-            if prompt_lines:
-                if not _prompt_lines_are_index(prompt_lines):
-                    return True
-            elif re.search(r"(?m)^\s*\.\.\.\s", t):
-                return True
-            if re.search(r"^\s*(import|from)\b.+\s:\s+[A-Z]", t):
-                return False
-            if re.search(r"^\s*(def|class)\b", t):
-                return True
-            # Avoid false positives on English "from ..."; require Python import syntax.
-            if re.search(r"^\s*from\s+[A-Za-z_][\w\.]*\s+import\b", t):
-                return True
-            if re.search(
-                r"^\s*import\s+[A-Za-z_][\w\.]*(\s*,\s*[A-Za-z_][\w\.]*)*(\s+as\s+[A-Za-z_][\w]*)?\s*$",
-                t,
-            ):
-                return True
-            # REQ-STRUCT-01 / _looks_like_code_text flat-code extension:
-            # A broken PDF generator (e.g. Kimothi 2025) strips all \n from code blocks,
-            # producing one very long flat string. The ^ anchors above cannot match
-            # keywords that appear mid-string. Detect flat code by looking for multiple
-            # Python keyword occurrences anywhere in a long single-line string.
-            if len(t) > 80 and "\n" not in t:
-                kw_hits = len(re.findall(
-                    r"\b(import|from|def|class|return|raise|yield|elif|else|except|with|pass|break|continue)\b",
-                    t,
-                ))
-                if kw_hits >= 2 and re.search(r"[=\(\)\[\]\{\}:.,]", t):
-                    return True
-            # Fix 4a (single-line): snake_case variable = function_call(...).
-            if re.search(r"^\s*[a-z_][a-z_\d]*\s*=\s*[A-Za-z_][\w.]*\(", t):
-                return True
-            # Fix 4b (single-line): dict literal opening {"key": ...}.
-            if re.search(r'^\s*\{["\'][\w\s]+["\']\s*:', t):
-                return True
-            # Fix 4c (single-line): shebang line.
-            if re.search(r"^#!", t):
-                return True
+        if not lines:
             return False
 
-        indented = sum(1 for ln in lines if ln.startswith(("    ", "\t")))
-        if indented / max(len(lines), 1) >= 0.3:
-            return True
-
-        # Fix 2 (multi-line): guard >>> lines that are index cross-references.
-        prompt_lines_ml = [ln for ln in lines if ln.lstrip().startswith(">>>")]
-        has_continuation = any(ln.lstrip().startswith("...") for ln in lines)
-        if prompt_lines_ml:
-            if not _prompt_lines_are_index(prompt_lines_ml):
+        # ── 1. AST parse (ground truth for complete blocks) ──────────────────
+        # An empty body means the text was only comments — not code on its own.
+        try:
+            tree = ast.parse(t)
+            if tree.body:
                 return True
-        elif has_continuation:
-            return True
+        except SyntaxError:
+            pass
 
-        explanatory_import_lines = sum(
-            1 for ln in lines if re.search(r"^\s*(import|from)\b.+\s:\s+[A-Z]", ln)
-        )
-        if explanatory_import_lines >= max(1, len(lines) // 2):
+        # ── 2. REPL session ───────────────────────────────────────────────────
+        if any(ln.lstrip().startswith(">>> ") for ln in lines):
+            extracted = [
+                ln.lstrip()[4:]
+                for ln in lines
+                if ln.lstrip().startswith((">>> ", "... "))
+            ]
+            if extracted:
+                try:
+                    tree = ast.parse("\n".join(extracted))
+                    # Only return True when the parse result contains real code
+                    # constructs.  A bare tuple like (MISSING_VALUE, 42-43) is
+                    # valid Python but is almost certainly a book-index entry,
+                    # not a REPL expression — it has no calls, assignments, or
+                    # control-flow nodes.
+                    _CODE_NODES = (
+                        ast.Call, ast.Assign, ast.AugAssign, ast.AnnAssign,
+                        ast.For, ast.While, ast.If, ast.With, ast.Try,
+                        ast.Return, ast.Yield, ast.YieldFrom,
+                        ast.Import, ast.ImportFrom,
+                        ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                        ast.Subscript, ast.Attribute,
+                    )
+                    if tree.body and any(isinstance(n, _CODE_NODES) for n in ast.walk(tree)):
+                        return True
+                except SyntaxError:
+                    pass
+                # Extracted text didn't parse cleanly.
+                # An assignment operator is a reliable signal for real REPL code;
+                # book-index entries never use "=".
+                if any("=" in e for e in extracted):
+                    return True
+                # Compound keyword (for/while/with/if/try) used as real Python.
+                # Verify by wrapping in a dummy body — index entries starting
+                # with an English keyword word (e.g. "with, 284") won't parse.
+                for e in extracted:
+                    first = e.split()[0].rstrip(":([,") if e.split() else ""
+                    if keyword.iskeyword(first):
+                        try:
+                            ast.parse(e + "\n    pass")
+                            return True
+                        except SyntaxError:
+                            pass
+            # REPL markers present but content looks like cross-references.
             return False
 
-        if re.search(r"^\s*(def|class|return|yield)\b", t, flags=re.MULTILINE):
+        # ── 3. Incomplete definition guard ───────────────────────────────────
+        if any(ln.lstrip().startswith(("def ", "class ", "async def ")) for ln in lines):
             return True
 
-        if re.search(r"(?m)^\s*from\s+[A-Za-z_][\w\.]*\s+import\b", t):
+        # ── 4. Shebang guard ─────────────────────────────────────────────────
+        if lines[0].lstrip().startswith("#!"):
             return True
 
-        if re.search(
-            r"(?m)^\s*import\s+[A-Za-z_][\w\.]*(\s*,\s*[A-Za-z_][\w\.]*)*(\s+as\s+[A-Za-z_][\w]*)?\s*$",
-            t,
-        ):
+        # ── 5. Structural scoring ─────────────────────────────────────────────
+        score = 0.0
+        for ln in lines:
+            stripped = ln.strip()
+            tokens = stripped.split()
+            if not tokens:
+                continue
+
+            # Indentation is the strongest single code signal.
+            if ln.startswith(("    ", "\t")):
+                score += 3.0
+                continue
+
+            first = tokens[0].rstrip(":([,")
+
+            # import / from — verify it's Python syntax, not English "from ...".
+            if first in ("import", "from"):
+                try:
+                    ast.parse(stripped)
+                    score += 4.0
+                except SyntaxError:
+                    score += 0.5  # prose: "from this perspective..."
+                continue
+
+            # Other Python keywords at line start — verify per-line syntax.
+            if keyword.iskeyword(first):
+                try:
+                    ast.parse(stripped)
+                    score += 3.0
+                except SyntaxError:
+                    try:
+                        ast.parse(stripped + "\n    pass")
+                        score += 3.0
+                    except SyntaxError:
+                        score += 0.5  # keyword used as an English word
+                continue
+
+            # Bracket / assignment density (capped per line).
+            syms = (stripped.count("(") + stripped.count("=")
+                    + stripped.count("[") + stripped.count("{"))
+            score += min(syms * 0.8, 2.5)
+
+            # Prose counter-signal: sentence-shaped line.
+            if stripped[0].isupper() and len(tokens) >= 7 and stripped[-1] in ".?!":
+                score -= 2.0
+
+        if score / len(lines) >= 2.0:
             return True
 
-        # Fix 4a (multi-line): snake_case assignment + function call.
-        # Requires at least one other code-like line to avoid prose false positives.
-        snake_assign = sum(
-            1 for ln in lines
-            if re.search(r"^\s*[a-z_][a-z_\d]*\s*=\s*[A-Za-z_][\w.]*\(", ln)
-        )
-        if snake_assign >= 1 and len(lines) >= 2:
-            other_code = sum(
-                1 for ln in lines
-                if re.search(
-                    r"^\s*(import|from|def|class|return|if|for|while|with|try|except"
-                    r"|elif|else|raise|yield|pass|break|continue|print\(|assert)\b",
-                    ln,
-                )
-                or ln.startswith(("    ", "\t"))
-                or re.search(r"[=\(\)\[\]\{\}]", ln)
-            )
-            if other_code >= 1:
+        # ── 6. Flat-code detection (PDF strips all newlines from code blocks) ──
+        if len(lines) == 1 and len(t) > 80:
+            kw_count = sum(1 for w in t.split() if keyword.iskeyword(w))
+            if kw_count >= 2 and any(c in t for c in "=([{"):
                 return True
-
-        # Fix 4b (multi-line): dict literal block (≥2 "key": value lines, ≥50% of chunk).
-        dict_entry_lines = sum(
-            1 for ln in lines
-            if re.search(r'^\s*["\'][\w\s]+["\']\s*:\s*\S', ln)
-            or re.search(r'^\s*\{["\'][\w\s]+["\']\s*:', ln)
-        )
-        if dict_entry_lines >= 2 and dict_entry_lines / max(len(lines), 1) >= 0.5:
-            return True
-
-        # Fix 4c (multi-line): comment-first code block ("# filename.py" or shebang).
-        if lines and re.search(r"^#\s*[\w./]+\.py\b|^#!\s*/", lines[0].lstrip()):
-            subsequent = sum(
-                1 for ln in lines[1:]
-                if re.search(
-                    r"^\s*(import|from|def|class|return|if|for|while|with"
-                    r"|try|except|elif|else|raise|async)\b",
-                    ln,
-                )
-                or ln.startswith(("    ", "\t"))
-            )
-            if subsequent >= 1:
-                return True
-
-        # Fix 4d (multi-line): general comment + structural code lines in same chunk.
-        comment_lines = sum(1 for ln in lines if re.search(r"^\s*#\s+\S", ln))
-        structural_lines = sum(
-            1 for ln in lines
-            if re.search(
-                r"^\s*(import|from|def|class|return|if|for|while|with"
-                r"|try|except|elif|else|raise|yield|pass|async)\b",
-                ln,
-            )
-            or ln.startswith(("    ", "\t"))
-        )
-        if comment_lines >= 1 and structural_lines >= 2:
-            return True
 
         return False
 
