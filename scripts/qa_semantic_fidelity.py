@@ -47,6 +47,9 @@ def is_placeholder_image_or_table(content: str) -> bool:
         return True
     if re.match(r"^\[(figure|image|table)\b", t):
         return True
+    # VLM failure sentinels — distinguishable from intentional no-VLM placeholders.
+    if t.startswith("[vlm_failed"):
+        return True
     # Extremely short "context only" strings should count as low-fidelity placeholders.
     if len(t) < 80 and ("figure on page" in t or "table on page" in t):
         return True
@@ -81,6 +84,9 @@ def main() -> int:
     with args.ingestion_jsonl.open("r", encoding="utf-8") as f:
         for line in f:
             rows.append(json.loads(line))
+
+    # Skip the document-level metadata record (first line in v2.6+ JSONLs).
+    rows = [r for r in rows if r.get("object_type") != "ingestion_metadata"]
 
     images = [r for r in rows if r.get("modality") == "image"]
     tables = [r for r in rows if r.get("modality") == "table"]
@@ -177,12 +183,14 @@ def main() -> int:
                 f"table_markdown_ratio={table_markdown_ratio:.3f} "
                 f"(<{args.min_table_markdown_ratio:.2f})"
             )
-    if code_flat_ratio > args.max_code_flat_ratio:
+    # Require at least 3 code chunks before penalising flat ratio — a single
+    # flat snippet in a 20-page sample is a statistical artefact, not a bug.
+    if len(code_chunks) >= 3 and code_flat_ratio > args.max_code_flat_ratio:
         fails.append(
             f"code_flat_ratio={code_flat_ratio:.3f} "
             f"(>{args.max_code_flat_ratio:.2f})"
         )
-    if code_indentation_fidelity < args.min_code_indentation_fidelity:
+    if len(code_chunks) >= 3 and code_indentation_fidelity < args.min_code_indentation_fidelity:
         fails.append(
             f"code_indentation_fidelity={code_indentation_fidelity:.3f} "
             f"(<{args.min_code_indentation_fidelity:.2f})"

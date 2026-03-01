@@ -14,7 +14,15 @@ VISION_BASE_URL="${VISION_BASE_URL:-http://192.168.10.11:1234/v1}"
 VLM_TIMEOUT="${VLM_TIMEOUT:-600}"
 API_KEY="${API_KEY:-lm-studio}"
 SEMANTIC_QA="${SEMANTIC_QA:-1}"
-SEM_MAX_IMAGE_PLACEHOLDER="${SEM_MAX_IMAGE_PLACEHOLDER:-0.05}"
+# Image placeholder threshold: strict when VLM is enabled, relaxed when VLM is disabled.
+# When VLM is enabled, [VLM_FAILED] sentinels are caught and the strict 0.05 applies.
+# When VLM is disabled, all image descriptions are expected placeholders (pass-through).
+# The user can always override via environment variable.
+if [[ "${VISION_PROVIDER}" == "none" ]]; then
+  SEM_MAX_IMAGE_PLACEHOLDER="${SEM_MAX_IMAGE_PLACEHOLDER:-1.0}"
+else
+  SEM_MAX_IMAGE_PLACEHOLDER="${SEM_MAX_IMAGE_PLACEHOLDER:-0.05}"
+fi
 SEM_MAX_TABLE_PLACEHOLDER="${SEM_MAX_TABLE_PLACEHOLDER:-0.20}"
 SEM_MIN_TABLE_MARKDOWN="${SEM_MIN_TABLE_MARKDOWN:-0.80}"
 SEM_MIN_CODE_INDENT_FIDELITY="${SEM_MIN_CODE_INDENT_FIDELITY:-0.90}"
@@ -84,7 +92,6 @@ run_doc() {
   set +e
   conda run -n "$ENV_NAME" python -m mmrag_v2.cli process "$pdf" \
     --output-dir "$out" \
-    --profile-override technical_manual \
     --batch-size "$BATCH_SIZE" \
     --pages "$PAGES" \
     "${OCR_ARGS[@]}" \

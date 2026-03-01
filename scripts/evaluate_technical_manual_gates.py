@@ -43,6 +43,9 @@ def infer_doc_class(path: Path) -> tuple[str, str, Counter[str], Counter[str]]:
     with path.open("r", encoding="utf-8") as f:
         for line in f:
             o = json.loads(line)
+            # Skip the document-level metadata record (first line in v2.6+ JSONLs).
+            if o.get("object_type") == "ingestion_metadata":
+                continue
             md = o.get("metadata") or {}
             modality = str(md.get("document_modality") or "").strip().lower()
             extraction = str(md.get("extraction_method") or "").strip().lower()
@@ -150,6 +153,9 @@ def main() -> int:
     with path.open("r", encoding="utf-8") as f:
         for line in f:
             o = json.loads(line)
+            # Skip the document-level metadata record (first line in v2.6+ JSONLs).
+            if o.get("object_type") == "ingestion_metadata":
+                continue
             if o.get("modality") != "text":
                 continue
             text += 1

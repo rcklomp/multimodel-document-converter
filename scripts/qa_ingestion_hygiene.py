@@ -127,6 +127,9 @@ def scan(path: Path) -> Tuple[Stats, Dict[str, Optional[str]]]:
     text_rows: List[Tuple[str, int, str, dict]] = []
 
     for o in iter_jsonl(path):
+        # Skip the document-level metadata record (first line in v2.6+ JSONLs).
+        if o.get("object_type") == "ingestion_metadata":
+            continue
         st.total += 1
         modality = o.get("modality")
         if modality == "text":

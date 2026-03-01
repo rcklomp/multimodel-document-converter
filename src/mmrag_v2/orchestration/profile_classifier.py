@@ -957,21 +957,42 @@ class ProfileClassifier:
         confidence = 1.0
 
         # V16 TECHNICAL DOMINANCE: Combo check FIRST
-        # If technical domain + scan + low/no native text → almost certainly a scanned manual
+        # If technical domain + scan + low/no native text → almost certainly a scanned manual.
+        # EXTENDED (v2.6): Domain detector is unreliable for scanned/OCR'd documents. An
+        # editorial-domain scanned doc extracted as full-page images will have large median_dim
+        # (1000-1600px per page) — so median_dim cannot discriminate between magazine photos and
+        # scanned technical manual pages. Instead we use PAGE COUNT: magazine issues are < 100
+        # pages; technical manuals are typically 100+ pages. A short doc (< 100 pages) with
+        # small content images (median_dim < 200px) is also flagged as a technical manual.
+        is_scanned_editorial_technical = (
+            f.domain == "editorial"
+            and f.is_scan
+            and f.text_density < self.TEXT_DENSITY_LOW
+            and (
+                f.page_count >= (self.PAGE_COUNT_BOOK * 2)  # 100+ pages: no single magazine issue
+                or f.median_dim < self.MEDIAN_DIM_LARGE  # short doc with small images: parts diagrams
+            )
+        )
         is_scanned_technical_manual = (
-            f.domain == "technical" and f.is_scan and f.text_density < self.TEXT_DENSITY_LOW
+            f.is_scan
+            and f.text_density < self.TEXT_DENSITY_LOW
+            and (f.domain == "technical" or is_scanned_editorial_technical)
         )
 
         if is_scanned_technical_manual:
-            # V16.2 MASSIVE BOOST: This combination is the signature of scanned technical manuals
-            # The boost must be high enough that weighted_score beats scanned_degraded/scanned_magazine
-            # With boost=0.55 + 0.10 (image) + 0.10 (dim) + 0.05 (pages) = 0.80
-            # And confidence=1.0 → weighted = 0.80 × 1.0 = 0.80 (beats 0.68 of scanned_degraded)
+            # V16.2 MASSIVE BOOST: This combination is the signature of scanned technical manuals.
+            # The boost + dominance lock ensures rank_score = 0.80 beats scanned_magazine (0.665).
             score += 0.55
-            reasoning.append(
-                "⚡ TECHNICAL DOMINANCE: domain=technical + scan + low_text → "
-                "scanned technical manual signature (BOOSTED)"
-            )
+            if is_scanned_editorial_technical:
+                reasoning.append(
+                    "⚡ TECHNICAL DOMINANCE: editorial + scan + low_text + long_doc → "
+                    "scanned technical manual (domain detector unreliable for OCR docs)"
+                )
+            else:
+                reasoning.append(
+                    "⚡ TECHNICAL DOMINANCE: domain=technical + scan + low_text → "
+                    "scanned technical manual signature (BOOSTED)"
+                )
             confidence = 1.0  # HIGH confidence for this combination
 
         # EDITORIAL TECHNICAL BOOK: digital + editorial + low image density + many pages.
@@ -1003,6 +1024,11 @@ class ProfileClassifier:
                 f"low image density ({f.image_density:.2f}) + {f.page_count} pages"
             )
             # No confidence penalty — these are legitimate technical reference books
+        elif is_scanned_editorial_technical:
+            # Domain already handled by TECHNICAL DOMINANCE boost; no confidence penalty.
+            reasoning.append(
+                f"Editorial domain accepted: scanned + long_doc confirms technical manual"
+            )
         else:
             score += 0.0
             reasoning.append(f"Non-technical domain ({f.domain})")
@@ -1064,6 +1090,12 @@ class ProfileClassifier:
             score += 0.0
             reasoning.append(f"Very short ({f.page_count} pages) - may be datasheet")
             confidence *= 0.8
+
+        # DOMINANCE LOCK: when TECHNICAL DOMINANCE fired, enforce certainty = 1.0.
+        # Intermediate checks (image density, page count) may have reduced confidence;
+        # the DOMINANCE condition is strong enough to override those reductions.
+        if is_scanned_technical_manual:
+            confidence = 1.0
 
         return ProfileScore(
             profile_type=ProfileType.TECHNICAL_MANUAL,

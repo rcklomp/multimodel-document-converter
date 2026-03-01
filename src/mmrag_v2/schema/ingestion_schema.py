@@ -30,9 +30,9 @@ import hashlib
 import warnings
 from datetime import datetime, timezone
 from enum import Enum
-from typing import List, Optional, Union
+from typing import List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 # Centralized versioning (single source of truth)
 from ..version import __schema_version__
@@ -527,6 +527,38 @@ class IngestionChunk(BaseModel):
         # ingestion code paths). Do not append [Visual: ...] here — it would duplicate
         # the description, inflating the embedding vector for no benefit.
         return " ".join(parts)
+
+
+# ============================================================================
+# INGESTION METADATA (DOCUMENT-LEVEL RECORD)
+# ============================================================================
+
+
+class IngestionMetadata(BaseModel):
+    """First record in every ingestion.jsonl — document-level summary.
+
+    Written as the very first line before any IngestionChunk records.
+    Downstream consumers MUST skip records where object_type == "ingestion_metadata"
+    when iterating chunks.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    object_type: Literal["ingestion_metadata"] = "ingestion_metadata"
+    schema_version: str
+    doc_id: str
+    source_file: str
+    profile_type: Optional[str] = None
+    document_type: Optional[str] = None
+    domain: Optional[str] = None
+    is_scan: Optional[bool] = None
+    total_pages: Optional[int] = None
+    image_density: Optional[float] = None
+    avg_text_per_page: Optional[float] = None
+    has_flat_text_corruption: Optional[bool] = None
+    has_encoding_corruption: Optional[bool] = None
+    chunk_count: Optional[int] = None
+    ingestion_timestamp: str = ""
 
 
 # ============================================================================

@@ -29,8 +29,10 @@ from __future__ import annotations
 import math
 import hashlib
 import io
+import json as _json
 import logging
 import re
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Tuple
@@ -59,6 +61,7 @@ from .schema.ingestion_schema import (
     FileType,
     HierarchyMetadata,
     IngestionChunk,
+    IngestionMetadata,
     SemanticContext,
     ChunkType,
     create_image_chunk,
@@ -2964,8 +2967,25 @@ class V2DocumentProcessor:
         else:
             final_output_path = Path(output_path)
 
+        # Compute doc_id from file MD5 (12-char hex) for metadata record.
+        _fp = Path(file_path)
+        _hasher = hashlib.md5()
+        with open(_fp, "rb") as _fh:
+            for _blk in iter(lambda: _fh.read(8192), b""):
+                _hasher.update(_blk)
+        _doc_id = _hasher.hexdigest()[:12]
+
         chunk_count = 0
         with open(final_output_path, "w", encoding="utf-8") as f:
+            # Write document-level metadata record as the FIRST line.
+            _meta_rec = IngestionMetadata(
+                schema_version=SCHEMA_VERSION,
+                doc_id=_doc_id,
+                source_file=_fp.name,
+                ingestion_timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+            f.write(json.dumps(_meta_rec.model_dump(mode="json"), ensure_ascii=False) + "\n")
+
             for chunk in self.process_document(file_path):
                 chunk_dict = chunk.model_dump(mode="json")
                 # Ensure schema_version is emitted in metadata for downstream versioning
@@ -3022,6 +3042,25 @@ class V2DocumentProcessor:
         # Clear file if exists (we're starting fresh)
         if final_output_path.exists():
             final_output_path.unlink()
+
+        # Compute doc_id from file MD5 (12-char hex) for metadata record.
+        _fp = Path(file_path)
+        _hasher = hashlib.md5()
+        with open(_fp, "rb") as _fh:
+            for _blk in iter(lambda: _fh.read(8192), b""):
+                _hasher.update(_blk)
+        _doc_id = _hasher.hexdigest()[:12]
+
+        # Write document-level metadata record as the FIRST line (atomic write).
+        _meta_rec = IngestionMetadata(
+            schema_version=SCHEMA_VERSION,
+            doc_id=_doc_id,
+            source_file=_fp.name,
+            ingestion_timestamp=datetime.now(timezone.utc).isoformat(),
+        )
+        with open(final_output_path, "a", encoding="utf-8") as _mf:
+            _mf.write(json.dumps(_meta_rec.model_dump(mode="json"), ensure_ascii=False) + "\n")
+            _mf.flush()
 
         chunk_count = 0
 

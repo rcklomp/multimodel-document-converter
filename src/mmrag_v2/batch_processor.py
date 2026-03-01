@@ -34,6 +34,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
@@ -55,6 +56,7 @@ from .schema.ingestion_schema import (
     FileType,
     HierarchyMetadata,
     IngestionChunk,
+    IngestionMetadata,
     Modality,
     ChunkType,
     ChunkMetadata,
@@ -2512,6 +2514,29 @@ class BatchProcessor:
             output_jsonl.unlink()
 
         with open(output_jsonl, "a", encoding="utf-8") as f:
+            # Write document-level metadata record as the FIRST line.
+            intel = self._intelligence_metadata or {}
+            # Derive is_scan from document_modality (key set by cli.py intelligence stack).
+            _modality = intel.get("document_modality") or ""
+            _is_scan: Optional[bool] = _modality.startswith("scanned") if _modality else None
+            meta_record = IngestionMetadata(
+                schema_version=SCHEMA_VERSION,
+                doc_id=export_chunks[0].doc_id if export_chunks else "",
+                source_file=Path(self._current_pdf_path).name if self._current_pdf_path else "",
+                profile_type=intel.get("profile_type"),
+                document_type=intel.get("document_type"),
+                domain=intel.get("document_domain"),  # key is "document_domain" in intel dict
+                is_scan=_is_scan,
+                total_pages=intel.get("total_pages"),
+                image_density=intel.get("image_density"),
+                avg_text_per_page=intel.get("avg_text_per_page"),
+                has_flat_text_corruption=self.has_flat_text_corruption,
+                has_encoding_corruption=self.has_encoding_corruption,
+                chunk_count=len(export_chunks),
+                ingestion_timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+            f.write(json.dumps(meta_record.model_dump(mode="json"), ensure_ascii=False) + "\n")
+
             write_buffer: List[str] = []
 
             # Process chunks with streaming writes

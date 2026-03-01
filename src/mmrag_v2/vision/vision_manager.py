@@ -1102,7 +1102,7 @@ class VisionManager:
                 if validation.text_reading_detected:
                     description = "Dense typographic layout; no distinct non-text visuals."
                 else:
-                    description = "Unverified visual element."
+                    description = "[VLM_FAILED: response invalid]"
 
                 if self._cache:
                     self._cache.set(image, description)
@@ -1124,7 +1124,7 @@ class VisionManager:
         except Exception as e:
             logger.warning(f"VLM enrichment failed: {e}")
             # Return fallback - keep it visual-only (no page/document meta-language).
-            return "Unverified visual element."
+            return "[VLM_FAILED: call error]"
 
     def extract_table_markdown(
         self,
@@ -1424,7 +1424,7 @@ class VisionManager:
                     elif obj:
                         clean = f"Image of {obj}"
                     else:
-                        clean = "Unverified visual element."
+                        clean = "[VLM_FAILED: parse error]"
 
                     # Remove any remaining JSON artifacts that might have slipped through
                     clean = self._strip_json_artifacts(clean)
@@ -1484,7 +1484,7 @@ class VisionManager:
             clean = self._strip_json_artifacts(clean)
 
         if not clean or len(clean) < 5:
-            clean = "Unverified visual element."
+            clean = "[VLM_FAILED: parse error]"
 
         return clean[:MAX_DESCRIPTION_CHARS]
 
@@ -1964,7 +1964,7 @@ class VisionManager:
                 if validation.text_reading_detected:
                     description = "Dense typographic layout; no distinct non-text visuals."
                 else:
-                    description = "Unverified visual element."
+                    description = "[VLM_FAILED: response invalid]"
 
                 if self._cache:
                     self._cache.set(image, description)
