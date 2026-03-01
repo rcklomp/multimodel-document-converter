@@ -4561,6 +4561,7 @@ class BatchProcessor:
         """
         import ast
         import keyword
+        import re as _re
 
         if not text:
             return False
@@ -4683,7 +4684,23 @@ class BatchProcessor:
                 score -= 2.0
 
         if score / len(lines) >= 2.0:
-            return True
+            # Guard: pure indentation (OCR column-layout artifact) is not
+            # sufficient on its own.  Require at least one unambiguous code
+            # token — assignment, subscript/dict literal, function call, or a
+            # Python keyword in a syntactically valid position.
+            _code_anchor = _re.compile(
+                r"[=\[{]"                          # assignment / subscript / dict
+                r"|\w\("                           # function call: word(
+                r"|^\s*(?:import\s"                # import statement
+                r"|from\s+[\w.]+\s+import"         # from X import Y
+                r"|def |class "                    # definition
+                r"|return\b|yield\b|raise\b|pass\b"  # returns / control
+                r"|elif\b|else:|try:|except\b|finally:)",  # block starters
+                _re.MULTILINE,
+            )
+            if _code_anchor.search(t):
+                return True
+            # No genuine code token found — likely OCR-indented prose.
 
         # ── 6. Flat-code detection (PDF strips all newlines from code blocks) ──
         if len(lines) == 1 and len(t) > 80:
