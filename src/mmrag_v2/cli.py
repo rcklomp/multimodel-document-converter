@@ -980,6 +980,10 @@ def process_document(
                 "has_flat_text_corruption": diagnostic_report.physical_check.has_flat_text_corruption,
                 "has_encoding_corruption": diagnostic_report.physical_check.has_encoding_corruption,
                 "geometry_error_rate": diagnostic_report.physical_check.geometry_error_rate,
+                # v2.6: Document profile stats for IngestionMetadata record
+                "total_pages": smart_profile.total_pages,
+                "image_density": smart_profile.image_density,
+                "avg_text_per_page": smart_profile.avg_text_per_page,
             }
             logger.info(
                 f"[V2.4-METADATA] Intelligence metadata prepared: "
@@ -1556,6 +1560,10 @@ def batch_process(
                 "has_flat_text_corruption": diagnostic_report.physical_check.has_flat_text_corruption,
                 "has_encoding_corruption": diagnostic_report.physical_check.has_encoding_corruption,
                 "geometry_error_rate": diagnostic_report.physical_check.geometry_error_rate,
+                # v2.6: Document profile stats for IngestionMetadata record
+                "total_pages": smart_profile.total_pages,
+                "image_density": smart_profile.image_density,
+                "avg_text_per_page": smart_profile.avg_text_per_page,
             }
 
             # Log metadata for parity verification
