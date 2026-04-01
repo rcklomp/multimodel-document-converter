@@ -1,8 +1,8 @@
 # 🏗️ Universal Multi-Format RAG Pipeline Architecture
 
-**Version:** v2.5.0-dev
-**Date:** February 2026
-**Status:** IN DEVELOPMENT (v2.4.2-stable is the current production baseline)
+**Version:** v2.6.0-dev (schema version 2.5.0)
+**Date:** April 2026
+**Status:** IN DEVELOPMENT (v2.5.0-stable is the last tagged release)
 **Policy Update (v2.5.0):** PDF extraction pathway is now determined by **structural integrity tests** on the byte-stream, not by semantic content type. Three pre-flight checks (line-break health, visual-digital delta, geometry error rate) run before extraction and drive pathway decisions independently of the semantic profile. See `docs/DECISIONS.md` — "Structural Pathology over Semantic Profiling".
 **Policy Update (v2.4.2-stable):** `IngestionChunk.visual_description` is now a top-level computed field in the serialised JSON. `VisionCache` is model-aware and discards stale entries when the VLM model changes.
 **Policy Update (v2.4.1-stable):** Native-digital PDFs bypass the OCR cascade (Docling text layer + recovery only). Layout-aware OCR (Tesseract/Doctr) is reserved for scanned/unknown modalities. Gap-fill recovery on academic whitepapers uses a 60-character minimum block to fill low-coverage pages with strict deduplication and noise filters.

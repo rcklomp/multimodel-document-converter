@@ -1,10 +1,10 @@
-# Testing Guide (v2.4.1-stable)
+# Testing Guide (v2.6.0-dev)
 
-**Version:** v2.4.1-stable  
+**Version:** v2.6.0-dev  
 **Validation Policy:** Required for every test command
 
 ## Environment
-- Runner: `conda run -p ./env`
+- Runner: `conda run -n mmrag-v2`
 - Default VLM: `none` (set explicit provider when needed)
 
 ## Validation (Required)
@@ -24,25 +24,25 @@ For every test command in this file, validation is mandatory:
 ### Test 1: `process` (no batching)
 ```bash
 rm -rf /tmp/test1-output
-conda run -p ./env \
+conda run -n mmrag-v2 \
   mmrag-v2 process \
-  "data/raw/Hybrid_electric_vehicles_and_their_challenges.pdf" \
+  "data/academic_journal/AIOS LLM Agent Operating System.pdf" \
   --output-dir /tmp/test1-output \
   --vision-provider none
-conda run -p ./env \
+conda run -n mmrag-v2 \
   python tests/test_bug009_metadata_propagation.py /tmp/test1-output/ingestion.jsonl
 ```
 
 ### Test 2: `process --batch-size`
 ```bash
 rm -rf /tmp/test2-output
-conda run -p ./env \
+conda run -n mmrag-v2 \
   mmrag-v2 process \
-  "data/raw/Hybrid_electric_vehicles_and_their_challenges.pdf" \
+  "data/academic_journal/AIOS LLM Agent Operating System.pdf" \
   --output-dir /tmp/test2-output \
   --batch-size 3 \
   --vision-provider none
-conda run -p ./env \
+conda run -n mmrag-v2 \
   python tests/test_bug009_metadata_propagation.py /tmp/test2-output/ingestion.jsonl
 ```
 
@@ -50,26 +50,26 @@ conda run -p ./env \
 ```bash
 rm -rf /tmp/test3-input /tmp/test3-output
 mkdir -p /tmp/test3-input
-cp "data/raw/Hybrid_electric_vehicles_and_their_challenges.pdf" /tmp/test3-input/doc1.pdf
-cp "data/raw/IRJET_Modeling_of_Solar_PV_system_under.pdf" /tmp/test3-input/doc2.pdf
+cp "data/academic_journal/AIOS LLM Agent Operating System.pdf" /tmp/test3-input/doc1.pdf
+cp "data/academic_journal/A_comprehensive_review_on_hybrid_electri.pdf" /tmp/test3-input/doc2.pdf
 
-conda run -p ./env \
+conda run -n mmrag-v2 \
   mmrag-v2 batch /tmp/test3-input \
   --output-dir /tmp/test3-output \
   --vision-provider none
 
-conda run -p ./env \
+conda run -n mmrag-v2 \
   python tests/test_bug009_metadata_propagation.py /tmp/test3-output/doc1/ingestion.jsonl
-conda run -p ./env \
+conda run -n mmrag-v2 \
   python tests/test_bug009_metadata_propagation.py /tmp/test3-output/doc2/ingestion.jsonl
 ```
 
-### Test 4: Layout-aware OCR (full run)
+### Test 4: Layout-aware OCR (scanned document)
 ```bash
 rm -rf /tmp/test4-output
-conda run -p ./env \
+conda run -n mmrag-v2 \
   mmrag-v2 process \
-  "data/raw/HarryPotter_and_the_Sorcerers_Stone.pdf" \
+  "data/scanned_literature/HarryPotter_and_the_Sorcerers_Stone.pdf" \
   --output-dir /tmp/test4-output \
   --batch-size 3 \
   --ocr-mode layout-aware \
@@ -77,23 +77,29 @@ conda run -p ./env \
   --ocr-confidence-threshold 0.7 \
   --vision-provider none
 
-conda run -p ./env \
+conda run -n mmrag-v2 \
   python tests/test_bug009_metadata_propagation.py /tmp/test4-output/ingestion.jsonl
 ```
 
 ## Intelligence Stack Parity (Data-Agnostic)
 
-Prepare a small, representative set:
-- Academic/technical whitepaper (digital, high text density, small diagrams)
-- Scanned literature (long-form, low OCR text, small illustrations)
-- Technical manual (technical domain, scanned, low text density)
-- Magazine/editorial (high image density; digital + scanned if possible)
-- At least one non-PDF file for guard behavior
+Representative test set (all present in `data/`):
+- `data/academic_journal/AIOS LLM Agent Operating System.pdf` — digital, high text density
+- `data/scanned_literature/HarryPotter_and_the_Sorcerers_Stone.pdf` — scanned long-form
+- `data/technical_manual/Firearms.pdf` — scanned technical manual
+- `data/digital_magazine/PCWorld_July_2025_USA.pdf` — high image density, digital
+
+### Multi-Profile Smoke Test (primary acceptance gate)
+```bash
+conda run -n mmrag-v2 bash scripts/smoke_multiprofile.sh
+```
+Expected: `GATE_PASS` + `UNIVERSAL_PASS` in every row of the summary table.
 
 ### Process vs Batch (Parity)
 ```bash
-conda run -p ./env mmrag-v2 process <FILE> --output-dir output/test_process
-conda run -p ./env mmrag-v2 batch <DIR> --pattern "<GLOB>" --output-dir output/test_batch
+PDF="data/academic_journal/AIOS LLM Agent Operating System.pdf"
+conda run -n mmrag-v2 mmrag-v2 process "$PDF" --output-dir output/test_process --vision-provider none
+conda run -n mmrag-v2 mmrag-v2 batch data/academic_journal --pattern "AIOS*.pdf" --output-dir output/test_batch --vision-provider none
 ```
 
 Expected:
@@ -103,12 +109,13 @@ Expected:
 
 ### Filename Independence (Parity Regression)
 ```bash
+PDF="data/academic_journal/AIOS LLM Agent Operating System.pdf"
 rm -rf /tmp/parity_name_test /tmp/parity_name_out
 mkdir -p /tmp/parity_name_test
-cp "<SOURCE_PDF>" /tmp/parity_name_test/doc1.pdf
+cp "$PDF" /tmp/parity_name_test/doc1.pdf
 
-conda run -p ./env mmrag-v2 process "<SOURCE_PDF>" --output-dir /tmp/parity_name_out/process
-conda run -p ./env mmrag-v2 batch /tmp/parity_name_test --pattern "*.pdf" --output-dir /tmp/parity_name_out/batch
+conda run -n mmrag-v2 mmrag-v2 process "$PDF" --output-dir /tmp/parity_name_out/process --vision-provider none
+conda run -n mmrag-v2 mmrag-v2 batch /tmp/parity_name_test --pattern "*.pdf" --output-dir /tmp/parity_name_out/batch --vision-provider none
 
 jq -r '.metadata.profile_type' /tmp/parity_name_out/process/ingestion.jsonl | sort | uniq -c
 jq -r '.metadata.profile_type' /tmp/parity_name_out/batch/doc1/ingestion.jsonl | sort | uniq -c

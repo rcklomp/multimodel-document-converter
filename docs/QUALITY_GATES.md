@@ -53,10 +53,21 @@ Sunset intent:
   - Suggested acceptance gates: `micro_non_label_ratio <= 0.12`, `oversize_ratio <= 0.01`, `orphan_label_ratio <= 0.20`, `code_fragmentation_ratio <= 0.05`.
 
 ### Acceptance Workflow
-1. Run `scripts/acceptance_technical_manual.sh` on representative docs.
-2. Compare metrics against prior baseline (`_summary.txt`).
-3. Approve only when regressions are absent or explicitly justified with impact notes.
-4. Keep thresholds as guidance defaults; tune per profile only with documented before/after evidence.
+1. Run `scripts/smoke_multiprofile.sh` — this is the primary gate. Every row must show `GATE_PASS` + `UNIVERSAL_PASS`.
+2. Run `scripts/acceptance_technical_manual.sh` for deep validation of the technical-manual category (4 docs × 20 pages).
+3. Compare metrics against prior baseline (`_summary.txt`).
+4. Approve only when regressions are absent or explicitly justified with impact notes.
+5. Keep thresholds as guidance defaults; tune per profile only with documented before/after evidence.
+
+### Universal Invariants (apply to all profiles)
+Run `scripts/qa_universal_invariants.py` on any output JSONL.
+Hard fails:
+- Any text chunk with `chunk_type=null`
+- Any `bbox` value outside integer `[0,1000]`
+- Any text chunk with empty content
+- Any chunk missing `modality`
+
+These must be zero. No profile-specific waivers.
 
 ## Known Warnings (Observed)
 

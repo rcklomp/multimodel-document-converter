@@ -1,6 +1,6 @@
-# 🤖 AGENTS.md: MMRAG V2.4.1 Operational Protocol (Aligned, V2.4.2 learnings without classifier swap)
+# 🤖 AGENTS.md: MMRAG V2 Operational Protocol
 
-**Target Agent:** Codex / Senior Python ETL Architect  
+**Target Agent:** Claude Code / Senior Python ETL Architect  
 **Project:** MMRAG V2 (Multimodal RAG Converter)  
 **Philosophy:** Principle-Based Engineering over Rigid Scripting
 
@@ -25,8 +25,8 @@ Suggestions and patterns. Always optional.
 If a heuristic becomes critical (breakages recur), promote it through the evolution process.
 
 Companion docs:
-- AGENT_GUIDANCE_MANAGEMENT.md (format + organization)
-- AGENT_GUIDANCE_EVOLUTION.md (when/how to add or promote guidance)
+- `docs/DECISIONS.md` — records all architectural decisions and their rationale
+- `docs/QUALITY_GATES.md` — pass/fail thresholds per profile
 
 ---
 
@@ -35,7 +35,7 @@ Companion docs:
 2. **Hardware Bound:** Optimize for **Apple Silicon (MPS)**; prefer `mps` for torch when available.
 3. **Library Lockdown:** `docling` must be exact-pinned in `pyproject.toml`; do not bump without impact review.
 4. **Resource Ceiling:** Target **≤8GB RAM** during runs; keep batch sizes ≤10 pages and call `gc.collect()` between batches.
-5. **AGENT-VAL-01 (Blind Test Validation):** A code change is only valid if the full `acceptance_suite` yields a `GATE_PASS`. This MUST include at least one "Blind Test" document (Greenhouse Design and Control by Pedro Ponce) that was not part of the dev-loop. Any pass based on hardcoded filenames or word-lists is a system failure.
+5. **AGENT-VAL-01 (Blind Test Validation):** A code change is only valid if the multi-profile smoke test (`smoke_multiprofile.sh`) yields `GATE_PASS` + `UNIVERSAL_PASS` across all document categories. At least one document per category must be a "blind test" document not used during the fix dev-loop. The technical-manual blind test document is `Greenhouse Design and Control by Pedro Ponce.pdf`. Any pass based on hardcoded filenames or word-lists is a system failure.
 6. **AGENT-SPATIAL-20:** Refinement logic must rely on a single `20-unit` vertical threshold. No profile-specific or heading-specific branches allowed.
 
 **Numbering Note:** SRS IRON IDs remain canonical. Agent-local constraints use `AGENT-*` IDs to avoid collisions.
@@ -68,9 +68,11 @@ Companion docs:
 
 ---
 
-## 🧬 3. CLASSIFICATION & UIR CONTRACT (V2.4.1 scope)
-- **Do NOT enable the V2.4.2 DocumentClassifier**; stay on the V2.4.1 multi-dimensional profile classifier (e.g., `academic_whitepaper`, `digital_magazine`).
-- Prefer manual profile overrides when certainty is high (use `--profile-override`).
+## 🧬 3. CLASSIFICATION & UIR CONTRACT
+
+- Use the **`ProfileClassifier`** in `orchestration/profile_classifier.py` for all automatic routing. Do not replace it with the V2.4.2 `DocumentClassifier` approach (different architecture, not compatible).
+- `--profile-override` is a debugging and diagnostic tool only. **Never use it in acceptance runs** — correct classification by the ProfileClassifier is the goal, not a workaround for it.
+- Extraction pathway (OCR vs direct) is determined by **structural integrity flags** (`has_flat_text_corruption`, `has_encoding_corruption`) from `DocumentDiagnosticEngine`, not by profile type. See `docs/DECISIONS.md`.
 - BBoxes must be normalized to **int [0,1000]** before emission.
 - Shadow assets: promote to `IMAGE` if visual signal exists; otherwise drop before final JSONL.
 
@@ -83,22 +85,32 @@ Companion docs:
 
 ---
 
-## 📍 5. CURRENT STATE & DIRECTIVES (Jan 24, 2026)
-**Phase:** `v2.4.1-stable` with targeted hotfixes (no v2.4.2 classifier).  
-**Recent Finding:** Significant token variance on AIOS PDF; recovery pipeline rescues missing text, but OCR guard disabled layout-aware OCR on digital PDFs.  
-**Known debt:** `digital_magazine` → "Combat Aircraft - August 2025 UK" stabilizes around **-16% token variance** due to heavy text-in-graphics; treat as tolerated debt (see QA guidance below).
-**Decision (known debt):** Do not add/maintain extra "text-in-graphics" complexity (digital-magazine layout-OCR / image-region OCR). Keep the digital PDF path simple and stable; only run OCR on digital-like PDFs when the user explicitly sets `--force-ocr`.
-**QA policy update:** For `digital_magazine` only, QA tolerance is temporarily 18% (0.18). Do not raise tolerances for other profiles; target remains 10% (0.10) for all profiles.
+## 📍 5. CURRENT STATE & DIRECTIVES (April 2026)
+
+**Version:** `v2.6.0-dev` (schema version 2.5.0)  
+**Phase:** Multi-profile expansion — moving from technical-manual-only validation to full cross-category acceptance.
+
+**Active architecture decisions:**
+- PDF extraction pathway is determined by structural integrity pre-flight tests, not semantic profile. See `docs/DECISIONS.md` — "Structural Pathology over Semantic Profiling".
+- `IngestionMetadata` record is written as the first JSONL line (v2.6+); QA scripts must skip it.
+- VLM failure paths use differentiated sentinels (`[VLM_FAILED: response invalid]`, `[VLM_FAILED: call error]`, `[VLM_FAILED: parse error]`).
+
+**Known debt:**
+- `digital_magazine` token variance ~-16% due to heavy text-in-graphics; temporary QA waiver of 18% is in effect. Do not add layout-OCR complexity; target is to retire the waiver via chunking improvements only.
+
+**QA policy:** For `digital_magazine` only, tolerance is temporarily 18% (0.18). All other profiles: 10% (0.10). See `docs/QUALITY_GATES.md`.
 
 ### Priority TODOs (Open)
-1. Fix **finalize chunk-count mismatch** (log vs. written JSONL).
-2. Bring `digital_magazine` token variance back under the standard 10% QA target and retire the temporary 18% waiver.
+1. Bring `digital_magazine` token variance under the standard 10% target and retire the temporary 18% waiver.
+2. Establish per-category blind-test baselines for all document categories in the smoke test matrix.
 3. Keep chunk sizing profile-driven and acceptance-tested (no universal hard min/max invariant).
 
 ### Recently Completed (Do Not Reopen)
 1. `--force-ocr` override is implemented.
 2. QA strictness knobs are implemented (`--qa-tolerance`, `--qa-noise-allowance`, `--strict-qa`).
-3. `--profile-override` is implemented.
+3. `--profile-override` is implemented (debugging use only).
+4. `IngestionMetadata` record implemented (v2.6).
+5. Multi-profile smoke test + universal invariant checker implemented (`scripts/smoke_multiprofile.sh`, `scripts/qa_universal_invariants.py`).
 
 ---
 
