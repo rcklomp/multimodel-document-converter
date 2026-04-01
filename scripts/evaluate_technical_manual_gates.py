@@ -115,6 +115,13 @@ def count_infix_artifacts(text: str) -> int:
         # Mid-sentence artifacts usually bridge normal words.
         if len(prev) <= 1 or len(nxt) <= 1:
             continue
+        # Skip ordinal range patterns: "vom 6. bis 8. Oktober" (German date range),
+        # "from 5. to 7." etc. are legitimate ordinal usage, not list artifacts.
+        # Guard on prev (range-start prepositions) and next (range connectors).
+        if prev in ("bis", "to", "from", "through", "vom", "von"):
+            continue
+        if nxt in ("bis", "to", "through"):
+            continue
         n += 1
     return n
 
