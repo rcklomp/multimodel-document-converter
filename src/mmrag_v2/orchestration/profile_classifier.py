@@ -541,11 +541,24 @@ class ProfileClassifier:
         # If we get here, it's a digital document - proceed with scoring
         reasoning.append("✓ Digital document (modality check passed)")
 
+        # IMAGE DENSITY SANITY: > 5.0 images/page indicates decorative inline elements
+        # (bullets, ornaments, drop caps, inline icons) rather than real editorial photos.
+        # Real magazines have 0.5 – 3.0 large photos per page, not 10-15 tiny objects.
+        # Cap the effective density used for scoring so decorative-heavy books don't get
+        # the same bonus as genuine photo-heavy magazines.
+        effective_image_density = min(f.image_density, 3.0)
+        if f.image_density > 5.0:
+            confidence *= 0.15
+            reasoning.append(
+                f"Extreme image density ({f.image_density:.1f}/page) → decorative inline "
+                f"elements, not editorial photos; capped at 3.0 for scoring"
+            )
+
         # IMAGE DENSITY: Primary signal for magazines (weight: 0.30)
-        if f.image_density >= self.IMAGE_DENSITY_HIGH:
+        if effective_image_density >= self.IMAGE_DENSITY_HIGH:
             score += 0.30
             reasoning.append(f"High image density ({f.image_density:.2f} >= 0.5)")
-        elif f.image_density >= self.IMAGE_DENSITY_MEDIUM:
+        elif effective_image_density >= self.IMAGE_DENSITY_MEDIUM:
             score += 0.15
             reasoning.append(f"Moderate image density ({f.image_density:.2f})")
         else:
@@ -583,6 +596,19 @@ class ProfileClassifier:
             score += 0.05
             reasoning.append(f"Non-editorial domain ({f.domain})")
             confidence *= 0.7
+
+        # PAGE COUNT: No magazine issue exceeds ~250 pages. Long documents with high
+        # image density are illustrated books or photo collections, not magazines.
+        if f.page_count > 250:
+            confidence *= 0.15
+            reasoning.append(
+                f"Very long document ({f.page_count} pages) → not a magazine issue"
+            )
+        elif f.page_count > 150:
+            confidence *= 0.5
+            reasoning.append(
+                f"Long document ({f.page_count} pages) → unlikely to be a magazine"
+            )
 
         return ProfileScore(
             profile_type=ProfileType.DIGITAL_MAGAZINE,

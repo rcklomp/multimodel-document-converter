@@ -636,3 +636,103 @@ class TestEditorialTechBookClassification:
             text_density=900, image_density=0.6, median_dim=500, page_count=200
         )
         assert result == ProfileType.DIGITAL_MAGAZINE
+
+
+class TestCrossProfileClassifierFixes:
+    """
+    Regression tests for cross-profile classifier fixes identified during
+    multi-profile smoke testing (April 2026).
+    """
+
+    def _make_features(self, **kw):
+        from mmrag_v2.orchestration.profile_classifier import ClassificationFeatures
+        defaults = dict(
+            text_density=800, image_density=1.0, median_dim=300, page_count=80,
+            is_scan=False, scan_confidence=0.0, domain="editorial", modality="native_digital",
+            has_extractable_text=True, image_count=80,
+        )
+        defaults.update(kw)
+        return ClassificationFeatures(**defaults)
+
+    def _score_magazine(self, **kw):
+        from mmrag_v2.orchestration.profile_classifier import ProfileClassifier
+        clf = ProfileClassifier()
+        f = self._make_features(**kw)
+        return clf._score_digital_magazine(f)
+
+    # ── digital_magazine sanity guards ───────────────────────────────────────
+
+    def test_decorative_image_density_penalises_magazine(self):
+        """image_density=14.6 (decorative book elements) → magazine confidence is near zero."""
+        s = self._score_magazine(image_density=14.6, page_count=327, text_density=790,
+                                  domain="unknown", median_dim=150)
+        assert s.confidence < 0.05, (
+            f"Expected near-zero confidence for decorative image density, got {s.confidence:.3f}"
+        )
+
+    def test_very_long_document_penalises_magazine(self):
+        """page_count=327 → magazine confidence is strongly penalised (≤ 0.15)."""
+        s = self._score_magazine(image_density=2.0, page_count=327, text_density=800,
+                                  domain="editorial", median_dim=400)
+        assert s.confidence <= 0.15, (
+            f"Expected strongly penalised confidence for 327-page document, got {s.confidence:.3f}"
+        )
+
+    def test_pcworld_still_digital_magazine(self):
+        """PCWorld (108 pages, img_density=1.0, large photos) → digital_magazine preserved."""
+        from mmrag_v2.orchestration.profile_classifier import ProfileClassifier, ProfileType
+        clf = ProfileClassifier()
+        f = self._make_features(image_density=1.0, page_count=108, text_density=900,
+                                 domain="editorial", median_dim=500)
+        scores = [
+            clf._score_digital_magazine(f),
+            clf._score_academic_whitepaper(f),
+            clf._score_technical_manual(f),
+        ]
+        best = max(scores, key=lambda s: s.score * s.confidence)
+        assert best.profile_type == ProfileType.DIGITAL_MAGAZINE, (
+            f"PCWorld should route to digital_magazine, got {best.profile_type}"
+        )
+
+    def test_harry_potter_features_not_digital_magazine(self):
+        """
+        Harry Potter PDF features (327 pages, image_density=14.6 decorative elements,
+        unknown domain) must NOT route to digital_magazine.
+        """
+        from mmrag_v2.orchestration.profile_classifier import ProfileClassifier, ProfileType
+        clf = ProfileClassifier()
+        f = self._make_features(image_density=14.6, page_count=327, text_density=790,
+                                 domain="unknown", median_dim=150, is_scan=False)
+        scores = [
+            clf._score_digital_magazine(f),
+            clf._score_academic_whitepaper(f),
+            clf._score_technical_manual(f),
+        ]
+        best = max(scores, key=lambda s: s.score * s.confidence)
+        assert best.profile_type != ProfileType.DIGITAL_MAGAZINE, (
+            f"Harry Potter features should NOT route to digital_magazine, got {best.profile_type}"
+        )
+
+    # ── LABEL_RE numbered section heading fix ─────────────────────────────────
+
+    def test_numbered_section_heading_is_label_like(self):
+        """'2.1 Der horizontale Bruch' (German numbered heading) is recognised as a label."""
+        import re
+        LABEL_RE = re.compile(r"^(?:\d[\d.]*\s+)?[A-Z][A-Za-z0-9/&()' .,-]{1,55}:?$")
+        assert LABEL_RE.match("2.1 Der horizontale Bruch"), \
+            "Numbered German section heading should match LABEL_RE"
+        assert LABEL_RE.match("1 Einleitung"), \
+            "Simple numbered heading should match LABEL_RE"
+        assert LABEL_RE.match("10.2 Fazit und Ausblick"), \
+            "Multi-level numbered heading should match LABEL_RE"
+
+    def test_plain_prose_sentence_not_label_like(self):
+        """Prose sentences starting with digits should NOT match the label pattern."""
+        import re
+        LABEL_RE = re.compile(r"^(?:\d[\d.]*\s+)?[A-Z][A-Za-z0-9/&()' .,-]{1,55}:?$")
+        # Lowercase word after number → not a section heading
+        assert not LABEL_RE.match("2 items were found in the results"), \
+            "Prose sentence starting with lowercase after digit should not match"
+        # Sentence too long
+        assert not LABEL_RE.match("1 This is a very long section title that exceeds the maximum character limit set"), \
+            "Overly long heading should not match"

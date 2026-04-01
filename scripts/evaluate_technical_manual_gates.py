@@ -14,7 +14,10 @@ import re
 from pathlib import Path
 
 
-LABEL_RE = re.compile(r"^[A-Z][A-Za-z0-9/&()' .,-]{1,50}:?$")
+# Optional numeric prefix (e.g. "2.1 ", "10 ") allows numbered section headings
+# like "2.1 Der horizontale Bruch" or "1 Introduction" to be recognised as labels
+# rather than counted as micro-noise.
+LABEL_RE = re.compile(r"^(?:\d[\d.]*\s+)?[A-Z][A-Za-z0-9/&()' .,-]{1,55}:?$")
 CODE_LIKE_RE = re.compile(
     r"(::|\bdef\s+\w+\(|\bclass\s+\w+|\bimport\s+\w+|"
     r"\bfrom\s+\w+\s+import\b|[{}<>]=?|==|!=|:=|->|=>|\breturn\b)"
@@ -130,6 +133,18 @@ def main() -> int:
     path = args.ingestion_jsonl
     doc_class = args.doc_class
 
+    # Read profile_type from ingestion_metadata (first JSONL line in v2.6+).
+    # Used to apply profile-appropriate gate thresholds below.
+    profile_type = "unknown"
+    with path.open("r", encoding="utf-8") as _f:
+        try:
+            _first = json.loads(_f.readline())
+            if _first.get("object_type") == "ingestion_metadata":
+                profile_type = _first.get("profile_type") or "unknown"
+        except Exception:
+            pass
+    print(f"profile_type={profile_type}")
+
     if doc_class == "auto":
         doc_class, reason, modality_counts, extraction_counts = infer_doc_class(path)
         print(f"doc_class={doc_class} (inferred)")
@@ -216,26 +231,39 @@ def main() -> int:
     print(f"orphan_label_ratio={orphan_ratio:.4f}")
     print(f"code_fragmentation_ratio={code_frag_ratio:.4f}")
 
+    # Profile-aware threshold overrides.
+    # Academic whitepapers legitimately contain abbreviation/nomenclature tables
+    # with many isolated short label-like entries (e.g. "EV  Electric vehicle"),
+    # which inflate orphan_label_ratio well above the technical-manual baseline.
+    # Digital magazines and technical reports often have more caption fragments
+    # than a coding book, so micro_non_label is relaxed slightly.
+    if doc_class == "digital":
+        orphan_label_limit = 0.45 if profile_type == "academic_whitepaper" else 0.20
+        micro_limit = 0.18 if profile_type in ("digital_magazine", "academic_whitepaper") else 0.12
+    else:
+        orphan_label_limit = 0.30
+        micro_limit = 0.22
+
     fails = []
     if strict > 0:
         fails.append(f"infix_strict={strict} (expected 0)")
 
     if doc_class == "digital":
-        if micro_ratio > 0.12:
-            fails.append(f"micro_non_label_ratio={micro_ratio:.3f} (>0.12)")
+        if micro_ratio > micro_limit:
+            fails.append(f"micro_non_label_ratio={micro_ratio:.3f} (>{micro_limit})")
         if oversize_ratio > 0.01:
             fails.append(f"oversize_ratio={oversize_ratio:.3f} (>0.01)")
-        if orphan_ratio > 0.20:
-            fails.append(f"orphan_label_ratio={orphan_ratio:.3f} (>0.20)")
+        if orphan_ratio > orphan_label_limit:
+            fails.append(f"orphan_label_ratio={orphan_ratio:.3f} (>{orphan_label_limit})")
         if code_frag_ratio > 0.05:
             fails.append(f"code_fragmentation_ratio={code_frag_ratio:.3f} (>0.05)")
     else:
-        if micro_ratio > 0.22:
-            fails.append(f"micro_non_label_ratio={micro_ratio:.3f} (>0.22)")
+        if micro_ratio > micro_limit:
+            fails.append(f"micro_non_label_ratio={micro_ratio:.3f} (>{micro_limit})")
         if oversize_ratio > 0.02:
             fails.append(f"oversize_ratio={oversize_ratio:.3f} (>0.02)")
-        if orphan_ratio > 0.30:
-            fails.append(f"orphan_label_ratio={orphan_ratio:.3f} (>0.30)")
+        if orphan_ratio > orphan_label_limit:
+            fails.append(f"orphan_label_ratio={orphan_ratio:.3f} (>{orphan_label_limit})")
 
     if fails:
         print("GATE_FAIL: " + "; ".join(fails))

@@ -58,7 +58,10 @@ _PAGE_NUM_LINE = re.compile(r"(?m)^\s*\d{1,4}\s*$")
 _CODE_SIG = re.compile(
     r"(?m)^\s*(def|class|import|from|return|yield|if\s+__name__|async\s+def)\b"
 )
-_LABEL_LIKE = re.compile(r"^[A-Z][A-Za-z0-9/&()' .,-]{1,50}:?$")
+# Optional numeric prefix (e.g. "2.1 ", "10 ") allows numbered section headings
+# like "2.1 Der horizontale Bruch" or "1 Introduction" to be recognised as labels
+# rather than counted as micro-noise.
+_LABEL_LIKE = re.compile(r"^(?:\d[\d.]*\s+)?[A-Z][A-Za-z0-9/&()' .,-]{1,55}:?$")
 _CODE_INLINE = re.compile(
     r"(```|::|\bdef\s+\w+\(|\bclass\s+\w+|"
     r"\bimport\s+\w+|\bfrom\s+\w+\s+import\b|"
