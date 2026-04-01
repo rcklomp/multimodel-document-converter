@@ -608,6 +608,7 @@ class DoclingToV2Mapper:
                     page_number=page_no,
                     hierarchy=hierarchy,
                     chunk_type=chunk_type,
+                    content_classification=self._classify_text_content(chunk_text, chunk_type),
                     **self.intelligence_metadata,  # BUG-006 FIX: Propagate intelligence metadata
                 )
 
@@ -873,6 +874,18 @@ class DoclingToV2Mapper:
     def _is_image_label(self, label_lower: str) -> bool:
         """Check if label indicates an image."""
         return any(t in label_lower for t in ["picture", "figure", "image", "background"])
+
+    def _classify_text_content(self, text: str, chunk_type: Any = None) -> str:
+        """Classify text content for content_classification metadata field."""
+        from mmrag_v2.schema.ingestion_schema import ChunkType as CT
+        from mmrag_v2.processor import TECHNICAL_KEYWORDS
+        if chunk_type == CT.CODE:
+            return "code"
+        lowered = (text or "").lower()
+        technical_hits = sum(1 for kw in TECHNICAL_KEYWORDS if kw in lowered)
+        if technical_hits >= 2:
+            return "technical"
+        return "editorial"
 
     def _is_noise_content(self, text: str) -> bool:
         """Check if content is noise."""

@@ -36,7 +36,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, ClassVar, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import fitz  # PyMuPDF for page rendering
 import numpy as np
@@ -389,6 +389,11 @@ class BatchProcessor:
         self.geometry_error_rate = float(
             intelligence_metadata.pop("geometry_error_rate", 0.0)
         )
+        # v2.6: Document profile stats — also not valid chunk-creation kwargs; pop into
+        # dedicated instance vars so the JSONL write block can use them from self.
+        self._doc_total_pages: Optional[int] = intelligence_metadata.pop("total_pages", None)
+        self._doc_image_density: Optional[float] = intelligence_metadata.pop("image_density", None)
+        self._doc_avg_text_per_page: Optional[float] = intelligence_metadata.pop("avg_text_per_page", None)
 
         self._intelligence_metadata = intelligence_metadata
         # Adjust QA tolerance per profile (digital_magazine is allowed higher variance)
@@ -823,7 +828,8 @@ class BatchProcessor:
                         logger.error(f"[REFINER] Failed on page {page_number}: {refiner_error}")
 
             # Classify code-like OCR text (programming manuals/books).
-            chunk_type = None
+            # TEXT chunks default to PARAGRAPH; non-TEXT (image/table) stay None.
+            chunk_type = ChunkType.PARAGRAPH if modality == Modality.TEXT else None
             content_classification = self._classify_text_content(pc.content or "") if modality == Modality.TEXT else None
             if modality == Modality.TEXT and self._looks_like_code_text(pc.content or ""):
                 chunk_type = ChunkType.CODE
@@ -1107,7 +1113,7 @@ class BatchProcessor:
                                 fallback_parts = self._split_nearest_paragraph_breaks(
                                     text=native_text,
                                     max_chars=1200,
-                                    overlap_chars=120,
+                                    overlap_chars=0,  # no overlap — prevents duplicate sentence content
                                 )
                                 fallback_parts = [p for p in fallback_parts if p and p.strip()]
                                 if not fallback_parts:
@@ -1136,6 +1142,7 @@ class BatchProcessor:
                                         page_number=actual_page_no,
                                         hierarchy=hierarchy,
                                         extraction_method="digital_text_layer_fallback",
+                                        content_classification=self._classify_text_content(part_text),
                                         **self._intelligence_metadata,
                                     )
                                     text_fallback_chunks.append(fallback_chunk)
@@ -2491,6 +2498,7 @@ class BatchProcessor:
             self._log_memory_checkpoint("[TECHMANUAL-FINAL] preflight")
             all_chunks = self._sanitize_technical_manual_final(all_chunks)
         all_chunks = self._apply_oversize_breaker(all_chunks, max_chars=1500)
+        all_chunks = self._normalize_chunk_text(all_chunks)  # PUA + whitespace normalization
         all_chunks = self._filter_no_visual_images(all_chunks)
         all_chunks = self._filter_repetition_garbage(all_chunks)
         all_chunks = self._apply_table_recovery_highlander_dedup(all_chunks)
@@ -2524,12 +2532,12 @@ class BatchProcessor:
                 doc_id=export_chunks[0].doc_id if export_chunks else "",
                 source_file=Path(self._current_pdf_path).name if self._current_pdf_path else "",
                 profile_type=intel.get("profile_type"),
-                document_type=intel.get("document_type"),
+                document_type=intel.get("document_modality"),  # physical doc type: native_digital, scanned_clean, scanned_degraded, image_heavy
                 domain=intel.get("document_domain"),  # key is "document_domain" in intel dict
                 is_scan=_is_scan,
-                total_pages=intel.get("total_pages"),
-                image_density=intel.get("image_density"),
-                avg_text_per_page=intel.get("avg_text_per_page"),
+                total_pages=self._doc_total_pages,
+                image_density=self._doc_image_density,
+                avg_text_per_page=self._doc_avg_text_per_page,
                 has_flat_text_corruption=self.has_flat_text_corruption,
                 has_encoding_corruption=self.has_encoding_corruption,
                 chunk_count=len(export_chunks),
@@ -2969,6 +2977,59 @@ class BatchProcessor:
             out_chars.append(ch)
         return "".join(out_chars)
 
+    # PUA → readable-unicode mapping (Wingdings/Symbol font characters extracted by docling).
+    # Keys are Private Use Area codepoints (U+E000–U+F8FF); values are their visual equivalents.
+    _PUA_MAP: ClassVar[dict] = {
+        "\uf02d": "\u2022",  # Wingdings dash/bullet → •
+        "\uf0b7": "\u2022",  # Wingdings solid bullet → •
+        "\uf0e0": "\u2192",  # Wingdings right arrow → →
+        "\uf070": "\u25c4",  # Wingdings left triangle → ◄
+        "\uf071": "\u25ba",  # Wingdings right triangle → ►
+        "\uf074": "\u25b2",  # Wingdings up triangle → ▲
+        "\uf075": "\u25bc",  # Wingdings down triangle → ▼
+    }
+
+    @staticmethod
+    def _normalize_pua_chars(text: str) -> str:
+        """Replace Private Use Area (PUA) Unicode codepoints with readable equivalents.
+
+        Docling converts Wingdings/Symbol font characters to PUA codepoints that are
+        meaningless to embedding models. Known mappings are replaced; unknown PUA
+        codepoints become a single space (safe fallback).
+        """
+        if not text:
+            return text
+        result: List[str] = []
+        for ch in text:
+            code = ord(ch)
+            if 0xE000 <= code <= 0xF8FF:
+                result.append(BatchProcessor._PUA_MAP.get(ch, " "))
+            else:
+                result.append(ch)
+        return "".join(result)
+
+    def _normalize_chunk_text(
+        self, chunks: List["IngestionChunk"]
+    ) -> List["IngestionChunk"]:
+        """Post-processing pass: PUA normalization + whitespace collapsing for text chunks.
+
+        - PUA chars: applied to ALL text chunks regardless of chunk_type.
+        - Double-space collapsing: applied only to non-code chunks (code relies on
+          indentation whitespace).
+        """
+        import re as _re
+
+        for ch in chunks:
+            if ch.modality != Modality.TEXT or not ch.content:
+                continue
+            text = self._normalize_pua_chars(ch.content)
+            is_code = ch.metadata.chunk_type == ChunkType.CODE if ch.metadata else False
+            if not is_code:
+                # Collapse 2+ horizontal spaces to one (leaves newlines intact).
+                text = _re.sub(r"[^\S\n]{2,}", " ", text)
+            ch.content = text
+        return chunks
+
     def _remove_standalone_page_number_lines(self, text: str) -> str:
         """
         Remove standalone page number lines that get embedded in extracted text.
@@ -3134,7 +3195,9 @@ class BatchProcessor:
         has_indent = any(ln.startswith(("    ", "\t")) for ln in lines)
         if not has_repl and not has_indent and lines:
             stmt_like = re.compile(
-                r"^(%pip\s+|!?[A-Za-z_][\w\.]*\s*=|from\s+[A-Za-z_][\w\.]*\s+import\b|import\s+[A-Za-z_][\w\.,\s]*$|[A-Za-z_][\w\.]*\s*\()"
+                r"^(%pip\s+|!?[A-Za-z_][\w\.]*\s*=|from\s+[A-Za-z_][\w\.]*\s+import\b"
+                r"|from\s+[A-Za-z_][\w\.]*\s*$"  # bare 'from X' split off from 'from X import Y'
+                r"|import\s+[A-Za-z_][\w\.,\s]*$|[A-Za-z_][\w\.]*\s*\()"
             )
             codey_lines = sum(
                 1
@@ -3244,7 +3307,7 @@ class BatchProcessor:
             def _demote() -> None:
                 ch.metadata.chunk_type = ChunkType.PARAGRAPH
                 if ch.metadata.content_classification == "code":
-                    ch.metadata.content_classification = None
+                    ch.metadata.content_classification = self._classify_text_content(ch.content or "")
 
             lines = [ln.rstrip() for ln in txt.splitlines() if ln.strip()]
             if not lines:
@@ -3252,8 +3315,41 @@ class BatchProcessor:
             has_repl = any(re.search(r"^\s*(>>>|\.\.\.)\s", ln) for ln in lines)
             has_indent = any(ln.startswith(("    ", "\t")) for ln in lines)
 
-            # Keep true REPL/code signals.
+            # Keep true REPL/code signals — but guard against book-formatting abuse
+            # where ">>>" is used as a cross-reference or prose lead-in marker rather
+            # than a Python REPL prompt (e.g. ">>> Input and Output 9.1 ...",
+            # ">>> The round() function implements ...").
             if has_repl:
+                import keyword as _kw
+                repl_lines_content = [
+                    ln.lstrip()[4:]  # strip leading ">>> "
+                    for ln in lines
+                    if ln.lstrip().startswith(">>> ")
+                ]
+                # Classify each >>> line: is the content after the prompt likely
+                # real Python?  A digit start (arithmetic REPL), special char, or
+                # a lowercase non-keyword token (variable / function name) are
+                # reliable signals.  Uppercase starts are book prose.
+                any_real_repl_start = any(
+                    rc[:1].isdigit()
+                    or rc[:1] in "_'\"-+~"
+                    or (
+                        rc
+                        and rc[:1].islower()
+                        and not _kw.iskeyword(
+                            rc.split()[0].rstrip(":([,=") if rc.split() else ""
+                        )
+                    )
+                    for rc in repl_lines_content
+                    if rc
+                )
+                if any_real_repl_start or self._looks_like_code_text(txt):
+                    return
+                # >>> markers present but content is prose/index (not real REPL).
+                # is_code_line() can still trigger on incidental brackets in prose
+                # (e.g. "round()" in ">>> The round() function implements …"),
+                # so demote directly rather than relying on the scoring fallback.
+                _demote()
                 return
 
             # Scanned-degraded OCR often emits tiny orphan code fragments
@@ -3270,7 +3366,13 @@ class BatchProcessor:
             def is_code_line(ln: str) -> bool:
                 if explanatory_import.search(ln):
                     return False
-                if re.search(r"^\s*(def|class|return|yield|async\s+def|await|if|elif|else|for|while|try|except|with)\b", ln):
+                # Structural keywords that form valid statements without ':' on the same line.
+                if re.search(r"^\s*(def|class|return|yield|async\s+def|await)\b", ln):
+                    return True
+                # Flow-control keywords require ':' on the same line to distinguish from prose.
+                # "if the control is desired" has no ':' → prose, not code.
+                # "if x > 0:" has ':' → code line.
+                if re.search(r"^\s*(if|elif|else|for|while|try|except|with)\b", ln) and ":" in ln:
                     return True
                 if re.search(r"^\s*(from\s+[A-Za-z_][\w\.]*\s+import|import\s+[A-Za-z_][\w\.]*)\b", ln):
                     return True
@@ -4276,6 +4378,23 @@ class BatchProcessor:
                 split_idx = max_chars
                 delimiter_len = 0
 
+            # Word-boundary snap: if the split point is inside a word (both the character
+            # just before split_idx and the one at split_idx are alphabetic), back up to
+            # the last space in the valid range to avoid mid-word cuts like "prog|rammed".
+            # This fires whether the hard cap landed at exactly max_chars OR a level-3
+            # sentence-mark fallback set split_idx to target mid-word.
+            if (
+                0 < split_idx <= len(remaining)
+                and split_idx - 1 < len(remaining)
+                and remaining[split_idx - 1 : split_idx].isalpha()
+                and split_idx < len(remaining)
+                and remaining[split_idx : split_idx + 1].isalpha()
+            ):
+                last_space = remaining.rfind(" ", max_chars // 5, split_idx)
+                if last_space > max_chars // 5:
+                    split_idx = last_space
+                    delimiter_len = 1  # consume the space
+
             head = remaining[:split_idx].strip()
             if not head:
                 head = remaining[:target].strip()
@@ -4491,7 +4610,7 @@ class BatchProcessor:
                 parts = self._split_nearest_paragraph_breaks(
                     text=ch.content,
                     max_chars=max_chars,
-                    overlap_chars=120,
+                    overlap_chars=0,  # no overlap — prevents duplicate sentence content
                 )
             if len(parts) <= 1:
                 out.append(ch)
@@ -4502,7 +4621,7 @@ class BatchProcessor:
                 if is_code:
                     sub_is_code = self._looks_like_code_text(sub)
                     sub_chunk_type = ChunkType.CODE if sub_is_code else ChunkType.PARAGRAPH
-                    sub_content_classification = "code" if sub_is_code else None
+                    sub_content_classification = "code" if sub_is_code else self._classify_text_content(sub)
                 else:
                     sub_chunk_type = ch.metadata.chunk_type
                     sub_content_classification = getattr(ch.metadata, "content_classification", None)
@@ -4537,6 +4656,8 @@ class BatchProcessor:
                         hierarchy=new_h,
                         chunk_type=sub_chunk_type,
                         bbox=(ch.metadata.spatial.bbox if ch.metadata.spatial else None),
+                        page_width=(ch.metadata.spatial.page_width if ch.metadata.spatial else None),
+                        page_height=(ch.metadata.spatial.page_height if ch.metadata.spatial else None),
                         extraction_method=ch.metadata.extraction_method,
                         prev_text=(ch.semantic_context.prev_text_snippet if ch.semantic_context else None),
                         next_text=(ch.semantic_context.next_text_snippet if ch.semantic_context else None),
@@ -4544,11 +4665,6 @@ class BatchProcessor:
                         **{k: v for k, v in self._intelligence_metadata.items() if v is not None},
                     )
                     new_chunk.chunk_id = f"{ch.chunk_id}_o{idx+1}"
-                    if ch.metadata.spatial:
-                        if new_chunk.metadata.spatial is None:
-                            new_chunk.metadata.spatial = SpatialMetadata(bbox=None)
-                        new_chunk.metadata.spatial.page_width = ch.metadata.spatial.page_width
-                        new_chunk.metadata.spatial.page_height = ch.metadata.spatial.page_height
                     out.append(new_chunk)
                 except Exception:
                     out.append(ch)
@@ -4728,10 +4844,34 @@ class BatchProcessor:
             # No genuine code token found — likely OCR-indented prose.
 
         # ── 6. Flat-code detection (PDF strips all newlines from code blocks) ──
-        if len(lines) == 1 and len(t) > 80:
+        if len(lines) == 1:
             kw_count = sum(1 for w in t.split() if keyword.iskeyword(w))
-            if kw_count >= 2 and any(c in t for c in "=([{"):
+            if len(t) > 80 and kw_count >= 2 and any(c in t for c in "=([{"):
                 return True
+            # Flat import chain: starts with 'import'/'from', with multiple import
+            # occurrences or one import keyword + an operator.  Catches multi-statement
+            # import blocks that PDF extraction flattened onto a single line.
+            # Threshold lowered to 60 chars to catch import+assignment concatenations.
+            if len(t) > 60:
+                split_words = t.split()
+                if split_words and split_words[0] in ("import", "from"):
+                    import_kw_count = len(_re.findall(r'\bimport\s+[A-Za-z_]', t))
+                    if import_kw_count >= 2:
+                        return True
+                    if import_kw_count >= 1 and any(c in t for c in "=([{"):
+                        return True
+
+        # ── 7. Compact single-line if/else control flow ───────────────────────
+        # PDFs sometimes flatten "if cond:\n    a()\nelse:\n    b()" onto one line.
+        # Require: `if <cond>:` (colon after condition), `else:` (colon after else),
+        # AND at least one bracket/call token — rules out English "if … else" prose.
+        if (
+            len(lines) == 1
+            and _re.search(r"\bif\b[^:]+:", t)
+            and _re.search(r"\belse\s*:", t)
+            and any(c in t for c in "=([{")
+        ):
+            return True
 
         return False
 
@@ -5326,6 +5466,7 @@ class BatchProcessor:
                             breadcrumb_path=[doc_title, f"Page {page_no}", "[RECOVERED-FRONT]"],
                             level=3,
                         )
+                        _pg_wh = page_size_per_page.get(page_no)
                         recovery_chunk = create_text_chunk(
                             doc_id=self._doc_hash or "unknown",
                             content=text_clean,
@@ -5334,6 +5475,8 @@ class BatchProcessor:
                             page_number=page_no,
                             hierarchy=hierarchy,
                             bbox=_normalize_bbox_pdf_points(page_no, bbox),
+                            page_width=int(_pg_wh[0]) if _pg_wh and _pg_wh[0] > 0 else None,
+                            page_height=int(_pg_wh[1]) if _pg_wh and _pg_wh[1] > 0 else None,
                             extraction_method="recovery_frontpage",
                             content_classification=self._classify_recovery_text_content(text_clean),
                             **self._intelligence_metadata,
@@ -5468,6 +5611,7 @@ class BatchProcessor:
                             )
                             if len(cleaned_block) < 20:
                                 continue
+                            _pg_wh2 = page_size_per_page.get(page_no)
                             recovery_chunk = create_text_chunk(
                                 doc_id=self._doc_hash or "unknown",
                                 content=cleaned_block,
@@ -5476,6 +5620,8 @@ class BatchProcessor:
                                 page_number=page_no,
                                 hierarchy=hierarchy,
                                 bbox=[int(v) for v in fig_bbox],
+                                page_width=int(_pg_wh2[0]) if _pg_wh2 and _pg_wh2[0] > 0 else None,
+                                page_height=int(_pg_wh2[1]) if _pg_wh2 and _pg_wh2[1] > 0 else None,
                                 extraction_method="recovery_subsurface",
                                 asset_ref=fig_chunk.asset_ref,
                                 content_classification=classification,
@@ -5556,6 +5702,7 @@ class BatchProcessor:
                             breadcrumb_path=[doc_title, f"Page {page_no}", label],
                             level=3,
                         )
+                        _pg_wh3 = page_size_per_page.get(page_no)
                         recovery_chunk = create_text_chunk(
                             doc_id=self._doc_hash or "unknown",
                             content=text_clean,
@@ -5564,6 +5711,8 @@ class BatchProcessor:
                             page_number=page_no,
                             hierarchy=hierarchy,
                             bbox=_normalize_bbox_pdf_points(page_no, bbox),
+                            page_width=int(_pg_wh3[0]) if _pg_wh3 and _pg_wh3[0] > 0 else None,
+                            page_height=int(_pg_wh3[1]) if _pg_wh3 and _pg_wh3[1] > 0 else None,
                             extraction_method="recovery_gap_fill",
                             content_classification=classification,
                             **self._intelligence_metadata,
@@ -6007,6 +6156,9 @@ class BatchProcessor:
                         if img_chunk.metadata:
                             img_chunk.metadata.extraction_method = "image_to_text_recovery"
                             img_chunk.metadata.content_classification = self._classify_recovery_text_content(ocr_text)
+                            # TEXT chunks must have a chunk_type; image chunks start with None.
+                            if img_chunk.metadata.chunk_type is None:
+                                img_chunk.metadata.chunk_type = ChunkType.PARAGRAPH
                         updated += 1
                     except Exception as e:  # pragma: no cover
                         logger.debug(f"[RECOVERY] OCR failed for page {page_no} image: {e}")
@@ -6119,6 +6271,8 @@ class BatchProcessor:
                         if img_chunk.metadata:
                             img_chunk.metadata.extraction_method = "enhanced_image_ocr"
                             img_chunk.metadata.content_classification = self._classify_recovery_text_content(ocr_text)
+                            if img_chunk.metadata.chunk_type is None:
+                                img_chunk.metadata.chunk_type = ChunkType.PARAGRAPH
                         ocr_count += 1
                     except Exception as e:  # pragma: no cover
                         logger.debug(f"[RECOVERY] Enhanced OCR failed for page {page_no}: {e}")
@@ -6168,6 +6322,8 @@ class BatchProcessor:
                         page_number=page_no,
                         hierarchy=hierarchy,
                         bbox=bbox,
+                        page_width=int(page_w) if page_w > 0 else None,
+                        page_height=int(page_h) if page_h > 0 else None,
                         extraction_method="enhanced_frontpage",
                         content_classification=self._classify_recovery_text_content(text_clean),
                         **self._intelligence_metadata,
@@ -6480,8 +6636,10 @@ class BatchProcessor:
                     file_type=chunk.metadata.file_type,
                     page_number=chunk.metadata.page_number,
                     hierarchy=new_hierarchy,
-                    chunk_type=chunk.metadata.chunk_type,
+                    chunk_type=(chunk.metadata.chunk_type or ChunkType.PARAGRAPH),
                     bbox=(chunk.metadata.spatial.bbox if chunk.metadata.spatial else None),
+                    page_width=(chunk.metadata.spatial.page_width if chunk.metadata.spatial else None),
+                    page_height=(chunk.metadata.spatial.page_height if chunk.metadata.spatial else None),
                     extraction_method=chunk.metadata.extraction_method,
                     prev_text=(
                         chunk.semantic_context.prev_text_snippet if chunk.semantic_context else None
@@ -6495,15 +6653,6 @@ class BatchProcessor:
 
                 # Override chunk_id with our custom split ID
                 new_chunk.chunk_id = new_chunk_id
-
-                # Preserve page dimension metadata if it existed on the original chunk.
-                if chunk.metadata.spatial:
-                    if new_chunk.metadata.spatial is None:
-                        new_chunk.metadata.spatial = SpatialMetadata(bbox=None)
-                    if chunk.metadata.spatial.page_width is not None:
-                        new_chunk.metadata.spatial.page_width = chunk.metadata.spatial.page_width
-                    if chunk.metadata.spatial.page_height is not None:
-                        new_chunk.metadata.spatial.page_height = chunk.metadata.spatial.page_height
 
                 result_chunks.append(new_chunk)
 

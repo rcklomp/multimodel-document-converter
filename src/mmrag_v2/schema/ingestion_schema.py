@@ -614,6 +614,8 @@ def create_text_chunk(
     hierarchy: Optional[HierarchyMetadata] = None,
     chunk_type: ChunkType = ChunkType.PARAGRAPH,
     bbox: Optional[List[int]] = None,
+    page_width: Optional[int] = None,
+    page_height: Optional[int] = None,
     ocr_confidence: Optional[float] = None,
     extraction_method: str = "docling",
     prev_text: Optional[str] = None,
@@ -648,7 +650,7 @@ def create_text_chunk(
 
     spatial = None
     if bbox:
-        spatial = SpatialMetadata(bbox=bbox)
+        spatial = SpatialMetadata(bbox=bbox, page_width=page_width, page_height=page_height)
 
     # Convert numeric confidence to level string
     confidence_level = None

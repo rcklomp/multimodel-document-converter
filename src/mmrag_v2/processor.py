@@ -2925,7 +2925,9 @@ class V2DocumentProcessor:
                         page_number=page_no,
                         hierarchy=hierarchy,
                         chunk_type=chunk_type,
-                        bbox=text_bbox,  # FIX #2: Propagate spatial data
+                        bbox=text_bbox,
+                        page_width=int(page_w) if text_bbox and page_w else None,
+                        page_height=int(page_h) if text_bbox and page_h else None,
                         prev_text=prev_text_context,
                         next_text=next_text_context,
                         refined_content=refined_content,
