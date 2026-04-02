@@ -95,15 +95,11 @@ Companion docs:
 - `IngestionMetadata` record is written as the first JSONL line (v2.6+); QA scripts must skip it.
 - VLM failure paths use differentiated sentinels (`[VLM_FAILED: response invalid]`, `[VLM_FAILED: call error]`, `[VLM_FAILED: parse error]`).
 
-**Known debt:**
-- `digital_magazine` token variance ~-16% due to heavy text-in-graphics; temporary QA waiver of 18% is in effect. Do not add layout-OCR complexity; target is to retire the waiver via chunking improvements only.
-
-**QA policy:** For `digital_magazine` only, tolerance is temporarily 18% (0.18). All other profiles: 10% (0.10). See `docs/QUALITY_GATES.md`.
+**QA policy:** All profiles use the standard 10% token variance tolerance. See `docs/QUALITY_GATES.md`.
 
 ### Priority TODOs (Open)
-1. Bring `digital_magazine` token variance under the standard 10% target and retire the temporary 18% waiver.
-2. Establish per-category blind-test baselines for all document categories in the smoke test matrix.
-3. Keep chunk sizing profile-driven and acceptance-tested (no universal hard min/max invariant).
+1. Establish per-category blind-test baselines for all document categories in the smoke test matrix.
+2. Keep chunk sizing profile-driven and acceptance-tested (no universal hard min/max invariant).
 
 ### Recently Completed (Do Not Reopen)
 1. `--force-ocr` override is implemented.
@@ -111,6 +107,7 @@ Companion docs:
 3. `--profile-override` is implemented (debugging use only).
 4. `IngestionMetadata` record implemented (v2.6).
 5. Multi-profile smoke test + universal invariant checker implemented (`scripts/smoke_multiprofile.sh`, `scripts/qa_universal_invariants.py`).
+6. `digital_magazine` 18% token variance waiver retired — IMAGE-bbox-aware source text extraction brings all magazines under 10%.
 
 ---
 

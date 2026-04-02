@@ -10,20 +10,15 @@
 
 ## QA-CHECK-01 Tolerance Policy (Pass/Fail Source)
 
-Use this section for gate decisions when evaluating token variance.
-This operational policy does not change the SRS QA-CHECK-01 target of 10%; it only defines current pass/fail handling for known debt.
+| Scope | Tolerance | Gate Decision |
+|------|-----------|---------------|
+| All profiles | 10% (`0.10`) | Pass |
+| Any profile above `0.10` | >10% | Fail |
 
-| Scope | Tolerance | Gate Decision | Policy |
-|------|-----------|---------------|--------|
-| All profiles (standard) | 10% (`0.10`) | Pass | Baseline gate and end-state target. |
-| `digital_magazine` only (temporary waiver) | 18% (`0.18`) | Pass (temporary debt waiver) | Allowed only for known text-in-graphics debt; still record a debt note and remediation follow-up. |
-| Any non-`digital_magazine` profile above `0.10` | >10% | Fail | No waiver allowed. |
-| `digital_magazine` above `0.18` | >18% | Fail | Out of temporary tolerance. |
-
-Sunset intent:
-- The temporary `digital_magazine` waiver exists to keep current runs operational.
-- Target state remains `<= 0.10` for **all** profiles, including `digital_magazine`.
-- Retire the waiver as soon as representative `digital_magazine` acceptance runs consistently stay within 10%.
+The former 18% temporary waiver for `digital_magazine` was retired in v2.6 after
+implementing IMAGE-bbox-aware source text extraction (commit 2ff6883). Chart/graph
+label text in the PDF text layer is now correctly excluded from the source baseline,
+bringing both tested magazines (PCWorld, Combat Aircraft) from ~-20% to under -9%.
 
 ## Chunk Quality Policy (Principle-Based)
 - Chunk-size quality is profile-specific and empirically validated.

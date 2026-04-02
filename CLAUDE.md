@@ -19,7 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Spatial metadata `bbox` must be emitted as integer `[0,1000]` coordinates.
 - AGENT-SPATIAL-20: keep the single 20-unit vertical threshold behavior (no profile-specific branching for that rule).
 - Acceptance is not complete unless `GATE_PASS` + `UNIVERSAL_PASS` are reported across all document categories in the multi-profile smoke test, and at least one per-category blind-test document is included.
-- QA-CHECK-01 tolerance target is `0.10`; temporary waiver is only for `digital_magazine` up to `0.18`.
+- QA-CHECK-01 tolerance target is `0.10` for all profiles (no waivers).
 
 ## Setup
 ```bash
