@@ -1041,6 +1041,7 @@ class VisionManager:
         self._provider = provider
         self._cache: Optional[VisionCache] = None
         self._processed_count = 0
+        self.document_domain: str = ""  # Set by caller to influence prompt selection
         # Cache OCR hint engines by (min_confidence, languages) to avoid
         # repeatedly reloading EasyOCR models for every image.
         self._ocr_hint_engines: Dict[Tuple[float, Tuple[str, ...]], Any] = {}
@@ -1108,6 +1109,10 @@ class VisionManager:
         #   because it encourages meta-language ("page", "document", "surrounding text")
         #   and speculative statements that degrade retrieval quality.
         is_diagram, is_photograph = _classify_image_type(image)
+        # Literature domain: book illustrations look like diagrams (few colors,
+        # white background) but should NOT get the technical diagram prompt.
+        if self.document_domain == "literature":
+            is_diagram = False
         prompt = build_visual_prompt(
             context_section=None,
             diagnostic_hints=None,

@@ -2106,6 +2106,10 @@ class BatchProcessor:
 
         # Initialize global vision manager
         self._vision_manager = self._initialize_vision_manager()
+        if self._vision_manager:
+            self._vision_manager.document_domain = self._intelligence_metadata.get(
+                "document_domain", ""
+            )
 
         # Initialize context state for first batch
         self._context_state = create_context_state(

@@ -328,6 +328,12 @@ class V2DocumentProcessor:
         else:
             self._vision_manager = None
 
+        # Pass document domain to VisionManager for domain-aware prompt selection
+        if self._vision_manager and self._intelligence_metadata:
+            self._vision_manager.document_domain = self._intelligence_metadata.get(
+                "document_domain", ""
+            )
+
         # Initialize Semantic Text Refiner (v18.2) - disabled by default
         self._refiner = None
 
