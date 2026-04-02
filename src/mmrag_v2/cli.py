@@ -713,8 +713,18 @@ def process_document(
 
     processor_instance: Optional[Any] = None
     try:
+        _SUPPORTED_EXTENSIONS = {".pdf", ".epub", ".html", ".htm", ".docx", ".pptx", ".xlsx"}
         is_pdf = input_file.suffix.lower() == ".pdf"
-        use_batching = batch_size_pages > 0 and is_pdf
+        is_supported = input_file.suffix.lower() in _SUPPORTED_EXTENSIONS
+        use_batching = batch_size_pages > 0 and is_pdf  # Batching is PDF-only
+
+        if not is_supported:
+            console.print(
+                f"[red]Unsupported format: {input_file.suffix}[/red]\n"
+                f"Supported: {', '.join(sorted(_SUPPORTED_EXTENSIONS))}",
+                style="bold red",
+            )
+            raise typer.Exit(code=1)
 
         # Smart Vision Orchestration for PDFs
         # NOTE: SmartConfigProvider uses PyMuPDF (fast), not Docling

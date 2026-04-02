@@ -555,6 +555,91 @@ class V2DocumentProcessor:
         }
         return type_map.get(ext, FileType.PDF)
 
+    @staticmethod
+    def _epub_to_html(epub_path: Path) -> Optional[Path]:
+        """Extract XHTML content from an EPUB file into a temporary HTML file.
+
+        EPUB files are ZIP archives containing XHTML chapters. Docling 2.66.0
+        doesn't support EPUB natively, but it does support HTML. This method
+        extracts all chapter content into a single HTML file that Docling can
+        process.
+
+        Returns:
+            Path to a temporary HTML file, or None on failure.
+        """
+        import tempfile
+        import zipfile
+        from xml.etree import ElementTree as ET
+
+        try:
+            parts: list[str] = []
+            with zipfile.ZipFile(epub_path, "r") as zf:
+                # Find the OPF file via container.xml
+                spine_items: list[str] = []
+                try:
+                    container = ET.fromstring(zf.read("META-INF/container.xml"))
+                    ns = {"c": "urn:oasis:names:tc:opendocument:xmlns:container"}
+                    rootfile = container.find(".//c:rootfile", ns)
+                    opf_path = rootfile.attrib["full-path"] if rootfile is not None else None
+                except Exception:
+                    opf_path = None
+
+                if opf_path:
+                    try:
+                        opf = ET.fromstring(zf.read(opf_path))
+                        opf_ns = {"opf": "http://www.idpf.org/2007/opf"}
+                        opf_dir = str(Path(opf_path).parent)
+                        manifest = {}
+                        for item in opf.findall(".//opf:manifest/opf:item", opf_ns):
+                            manifest[item.attrib.get("id", "")] = item.attrib.get("href", "")
+                        for itemref in opf.findall(".//opf:spine/opf:itemref", opf_ns):
+                            idref = itemref.attrib.get("idref", "")
+                            href = manifest.get(idref, "")
+                            if href:
+                                full = f"{opf_dir}/{href}" if opf_dir != "." else href
+                                spine_items.append(full)
+                    except Exception:
+                        pass
+
+                # Fallback: grab all .xhtml/.html files alphabetically
+                if not spine_items:
+                    spine_items = sorted(
+                        n for n in zf.namelist()
+                        if n.endswith((".xhtml", ".html", ".htm"))
+                        and "META-INF" not in n
+                    )
+
+                for item_path in spine_items:
+                    try:
+                        raw = zf.read(item_path).decode("utf-8", errors="replace")
+                        # Strip XML declaration and doctype for concatenation
+                        raw = raw.split("<body", 1)[-1] if "<body" in raw.lower() else raw
+                        if raw.startswith((" ", "\n", ">")):
+                            raw = "<body" + raw  # restore tag
+                        parts.append(raw)
+                    except Exception:
+                        continue
+
+            if not parts:
+                return None
+
+            html = (
+                "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+                f"<title>{epub_path.stem}</title></head>\n"
+                + "\n".join(parts)
+                + "\n</html>"
+            )
+
+            tmp = tempfile.NamedTemporaryFile(
+                suffix=".html", prefix="epub_", delete=False, mode="w", encoding="utf-8"
+            )
+            tmp.write(html)
+            tmp.close()
+            return Path(tmp.name)
+        except Exception as exc:
+            logger.warning(f"[EPUB] Failed to convert EPUB to HTML: {exc}")
+            return None
+
     def _is_advertisement(self, text: str) -> bool:
         """Detect if text is likely an advertisement (SRS Rule 4)."""
         if not text or len(text) < 10:
@@ -1979,6 +2064,17 @@ class V2DocumentProcessor:
         if self._page_offset > 0:
             logger.info(f"Batch processing mode: page_offset={self._page_offset}")
 
+        # EPUB pre-processing: extract XHTML chapters to a temporary HTML file.
+        # Docling 2.66.0 supports HTML but not EPUB natively.
+        _tmp_epub_html: Optional[Path] = None
+        if file_path.suffix.lower() == ".epub":
+            _tmp_epub_html = self._epub_to_html(file_path)
+            if _tmp_epub_html:
+                logger.info(f"[EPUB] Converted to temporary HTML: {_tmp_epub_html}")
+                file_path = _tmp_epub_html
+            else:
+                raise ValueError(f"Failed to extract HTML from EPUB: {input_path}")
+
         print("⏳ Starting Docling layout analysis...", flush=True)
         logger.info("Starting Docling document conversion...")
 
@@ -2112,6 +2208,13 @@ class V2DocumentProcessor:
             f"ENGINE_USE: Docling v2.66.0 | Completed: {file_path.name} | "
             f"Doc ID: {doc_hash} | Assets saved: {assets_saved}"
         )
+
+        # Clean up temporary EPUB-to-HTML file
+        if _tmp_epub_html is not None:
+            try:
+                _tmp_epub_html.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     def _process_element_v2(
         self,
@@ -2655,22 +2758,42 @@ class V2DocumentProcessor:
             if prev_text_table:
                 prev_text_table = prev_text_table[-CONTEXT_SNIPPET_LENGTH:]
 
-            # Create table chunk with semantic context - will be populated by pending queue
-            table_chunk = create_table_chunk(
-                doc_id=doc_hash,
-                content=table_content,
-                source_file=source_file,
-                file_type=file_type,
-                page_number=page_no,
-                bbox=table_bbox,
-                hierarchy=hierarchy,
-                asset_path=asset_path,
-                page_width=int(tbl_page_w),
-                page_height=int(tbl_page_h),
-                extraction_method=table_extraction_method,
-                # V2.4: Intelligence Stack Metadata
-                **self._intelligence_metadata,
-            )
+            # Create table or text chunk depending on whether an asset image is available.
+            # Non-PDF formats (HTML, EPUB, DOCX) cannot render table images, so tables
+            # are emitted as TEXT with chunk_type=table to satisfy QA-CHECK-05.
+            if asset_path is not None:
+                table_chunk = create_table_chunk(
+                    doc_id=doc_hash,
+                    content=table_content,
+                    source_file=source_file,
+                    file_type=file_type,
+                    page_number=page_no,
+                    bbox=table_bbox,
+                    hierarchy=hierarchy,
+                    asset_path=asset_path,
+                    page_width=int(tbl_page_w),
+                    page_height=int(tbl_page_h),
+                    extraction_method=table_extraction_method,
+                    # V2.4: Intelligence Stack Metadata
+                    **self._intelligence_metadata,
+                )
+            else:
+                # No rendered image available (non-PDF) — emit as TEXT chunk
+                table_chunk = create_text_chunk(
+                    doc_id=doc_hash,
+                    content=table_content,
+                    source_file=source_file,
+                    file_type=file_type,
+                    page_number=page_no,
+                    bbox=table_bbox,
+                    hierarchy=hierarchy,
+                    chunk_type=ChunkType.PARAGRAPH,
+                    page_width=int(tbl_page_w),
+                    page_height=int(tbl_page_h),
+                    extraction_method=table_extraction_method,
+                    # V2.4: Intelligence Stack Metadata
+                    **self._intelligence_metadata,
+                )
 
             # REQ-MM-03: TABLE CONTEXT PARITY - Initialize semantic context
             if table_chunk.semantic_context is None:
