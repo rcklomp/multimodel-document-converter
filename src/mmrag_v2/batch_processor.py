@@ -396,10 +396,8 @@ class BatchProcessor:
         self._doc_avg_text_per_page: Optional[float] = intelligence_metadata.pop("avg_text_per_page", None)
 
         self._intelligence_metadata = intelligence_metadata
-        # Adjust QA tolerance per profile (digital_magazine is allowed higher variance)
-        profile = intelligence_metadata.get("profile_type")
-        if profile == "digital_magazine":
-            self._token_validator = create_token_validator(tolerance=0.18)
+        # All profiles use the standard 10% tolerance now that IMAGE-bbox-aware
+        # source text extraction correctly excludes chart/graph label text.
         logger.info(
             f"[V2.4-OBSERVABILITY] Intelligence metadata set: "
             f"profile={intelligence_metadata.get('profile_type')}, "
@@ -6403,18 +6401,40 @@ class BatchProcessor:
                 )
 
             # ================================================================
-            # Use PyMuPDF raw text extraction as source for recovery triggering
+            # IMAGE-BBOX-AWARE SOURCE TEXT EXTRACTION
             # ================================================================
-            # PyMuPDF sees the raw PDF text layer which includes content that
-            # Docling may filter out (ads, headers, etc.) or miss entirely.
-            # This higher baseline ensures recovery mechanisms trigger when
-            # content is missing from Docling's extraction.
+            # PyMuPDF sees ALL text in the PDF text layer, including labels
+            # and data embedded in charts/graphs/figures. Docling correctly
+            # classifies chart regions as IMAGE chunks. If we count that text
+            # as "expected" source text, the variance is inflated because the
+            # content IS preserved — just as image chunks, not text chunks.
+            #
+            # Fix: extract PyMuPDF text blocks WITH positions, then exclude
+            # blocks whose area overlaps >50% with an IMAGE chunk bbox.
+            # This gives an accurate baseline of text that SHOULD be in
+            # TEXT chunks, not text that's legitimately in IMAGE chunks.
             # ================================================================
             source_text = ""
             if self._current_pdf_path and self._current_pdf_path.exists():
                 try:
                     doc: Optional[fitz.Document] = None
                     all_text_parts = []
+
+                    # Build per-page IMAGE bbox lookup from ALL chunks (not just text)
+                    image_bboxes_by_page: Dict[int, list] = {}
+                    for c in chunks:
+                        if (
+                            c.modality == Modality.IMAGE
+                            and c.metadata
+                            and c.metadata.spatial
+                            and c.metadata.spatial.bbox
+                        ):
+                            pg = c.metadata.page_number or 0
+                            image_bboxes_by_page.setdefault(pg, []).append(
+                                c.metadata.spatial.bbox  # [x0, y0, x1, y1] in 0-1000 coords
+                            )
+
+                    excluded_chars = 0
                     try:
                         doc = fitz.open(self._current_pdf_path)
                         for page_idx in range(len(doc)):
@@ -6422,9 +6442,58 @@ class BatchProcessor:
                             if self._processed_pages is not None and page_no not in self._processed_pages:
                                 continue
                             page = doc.load_page(page_idx)
-                            page_text = page.get_text("text")
-                            if page_text:
-                                all_text_parts.append(page_text.strip())
+
+                            # Filter IMAGE bboxes to only SMALL chart/graph regions.
+                            # Large images (>35% of page area) are editorial photos
+                            # where text IS legitimately placed around/within them.
+                            # Charts/graphs (<35%) contain embedded text labels that
+                            # PyMuPDF sees but Docling correctly treats as image content.
+                            _PAGE_AREA = 1_000_000  # 1000×1000 normalized page
+                            _MAX_CHART_FRACTION = 0.35
+                            chart_bboxes = [
+                                bbox for bbox in image_bboxes_by_page.get(page_no, [])
+                                if (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]) < _PAGE_AREA * _MAX_CHART_FRACTION
+                            ]
+                            if not chart_bboxes:
+                                # No small chart-sized IMAGE chunks — use all text
+                                page_text = page.get_text("text")
+                                if page_text:
+                                    all_text_parts.append(page_text.strip())
+                            else:
+                                # Has chart-sized IMAGE chunks — filter text blocks by bbox overlap
+                                pw = page.rect.width or 1.0
+                                ph = page.rect.height or 1.0
+                                blocks = page.get_text("blocks")
+                                for block in blocks:
+                                    if block[6] != 0:  # block_type 0 = text
+                                        continue
+                                    block_text = (block[4] or "").strip()
+                                    if not block_text:
+                                        continue
+                                    # Normalize block bbox to 0-1000 coordinate space
+                                    bx0 = int(block[0] / pw * 1000)
+                                    by0 = int(block[1] / ph * 1000)
+                                    bx1 = int(block[2] / pw * 1000)
+                                    by1 = int(block[3] / ph * 1000)
+                                    block_area = max(1, (bx1 - bx0) * (by1 - by0))
+
+                                    in_chart = False
+                                    for ibbox in chart_bboxes:
+                                        ix0, iy0, ix1, iy1 = ibbox
+                                        ox0 = max(bx0, ix0)
+                                        oy0 = max(by0, iy0)
+                                        ox1 = min(bx1, ix1)
+                                        oy1 = min(by1, iy1)
+                                        if ox0 < ox1 and oy0 < oy1:
+                                            overlap_area = (ox1 - ox0) * (oy1 - oy0)
+                                            if overlap_area / block_area > 0.70:
+                                                in_chart = True
+                                                break
+
+                                    if in_chart:
+                                        excluded_chars += len(block_text)
+                                    else:
+                                        all_text_parts.append(block_text)
                     finally:
                         if doc is not None:
                             try:
@@ -6434,7 +6503,8 @@ class BatchProcessor:
                     source_text = "\n".join(all_text_parts)
                     logger.info(
                         f"[QA-CHECK-01] Extracted {len(source_text)} chars from PDF for validation "
-                        f"(pages={len(self._processed_pages) if self._processed_pages else 'ALL'})"
+                        f"(excluded {excluded_chars} chars in IMAGE regions, "
+                        f"pages={len(self._processed_pages) if self._processed_pages else 'ALL'})"
                     )
                 except Exception as pdf_err:
                     logger.warning(f"[QA-CHECK-01] Failed to extract PDF text: {pdf_err}")

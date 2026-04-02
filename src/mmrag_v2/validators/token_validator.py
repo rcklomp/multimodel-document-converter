@@ -339,7 +339,7 @@ class TokenValidator:
             "technical_manual": 0.15,  # 15% - moderate noise
             "digital_magazine": 0.10,  # 10% - low noise
             "scanned_degraded": 0.05,  # 5%  - minimal filtering for OCR
-            "scanned_clean": 0.05,  # 5%  - minimal filtering for OCR
+            "scanned": 0.05,  # 5%  - minimal filtering for OCR
             "unknown": 0.10,  # 10% - default
         }
         return noise_allowances.get(profile_type, 0.10)  # Default 10%
