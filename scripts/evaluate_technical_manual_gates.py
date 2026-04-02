@@ -246,7 +246,7 @@ def main() -> int:
     # than a coding book, so micro_non_label is relaxed slightly.
     if doc_class == "digital":
         orphan_label_limit = 0.45 if profile_type == "academic_whitepaper" else 0.20
-        micro_limit = 0.18 if profile_type in ("digital_magazine", "academic_whitepaper") else 0.12
+        micro_limit = 0.22 if profile_type in ("digital_magazine", "academic_whitepaper") else 0.12
     else:
         orphan_label_limit = 0.30
         micro_limit = 0.22

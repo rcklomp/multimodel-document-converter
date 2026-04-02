@@ -873,7 +873,17 @@ class ProfileClassifier:
 
         # IMAGE DENSITY: Medium is ideal for manuals (weight: 0.20)
         # Not as high as magazines, not as low as books
-        if self.IMAGE_DENSITY_LOW <= f.image_density <= self.IMAGE_DENSITY_HIGH:
+        if f.image_density > 5.0:
+            # Extreme image density (>5/page) indicates decorative inline elements
+            # (drop caps, ornaments, bullets) — not technical diagrams. Real technical
+            # manuals have 0.1–0.5 images/page.
+            score += 0.0
+            reasoning.append(
+                f"Extreme image density ({f.image_density:.1f}/page) — "
+                f"decorative content, not technical diagrams"
+            )
+            confidence *= 0.15
+        elif self.IMAGE_DENSITY_LOW <= f.image_density <= self.IMAGE_DENSITY_HIGH:
             score += 0.20
             reasoning.append(
                 f"Manual-appropriate image density ({f.image_density:.2f}) - "
