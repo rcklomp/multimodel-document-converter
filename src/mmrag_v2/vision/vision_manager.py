@@ -34,6 +34,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, Optional, TYPE_CHECKING, Tuple
 
+import numpy as np
 from PIL import Image
 
 if TYPE_CHECKING:
@@ -44,6 +45,49 @@ if TYPE_CHECKING:
 from .vision_prompts import build_visual_prompt, clean_vlm_response, validate_vlm_response
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# IMAGE TYPE HEURISTIC
+# ============================================================================
+
+
+def _classify_image_type(image: Image.Image) -> tuple[bool, bool]:
+    """Light heuristic to classify an image as diagram or photograph.
+
+    Returns (is_diagram, is_photograph).  Both False means unknown/generic.
+
+    Signals used (no ML model, ~2 ms per image):
+    - Unique color count on a 128×128 thumbnail (diagrams use few colors)
+    - White/near-white pixel fraction (diagrams have white backgrounds)
+    - Mean saturation in HSV space (photos are more saturated)
+    """
+    try:
+        thumb = image.convert("RGB").resize((128, 128), Image.BILINEAR)
+        arr = np.asarray(thumb, dtype=np.uint8)
+
+        # --- Unique color count (quantised to 8-bit cubes) ---
+        quantised = (arr >> 4).reshape(-1, 3)
+        unique_colors = len(set(map(tuple, quantised.tolist())))
+
+        # --- White pixel fraction ---
+        luminance = arr.mean(axis=2)
+        white_frac = float((luminance > 240).sum()) / (128 * 128)
+
+        # --- Mean saturation (HSV) ---
+        hsv = np.asarray(thumb.convert("HSV"), dtype=np.float32)
+        mean_sat = float(hsv[:, :, 1].mean()) / 255.0
+
+        # Decision logic
+        # Diagrams: few colors, large white area, low saturation
+        if unique_colors < 120 and white_frac > 0.30 and mean_sat < 0.25:
+            return (True, False)
+        # Photographs: many colors, high saturation, little white
+        if unique_colors > 400 and mean_sat > 0.20 and white_frac < 0.40:
+            return (False, True)
+        return (False, False)
+    except Exception:
+        return (False, False)
 
 
 # ============================================================================
@@ -1063,12 +1107,13 @@ class VisionManager:
         # - We intentionally do NOT pass breadcrumbs, page number, or surrounding text
         #   because it encourages meta-language ("page", "document", "surrounding text")
         #   and speculative statements that degrade retrieval quality.
+        is_diagram, is_photograph = _classify_image_type(image)
         prompt = build_visual_prompt(
             context_section=None,
             diagnostic_hints=None,
             is_scan=False,  # Caller may route scan-specific prompting elsewhere
-            is_diagram=False,  # TODO: add light heuristic auto-detect
-            is_photograph=False,
+            is_diagram=is_diagram,
+            is_photograph=is_photograph,
             ocr_confidence=ocr_confidence,
         )
 
@@ -1925,12 +1970,13 @@ class VisionManager:
         is_scan = bool(profile_params and profile_params.inject_scan_hints)
         diagnostic_hints = SCAN_ARTIFACT_HINTS if is_scan else None
 
+        _is_diagram, _is_photograph = _classify_image_type(image)
         prompt = build_visual_prompt(
             context_section=None,
             diagnostic_hints=diagnostic_hints,
             is_scan=is_scan,
-            is_diagram=False,
-            is_photograph=False,
+            is_diagram=_is_diagram,
+            is_photograph=_is_photograph,
             ocr_confidence=None,
         )
 
