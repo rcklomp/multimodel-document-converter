@@ -897,15 +897,14 @@ def process_document(
                 profile_type=selected_profile.profile_type.value,  # V2.2 FIX: Pass profile_type
             )
 
-            # GEMINI AUDIT FIX: Adjust strategy based on diagnostic results
-            if diagnostic_report.should_force_scan_mode():
-                console.print(
-                    "[yellow]⚠ Diagnostic: Forcing scan mode due to physical checks[/yellow]"
-                )
-                # Enable OCR if document is likely a scan
+            # AUTO-ENABLE OCR for scanned documents.
+            # Without OCR, scanned pages produce only image chunks (no searchable text).
+            # This is the #1 quality issue reported in blind testing.
+            if diagnostic_report.should_force_scan_mode() or diagnostic_report.physical_check.is_likely_scan:
                 if not enable_ocr:
+                    enable_ocr = True
                     console.print(
-                        "[yellow]  → Consider using --enable-ocr for better text extraction[/yellow]"
+                        "[yellow]⚠ Scanned document detected → OCR auto-enabled for text extraction[/yellow]"
                     )
 
             # ================================================================
