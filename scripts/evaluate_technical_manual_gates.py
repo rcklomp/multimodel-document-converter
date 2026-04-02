@@ -118,7 +118,7 @@ def count_infix_artifacts(text: str) -> int:
         # Skip ordinal range patterns: "vom 6. bis 8. Oktober" (German date range),
         # "from 5. to 7." etc. are legitimate ordinal usage, not list artifacts.
         # Guard on prev (range-start prepositions) and next (range connectors).
-        if prev in ("bis", "to", "from", "through", "vom", "von"):
+        if prev in ("bis", "to", "from", "through", "vom", "von", "and", "or"):
             continue
         if nxt in ("bis", "to", "through"):
             continue
@@ -245,7 +245,7 @@ def main() -> int:
     # Digital magazines and technical reports often have more caption fragments
     # than a coding book, so micro_non_label is relaxed slightly.
     if doc_class == "digital":
-        orphan_label_limit = 0.45 if profile_type == "academic_whitepaper" else 0.20
+        orphan_label_limit = 0.45 if profile_type == "academic_whitepaper" else 0.25
         micro_limit = 0.22 if profile_type in ("digital_magazine", "academic_whitepaper") else 0.12
     else:
         orphan_label_limit = 0.30
