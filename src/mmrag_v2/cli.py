@@ -477,7 +477,7 @@ def process_document(
     profile_override: Optional[str] = typer.Option(
         None,
         "--profile-override",
-        help="Force a strategy profile (e.g., academic_whitepaper, digital_magazine, scanned_clean, scanned_degraded, scanned_magazine, technical_manual)",
+        help="Force a strategy profile (e.g., academic_whitepaper, digital_magazine, scanned, scanned_degraded, technical_manual)",
     ),
     force_table_vlm: bool = typer.Option(
         False,

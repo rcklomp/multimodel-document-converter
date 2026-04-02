@@ -158,19 +158,19 @@ class TestProfileSelection:
         self, scanned_firearms_diagnostic: DiagnosticReport
     ):
         """
-        Scanned documents MUST get a scan profile (degraded or clean).
+        Scanned documents MUST get a scan profile (degraded or standard).
 
         CONTEXT: The legacy heuristic (without doc_profile) selects between
-        ScannedDegradedProfile (confidence < 0.70) and ScannedCleanProfile (>= 0.70).
-        With confidence=0.85, it correctly selects ScannedCleanProfile.
+        ScannedDegradedProfile (confidence < 0.70) and ScannedProfile (>= 0.70).
+        With confidence=0.85, it correctly selects ScannedProfile.
         """
         profile = ProfileManager.select_profile(scanned_firearms_diagnostic)
 
-        # Accept either scan profile type (degraded or clean)
-        from mmrag_v2.orchestration.strategy_profiles import ScannedCleanProfile
+        # Accept either scan profile type (degraded or standard)
+        from mmrag_v2.orchestration.strategy_profiles import ScannedProfile
 
-        assert isinstance(profile, (ScannedDegradedProfile, ScannedCleanProfile))
-        assert profile.profile_type in (ProfileType.SCANNED_DEGRADED, ProfileType.SCANNED_CLEAN)
+        assert isinstance(profile, (ScannedDegradedProfile, ScannedProfile))
+        assert profile.profile_type in (ProfileType.SCANNED_DEGRADED, ProfileType.SCANNED)
 
     def test_low_confidence_falls_back_to_digital(
         self, low_confidence_diagnostic: DiagnosticReport

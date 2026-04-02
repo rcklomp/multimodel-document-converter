@@ -59,11 +59,9 @@ class ProfileType(str, Enum):
 
     ACADEMIC_WHITEPAPER = "academic_whitepaper"
     DIGITAL_MAGAZINE = "digital_magazine"
-    SCANNED_LITERATURE = "scanned_literature"
-    SCANNED_CLEAN = "scanned_clean"
+    SCANNED = "scanned"  # Standard-quality scans (replaces scanned_clean/literature/magazine)
     SCANNED_DEGRADED = "scanned_degraded"
-    SCANNED_MAGAZINE = "scanned_magazine"  # NEW: Scanned editorial content with large photos
-    TECHNICAL_MANUAL = "technical_manual"  # NEW: Technical manuals with small detail parts
+    TECHNICAL_MANUAL = "technical_manual"
     STANDARD_DIGITAL = "standard_digital"  # Fallback profile
 
 
@@ -219,10 +217,8 @@ class ProfileClassifier:
         scores = [
             self._score_academic_whitepaper(features),
             self._score_digital_magazine(features),
-            self._score_scanned_literature(features),
-            self._score_scanned_clean(features),
+            self._score_scanned(features),
             self._score_scanned_degraded(features),
-            self._score_scanned_magazine(features),
             self._score_technical_manual(features),
         ]
 
@@ -249,7 +245,7 @@ class ProfileClassifier:
 
         # V16.2 CONFIDENCE-WEIGHTED SELECTION: Always use score * confidence
         # This ensures that high-confidence classifications beat high-score but low-confidence ones
-        # Example: technical_manual (0.80 * 0.80 = 0.64) beats scanned_magazine (0.85 * 0.56 = 0.47)
+        # Example: technical_manual (0.80 * 0.80 = 0.64) beats scanned (0.85 * 0.56 = 0.47)
         def rank_score(s: ProfileScore) -> float:
             return s.score * s.confidence
 
@@ -294,7 +290,7 @@ class ProfileClassifier:
         ==================================================
         Instead of selecting purely on RAW SCORE, we use a CONFIDENCE-WEIGHTED
         score to handle cases where a profile has high confidence but lower
-        raw score (e.g., technical_manual with 0.80 confidence vs scanned_magazine
+        raw score (e.g., technical_manual with 0.80 confidence vs scanned
         with 0.56 confidence).
 
         FORMULA: weighted_score = score * (0.5 + 0.5 * confidence)
@@ -302,8 +298,7 @@ class ProfileClassifier:
         - A profile with score=0.65 and confidence=0.80 beats
           a profile with score=0.85 and confidence=0.56
 
-        SCANNED PROFILES: scanned_literature, scanned_clean, scanned_degraded,
-                         scanned_magazine, technical_manual
+        SCANNED PROFILES: scanned, scanned_degraded, technical_manual
         DIGITAL PROFILES: academic_whitepaper, digital_magazine, technical_manual
 
         Note: technical_manual is valid for BOTH modalities.
@@ -317,10 +312,8 @@ class ProfileClassifier:
         """
         # Define profile modality categories
         scanned_profiles = {
-            ProfileType.SCANNED_LITERATURE,
-            ProfileType.SCANNED_CLEAN,
+            ProfileType.SCANNED,
             ProfileType.SCANNED_DEGRADED,
-            ProfileType.SCANNED_MAGAZINE,
             ProfileType.TECHNICAL_MANUAL,  # Valid for both
         }
         digital_profiles = {
@@ -333,7 +326,7 @@ class ProfileClassifier:
         if features.is_scan:
             logger.info("[CLASSIFIER] Modality: SCANNED → filtering to scanned profiles only")
             modality_valid = [s for s in valid_scores if s.profile_type in scanned_profiles]
-            default_fallback = ProfileType.SCANNED_CLEAN
+            default_fallback = ProfileType.SCANNED
         else:
             logger.info("[CLASSIFIER] Modality: DIGITAL → filtering to digital profiles only")
             modality_valid = [s for s in valid_scores if s.profile_type in digital_profiles]
@@ -383,8 +376,8 @@ class ProfileClassifier:
             Safe default ProfileType based on modality
         """
         if features.is_scan:
-            logger.warning("[CLASSIFIER] EMERGENCY: All rejected, defaulting to SCANNED_CLEAN")
-            return ProfileType.SCANNED_CLEAN
+            logger.warning("[CLASSIFIER] EMERGENCY: All rejected, defaulting to SCANNED")
+            return ProfileType.SCANNED
         else:
             logger.warning("[CLASSIFIER] EMERGENCY: All rejected, defaulting to DIGITAL_MAGAZINE")
             return ProfileType.DIGITAL_MAGAZINE
@@ -528,9 +521,9 @@ class ProfileClassifier:
         confidence = 1.0
 
         # MODALITY CHECK: HARD REQUIREMENT - must be digital
-        # This is a DIGITAL profile - scans must use scanned_magazine instead
+        # This is a DIGITAL profile - scans must use scanned profile instead
         if f.is_scan:
-            reasoning.append("REJECTED: Scanned document - use scanned_magazine instead")
+            reasoning.append("REJECTED: Scanned document - use scanned profile instead")
             return ProfileScore(
                 profile_type=ProfileType.DIGITAL_MAGAZINE,
                 score=0.0,
@@ -617,160 +610,80 @@ class ProfileClassifier:
             confidence=confidence,
         )
 
-    def _score_scanned_literature(self, f: ClassificationFeatures) -> ProfileScore:
+    def _score_scanned(self, f: ClassificationFeatures) -> ProfileScore:
         """
-        Score for Scanned Literature profile (books, novels, fiction).
+        Score for Scanned profile (standard-quality scans).
+
+        Replaces scanned_clean, scanned_literature, and scanned_magazine —
+        three former profiles that shared identical batch-processor behavior
+        and only differed in minor extraction parameters.
 
         CHARACTERISTICS:
         - SCAN = True (essential)
-        - MANY pages (50+ typical for books)
-        - Editorial domain (fiction, literature)
-        - SMALL median_dim (25-100px for decorative illustrations)
-        - LOW-MEDIUM text density (due to poor OCR)
-        - LOW-MEDIUM image density (occasional illustrations)
+        - Reasonable scan quality (confidence 0.60+)
+        - NOT degraded (that's scanned_degraded)
+        - NOT a technical manual (that's technical_manual via DOMINANCE)
+        - Covers: books, editorial scans, standard-quality document scans
         """
         score = 0.0
         reasoning = []
         confidence = 1.0
 
-        # SCAN CHECK: Essential for this profile (weight: 0.30)
-        if f.is_scan:
-            score += 0.30
-            reasoning.append("Scanned document")
-        else:
-            score += 0.0
-            reasoning.append("Not scanned - wrong profile")
-            confidence *= 0.1  # Massive penalty - this profile is for scans only
+        # SCAN CHECK: Required — hard reject if digital
+        if not f.is_scan:
+            reasoning.append("REJECTED: Digital document — use digital profile instead")
             return ProfileScore(
-                profile_type=ProfileType.SCANNED_LITERATURE,
-                score=score,
+                profile_type=ProfileType.SCANNED,
+                score=0.0,
                 reasoning=reasoning,
-                confidence=confidence,
+                confidence=0.0,
             )
 
-        # PAGE COUNT: Books have many pages (weight: 0.25)
-        if f.page_count >= self.PAGE_COUNT_BOOK:
-            score += 0.25
-            reasoning.append(f"Book-length ({f.page_count} >= 50 pages)")
-        elif f.page_count >= self.PAGE_COUNT_ARTICLE:
-            score += 0.10
-            reasoning.append(f"Moderate page count ({f.page_count} pages)")
-        else:
-            score += 0.0
-            reasoning.append(f"Too few pages ({f.page_count}) for typical book")
-            confidence *= 0.6
+        reasoning.append("✓ Scanned document")
 
-        # MEDIAN DIM: CRITICAL DISCRIMINATOR! (weight: 0.25)
-        # Small illustrations distinguish books from magazines
-        if f.median_dim < self.MEDIAN_DIM_MEDIUM:
-            score += 0.25
-            reasoning.append(
-                f"Small decorative illustrations ({f.median_dim}px < 100) - typical for books"
-            )
-        elif f.median_dim < self.MEDIAN_DIM_LARGE:
-            score += 0.10
-            reasoning.append(f"Medium images ({f.median_dim}px)")
+        # SCAN QUALITY (weight: 0.35)
+        if f.scan_confidence >= 0.70:
+            score += 0.35
+            reasoning.append(f"Good scan quality ({f.scan_confidence:.2f})")
         else:
-            score += 0.0
-            reasoning.append(f"Large images ({f.median_dim}px >= 200) - more typical of magazines")
-            confidence *= 0.4
-
-        # DOMAIN: Editorial for fiction/literature (weight: 0.15)
-        if f.domain == "editorial":
             score += 0.15
-            reasoning.append("Editorial domain (fiction/literature)")
-        else:
-            score += 0.05
-            reasoning.append(f"Non-editorial domain ({f.domain})")
-            confidence *= 0.7
-
-        # IMAGE DENSITY: Should be LOW (occasional illustrations) (weight: 0.05)
-        if f.image_density <= self.IMAGE_DENSITY_MEDIUM:
-            score += 0.05
-            reasoning.append(f"Appropriate image density for books ({f.image_density:.2f})")
-        else:
-            score += 0.0
-            reasoning.append(f"High image density ({f.image_density:.2f}) unusual for literature")
+            reasoning.append(f"Moderate scan quality ({f.scan_confidence:.2f})")
             confidence *= 0.8
 
-        return ProfileScore(
-            profile_type=ProfileType.SCANNED_LITERATURE,
-            score=score,
-            reasoning=reasoning,
-            confidence=confidence,
-        )
-
-    def _score_scanned_clean(self, f: ClassificationFeatures) -> ProfileScore:
-        """
-        Score for Scanned Clean profile (high-quality scans).
-
-        CHARACTERISTICS:
-        - SCAN = True with HIGH confidence (0.70+)
-        - Clean scanned_clean modality
-        - MODERATE text density (good OCR potential)
-        - Technical or editorial domain
-        - Variable page count
-        """
-        score = 0.0
-        reasoning = []
-        confidence = 1.0
-
-        # SCAN CHECK: Essential (weight: 0.35)
-        if f.is_scan and f.scan_confidence >= 0.70:
-            score += 0.35
-            reasoning.append(f"High-quality scan (confidence: {f.scan_confidence:.2f})")
-        elif f.is_scan:
-            score += 0.15
-            reasoning.append(f"Scan with moderate confidence ({f.scan_confidence:.2f})")
-            confidence *= 0.7
-        else:
-            score += 0.0
-            reasoning.append("Not scanned")
-            confidence *= 0.1
-            return ProfileScore(
-                profile_type=ProfileType.SCANNED_CLEAN,
-                score=score,
-                reasoning=reasoning,
-                confidence=confidence,
-            )
-
-        # MODALITY: Should be scanned_clean (weight: 0.25)
-        if f.modality == "scanned_clean":
+        # MODALITY (weight: 0.25)
+        if f.modality in ("scanned_clean", "scanned_degraded", "hybrid"):
             score += 0.25
-            reasoning.append("Clean scan modality")
-        elif f.modality in ("scanned_degraded", "hybrid"):
-            score += 0.10
-            reasoning.append(f"Scan modality: {f.modality}")
-            confidence *= 0.7
+            reasoning.append(f"Confirmed scan modality ({f.modality})")
 
-        # DOMAIN: Technical documents often high-quality scans (weight: 0.20)
-        if f.domain in ("technical", "editorial"):
+        # DOMAIN (weight: 0.20)
+        if f.domain in ("editorial", "technical"):
             score += 0.20
-            reasoning.append(f"Appropriate domain ({f.domain})")
+            reasoning.append(f"Known domain ({f.domain})")
+        elif f.domain == "academic":
+            score += 0.15
+            reasoning.append("Academic domain")
         else:
             score += 0.10
-            reasoning.append(f"Domain: {f.domain}")
+            reasoning.append(f"Unknown domain ({f.domain})")
+            confidence *= 0.9
 
-        # TEXT DENSITY: Moderate (good OCR) (weight: 0.15)
+        # TEXT DENSITY: moderate extraction = readable scan (weight: 0.15)
         if f.text_density >= self.TEXT_DENSITY_LOW:
             score += 0.15
-            reasoning.append(f"Good OCR text extraction ({f.text_density:.0f} chars/page)")
+            reasoning.append(f"Readable scan ({f.text_density:.0f} chars/page)")
         else:
-            score += 0.0
-            reasoning.append(f"Low text extraction ({f.text_density:.0f}) - may be degraded")
-            confidence *= 0.6
-
-        # PAGE COUNT: Exclude very long books (weight: 0.05)
-        if f.page_count < self.PAGE_COUNT_BOOK:
+            # Low text density is valid (OCR may have struggled), small penalty
             score += 0.05
-            reasoning.append(f"Standard document length ({f.page_count} pages)")
-        else:
-            score += 0.0
-            reasoning.append(f"Long document ({f.page_count} pages) - may be literature")
-            confidence *= 0.7
+            reasoning.append(f"Low text extraction ({f.text_density:.0f} chars/page)")
+            confidence *= 0.85
+
+        # PAGE COUNT (weight: 0.05)
+        if f.page_count >= 5:
+            score += 0.05
+            reasoning.append(f"Reasonable page count ({f.page_count})")
 
         return ProfileScore(
-            profile_type=ProfileType.SCANNED_CLEAN,
+            profile_type=ProfileType.SCANNED,
             score=score,
             reasoning=reasoning,
             confidence=confidence,
@@ -842,108 +755,6 @@ class ProfileClassifier:
             confidence=confidence,
         )
 
-    def _score_scanned_magazine(self, f: ClassificationFeatures) -> ProfileScore:
-        """
-        Score for Scanned Magazine profile (Combat Aircraft scenario).
-
-        CRITICAL INSIGHT: When a magazine is scanned, the digital_magazine score
-        gets heavily penalized by the scan check. But we STILL want magazine-quality
-        processing (high DPI, preserve large photos, editorial sensitivity).
-
-        This profile OVERRIDES the conservative scanned_clean settings when:
-        - It's a scan (essential)
-        - HIGH image density (magazine-like)
-        - LARGE median_dim (editorial photos, not small illustrations)
-        - Editorial domain preferred
-
-        CHARACTERISTICS:
-        - SCAN = True (essential)
-        - HIGH image density (0.5+ images/page - magazine hallmark)
-        - LARGE median_dim (200+ px - editorial photos)
-        - Editorial domain
-        - Variable page count (not books, typically < 50 pages)
-        """
-        score = 0.0
-        reasoning = []
-        confidence = 1.0
-
-        # SCAN CHECK: Essential - this profile ONLY for scanned magazines (weight: 0.25)
-        if f.is_scan:
-            score += 0.25
-            reasoning.append("Scanned document")
-        else:
-            score += 0.0
-            reasoning.append("Not scanned - use digital_magazine instead")
-            confidence *= 0.1  # Massive penalty
-            return ProfileScore(
-                profile_type=ProfileType.SCANNED_MAGAZINE,
-                score=score,
-                reasoning=reasoning,
-                confidence=confidence,
-            )
-
-        # IMAGE DENSITY: Critical - magazines have high image density (weight: 0.30)
-        if f.image_density >= self.IMAGE_DENSITY_HIGH:
-            score += 0.30
-            reasoning.append(
-                f"High image density ({f.image_density:.2f} >= 0.5) - magazine signature"
-            )
-        elif f.image_density >= self.IMAGE_DENSITY_MEDIUM:
-            score += 0.15
-            reasoning.append(f"Moderate image density ({f.image_density:.2f})")
-            confidence *= 0.7
-        else:
-            score += 0.0
-            reasoning.append(
-                f"Low image density ({f.image_density:.2f}) - not typical for magazines"
-            )
-            confidence *= 0.4
-
-        # MEDIAN DIM: Critical discriminator from scanned_literature (weight: 0.25)
-        # Large photos = magazine, small illustrations = book
-        if f.median_dim >= self.MEDIAN_DIM_LARGE:
-            score += 0.25
-            reasoning.append(
-                f"Large editorial photos ({f.median_dim}px >= 200) - magazine hallmark"
-            )
-        elif f.median_dim >= self.MEDIAN_DIM_MEDIUM:
-            score += 0.10
-            reasoning.append(f"Medium images ({f.median_dim}px)")
-            confidence *= 0.7
-        else:
-            score += 0.0
-            reasoning.append(f"Small images ({f.median_dim}px < 100) - more like scanned book")
-            confidence *= 0.3  # Strong penalty
-
-        # DOMAIN: Editorial strongly preferred (weight: 0.15)
-        if f.domain == "editorial":
-            score += 0.15
-            reasoning.append("Editorial domain - magazine content")
-        elif f.domain == "technical":
-            score += 0.05
-            reasoning.append(f"Technical domain - could be illustrated manual")
-            confidence *= 0.8
-        else:
-            score += 0.0
-            reasoning.append(f"Non-editorial domain ({f.domain})")
-            confidence *= 0.6
-
-        # PAGE COUNT: Magazines typically < 50 pages (weight: 0.05)
-        if f.page_count < self.PAGE_COUNT_BOOK:
-            score += 0.05
-            reasoning.append(f"Magazine-appropriate page count ({f.page_count} < 50)")
-        else:
-            score += 0.0
-            reasoning.append(f"Long document ({f.page_count} pages) - may be book")
-            confidence *= 0.7
-
-        return ProfileScore(
-            profile_type=ProfileType.SCANNED_MAGAZINE,
-            score=score,
-            reasoning=reasoning,
-            confidence=confidence,
-        )
-
     def _score_technical_manual(self, f: ClassificationFeatures) -> ProfileScore:
         """
         Score for Technical Manual profile (Firearms.pdf scenario).
@@ -1007,7 +818,7 @@ class ProfileClassifier:
 
         if is_scanned_technical_manual:
             # V16.2 MASSIVE BOOST: This combination is the signature of scanned technical manuals.
-            # The boost + dominance lock ensures rank_score = 0.80 beats scanned_magazine (0.665).
+            # The boost + dominance lock ensures rank_score = 0.80 beats scanned (0.665).
             score += 0.55
             if is_scanned_editorial_technical:
                 reasoning.append(

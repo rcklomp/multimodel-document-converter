@@ -51,10 +51,8 @@ class ProfileType(str, Enum):
     DIGITAL_MAGAZINE = "digital_magazine"
     ACADEMIC_WHITEPAPER = "academic_whitepaper"
     SCANNED_DEGRADED = "scanned_degraded"
-    SCANNED_CLEAN = "scanned_clean"
-    SCANNED_LITERATURE = "scanned_literature"  # For scanned books/novels
-    SCANNED_MAGAZINE = "scanned_magazine"  # NEW: Scanned editorial content (Combat Aircraft)
-    TECHNICAL_MANUAL = "technical_manual"  # NEW: Technical manuals (Firearms.pdf)
+    SCANNED = "scanned"  # Standard quality scans (replaces scanned_clean/literature/magazine)
+    TECHNICAL_MANUAL = "technical_manual"
     UNKNOWN = "unknown"
 
 
@@ -563,91 +561,86 @@ class ScannedDegradedProfile(BaseProfile):
 
 
 # ============================================================================
-# SCANNED CLEAN PROFILE
+# SCANNED PROFILE (consolidates scanned_clean, scanned_literature, scanned_magazine)
 # ============================================================================
 
 
-class ScannedCleanProfile(BaseProfile):
+class ScannedProfile(BaseProfile):
     """
-    Profile for high-quality scanned documents (confidence 0.70+).
+    Profile for standard-quality scanned documents.
+
+    Replaces the three former profiles (scanned_clean, scanned_literature,
+    scanned_magazine) which shared identical batch-processor behavior and
+    only differed in minor extraction parameters.
 
     CHARACTERISTICS:
-    - Scanned paper documents with good quality
-    - Minimal artifacts, clear text, sharp images
-    - OCR should work well with layout-aware mode
-    - Firearms manual quality level (confidence ~0.70)
+    - Scanned documents with reasonable quality (scan_confidence 0.60+)
+    - Covers: scanned books, scanned magazines, clean scanned manuals
+    - NOT for heavily degraded scans (use scanned_degraded)
+    - NOT for technical manuals needing fine-detail extraction (use technical_manual)
 
     VLM STRATEGY:
-    - STRICT freedom: Visual-only descriptions, no text interpretation
-    - INJECT scan hints: Tell VLM to ignore minor paper artifacts
-    - Layout-aware OCR is primary source of truth
+    - STRICT freedom: Visual-only descriptions
+    - INJECT scan hints: Ignore paper artifacts
+    - Generic hints suitable for any scan type
 
     EXTRACTION:
-    - Moderate min dimensions (50x50) - balance between recall and precision
-    - Standard sensitivity (0.6)
-    - Shadow extraction enabled but not primary
-
-    This profile is the OPTIMAL choice for quality scans like Firearms manual.
+    - min_image: 30px — catches small illustrations and decorative elements
+    - sensitivity: 0.70 — good recall without excessive noise
+    - render_dpi: 200 — good quality for most scans
     """
 
     @property
     def profile_type(self) -> ProfileType:
-        return ProfileType.SCANNED_CLEAN
+        return ProfileType.SCANNED
 
     @property
     def name(self) -> str:
-        return "High-Quality Scan (Layout-First)"
+        return "Scanned Document"
 
     def get_parameters(self) -> ProfileParameters:
         return ProfileParameters(
-            # Extraction - balanced for quality scans
-            sensitivity=0.6,  # Moderate recall
-            min_image_width=50,  # Standard minimum
-            min_image_height=50,
+            sensitivity=0.70,
+            min_image_width=30,
+            min_image_height=30,
             extract_backgrounds=True,
             enable_shadow_extraction=True,
-            # VLM - STRICT visual-only mode (REQ-VLM-NOISE)
-            vlm_freedom=VLMFreedom.STRICT,  # Visual descriptors only
-            inject_scan_hints=True,  # Minimal artifact handling
-            inject_historical_hints=False,  # Not needed for clean scans
-            confidence_threshold=0.8,  # High bar for VLM descriptions
-            # Post-processing
-            strip_artifacts_from_text=False,  # OCR should be clean
+            vlm_freedom=VLMFreedom.STRICT,
+            inject_scan_hints=True,
+            inject_historical_hints=False,
+            confidence_threshold=0.8,
+            strip_artifacts_from_text=False,
             aggressive_deduplication=False,
-            # OCR Hints - REQ-OCR-01: Enable for layout-aware hybrid
-            enable_ocr_hints=True,  # EasyOCR hints for brand names
-            ocr_min_confidence=0.5,  # Higher threshold for clean scans
+            enable_ocr_hints=True,
+            ocr_min_confidence=0.5,
             ocr_languages=["en"],
-            # Dynamic DPI - REQ-DPI-01: Standard resolution for clean scans
-            render_dpi=150,  # 150 DPI sufficient for clean scans
+            render_dpi=200,
+            recommended_batch_size=10,
         )
 
     def get_vlm_prompt_config(self) -> VLMPromptConfig:
         return VLMPromptConfig(
             base_hints=[
-                "This is a high-quality scanned document",
-                "Layout-aware OCR has ALREADY extracted ALL text content",
-                "Your job: Describe ONLY visual elements (diagrams, photos, technical illustrations)",
-                "DO NOT describe or interpret text content",
+                "This is a scanned document",
+                "OCR has extracted text content — describe ONLY visual elements",
+                "Focus on diagrams, photos, illustrations, and artwork",
             ],
             artifact_hints=[
-                "IGNORE minor paper texture or grain",
-                "Focus ONLY on non-textual visual content",
-                "Text is handled by OCR - you handle diagrams and images",
+                "IGNORE paper texture, grain, and discoloration",
+                "IGNORE scan artifacts, dust specks, and binding shadows",
+                "Focus ONLY on intentional visual content",
             ],
-            domain_context="technical/manual",
+            domain_context="scanned document",
             freedom_instruction=(
-                "STRICT VISUAL-ONLY MODE:\n"
-                "1. Describe ONLY diagrams, illustrations, photographs\n"
-                "2. NO text interpretation - OCR owns all text\n"
-                "3. NO meta-language ('This image shows...', 'The page contains...')\n"
-                "4. Direct visual descriptors: 'Exploded diagram of...', 'Technical schematic showing...'\n"
-                "5. If region contains ONLY text (no diagram), respond: 'Text region - OCR processed'"
+                "SCANNED DOCUMENT MODE:\n"
+                "1. Describe ONLY visual elements (diagrams, photos, illustrations)\n"
+                "2. NO text interpretation — OCR owns all text\n"
+                "3. IGNORE paper and scan quality artifacts\n"
+                "4. Use direct visual descriptors without meta-language"
             ),
         )
 
     def should_use_diagnostic_context(self) -> bool:
-        # Clean scans use diagnostic context for scan hints
         return True
 
     def get_adaptive_settings(
@@ -663,229 +656,6 @@ class ScannedCleanProfile(BaseProfile):
                 ocr_confidence_threshold=0.3,
             )
         return None
-
-
-# ============================================================================
-# SCANNED LITERATURE PROFILE
-# ============================================================================
-
-
-class ScannedLiteratureProfile(BaseProfile):
-    """
-    Profile for scanned literature: novels, fiction, long-form books.
-
-    V16 VLM HALLUCINATIE FIX (2026-01-10):
-    ======================================
-    CRITICAL: The VLM was hallucinating "revolvers" in Harry Potter because
-    it didn't know it was analyzing a CHILDREN'S BOOK. The domain_context
-    must be EXPLICIT about the document type to prevent such hallucinations.
-
-    NEW VLM STRATEGY:
-    - EXPLICIT domain context: "children's book / fiction / literature"
-    - REDUCED sensitivity (0.65 → 0.75 was too aggressive)
-    - STRICT warnings against modern/violent interpretations
-
-    CHARACTERISTICS:
-    - Scanned books with 50+ pages (Harry Potter, etc.)
-    - Editorial domain with narrative text flow
-    - Small decorative illustrations, chapter headings, ornamental elements
-    - Page-filling scans but with embedded artistic elements
-
-    VLM STRATEGY:
-    - STRICT freedom: Focus on visual elements only
-    - INJECT scan hints: Tell VLM to ignore paper artifacts
-    - EXPLICIT literature context: Prevent hallucinations
-    - Capture small illustrations that add context/atmosphere
-
-    EXTRACTION:
-    - LOWER min dimensions (25x25) to catch small illustrations
-    - MODERATE sensitivity (0.65) - balanced recall vs false positives
-    - Background extraction ENABLED (illustrations are part of scan layer)
-    - Shadow extraction enabled for embedded artwork
-
-    This profile optimizes for RAG where small illustrations provide
-    important contextual markers (chapter breaks, decorative elements, etc.)
-    """
-
-    @property
-    def profile_type(self) -> ProfileType:
-        return ProfileType.SCANNED_LITERATURE
-
-    @property
-    def name(self) -> str:
-        return "Scanned Literature/Fiction"
-
-    def get_parameters(self) -> ProfileParameters:
-        return ProfileParameters(
-            # Extraction - OPTIMIZED FOR SMALL ILLUSTRATIONS
-            sensitivity=0.65,  # V16 FIX: Reduced from 0.75 - balance recall vs false positives
-            min_image_width=25,  # Catch small chapter illustrations
-            min_image_height=25,  # Small ornamental elements
-            extract_backgrounds=True,  # CRITICAL: Illustrations in scan layer
-            enable_shadow_extraction=True,  # Embedded artwork
-            # VLM - STRICT visual-only mode with EXPLICIT literature context
-            vlm_freedom=VLMFreedom.STRICT,
-            inject_scan_hints=True,  # Tell VLM about scan artifacts
-            inject_historical_hints=False,  # Not typically historical
-            confidence_threshold=0.75,  # V16 FIX: Raised from 0.7 - higher bar for descriptions
-            # Post-processing
-            strip_artifacts_from_text=False,
-            aggressive_deduplication=False,
-            # OCR Hints - Enable for scanned books
-            enable_ocr_hints=True,
-            ocr_min_confidence=0.5,
-            ocr_languages=["en"],
-            # Dynamic DPI - Higher for better small illustration capture
-            render_dpi=200,  # Balance between quality and performance
-        )
-
-    def get_vlm_prompt_config(self) -> VLMPromptConfig:
-        return VLMPromptConfig(
-            base_hints=[
-                "This is a SCANNED BOOK - likely FICTION or CHILDREN'S LITERATURE",
-                "Focus on decorative illustrations, chapter headings, and artistic elements",
-                "These are BOOK ILLUSTRATIONS - whimsical, artistic, fantastical",
-                "OCR handles text content - you handle illustrations and artwork",
-            ],
-            artifact_hints=[
-                "IGNORE paper texture, grain, and minor discoloration",
-                "IGNORE page edges, binding artifacts, and scan shadows",
-                "Focus on intentional visual elements: illustrations, decorations, symbols",
-                "DO NOT interpret abstract shapes as modern objects (guns, electronics, etc.)",
-            ],
-            domain_context="fiction/literature/children's books",
-            freedom_instruction=(
-                "LITERATURE VISUAL MODE - ANTI-HALLUCINATION RULES:\n"
-                "1. You are analyzing a SCANNED BOOK (fiction/literature)\n"
-                "2. Describe decorative illustrations, chapter art, ornamental elements\n"
-                "3. AVOID modern/technical interpretations - this is NOT a manual\n"
-                "4. If you see ambiguous shapes, describe them as 'decorative elements'\n"
-                "5. DO NOT describe weapons, electronics, or modern objects unless UNMISTAKABLY present\n"
-                "6. When uncertain, use neutral terms: 'illustration', 'decorative motif', 'artistic element'\n"
-                "7. These are BOOK illustrations - expect whimsy, fantasy, artistic abstraction\n"
-                "8. NO text interpretation - focus on artwork and design only"
-            ),
-        )
-
-    def should_use_diagnostic_context(self) -> bool:
-        # Literature scans use diagnostic context for artifact handling
-        return True
-
-    def get_adaptive_settings(
-        self,
-        diagnostics: "DiagnosticReport",
-        base_params: ProfileParameters,
-        doc_profile: Optional[Any] = None,
-    ) -> Optional["AdaptiveSettings"]:
-        # If the scan is image-heavy or very long, keep min dims low and reduce
-        # semantic overlap slightly (helps avoid repeated boilerplate).
-        image_cov = float(getattr(diagnostics.physical_check, "avg_image_coverage", 0.0) or 0.0)
-        page_count = int(getattr(diagnostics.physical_check, "total_pages", 0) or 0)
-        if image_cov > 0.3 or page_count > 200:
-            return AdaptiveSettings(
-                min_image_width=25,
-                min_image_height=25,
-                semantic_overlap_ratio=0.10,
-            )
-        return None
-
-
-# ============================================================================
-# SCANNED MAGAZINE PROFILE (NEW)
-# ============================================================================
-
-
-class ScannedMagazineProfile(BaseProfile):
-    """
-    Profile for scanned magazines and editorial photo content.
-
-    CRITICAL USE CASE: Combat Aircraft scenario
-    ============================================
-    When a magazine is scanned, the classifier correctly identifies it as a scan,
-    but we MUST preserve magazine-quality processing:
-    - Large editorial photos (1928px+ median dimensions)
-    - High image density (4+ images/page)
-    - Editorial domain content
-
-    Without this profile, scanned magazines fall into scanned_clean which:
-    - Uses conservative 50x50 min dimensions (too coarse)
-    - Uses 150 DPI (loses photo detail)
-    - Uses 0.6 sensitivity (misses subtle editorial elements)
-
-    This profile OVERRIDES scanned_clean when:
-    - High image density (0.5+) + Large median_dim (200+) + Scan = True
-
-    VLM STRATEGY:
-    - STRICT freedom: Preserve visual fidelity of editorial photos
-    - INJECT scan hints: Handle scan artifacts gracefully
-    - Editorial domain context: Focus on photo content, not paper quality
-
-    EXTRACTION:
-    - KEEP 100x100 min dimensions (filter icons, preserve photos)
-    - HIGHER DPI (200) for better photo quality
-    - HIGHER sensitivity (0.7) for complete photo capture
-    """
-
-    @property
-    def profile_type(self) -> ProfileType:
-        return ProfileType.SCANNED_MAGAZINE
-
-    @property
-    def name(self) -> str:
-        return "Scanned Magazine (Editorial Photo-First)"
-
-    def get_parameters(self) -> ProfileParameters:
-        return ProfileParameters(
-            # Extraction - MAGAZINE-OPTIMIZED for scans
-            sensitivity=0.7,  # Higher than scanned_clean (0.6) for photo recall
-            min_image_width=100,  # Same as digital magazine - filter small ads
-            min_image_height=100,
-            extract_backgrounds=True,  # CRITICAL: Editorial photos often in background layer
-            enable_shadow_extraction=True,  # Catch embedded magazine photos
-            # VLM - STRICT but scan-aware
-            vlm_freedom=VLMFreedom.STRICT,  # Preserve visual fidelity
-            inject_scan_hints=True,  # Handle scan artifacts gracefully
-            inject_historical_hints=False,  # Not historical content
-            confidence_threshold=0.8,  # High bar for editorial descriptions
-            # Post-processing
-            strip_artifacts_from_text=False,  # OCR should handle text well
-            aggressive_deduplication=False,  # Preserve all editorial content
-            # OCR Hints - Enable for any scanned content
-            enable_ocr_hints=True,
-            ocr_min_confidence=0.5,
-            ocr_languages=["en"],
-            # Dynamic DPI - HIGHER for magazine photo quality
-            render_dpi=200,  # Compromise between 150 (clean) and 300 (degraded)
-        )
-
-    def get_vlm_prompt_config(self) -> VLMPromptConfig:
-        return VLMPromptConfig(
-            base_hints=[
-                "This is a SCANNED MAGAZINE with high-quality editorial photos",
-                "Focus on the editorial content: aircraft, vehicles, equipment, people",
-                "These are professional photographs - describe subjects and composition",
-                "Distinguish editorial photos from advertisements and graphics",
-            ],
-            artifact_hints=[
-                "IGNORE minor scan artifacts, paper texture, and binding shadows",
-                "IGNORE dust specks and scan lines",
-                "The content is professional photography - focus on SUBJECTS not paper quality",
-            ],
-            domain_context="editorial/magazine (scanned)",
-            freedom_instruction=(
-                "SCANNED MAGAZINE MODE:\n"
-                "1. Describe editorial photos with professional precision\n"
-                "2. Focus on subjects: aircraft, vehicles, people, equipment\n"
-                "3. Note composition and context of photographs\n"
-                "4. IGNORE scan artifacts - these are high-quality magazine photos\n"
-                "5. Distinguish between editorial content and advertisements\n"
-                "6. NO meta-language about paper or scan quality"
-            ),
-        )
-
-    def should_use_diagnostic_context(self) -> bool:
-        # Scanned magazines need diagnostic context for artifact handling
-        return True
 
 
 # ============================================================================
@@ -1016,10 +786,8 @@ class ProfileManager:
         ProfileType.DIGITAL_MAGAZINE: DigitalMagazineProfile,
         ProfileType.ACADEMIC_WHITEPAPER: AcademicWhitepaperProfile,
         ProfileType.SCANNED_DEGRADED: ScannedDegradedProfile,
-        ProfileType.SCANNED_CLEAN: ScannedCleanProfile,
-        ProfileType.SCANNED_LITERATURE: ScannedLiteratureProfile,
-        ProfileType.SCANNED_MAGAZINE: ScannedMagazineProfile,  # NEW
-        ProfileType.TECHNICAL_MANUAL: TechnicalManualProfile,  # NEW
+        ProfileType.SCANNED: ScannedProfile,
+        ProfileType.TECHNICAL_MANUAL: TechnicalManualProfile,
     }
 
     @classmethod
@@ -1065,11 +833,9 @@ class ProfileManager:
             type_mapping = {
                 ClassifierProfileType.ACADEMIC_WHITEPAPER: AcademicWhitepaperProfile,
                 ClassifierProfileType.DIGITAL_MAGAZINE: DigitalMagazineProfile,
-                ClassifierProfileType.SCANNED_LITERATURE: ScannedLiteratureProfile,
-                ClassifierProfileType.SCANNED_CLEAN: ScannedCleanProfile,
+                ClassifierProfileType.SCANNED: ScannedProfile,
                 ClassifierProfileType.SCANNED_DEGRADED: ScannedDegradedProfile,
-                ClassifierProfileType.SCANNED_MAGAZINE: ScannedMagazineProfile,  # NEW
-                ClassifierProfileType.TECHNICAL_MANUAL: TechnicalManualProfile,  # NEW
+                ClassifierProfileType.TECHNICAL_MANUAL: TechnicalManualProfile,
                 ClassifierProfileType.STANDARD_DIGITAL: DigitalMagazineProfile,
             }
 
@@ -1106,26 +872,13 @@ class ProfileManager:
 
         # LEGACY PROFILE SELECTION (kept for backward compatibility)
         if is_scan:
-            from .document_diagnostic import ContentDomain
-
-            content_domain = diagnostic_report.confidence_profile.detected_domain
-            total_pages = diagnostic_report.physical_check.total_pages
-
-            # Literature detection
-            if content_domain == ContentDomain.EDITORIAL and total_pages > 50:
-                logger.info(
-                    f"[PROFILE] Selected: ScannedLiteratureProfile "
-                    f"(editorial domain + {total_pages} pages + scan → literature/fiction)"
-                )
-                return ScannedLiteratureProfile()
-
-            # Confidence-based selection
+            # Confidence-based selection: degraded scans need extra OCR tolerance
             if confidence >= 0.70:
                 logger.info(
-                    f"[PROFILE] Selected: ScannedCleanProfile "
+                    f"[PROFILE] Selected: ScannedProfile "
                     f"(confidence={confidence:.2f}, modality={modality.value})"
                 )
-                return ScannedCleanProfile()
+                return ScannedProfile()
             else:
                 logger.info(
                     f"[PROFILE] Selected: ScannedDegradedProfile "

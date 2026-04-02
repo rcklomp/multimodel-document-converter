@@ -119,32 +119,22 @@ class StrategyOrchestrator:
         logger.info("StrategyOrchestrator initialized")
 
     # ========================================================================
-    # PROFILE TYPE TO DOCUMENT TYPE MAPPING (V16 BULLETPROOF FIX)
+    # PROFILE TYPE TO DOCUMENT TYPE MAPPING
     # ========================================================================
-    # ProfileClassifier returns ProfileType (digital_magazine, scanned_literature, etc.)
-    # ExtractionStrategy expects DocumentType (magazine, academic, literature, technical, etc.)
-    #
-    # V16 FIX (2026-01-10): STRICT MAPPING - each profile maps to its SEMANTIC type
-    # =============================================================================
-    # BEFORE: scanned_literature → MAGAZINE (WRONG! Books are not magazines!)
-    # AFTER:  scanned_literature → LITERATURE (Correct semantic type)
-    #
-    # BEFORE: technical_manual → REPORT (WRONG! Manuals are technical docs!)
-    # AFTER:  technical_manual → TECHNICAL (Correct semantic type)
+    # ProfileClassifier returns ProfileType (digital_magazine, scanned, etc.)
+    # ExtractionStrategy expects DocumentType (magazine, academic, technical, etc.)
     #
     # This mapping affects text segmentation and downstream processing:
     # - MAGAZINE: Column-based layout, editorial photos
-    # - LITERATURE: Paragraph-based flow, chapter structure
     # - TECHNICAL: Parts diagrams, assembly sequences, callouts
     # - ACADEMIC: Multi-column scientific papers, citations
+    # - REPORT: General scanned/digital documents
     PROFILE_TO_DOC_TYPE = {
         "digital_magazine": DocumentType.MAGAZINE,
-        "scanned_magazine": DocumentType.MAGAZINE,
         "academic_whitepaper": DocumentType.ACADEMIC,
-        "scanned_literature": DocumentType.LITERATURE,  # V16 FIX: Books → LITERATURE
-        "scanned_clean": DocumentType.REPORT,
+        "scanned": DocumentType.REPORT,
         "scanned_degraded": DocumentType.REPORT,
-        "technical_manual": DocumentType.TECHNICAL,  # V16 FIX: Manuals → TECHNICAL
+        "technical_manual": DocumentType.TECHNICAL,
         "standard_digital": DocumentType.UNKNOWN,
     }
 
@@ -179,7 +169,6 @@ class StrategyOrchestrator:
         sensitivity = max(MIN_SENSITIVITY, min(MAX_SENSITIVITY, sensitivity))
 
         # PRIORITY: If profile_params provided, use those directly
-        # This ensures ScannedLiteratureProfile settings are respected
         if profile_params is not None:
             logger.info(
                 f"Using profile-driven parameters: "

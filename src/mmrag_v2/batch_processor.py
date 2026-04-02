@@ -2834,7 +2834,7 @@ class BatchProcessor:
             "technical_manual": 5,  # Moderate: keep spec labels, short refs
             "digital_magazine": 3,  # Relaxed: keep pull-quotes, captions
             "scanned_degraded": 2,  # Very relaxed: OCR tolerance
-            "scanned_clean": 3,  # Relaxed: keep OCR text
+            "scanned": 3,  # Relaxed: keep OCR text
             "unknown": 5,  # Default: moderate threshold
         }
 
