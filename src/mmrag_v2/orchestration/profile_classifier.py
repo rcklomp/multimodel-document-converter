@@ -585,6 +585,12 @@ class ProfileClassifier:
         if f.domain == "editorial":
             score += 0.20
             reasoning.append("Editorial domain")
+        elif f.domain == "literature":
+            # Literature domain (novels, fiction) — digital_magazine is the safe default
+            # profile for narrative content. Score it reasonably so it wins over
+            # technical_manual for books with decorative images.
+            score += 0.15
+            reasoning.append("Literature domain — safe default for narrative content")
         else:
             score += 0.05
             reasoning.append(f"Non-editorial domain ({f.domain})")
@@ -592,7 +598,8 @@ class ProfileClassifier:
 
         # PAGE COUNT: No magazine issue exceeds ~250 pages. Long documents with high
         # image density are illustrated books or photo collections, not magazines.
-        if f.page_count > 250:
+        # Literature-domain docs are exempt — novels CAN be 300+ pages.
+        if f.page_count > 250 and f.domain != "literature":
             confidence *= 0.15
             reasoning.append(
                 f"Very long document ({f.page_count} pages) → not a magazine issue"

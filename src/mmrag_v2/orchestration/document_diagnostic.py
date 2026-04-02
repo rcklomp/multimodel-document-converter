@@ -107,6 +107,7 @@ class ContentDomain(str, Enum):
     EDITORIAL = "editorial"  # Magazines, newspapers, articles
     ACADEMIC = "academic"  # Research papers, textbooks
     COMMERCIAL = "commercial"  # Marketing, ads, brochures
+    LITERATURE = "literature"  # Novels, fiction, narrative non-fiction
     UNKNOWN = "unknown"
 
 
@@ -129,6 +130,7 @@ class PageDiagnostic:
     dominant_colors: List[str] = field(default_factory=list)
     contains_tables: bool = False
     contains_diagrams: bool = False
+    page_text_sample: str = ""  # First 500 chars for content analysis (dialogue detection)
 
 
 @dataclass
@@ -218,6 +220,8 @@ class DiagnosticReport:
             hints.append("Technical document - focus on diagrams, specifications, procedures")
         elif self.confidence_profile.detected_domain == ContentDomain.EDITORIAL:
             hints.append("Editorial content - distinguish photos from advertisements")
+        elif self.confidence_profile.detected_domain == ContentDomain.LITERATURE:
+            hints.append("Literature/fiction - describe illustrations as book artwork, not technical diagrams")
 
         for warning in self.confidence_profile.warnings:
             hints.append(f"Warning: {warning}")
@@ -523,6 +527,7 @@ class DocumentDiagnosticEngine:
                         has_ocr_artifacts=has_ocr_artifacts,
                         detected_noise_level=noise_level,
                         contains_tables=contains_tables,
+                        page_text_sample=text[:500] if text else "",
                     )
                 )
 
@@ -1200,6 +1205,7 @@ class DocumentDiagnosticEngine:
                         has_ocr_artifacts=has_ocr_artifacts,
                         detected_noise_level=noise_level,
                         contains_tables=contains_tables,
+                        page_text_sample=text[:500] if text else "",
                     )
                 )
 
@@ -1387,6 +1393,16 @@ class DocumentDiagnosticEngine:
         # Calculate content features from page diagnostics
         has_tables = any(p.contains_tables for p in page_diagnostics)
 
+        # Get total page count from PDF (cheap — fitz.open reads the index only)
+        total_pages = len(page_diagnostics)  # fallback: sampled pages
+        try:
+            import fitz as _fitz
+            _doc = _fitz.open(pdf_path)
+            total_pages = len(_doc)
+            _doc.close()
+        except Exception:
+            pass
+
         # Robustness: don't let a single image-heavy cover/figure page force "editorial".
         # Use a ratio across sampled pages instead of `any(...)`.
         high_image_pages = sum(1 for p in page_diagnostics if p.image_coverage > 0.5)
@@ -1415,6 +1431,34 @@ class DocumentDiagnosticEngine:
         content_score_academic = 0.0
         content_score_editorial = 0.0
         content_score_technical = 0.0
+        content_score_literature = 0.0
+
+        # Rule 0: Literature detection — narrative text with dialogue
+        # Novels/fiction: moderate-high text density, dialogue markers, many pages,
+        # low table/diagram density. Check the sampled text for dialogue quotation marks.
+        _dialogue_pages = 0
+        _total_sampled = len(page_diagnostics) or 1
+        for pd in page_diagnostics:
+            page_text = getattr(pd, "page_text_sample", "") or ""
+            # Count dialogue markers: straight/smart double quotes and em-dashes (dialogue tags)
+            _dq = page_text.count('"') + page_text.count('\u201c') + page_text.count('\u201d')
+            if _dq >= 4:  # At least 2 dialogue exchanges on the page
+                _dialogue_pages += 1
+        _dialogue_ratio = _dialogue_pages / _total_sampled
+
+        if _dialogue_ratio > 0.3 and total_pages > 50 and not has_tables:
+            # >30% of sampled pages have dialogue + long document + no tables → literature
+            content_score_literature += 0.8
+            logger.debug(
+                f"[DOMAIN-DETECT] Content: High dialogue ratio ({_dialogue_ratio:.2f}) "
+                f"+ {total_pages} pages + no tables → literature +0.8"
+            )
+        elif total_pages > 100 and not has_tables and avg_text_per_page < 2500:
+            # Long document without tables or heavy academic text → possible literature
+            content_score_literature += 0.3
+            logger.debug(
+                f"[DOMAIN-DETECT] Content: Long non-technical doc ({total_pages} pages) → literature +0.3"
+            )
 
         # Rule 1: High text density + low images = ACADEMIC
         # Academic papers: 3000+ chars/page, diagrams but not photo-heavy
@@ -1585,6 +1629,14 @@ class DocumentDiagnosticEngine:
             "documentation",
         ]
 
+        # Literature / fiction keywords
+        literature_keywords = [
+            "novel", "fiction", "story", "stories", "tales", "chapter",
+            "sorcerer", "wizard", "harry potter", "lord of the rings",
+            "fantasy", "mystery", "thriller", "romance",
+            "book", "volume", "edition",
+        ]
+
         # Commercial keywords
         commercial_keywords = ["catalog", "brochure", "ad", "marketing", "promo", "sale"]
 
@@ -1611,6 +1663,12 @@ class DocumentDiagnosticEngine:
             if kw in filename_normalized:
                 technical_score += 1
                 logger.debug(f"[DOMAIN-DETECT] Technical keyword match: '{kw}'")
+
+        literature_score = 0
+        for kw in literature_keywords:
+            if kw in filename_normalized:
+                literature_score += 1
+                logger.debug(f"[DOMAIN-DETECT] Literature keyword match: '{kw}'")
 
         for kw in commercial_keywords:
             if kw in filename_normalized:
@@ -1660,7 +1718,7 @@ class DocumentDiagnosticEngine:
         # Default: content dominates (parity-safe).
         # If content evidence is weak/ambiguous, allow filename to carry more weight
         # to avoid pathological UNKNOWN on clearly-named technical books.
-        max_content = max(content_score_academic, content_score_editorial, content_score_technical)
+        max_content = max(content_score_academic, content_score_editorial, content_score_technical, content_score_literature)
         if max_content < 0.35:
             CONTENT_WEIGHT = 0.6
             FILENAME_WEIGHT = 0.4
@@ -1674,6 +1732,7 @@ class DocumentDiagnosticEngine:
         # Technical filename signals are typically sparse but strong (e.g., \"python cookbook\").
         # Normalize with a lower ceiling so 2 strong hits can decisively influence the tie-break.
         filename_norm_technical = min(technical_score / 2.0, 1.0) if technical_score > 0 else 0.0
+        filename_norm_literature = min(literature_score / 2.0, 1.0) if literature_score > 0 else 0.0
 
         # Combined scores
         final_academic = (content_score_academic * CONTENT_WEIGHT) + (
@@ -1685,12 +1744,15 @@ class DocumentDiagnosticEngine:
         final_technical = (content_score_technical * CONTENT_WEIGHT) + (
             filename_norm_technical * FILENAME_WEIGHT
         )
+        final_literature = (content_score_literature * CONTENT_WEIGHT) + (
+            filename_norm_literature * FILENAME_WEIGHT
+        )
 
         # Log combined scores for transparency
         logger.info(
             f"[DOMAIN-DETECT] Combined scores (content={CONTENT_WEIGHT}, filename={FILENAME_WEIGHT}): "
             f"academic={final_academic:.3f}, editorial={final_editorial:.3f}, "
-            f"technical={final_technical:.3f}"
+            f"technical={final_technical:.3f}, literature={final_literature:.3f}"
         )
 
         # ================================================================
@@ -1700,10 +1762,13 @@ class DocumentDiagnosticEngine:
         MIN_CONFIDENCE_THRESHOLD = 0.3
 
         # Get max score
-        max_score = max(final_academic, final_editorial, final_technical)
+        max_score = max(final_academic, final_editorial, final_technical, final_literature)
 
         if max_score >= MIN_CONFIDENCE_THRESHOLD:
-            if final_academic == max_score:
+            if final_literature == max_score:
+                logger.info(f"[DOMAIN-DETECT] → LITERATURE (combined score={final_literature:.3f})")
+                return ContentDomain.LITERATURE
+            elif final_academic == max_score:
                 logger.info(f"[DOMAIN-DETECT] → ACADEMIC (combined score={final_academic:.3f})")
                 return ContentDomain.ACADEMIC
             elif final_editorial == max_score:
