@@ -198,6 +198,56 @@ class LayoutAwareOCRProcessor:
             f"{text_count} text, {image_count} image, {table_count} table"
         )
 
+        # Step 1b: Full-page Tesseract baseline for scanned pages.
+        # Region-by-region OCR loses context on degraded scans with multi-column
+        # layouts. A single Tesseract pass with auto page segmentation (PSM 3)
+        # handles columns correctly and produces a quality baseline we can compare
+        # region OCR against.
+        _fullpage_text: Optional[str] = None
+        try:
+            import pytesseract
+            from PIL import Image as _PILImage
+            _pil = _PILImage.fromarray(page_image)
+            _fullpage_text = pytesseract.image_to_string(_pil)
+            if _fullpage_text:
+                logger.debug(
+                    f"[LAYOUT-OCR] Full-page Tesseract baseline: {len(_fullpage_text)} chars"
+                )
+        except Exception as _e:
+            logger.debug(f"[LAYOUT-OCR] Full-page Tesseract baseline unavailable: {_e}")
+
+        # Make full-page baseline available to region processors
+        self._fullpage_baseline = _fullpage_text
+
+        # Optimisation: if all regions are text (no images/tables) and the full-page
+        # Tesseract produced good output, use it directly instead of running
+        # region-by-region OCR. Full-page Tesseract handles multi-column layouts
+        # far better than cropping individual regions on degraded scans.
+        if (
+            _fullpage_text
+            and len(_fullpage_text.strip()) > 50
+            and image_count == 0
+            and table_count == 0
+            and text_count > 0
+        ):
+            logger.info(
+                f"[LAYOUT-OCR] Page {page_number}: text-only page — using full-page "
+                f"Tesseract ({len(_fullpage_text)} chars) instead of {text_count} region crops"
+            )
+            page_h, page_w = page_image.shape[:2]
+            chunk_id = self._generate_chunk_id(doc_id, page_number, "text", 0)
+            full_chunk = ProcessedChunk(
+                chunk_id=chunk_id,
+                modality="text",
+                content=_fullpage_text.strip(),
+                bbox=self._normalize_bbox([0, 0, page_w, page_h], page_w, page_h),
+                page_number=page_number,
+                extraction_method="tesseract_fullpage",
+                ocr_confidence=0.7,
+                ocr_layer="tesseract",
+            )
+            return [full_chunk]
+
         # Step 2: Process each region based on type
         # V3.0.0: Track text chunks for semantic context and pending IMAGE chunks
         chunks = []
@@ -583,10 +633,22 @@ class LayoutAwareOCRProcessor:
             f"{len(ocr_result.text)} chars"
         )
 
+        # Quality check: if region OCR produced garbled text but the full-page
+        # Tesseract baseline has cleaner content for this region, prefer the baseline.
+        region_text = ocr_result.text
+        if (
+            self._fullpage_baseline
+            and region_text
+            and len(region_text) >= 20
+        ):
+            region_text = self._improve_from_fullpage_baseline(
+                region_text, self._fullpage_baseline
+            )
+
         return ProcessedChunk(
             chunk_id=chunk_id,
             modality="text",
-            content=ocr_result.text,
+            content=region_text,
             bbox=region.bbox,
             page_number=page_number,
             extraction_method="layout_aware_ocr",
@@ -920,6 +982,71 @@ class LayoutAwareOCRProcessor:
         for ln in lines:
             md.append("| " + ln.replace("|", "\\|") + " |")
         return "\n".join(md)
+
+    @staticmethod
+    def _improve_from_fullpage_baseline(region_text: str, fullpage_text: str) -> str:
+        """Replace garbled region OCR with cleaner full-page Tesseract text.
+
+        The full-page Tesseract pass (PSM 3, auto page segmentation) handles
+        multi-column layouts correctly. If the region OCR has low word overlap
+        with the full-page text, the region result is likely garbled.
+
+        Strategy: find the best-matching segment in the full-page text for
+        this region's content using word overlap. If the overlap is poor but
+        a good match exists in the full-page text, substitute it.
+        """
+        import re
+
+        region_words = set(re.findall(r"[a-zA-Z]{3,}", region_text.lower()))
+        if len(region_words) < 3:
+            return region_text  # Too short to evaluate
+
+        # Split full-page text into sentences for matching
+        fp_sentences = re.split(r"(?<=[.!?])\s+", fullpage_text)
+
+        # Find full-page sentences that share words with this region
+        best_overlap = 0.0
+        for sent in fp_sentences:
+            sent_words = set(re.findall(r"[a-zA-Z]{3,}", sent.lower()))
+            if not sent_words:
+                continue
+            overlap = len(region_words & sent_words) / len(region_words)
+            best_overlap = max(best_overlap, overlap)
+
+        # If region text has good overlap with full-page (>50%), it's fine
+        if best_overlap > 0.5:
+            return region_text
+
+        # Region text is garbled — try to find the matching full-page segment.
+        # Use the first and last recognizable words as anchors.
+        region_word_list = re.findall(r"[a-zA-Z]{4,}", region_text)
+        if len(region_word_list) < 2:
+            return region_text
+
+        # Search for the first anchor word in the full-page text
+        first_anchor = region_word_list[0].lower()
+        fp_lower = fullpage_text.lower()
+        anchor_pos = fp_lower.find(first_anchor)
+        if anchor_pos < 0:
+            return region_text  # Can't find anchor, keep region text
+
+        # Extract a segment of similar length from the full-page text
+        target_len = len(region_text)
+        segment = fullpage_text[anchor_pos:anchor_pos + int(target_len * 1.5)]
+
+        # Verify the segment is actually better (more real words)
+        seg_words = set(re.findall(r"[a-zA-Z]{3,}", segment.lower()))
+        seg_dict_score = sum(1 for w in seg_words if len(w) >= 4) / max(len(seg_words), 1)
+        reg_dict_score = sum(1 for w in region_words if len(w) >= 4) / max(len(region_words), 1)
+
+        if seg_dict_score > reg_dict_score:
+            logger.info(
+                f"[LAYOUT-OCR] Replaced garbled region OCR ({len(region_text)} chars, "
+                f"overlap={best_overlap:.2f}) with full-page baseline segment"
+            )
+            return segment.strip()
+
+        return region_text
 
     def _calculate_text_confidence(self, text: Optional[str], region_type: str) -> float:
         """
