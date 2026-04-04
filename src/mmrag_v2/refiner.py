@@ -66,6 +66,12 @@ CORRUPTION_PATTERNS: Dict[str, Tuple[str, float]] = {
     "dutch_ij_break": (r"i\s+j\b", 0.2),  # "i j" → "ij"
     "misplaced_punctuation": (r"\s+[.,;:!?]", 0.1),  # " ."
     "character_substitution": (r"[O0]{1}[lI1]{1}|[lI1]{1}[O0]{1}", 0.2),  # "O1" vs "01"
+    # V2.6: Degraded scan patterns (merged words, symbol substitution, truncated words)
+    "merged_words": (r"[a-z]{3,}[a-z][A-Z][a-z]|[a-z]{2,}i[a-z]{3,}", 0.3),  # "storingithe", "shaveibeen"
+    "symbol_noise": (r"[@~§¢£¥]\s*[a-zA-Z]|[a-zA-Z]\s*[@~§]", 0.25),  # "@s", "~storing"
+    "accent_on_ascii": (r"[éèêëàâäùûüôöîï][a-z]{2,}", 0.2),  # "célls", "détails" (accent on common English)
+    "dot_stuck_to_word": (r"[a-z]\.[a-z]{2,}", 0.15),  # "rooms.and", "to.grow"
+    "truncated_start": (r"(?:^|\n)[a-z]{1,3}\b\s+[a-z]", 0.2),  # "bviously" (missing first letter)
 }
 
 # Minimum hits per pattern to count (prevents false positives on short text)
