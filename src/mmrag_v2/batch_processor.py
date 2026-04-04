@@ -3893,6 +3893,65 @@ class BatchProcessor:
             )
         return result
 
+    def _apply_code_hygiene(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
+        """
+        Detect, reclassify, and reflow code chunks for ALL profiles.
+
+        Extracted from _apply_technical_manual_hygiene so that academic papers,
+        magazines, and other profiles also get proper code handling. Without this,
+        Docling-extracted code blocks in non-technical-manual documents remain as
+        flat single-line paragraph chunks.
+
+        Operations:
+        1. Reclassify missed code (paragraph chunks containing code)
+        2. Demote false positives (prose misidentified as code)
+        3. Reflow flat code (restore newlines in concatenated code)
+        """
+        def is_code_chunk(ch: IngestionChunk) -> bool:
+            try:
+                return (
+                    ch.metadata.chunk_type == ChunkType.CODE
+                    or ch.metadata.content_classification == "code"
+                )
+            except Exception:
+                return False
+
+        reclassified = 0
+        reflowed = 0
+        for ch in chunks:
+            if ch.modality != Modality.TEXT:
+                continue
+            txt = ch.content or ""
+            if not txt.strip():
+                continue
+
+            # Reclassify missed code blocks
+            try:
+                if (not is_code_chunk(ch)) and self._looks_like_code_text(txt):
+                    ch.metadata.chunk_type = ChunkType.CODE
+                    ch.metadata.content_classification = "code"
+                    reclassified += 1
+            except Exception:
+                pass
+
+            # Demote false positives
+            self._maybe_demote_false_code_chunk(ch)
+
+            # Reflow flat code
+            if is_code_chunk(ch):
+                reflowed_txt = self._preserve_or_reflow_code_text(txt)
+                if reflowed_txt != txt:
+                    ch.content = reflowed_txt
+                    reflowed += 1
+
+        if reclassified or reflowed:
+            logger.info(
+                f"[CODE-HYGIENE] Reclassified {reclassified} chunks as code, "
+                f"reflowed {reflowed} flat code chunks"
+            )
+
+        return chunks
+
     def _apply_technical_manual_hygiene(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
         """
         Technical-manual-specific cleanup to improve RAG quality:
@@ -4932,7 +4991,12 @@ class BatchProcessor:
                 # Always run false-code demotion, including scanned_degraded profile.
                 self._maybe_demote_false_code_chunk(chunk)
 
-        # Step 3: Profile-specific text hygiene (technical manuals are sensitive to
+        # Step 3a: Code hygiene for ALL profiles — detect, reclassify, and reflow
+        # flat code chunks. Without this, academic papers with code snippets produce
+        # unreadable single-line output (e.g., "class Foo: def __init__(self):...").
+        valid_chunks = self._apply_code_hygiene(valid_chunks)
+
+        # Step 3b: Profile-specific text hygiene (technical manuals are sensitive to
         # embedded page numbers, control chars, hyphenation, and broken chunk joins).
         profile_type = str(self._intelligence_metadata.get("profile_type", "unknown"))
         if profile_type == "technical_manual":
