@@ -41,7 +41,7 @@ declare -a MATRIX=(
   "business_form|data/business_form/betwistingsformulier_aankoop_niet_ontvangen.pdf"
   "data_spreadsheet|data/data_spreadsheet/CarOK voorraadtelling 2021-04.pdf"
   "digital_magazine|data/digital_magazine/PCWorld_July_2025_USA.pdf"
-  "scanned_literature|data/scanned_literature/HarryPotter_and_the_Sorcerers_Stone.pdf"
+  "scanned|data/scanned/HarryPotter_and_the_Sorcerers_Stone.pdf"
   "technical_manual|data/technical_manual/Firearms.pdf"
   "technical_manual|data/technical_manual/Greenhouse Design and Control by Pedro Ponce.pdf"
   "technical_manual|data/technical_manual/Python Distilled David M. Beazley 2022.pdf"
