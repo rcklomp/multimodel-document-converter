@@ -3,10 +3,11 @@
 Search Qdrant collections using nomic-embed-text via Ollama.
 
 Usage:
-    python scripts/search_qdrant.py "how to build walls with tires"
-    python scripts/search_qdrant.py "dragon hatching" --collection harrypotter_and_the_sorcerers_stone_pdf
-    python scripts/search_qdrant.py "solar heating" --limit 10
-    python scripts/search_qdrant.py "greenhouse design" --modality image
+    python3 scripts/search_qdrant.py "how to build walls with tires"
+    python3 scripts/search_qdrant.py "dragon hatching" -c harrypotter_and_the_sorcerers_stone_pdf
+    python3 scripts/search_qdrant.py "solar heating" -n 10
+    python3 scripts/search_qdrant.py "greenhouse" --modality image
+    python3 scripts/search_qdrant.py --list
 """
 
 from __future__ import annotations
@@ -14,8 +15,24 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import textwrap
 import urllib.request
 
+# ── ANSI colors ─────────────────────────────────────────────────────────────
+
+BOLD = "\033[1m"
+DIM = "\033[2m"
+CYAN = "\033[36m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+MAGENTA = "\033[35m"
+RESET = "\033[0m"
+BLUE = "\033[34m"
+
+MIN_SCORE = 0.55  # Don't show results below this relevance
+
+
+# ── API helpers ──────────────────────────────────────────────────────────────
 
 def embed(text: str, model: str = "nomic-embed-text", ollama_url: str = "http://localhost:11434") -> list[float]:
     data = json.dumps({"model": model, "input": text}).encode()
@@ -46,65 +63,139 @@ def search(query_vector: list[float], collection: str, limit: int = 5,
     return json.loads(urllib.request.urlopen(req, timeout=30).read())["result"]
 
 
+# ── Display ──────────────────────────────────────────────────────────────────
+
+def format_collection_name(name: str) -> str:
+    """Make collection names readable."""
+    return name.replace("_pdf", "").replace("_", " ").title()
+
+
+def format_content(text: str, width: int = 80) -> str:
+    """Clean and wrap content for display."""
+    # Collapse whitespace but preserve paragraph breaks
+    lines = text.strip().split("\n")
+    cleaned = " ".join(l.strip() for l in lines if l.strip())
+    return textwrap.fill(cleaned, width=width, initial_indent="    ", subsequent_indent="    ")
+
+
+def score_bar(score: float, width: int = 20) -> str:
+    """Visual relevance bar."""
+    filled = int(score * width)
+    bar = "█" * filled + "░" * (width - filled)
+    if score >= 0.75:
+        color = GREEN
+    elif score >= 0.65:
+        color = YELLOW
+    else:
+        color = DIM
+    return f"{color}{bar}{RESET} {score:.0%}"
+
+
+def display_result(r: dict, rank: int):
+    """Display a single search result."""
+    p = r["payload"]
+    score = r["score"]
+    mod = p.get("modality", "text")
+    pg = p.get("page_number", "?")
+    source = p.get("source_file", "")
+    heading = p.get("parent_heading", "")
+
+    # Score bar
+    print(f"\n  {score_bar(score)}")
+
+    # Header line
+    if mod == "image":
+        label = f"{MAGENTA}IMAGE{RESET}"
+    elif mod == "table":
+        label = f"{BLUE}TABLE{RESET}"
+    else:
+        label = f"{CYAN}TEXT{RESET}"
+
+    location = f"page {pg}"
+    if heading:
+        location += f"  {DIM}({heading}){RESET}"
+
+    print(f"  {label}  {location}")
+
+    # Content
+    if mod == "image":
+        desc = p.get("visual_description", "") or p.get("content", "")
+        print(format_content(desc))
+        asset = p.get("asset_path", "")
+        if asset:
+            print(f"    {DIM}Asset: {asset}{RESET}")
+    else:
+        content = p.get("content", "")
+        print(format_content(content[:300]))
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Search Qdrant with semantic queries")
-    parser.add_argument("query", nargs="?", help="Search query text")
-    parser.add_argument("--collection", "-c", default=None, help="Collection name (default: search all)")
-    parser.add_argument("--limit", "-n", type=int, default=5, help="Number of results (default: 5)")
-    parser.add_argument("--modality", "-m", choices=["text", "image", "table"], default=None, help="Filter by modality")
-    parser.add_argument("--list", "-l", action="store_true", help="List all collections")
+    parser = argparse.ArgumentParser(
+        description="Search your document collections",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+            Examples:
+              search_qdrant.py "how to build walls with tires"
+              search_qdrant.py "dragon hatching" -n 3
+              search_qdrant.py "tire construction" --modality image
+              search_qdrant.py --list
+        """),
+    )
+    parser.add_argument("query", nargs="?", help="Search query")
+    parser.add_argument("-c", "--collection", default=None, help="Specific collection")
+    parser.add_argument("-n", "--limit", type=int, default=5, help="Max results per collection")
+    parser.add_argument("-m", "--modality", choices=["text", "image", "table"], help="Filter by type")
+    parser.add_argument("-l", "--list", action="store_true", help="List collections")
+    parser.add_argument("--min-score", type=float, default=MIN_SCORE, help="Minimum relevance")
     parser.add_argument("--qdrant-url", default="http://localhost:6333")
     parser.add_argument("--ollama-url", default="http://localhost:11434")
     args = parser.parse_args()
 
     if args.list or not args.query:
         collections = list_collections(args.qdrant_url)
-        print("Collections:")
+        print(f"\n{BOLD}Collections:{RESET}")
         for c in collections:
-            print(f"  {c['name']}: {c['points']} points")
+            name = format_collection_name(c["name"])
+            print(f"  {GREEN}{name}{RESET}  ({c['points']:,} chunks)")
+        print()
         if not args.query:
             return 0
 
     query = args.query
-    vector = embed(query, ollama_url=args.ollama_url)
 
-    # Determine which collections to search
+    # Determine targets
     if args.collection:
         targets = [args.collection]
     else:
         targets = [c["name"] for c in list_collections(args.qdrant_url)]
 
-    print(f'\nQuery: "{query}"')
+    vector = embed(query, ollama_url=args.ollama_url)
+
+    print(f"\n{BOLD}Searching:{RESET} {query}")
     if args.modality:
-        print(f"Filter: modality={args.modality}")
-    print()
+        print(f"{DIM}Filter: {args.modality} only{RESET}")
+
+    any_results = False
 
     for collection in targets:
         results = search(vector, collection, args.limit, args.modality, args.qdrant_url)
+        # Filter by minimum score
+        results = [r for r in results if r["score"] >= args.min_score]
         if not results:
             continue
 
-        print(f"── {collection} ──")
-        for r in results:
-            p = r["payload"]
-            score = r["score"]
-            mod = p.get("modality", "?")
-            pg = p.get("page_number", "?")
-            source = p.get("source_file", "")
+        any_results = True
+        name = format_collection_name(collection)
+        print(f"\n{BOLD}{'━' * 60}{RESET}")
+        print(f"{BOLD}{GREEN}{name}{RESET}")
 
-            if mod == "image":
-                content = p.get("visual_description", "") or p.get("content", "")
-                asset = p.get("asset_path", "")
-                print(f"  [{score:.3f}] IMAGE pg={pg} | {content[:100]}")
-                if asset:
-                    print(f"          asset: {asset}")
-            else:
-                content = p.get("content", "")
-                heading = p.get("parent_heading", "")
-                prefix = f"[{heading}] " if heading else ""
-                print(f"  [{score:.3f}] {mod:5} pg={pg} | {prefix}{content[:100]}")
-        print()
+        for i, r in enumerate(results):
+            display_result(r, i + 1)
 
+    if not any_results:
+        print(f"\n{DIM}No results above {args.min_score:.0%} relevance.{RESET}")
+
+    print()
     return 0
 
 
