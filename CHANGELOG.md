@@ -4,7 +4,46 @@ All notable changes to this project will be documented in this file. This projec
 
 > **Versioning note:** Historical entries before the `v2.4.x` line used an internal `v18.x` milestone scheme during rapid iteration and test/fix cycles. Only stable or decision-worthy checkpoints were recorded, so intermediate builds are intentionally omitted. From `v2.4` onward, entries follow the current public semantic line.
 
-## [v2.5.0] - TBD (in development)
+## [v2.6.0] - 2026-04-04
+
+### Added
+- **Profile consolidation (7→5):** Merged `scanned_clean`, `scanned_literature`,
+  `scanned_magazine` into single `scanned` profile. Kept `digital_magazine`,
+  `academic_whitepaper`, `technical_manual`, `scanned_degraded` (all have dedicated
+  batch_processor behavior).
+- **Literature domain detection:** New `ContentDomain.LITERATURE` with dialogue-ratio
+  heuristic. Correctly identifies novels/fiction (Harry Potter: `domain=literature`).
+- **Multi-format support:** HTML, EPUB (auto-extract to HTML), DOCX, PPTX, XLSX via
+  Docling. Batching remains PDF-only.
+- **VLM diagram auto-detection:** Light heuristic classifies images as diagram vs
+  photograph for prompt selection. Domain-aware: literature bypasses diagram prompt.
+- **Auto-OCR for scanned documents:** OCR automatically enabled when diagnostics
+  detect a scan. Previously required explicit `--enable-ocr` flag.
+- **Code hygiene for all profiles:** Code detection, reclassification, and reflow
+  now runs for all profiles (was technical_manual only). Fixes flat code in academic
+  papers (AIOS: `code_flat_ratio` 1.0 → 0.04).
+- **Decorative heading normalization:** Spaced-out headings like
+  "C H A P T E R  O N E" collapsed to "CHAPTER ONE" in content and breadcrumbs.
+- **OCR table markdown formatting:** Layout-aware OCR table regions now produce
+  pipe-separated markdown instead of raw garbled text.
+- **Makefile:** `make test`, `make lint`, `make smoke`, `make acceptance`, etc.
+- **Gitea CI:** `.gitea/workflows/ci.yml` — lint + test on push/PR.
+
+### Fixed
+- **Token variance waiver retired:** IMAGE-bbox-aware source text extraction excludes
+  chart/graph label text from PyMuPDF baseline. PCWorld -20.2% → -8.9%. All profiles
+  use standard 10% tolerance (18% digital_magazine waiver removed).
+- **Harry Potter classification:** `technical_manual` → `digital_magazine` via
+  decorative image density guard (>5.0 images/page penalizes technical_manual).
+- **Gate thresholds:** Infix "and"/"or" conjunction guard; orphan label 0.20 → 0.25
+  for digital docs (accommodates literature chapter headings).
+
+### Changed
+- 11 non-pytest scripts moved from `tests/` to `tests/manual/`.
+- Data directories: `scanned_clean/`, `scanned_magazine/`, `standard_digital/` removed;
+  `scanned_literature/` renamed to `scanned/`.
+
+## [v2.5.0] - 2026-03-01 (stable)
 
 ### Added
 - **Structural Diagnostic Router** (`document_diagnostic.py`): Three hardware-level
