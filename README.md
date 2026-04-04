@@ -1,893 +1,409 @@
-# 🚀 Multimodal RAG Corpus Converter V2.4.1
+# MM-RAG Converter V2
 
-**Enterprise-grade document conversion for Advanced Multimodal RAG systems.**
+Convert PDF, EPUB, HTML, and Office documents into structured JSONL datasets for Multimodal RAG systems.
 
-Transform complex, visually-rich documents (magazines, technical manuals, reports) into production-ready RAG datasets with **zero information loss**, **intelligent overlap**, and **military-grade data integrity**.
+The converter extracts text, images, and tables from complex documents while preserving spatial layout, document hierarchy, and semantic context. It handles everything from born-digital magazines to degraded scanned manuals.
 
-[![SRS Compliance](https://img.shields.io/badge/SRS-v2.4.1--stable-blue.svg)]()
-[![Python](https://img.shields.io/badge/Python-3.10-green.svg)]()
-[![Engine](https://img.shields.io/badge/Engine-Docling%20pinned-orange.svg)]()
-[![Platform](https://img.shields.io/badge/Platform-Apple%20Silicon%20Native-silver.svg)]()
+**Version 2.6.0** | Python 3.10 | Apple Silicon native | Docling 2.66.0
 
 ---
 
-## 📋 Table of Contents
-
-- [Why This Exists](#-why-this-exists)
-- [Key Features](#-key-features)
-- [Quick Start](#-quick-start)
-- [Installation](#-installation)
-- [CLI Reference](#-cli-reference)
-- [Semantic Text Refiner](#-semantic-text-refiner)
-- [Architecture](#-architecture)
-- [Processing Pipeline](#-processing-pipeline)
-- [Smart Vision Orchestration](#-smart-vision-orchestration)
-- [Quality Assurance](#-quality-assurance)
-- [Output Schema](#-output-schema)
-- [Integration Examples](#-integration-examples)
-- [Layout-Aware OCR](#-layout-aware-ocr-phase-1b)
-- [Advanced Configuration](#-advanced-configuration)
-- [Troubleshooting](#-troubleshooting)
-- [API Reference](#-api-reference)
-
----
-
-## 🎯 Why This Exists
-
-**The Problem:** Converting PDFs to RAG-ready datasets sounds simple—until you encounter:
-- Full-page editorial photos that standard parsers miss
-- Advertisements polluting your vector database
-- Context loss when text chunks lose their document hierarchy
-- "Garbage in, garbage out" syndrome from naive chunking
-- Memory explosions on 244-page magazines
-
-**The Solution:** This converter implements a **production-grade ETL pipeline** that:
-
-✅ **Never loses information** (Token validation with 10% tolerance)  
-✅ **Maintains semantic context** (Dynamic Semantic Overlap between chunks)  
-✅ **Extracts missed assets** (Shadow Extraction for AI-blind images)  
-✅ **Preserves hierarchy** (Breadcrumb state machine across batch boundaries)  
-✅ **Runs on 16GB RAM** (Memory-efficient batch processing with gc.collect())  
-
----
-
-## ✨ Key Features
-
-### 🧠 Intelligent Processing
-
-| Feature | Description |
-|---------|-------------|
-| **Multi-Dimensional Profile Classifier** | Automatic document classification based on physical checks, text density, image ratio, and detected domain/era. Selects optimal processing strategy. |
-| **Dynamic Semantic Overlap (DSO)** | AI-powered overlap calculation between chunks using sentence embeddings. High-similarity boundaries get 1.5x overlap to preserve context. |
-| **Smart Vision Orchestration** | Automatic document classification with adaptive extraction thresholds via `--sensitivity` dial (0.1-1.0). |
-| **Auto OCR Mode Detection** | Automatically selects `legacy` or `layout-aware` OCR mode based on document diagnostics. |
-| **Token Post-Validation (QA-CHECK-01)** | Tiktoken-based verification that chunk tokens match source tokens ±10%. Catches data loss before it reaches your vector DB. |
-
-### 🎨 Multimodal Excellence
-
-| Feature | Description |
-|---------|-------------|
-| **High-Fidelity Rendering** | 2.0x scale, 10px padding on all asset crops. No blurry extractions. |
-| **VLM Integration** | Ollama (local), OpenAI (gpt-4o-mini), LM Studio (OpenAI-compatible), Anthropic (claude-3-5-haiku) for image descriptions. |
-| **Perceptual Deduplication** | pHash-based duplicate detection prevents the same image appearing multiple times. |
-| **Asset Integrity** | Every `asset_ref.file_path` verified to exist on disk. Orphan chunks are impossible. |
-| **Coordinate System** | REQ-COORD-02: `page_width` and `page_height` in spatial metadata for UI overlay support. |
-
-### 🏗️ Production Architecture
-
-| Feature | Description |
-|---------|-------------|
-| **Batch Processing** | Large PDFs split into N-page batches. 244 pages? No problem. |
-| **Memory Hygiene** | `gc.collect()` between batches. Runs stable on 16GB M-series Macs. |
-| **Breadcrumb Continuity** | Document hierarchy preserved across batch boundaries. No "orphan" chunks. |
-| **Strict Mode** | `--strict-qa` flag fails processing if token validation detects data loss. |
-
----
-
-## 🚀 Quick Start
-
-### Process Your First Document
+## Quick Start
 
 ```bash
-# Basic processing with local Ollama VLM
+# Install
+conda env create -f environment.yml
+conda activate mmrag-v2
+pip install -e .
+
+# Convert a PDF
 mmrag-v2 process document.pdf --output-dir ./output
 
-# Large document with batch processing
-mmrag-v2 process large_magazine.pdf --batch-size 10 --vision-provider ollama
+# Convert with VLM image descriptions (LM Studio example)
+mmrag-v2 process document.pdf \
+  --vision-provider openai \
+  --vision-model your-vision-model \
+  --vision-base-url http://localhost:1234/v1 \
+  --api-key lm-studio \
+  --output-dir ./output
 
-# Maximum recall for photo-heavy documents
-mmrag-v2 process photo_book.pdf --sensitivity 0.9 --batch-size 10
-
-# Strict mode (fails on data loss)
-mmrag-v2 process critical_document.pdf --batch-size 10 --strict-qa
-
-# Using LM Studio (OpenAI-compatible API)
-mmrag-v2 process document.pdf --vision-provider openai --api-key lm-studio
+# Convert an EPUB or HTML file
+mmrag-v2 process book.epub --output-dir ./output
+mmrag-v2 process article.html --output-dir ./output
 ```
 
-### Output Structure
+### Output
 
 ```
 output/
-├── ingestion.jsonl          # RAG-ready dataset (1 chunk per line)
-├── assets/                  # High-resolution PNG extractions
+├── ingestion.jsonl     # One JSON object per line (text, image, or table chunk)
+├── assets/             # Extracted images as PNG files
 │   ├── a1b2c3d4_001_figure_01.png
-│   ├── a1b2c3d4_002_table_01.png
 │   └── ...
-└── vision_cache.json        # VLM description cache (prevents redundant calls)
+└── .vision_cache.json  # Cached VLM descriptions (avoids re-processing)
 ```
 
 ---
 
-## 📦 Installation
+## How It Works
 
-### Prerequisites
+The pipeline has three stages:
 
-- **macOS** with Apple Silicon (M1/M2/M3) - Native ARM64
-- **Python 3.10** (not 3.11+ due to Docling compatibility)
-- **Conda** (Miniconda or Anaconda)
-- **16GB RAM** minimum (32GB recommended for large documents)
+### 1. Document Analysis
 
-### Step 1: Clone and Setup Environment
+Before extraction begins, the converter analyzes the document to determine the best processing strategy:
 
-```bash
-# Clone repository
-git clone https://github.com/your-org/MM-Converter-V2.git
-cd MM-Converter-V2
+- **Structural diagnosis**: Detects scanned pages, encoding corruption, and flat-text corruption
+- **Profile classification**: Selects one of 5 processing profiles based on text density, image ratio, page count, and content domain
+- **OCR decision**: Automatically enables OCR when scanned content is detected
 
-# Create conda environment from spec
-conda env create -f environment.yml
+### 2. Extraction
 
-# Activate environment
-conda activate ./env
+The extraction engine (Docling) processes each page to identify text paragraphs, images, tables, headings, code blocks, and list items. For scanned documents, a 3-layer OCR cascade runs:
 
-# Install package in development mode
-pip install -e .
+```
+Layer 1: OcrMac/EasyOCR  →  confidence > threshold → accept
+                          ↓
+Layer 2: Tesseract 5      →  confidence > threshold → accept
+                          ↓
+Layer 3: DocTR            →  final pass (accept all)
 ```
 
-### Step 2: Verify Installation
+A Vision Language Model (VLM) generates descriptions for extracted images, enabling image search through text queries.
 
-```bash
-# Check CLI is available
-mmrag-v2 version
+### 3. Post-Processing & Quality Assurance
 
-# Verify Docling engine
-python -c "import docling; print(f'Docling {docling.__version__}')"
+After extraction, the pipeline applies:
 
-# Check vision providers
-mmrag-v2 check
-```
-
-### Step 3: Setup Vision Provider
-
-#### Option A: Local Ollama (Free, Private)
-
-```bash
-# Install Ollama
-brew install ollama
-
-# Pull vision model
-ollama pull llava:latest
-
-# Start server (keep running)
-ollama serve
-```
-
-#### Option B: LM Studio (OpenAI-Compatible, Recommended for v17.1+)
-
-```bash
-# 1. Download LM Studio from https://lmstudio.ai
-# 2. Load a vision model (e.g., llama-3.2-vision)
-# 3. Start the local server (default: http://localhost:1234)
-
-# Set base URL environment variable
-export OPENAI_BASE_URL="http://localhost:1234/v1"
-
-# Use with the openai provider
-mmrag-v2 process document.pdf --vision-provider openai --api-key lm-studio
-```
-
-#### Option C: Cloud Providers
-
-```bash
-# OpenAI
-export OPENAI_API_KEY="sk-your-key"
-
-# Anthropic
-export ANTHROPIC_API_KEY="your-key"
-```
+- **Code detection and reflow**: Identifies code blocks misclassified as paragraphs and restores formatting
+- **Oversize breaking**: Splits chunks exceeding 1500 characters at sentence boundaries
+- **Token validation (QA-CHECK-01)**: Verifies that extracted text accounts for the document's content within 10% tolerance
+- **Deduplication**: Perceptual hashing (pHash) removes duplicate images
+- **Coordinate normalization**: All bounding boxes mapped to a [0, 1000] integer grid
 
 ---
 
-## 💻 CLI Reference
+## Processing Profiles
 
-### Main Command: `process`
+The converter automatically selects a profile based on document characteristics:
+
+| Profile | When Selected | Key Settings |
+|---------|--------------|--------------|
+| `digital_magazine` | Born-digital editorial content (magazines, illustrated books) | Sensitivity 0.5, min image 100px, DPI 150 |
+| `academic_whitepaper` | High text density + academic/technical domain | Sensitivity 0.6, min image 30px, DPI 150 |
+| `scanned` | Standard quality scanned documents | Sensitivity 0.7, min image 30px, DPI 200, OCR enabled |
+| `scanned_degraded` | Low quality or degraded scans | Sensitivity 0.8, min image 30px, DPI 300, aggressive OCR |
+| `technical_manual` | Technical manuals, coding books, handbooks | Sensitivity 0.8, min image 30px, DPI 300, batch size 3 |
+
+Content domains detected: `academic`, `editorial`, `technical`, `literature`, `commercial`, `unknown`.
+
+---
+
+## Supported Formats
+
+| Format | Support | Notes |
+|--------|---------|-------|
+| PDF | Full | Batched processing, OCR cascade, VLM enrichment |
+| HTML/HTM | Full | Direct Docling processing |
+| EPUB | Full | Auto-extracted to HTML, then processed |
+| DOCX | Full | Direct Docling processing |
+| PPTX | Full | Direct Docling processing |
+| XLSX | Full | Direct Docling processing |
+
+Batched processing (splitting into N-page batches for memory efficiency) is PDF-only. Other formats use single-pass processing.
+
+---
+
+## CLI Reference
+
+### `mmrag-v2 process`
+
+Convert a single document.
 
 ```bash
 mmrag-v2 process [OPTIONS] INPUT_FILE
 ```
 
-#### Core Options
+**Common options:**
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--output-dir`, `-o` | `./output` | Directory for JSONL and assets |
-| `--batch-size`, `-b` | `10` | Pages per batch (0=disable batching) |
-| `--pages` | `None` | **Specific pages** (comma-separated: `6,21,169,241`) or **max count** (single number: `10`) |
-| `--vision-provider`, `-v` | `ollama` | VLM provider: `ollama`, `openai`, `anthropic`, `haiku`, `none` |
-| `--vision-model`, `-m` | Auto-detect | Model name (e.g., `llava:latest`, `gpt-4o-mini`) |
-| `--vision-base-url` | `None` | Base URL for OpenAI-compatible endpoints (e.g., `http://localhost:1234/v1`) |
-| `--api-key`, `-k` | Env var | API key for cloud providers |
-| `--vlm-timeout` | `180` | VLM call timeout in seconds (default: 180) |
-| `--enable-cache/--no-cache` | `True` | Enable/disable vision cache for repeated images |
+| `--output-dir`, `-o` | `./output` | Output directory |
+| `--batch-size`, `-b` | `10` | Pages per batch (PDF only; 0 = no batching) |
+| `--pages` | all | Page limit (`20`) or specific pages (`6,21,169`) |
+| `--vision-provider`, `-v` | `none` | VLM: `openai`, `ollama`, `anthropic`, `none` |
+| `--vision-model` | auto | Model name for VLM |
+| `--vision-base-url` | none | OpenAI-compatible endpoint URL |
+| `--api-key`, `-k` | env var | API key for VLM/cloud providers |
+| `--sensitivity`, `-s` | profile-based | Image extraction sensitivity (0.1-1.0) |
+| `--strict-qa` | off | Fail processing on QA violations |
 
-#### Quality Control Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--sensitivity`, `-s` | `0.5` | Image extraction sensitivity (0.1-1.0) |
-| `--strict-qa` | `False` | Fail on token validation errors |
-| `--qa-tolerance` | `0.10` | Allowed token variance (decimal, 0.10 = 10%) |
-| `--qa-noise-allowance` | profile-based | Allowed filtered-token ratio (decimal); overrides profile default |
-| `--semantic-overlap` | `True` | Enable Dynamic Semantic Overlap (DSO) chunking |
-| `--vlm-context-depth` | `3` | Previous text chunks for VLM semantic anchoring |
-| `--allow-fullpage-shadow` | `False` | Override Full-Page Guard |
-| `--auto-safe/--no-auto-safe` | `False` | Auto-tighten QA and enable OCR heuristically on risky digital PDFs |
-| `--profile-override` | `None` | Force a strategy profile (e.g., academic_whitepaper, digital_magazine, scanned_clean, scanned_degraded, scanned_magazine, technical_manual) |
-
-#### OCR Options
+**OCR options:**
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--enable-ocr/--no-ocr` | `False` | Enable OCR for scanned pages |
-| `--ocr-engine` | `easyocr` | Engine: `tesseract`, `easyocr`, or `doctr` |
-| `--ocr-mode` | `auto` | OCR mode: `auto` (smart detection), `legacy`, or `layout-aware` |
-| `--ocr-confidence-threshold` | `0.7` | Minimum OCR confidence for layout-aware mode (0.0-1.0) |
-| `--enable-doctr/--no-doctr` | `True` | Enable Doctr Layer 3 for layout-aware OCR |
-| `--force-ocr/--no-force-ocr` | `False` | Bypass the digital-PDF guard; run OCR even when modality is “native_digital” |
+| `--enable-ocr/--no-ocr` | auto | OCR auto-enables for scanned documents |
+| `--ocr-engine` | `easyocr` | Engine: `tesseract`, `easyocr`, `doctr` |
+| `--ocr-mode` | `auto` | `auto`, `legacy`, or `layout-aware` |
+| `--force-ocr` | off | Force OCR even on digital PDFs |
 
-#### OCR & QA Quick Guide (avoid option overlap)
+**Refiner options (LLM-based OCR cleanup):**
 
-* Fast digital PDFs (clean text layer): leave OCR flags off.  
-* Digital PDFs with figures/overlays or missing tokens: add `--force-ocr --ocr-mode layout-aware --enable-doctr` (or simply `--auto-safe` to let the heuristic enable this).  
-* Scans: `--enable-ocr --ocr-mode layout-aware --enable-doctr` (auto-safe will also flip this on when modality is scanned).  
-* QA strictness: default allows ~10% variance (up to 25% noise for academic). For tighter integrity use `--strict-qa` and/or set `--qa-tolerance 0.08 --qa-noise-allowance 0.10`, or use `--auto-safe` to apply those automatically on risky files.  
-* Auto mode: `--auto-safe` is opt-in; it tightens QA and enables layout-aware OCR for digital PDFs when the classifier sees images/high sensitivity. No change if it deems the doc low-risk.
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--enable-refiner` | off | Enable semantic text refinement |
+| `--refiner-provider` | `ollama` | `ollama`, `openai`, `anthropic` |
+| `--refiner-model` | auto | Model for refinement |
+| `--refiner-base-url` | none | OpenAI-compatible endpoint |
+
+### `mmrag-v2 batch`
+
+Convert all matching files in a directory.
+
+```bash
+mmrag-v2 batch INPUT_DIR --pattern "*.pdf" --output-dir ./output
+```
+
+### `mmrag-v2 version` / `mmrag-v2 check`
+
+Show version info or verify system dependencies.
 
 ### Examples
 
 ```bash
-# Editorial magazine with high recall
-mmrag-v2 process magazine.pdf \
-  --sensitivity 0.8 \
-  --batch-size 10 \
-  --vision-provider ollama \
-  --output-dir ./magazine_output
+# Digital magazine with VLM descriptions
+mmrag-v2 process magazine.pdf -b 10 \
+  -v openai --vision-model llava-1.6 \
+  --vision-base-url http://localhost:1234/v1 --api-key lm-studio
 
-# Technical manual with strict validation
-mmrag-v2 process manual.pdf \
-  --sensitivity 0.3 \
-  --batch-size 20 \
-  --strict-qa \
-  --output-dir ./manual_output
+# Scanned technical manual (OCR auto-enabled)
+mmrag-v2 process manual_scan.pdf -b 3
 
-# Scanned document with layout-aware OCR
-mmrag-v2 process scanned.pdf \
-  --ocr-mode layout-aware \
-  --enable-ocr \
-  --batch-size 10 \
-  --output-dir ./scanned_output
+# Academic paper, strict QA
+mmrag-v2 process paper.pdf -b 10 --strict-qa
 
-# LM Studio with OpenAI-compatible API
-mmrag-v2 process document.pdf \
-  --vision-provider openai \
-  --api-key lm-studio \
-  --batch-size 10
+# First 20 pages only
+mmrag-v2 process large_book.pdf --pages 20 -b 10
 
-# Process SPECIFIC pages only (targeted extraction)
-mmrag-v2 process firearms.pdf --pages 6,21,169,241 --no-cache
+# Specific pages
+mmrag-v2 process reference.pdf --pages 6,21,169,241
 
-# Process first 20 pages only (max count mode)
-mmrag-v2 process large.pdf --pages 20 --batch-size 10
-```
-
-### Utility Commands
-
-```bash
-# Check vision provider availability
-mmrag-v2 check
-
-# Show version and engine info
-mmrag-v2 version
-
-# Batch process directory
-mmrag-v2 batch ./documents --pattern "*.pdf" --vision-provider ollama
-```
-
-### Batch Processing
-
-```bash
-mmrag-v2 batch [OPTIONS] INPUT_DIR
-```
-
-Batch options (includes refiner passthrough):
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--output-dir`, `-o` | `./output` | Directory for JSONL and assets |
-| `--pattern`, `-p` | `*.pdf` | Glob pattern for files |
-| `--vision-provider`, `-v` | `ollama` | VLM provider for images |
-| `--vision-base-url` | `None` | Base URL for OpenAI-compatible endpoints |
-| `--api-key`, `-k` | Env var | API key for cloud providers |
-| `--vlm-timeout` | `180` | VLM call timeout in seconds |
-| `--enable-cache/--no-cache` | `True` | Enable/disable vision cache for repeated images |
-| `--enable-ocr/--no-ocr` | `False` | Enable OCR for scanned documents |
-| `--ocr-mode` | `auto` | OCR mode: `auto`, `legacy`, or `layout-aware` |
-| `--enable-refiner/--no-refiner` | `False` | Enable Semantic Text Refiner |
-| `--refiner-provider` | `ollama` | Refiner provider (`ollama|openai|anthropic`) |
-| `--refiner-model` | Auto-detect | Refiner model name |
-| `--refiner-base-url` | `None` | OpenAI-compatible base URL (LM Studio, LocalAI, vLLM) |
-
-Example:
-
-```bash
-mmrag-v2 batch ./documents --enable-refiner \
-  --refiner-provider openai \
-  --refiner-model llama-joycaption-beta-one-hf-llava-mmproj \
-  --refiner-base-url http://localhost:1234/v1 \
-  --api-key "lm-studio"
+# Batch convert a folder
+mmrag-v2 batch ./documents -p "*.pdf" -v none -o ./converted
 ```
 
 ---
 
-## 🧠 Semantic Text Refiner
+## Output Schema
 
-The Semantic Text Refiner runs after OCR to fix obvious OCR artifacts while preserving technical integrity. The original `content` is never overwritten; accepted refinements are stored in `metadata.refined_content`.
-
-### Safety Guarantees
-
-- **Provenance lock:** Original text preserved; refined text is opt-in.
-- **Protected tokens:** Part numbers, ECU codes, SN/ID tokens, URLs, and dates are immutable.
-- **Edit budget:** Levenshtein ratio guardrail prevents over-editing.
-- **Vision anchors:** Visual descriptions are treated as ground truth for entity names.
-- **Fail-safe:** On errors/timeouts, the refiner bypasses and returns original text.
-
-### Provider Matrix
-
-1) **Local Ollama (default)**
-```bash
-mmrag-v2 process file.pdf --enable-refiner
-```
-
-2) **LM Studio / Local OpenAI-compatible**
-```bash
-mmrag-v2 process file.pdf --enable-refiner \
-  --refiner-provider openai \
-  --refiner-model llama-joycaption-beta-one-hf-llava-mmproj \
-  --refiner-base-url http://localhost:1234/v1 \
-  --api-key "lm-studio"
-```
-
-3) **OpenAI / Anthropic Cloud**
-```bash
-# OpenAI
-mmrag-v2 process file.pdf --enable-refiner \
-  --refiner-provider openai \
-  --refiner-model gpt-4o-mini \
-  --api-key $OPENAI_API_KEY
-
-# Anthropic
-mmrag-v2 process file.pdf --enable-refiner \
-  --refiner-provider anthropic \
-  --refiner-model claude-3-5-haiku-20241022 \
-  --api-key $ANTHROPIC_API_KEY
-```
-
-### Refiner Flags
-
-- `--enable-refiner/--no-refiner`
-- `--refiner-provider`
-- `--refiner-model`
-- `--refiner-base-url`
-- `--api-key`
-
----
-
-## 🏛️ Architecture
-
-### System Overview
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                     MM-Converter-V2 Pipeline                     │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────┐    ┌───────────────────┐    ┌───────────────────┐  │
-│  │ PDF/EPUB │───▶│ DocumentDiagnostic│───▶│Profile Classifier │  │
-│  │ DOCX/HTML│    │ (Physical Checks) │    │(Multi-Dimensional)│  │
-│  └──────────┘    └───────────────────┘    └───────────────────┘  │
-│                           │                        │             │
-│                           ▼                        ▼             │
-│  ┌──────────────────────────────────────────────────────────┐    │
-│  │                   BatchProcessor                         │    │
-│  │  ┌────────────┐  ┌────────────┐  ┌────────────────────┐  │    │
-│  │  │ PDF Split  │─▶│ Docling    │─▶│ OCR Cascade        │  │    │
-│  │  │ (N pages)  │  │ (Layout AI)│  │ (Auto/Layout-Aware)│  │    │
-│  │  └────────────┘  └────────────┘  └────────────────────┘  │    │
-│  │         │               │                    │           │    │
-│  │         ▼               ▼                    ▼           │    │
-│  │  ┌────────────────────────────────────────────────────┐  │    │
-│  │  │              Context State Machine                 │  │    │
-│  │  │    (Breadcrumbs, Hierarchy, Page Tracking)         │  │    │
-│  │  └────────────────────────────────────────────────────┘  │    │
-│  │         │                                                │    │
-│  │         ▼                                                │    │
-│  │  ┌────────────────────────────────────────────────────┐  │    │
-│  │  │              VLM Enrichment Layer                  │  │    │
-│  │  │    (Ollama/OpenAI/LM Studio/Anthropic + Cache)     │  │    │
-│  │  └────────────────────────────────────────────────────┘  │    │
-│  └──────────────────────────────────────────────────────────┘    │
-│                                │                                 │
-│                                ▼                                 │
-│  ┌──────────────────────────────────────────────────────────┐    │
-│  │                 Quality Assurance Layer                  │    │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌────────────────┐  │    │
-│  │  │ Token        │  │ Asset        │  │ Coordinate     │  │    │
-│  │  │ Validator    │  │ Validator    │  │ Validator      │  │    │
-│  │  │ (QA-CHECK-01)│  │ (QA-CHECK-02)│  │ (REQ-COORD)    │  │    │
-│  │  └──────────────┘  └──────────────┘  └────────────────┘  │    │
-│  └──────────────────────────────────────────────────────────┘    │
-│                                │                                 │
-│                                ▼                                 │
-│  ┌──────────────────────────────────────────────────────────┐    │
-│  │                    Output Layer                          │    │
-│  │         ingestion.jsonl + assets/ directory              │    │
-│  └──────────────────────────────────────────────────────────┘    │
-│                                                                  │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-### Key Components
-
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| `BatchProcessor` | `src/mmrag_v2/batch_processor.py` | Orchestrates large PDF processing with memory management |
-| `V2DocumentProcessor` | `src/mmrag_v2/processor.py` | Core Docling-based document conversion |
-| `DocumentDiagnosticEngine` | `src/mmrag_v2/orchestration/document_diagnostic.py` | Pre-flight document analysis |
-| `ProfileClassifier` | `src/mmrag_v2/orchestration/profile_classifier.py` | Multi-dimensional profile selection |
-| `SmartConfigProvider` | `src/mmrag_v2/orchestration/smart_config.py` | Document profiling and classification |
-| `StrategyOrchestrator` | `src/mmrag_v2/orchestration/strategy_orchestrator.py` | Dynamic threshold computation |
-| `VisionManager` | `src/mmrag_v2/vision/vision_manager.py` | Multi-provider VLM abstraction |
-| `TokenValidator` | `src/mmrag_v2/validators/token_validator.py` | QA-CHECK-01 data integrity guard |
-| `ContextStateV2` | `src/mmrag_v2/state/context_state.py` | Breadcrumb state machine |
-| `EnhancedOCREngine` | `src/mmrag_v2/ocr/enhanced_ocr_engine.py` | 3-layer OCR cascade |
-
----
-
-## 📄 Output Schema
-
-### ingestion.jsonl Format
-
-Each line is a valid JSON object:
+The first line of `ingestion.jsonl` is a metadata record:
 
 ```json
 {
-  "chunk_id": "a1b2c3d4_042_8f3a2b1c9d4e5f6a",
+  "object_type": "ingestion_metadata",
+  "schema_version": "2.6.0",
   "doc_id": "a1b2c3d4e5f6",
-  "modality": "text",
-  "content": "The F-35 Lightning II represents a quantum leap in stealth technology...",
-  "metadata": {
-    "source_file": "combat_aircraft_aug2025.pdf",
-    "file_type": "pdf",
-    "page_number": 42,
-    "chunk_type": "paragraph",
-    "hierarchy": {
-      "parent_heading": "Stealth Technology",
-      "breadcrumb_path": ["Combat Aircraft", "August 2025", "Features", "F-35 Deep Dive"],
-      "level": 4
-    },
-    "spatial": {
-      "bbox": [50, 100, 950, 800],
-      "page_width": 612,
-      "page_height": 792
-    },
-    "extraction_method": "docling",
-    "created_at": "2025-12-30T14:23:45.123456+00:00"
-  },
-  "schema_version": "2.4.1-stable"
+  "source_file": "document.pdf",
+  "profile_type": "digital_magazine",
+  "domain": "editorial",
+  "is_scan": false,
+  "total_pages": 108,
+  "chunk_count": 276
 }
 ```
 
-### Image Chunk Example
+All subsequent lines are content chunks. Three modalities:
+
+### Text Chunk
+
+```json
+{
+  "chunk_id": "a1b2c3d4_042_8f3a2b1c",
+  "doc_id": "a1b2c3d4e5f6",
+  "modality": "text",
+  "content": "The converter extracts text while preserving document hierarchy...",
+  "chunk_type": "paragraph",
+  "metadata": {
+    "page_number": 42,
+    "chunk_type": "paragraph",
+    "hierarchy": {
+      "parent_heading": "Processing Pipeline",
+      "breadcrumb_path": ["Document Title", "Page 42", "Processing Pipeline"],
+      "level": 3
+    },
+    "spatial": {
+      "bbox": [50, 100, 950, 400],
+      "page_width": 612,
+      "page_height": 792
+    },
+    "extraction_method": "docling"
+  },
+  "semantic_context": {
+    "prev_text_snippet": "...end of previous chunk for overlap.",
+    "next_text_snippet": "Start of next chunk for context..."
+  },
+  "schema_version": "2.6.0"
+}
+```
+
+### Image Chunk
 
 ```json
 {
   "chunk_id": "a1b2c3d4_042_figure_01",
-  "doc_id": "a1b2c3d4e5f6",
   "modality": "image",
-  "content": "Cutaway diagram showing the F-35's internal weapons bay with AIM-120 AMRAAM missiles.",
-  "metadata": {
-    "source_file": "combat_aircraft_aug2025.pdf",
-    "file_type": "pdf",
-    "page_number": 42,
-    "hierarchy": {
-      "breadcrumb_path": ["Combat Aircraft", "August 2025", "Features", "F-35 Deep Dive"],
-      "level": 4
-    },
-    "spatial": {
-      "bbox": [100, 200, 900, 600],
-      "page_width": 612,
-      "page_height": 792
-    },
-    "extraction_method": "docling",
-    "visual_description": "Cutaway diagram showing the F-35's internal weapons bay..."
-  },
+  "content": "Cutaway diagram showing internal mechanism with labeled components.",
+  "visual_description": "Cutaway diagram showing internal mechanism with labeled components.",
   "asset_ref": {
     "file_path": "assets/a1b2c3d4_042_figure_01.png",
     "mime_type": "image/png",
     "width_px": 1600,
     "height_px": 800
-  },
-  "schema_version": "2.4.1-stable"
+  }
 }
 ```
 
-**Versioning Note:** `schema_version` is injected at export time from `src/mmrag_v2/version.py` (`__schema_version__`). JSONL output will carry the current schema version (e.g., `2.4.1-stable`) even if upstream parsers omit it.
+### Table Chunk
 
-### Spatial Metadata (REQ-COORD-02)
+```json
+{
+  "chunk_id": "a1b2c3d4_042_table_01",
+  "modality": "table",
+  "content": "| Component | Role |\n| --- | --- |\n| Converter | Document to chunks |\n| Vector Store | Similarity search |",
+  "asset_ref": {
+    "file_path": "assets/a1b2c3d4_042_table_01.png",
+    "mime_type": "image/png"
+  }
+}
+```
 
-The `spatial` object contains normalized coordinates for UI overlay support:
+### Coordinate System
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `bbox` | `[int, int, int, int]` | Normalized coordinates [x0, y0, x1, y1] in range 0-1000 |
-| `page_width` | `int` | Original page width in PDF points (e.g., 612 for US Letter) |
-| `page_height` | `int` | Original page height in PDF points (e.g., 792 for US Letter) |
+All `bbox` values are integers in the range [0, 1000], representing a normalized page grid. To convert to pixel coordinates:
 
-**Converting bbox to pixels for UI overlay:**
 ```python
-# Given: bbox = [100, 200, 900, 600], page_width = 612, page_height = 792
-# Scale factor for rendering at 150 DPI
-dpi_scale = 150 / 72  # PDF points are 72 DPI
-render_width = page_width * dpi_scale  # 1275 pixels
-render_height = page_height * dpi_scale  # 1650 pixels
+# bbox = [100, 200, 900, 600], page_width = 612, page_height = 792
+dpi_scale = 150 / 72  # PDF points to pixels at 150 DPI
+render_width = page_width * dpi_scale
 
-# Convert normalized bbox to pixel coordinates
-x0 = (bbox[0] / 1000) * render_width   # 127.5
-y0 = (bbox[1] / 1000) * render_height  # 330.0
-x1 = (bbox[2] / 1000) * render_width   # 1147.5
-y1 = (bbox[3] / 1000) * render_height  # 990.0
-```
-
-### Modality Types
-
-| Modality | Description | Has asset_ref |
-|----------|-------------|---------------|
-| `text` | Paragraphs, headings, lists | No |
-| `image` | Figures, photos, diagrams | Yes |
-| `table` | Markdown tables | Optional |
-
----
-
-## 🎯 Smart Vision Orchestration
-
-### Document Diagnostic Layer
-
-Before processing begins, the system runs a pre-flight diagnostic:
-
-```
-━━━━━ DOCUMENT DIAGNOSTICS ━━━━━
-Modality: digital
-File Size: 45.2 MB
-Avg Text/Page: 1250 chars
-Is Likely Scan: No
-Confidence: 0.92
-Era: modern
-Domain: editorial
-Strategy: editorial_balanced
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
-
-### Multi-Dimensional Profile Selection
-
-The ProfileClassifier analyzes multiple dimensions to select the optimal processing profile:
-
-| Profile Type | Use Case | VLM Freedom | Scan Hints |
-|--------------|----------|-------------|------------|
-| `digital_magazine` | Modern digital magazines | `strict` | No |
-| `technical_manual` | Technical manuals, handbooks, procedural documents | `strict` | Yes |
-| `academic_whitepaper` | Academic papers and technical whitepapers | `strict` | No |
-| `scanned_clean` | Clean modern scans with good OCR potential | `strict` | Yes |
-| `scanned_degraded` | Degraded/vintage scans with artifacts | `strict` | Yes |
-| `scanned_magazine` | Scanned editorial magazines with large photo content | `strict` | Yes |
-
-### Strategy Banner
-
-When processing begins, you'll see the strategy configuration:
-
-```
-🎯 SMART VISION ORCHESTRATION
-   📊 Document Profile: EDITORIAL
-   📐 Image-to-Text Ratio: 0.72
-   🎚️  Sensitivity Dial: 0.7
-   📏 Min Image Dimension: 140x140px
-   🖼️  Background Extraction: ENABLED
+x0_px = (bbox[0] / 1000) * render_width
+y0_px = (bbox[1] / 1000) * render_height
 ```
 
 ---
 
-## ✅ Quality Assurance
+## Installation
 
-### QA-CHECK-01: Token Balance Validation
+### Requirements
 
-Ensures no text is lost during chunking:
+- macOS with Apple Silicon (M1/M2/M3/M4) or Linux
+- Python 3.10 (not 3.11+)
+- Conda (Miniconda or Anaconda)
+- 16 GB RAM minimum
 
-```
-Source Tokens: 10,000 (from denoised text)
-Chunk Tokens:  11,500 (includes DSO overlap)
-Overlap Allow: 1,500 (15% estimate)
-─────────────────────────────────
-Effective:     10,000 (11,500 - 1,500)
-Variance:      0.0% ✓ (within 10% tolerance)
-```
-
-### QA-CHECK-02: Asset Verification
-
-Every `asset_ref.file_path` is verified to exist on disk before JSONL export.
-
-### QA-CHECK-03: Hierarchy Integrity
-
-`breadcrumb_path` depth must match `hierarchy.level` value.
-
-### REQ-COORD: Coordinate Validation
-
-- All `bbox` values must be integers in range [0, 1000]
-- `page_width` and `page_height` must be populated for IMAGE and TABLE chunks
-- Digital PDFs: OCR cascade is bypassed (Docling text layer + TextIntegrityScout only). Layout-aware OCR runs only for scanned/unknown modalities.
-- Gap-fill recovery: Academic whitepapers use a 60-character minimum block size on low-coverage pages, with noise filters and strict deduplication to avoid duplicates/noise.
-
----
-
-## 🔬 Layout-Aware OCR (Phase 1B)
-
-### Overview
-
-For scanned documents, the standard pipeline produces VLM summaries instead of verbatim text. The **Layout-Aware OCR** module uses a 3-layer confidence-based cascade:
-
-```
-Layer 1: Docling (existing)  →  confidence > 0.7 → accept
-                             ↓
-Layer 2: Tesseract 5.x       →  confidence > 0.7 → accept
-                             ↓
-Layer 3: Doctr (transformer) →  FINAL PASS (accept all)
-```
-
-### Auto-Detection (Default)
-
-When `--ocr-mode auto` (default), the system automatically selects:
-- **Digital documents** → `legacy` mode (shadow extraction)
-- **Scanned documents** → `layout-aware` mode (3-layer OCR cascade)
+### Setup
 
 ```bash
-# Auto-detection (recommended)
-mmrag-v2 process document.pdf --batch-size 10
+git clone <your-repo-url>
+cd MM-Converter-V2
 
-# Force layout-aware for vintage documents
-mmrag-v2 process vintage_catalog.pdf \
-  --ocr-mode layout-aware \
-  --ocr-confidence-threshold 0.7 \
-  --enable-doctr \
-  --batch-size 10
+conda env create -f environment.yml
+conda activate mmrag-v2
+pip install -e .
+
+# Verify
+mmrag-v2 version
+mmrag-v2 check
 ```
 
----
+### Vision Provider Setup
 
-## ⚙️ Advanced Configuration
+The VLM is optional but recommended. Without it, images get placeholder descriptions.
 
-### Environment Variables
-
+**LM Studio (recommended for local use):**
 ```bash
-# Vision providers
+# Download from https://lmstudio.ai, load a vision model, start the server
+mmrag-v2 process doc.pdf -v openai --vision-base-url http://localhost:1234/v1 --api-key lm-studio
+```
+
+**Ollama:**
+```bash
+brew install ollama && ollama pull llava:latest && ollama serve
+mmrag-v2 process doc.pdf -v ollama
+```
+
+**Cloud (OpenAI / Anthropic):**
+```bash
 export OPENAI_API_KEY="sk-..."
-export ANTHROPIC_API_KEY="..."
-
-# Ollama (if not on localhost)
-export OLLAMA_HOST="http://your-server:11434"
-
-# OpenAI-compatible APIs (LM Studio, LocalAI, vLLM)
-export OPENAI_BASE_URL="http://localhost:1234/v1"
-```
-
-### Python API
-
-```python
-from mmrag_v2.batch_processor import BatchProcessor
-
-processor = BatchProcessor(
-    output_dir="./output",
-    batch_size=10,
-    vision_provider="openai",  # or "ollama", "anthropic", "none"
-    vision_api_key="your-key",
-    strict_qa=True,
-    semantic_overlap=True,
-)
-
-result = processor.process_pdf("document.pdf")
-print(f"Chunks: {result.total_chunks}")
-print(f"Output: {result.output_jsonl}")
+mmrag-v2 process doc.pdf -v openai
 ```
 
 ---
 
-## 🔧 Troubleshooting
+## Development
 
-### Common Issues
+```bash
+# Run tests
+make test
 
-| Issue | Solution |
-|-------|----------|
+# Lint and format
+make lint
+make fmt
+
+# Type checking
+make typecheck
+
+# All checks (lint + typecheck + tests)
+make check
+
+# Multi-profile smoke test (10 pages each, no VLM)
+make smoke
+
+# Technical manual acceptance test (4 docs x 20 pages)
+make acceptance
+```
+
+### Project Structure
+
+```
+src/mmrag_v2/
+├── cli.py                          # CLI entry point (process, batch, version, check)
+├── batch_processor.py              # PDF batch orchestrator
+├── processor.py                    # Core Docling-based document conversion
+├── version.py                      # Single source of truth for version
+├── schema/ingestion_schema.py      # Pydantic models for JSONL output
+├── orchestration/
+│   ├── document_diagnostic.py      # Pre-flight structural analysis
+│   ├── profile_classifier.py       # Multi-dimensional profile selection
+│   ├── strategy_profiles.py        # Profile parameter definitions
+│   └── strategy_orchestrator.py    # Dynamic extraction configuration
+├── vision/
+│   ├── vision_manager.py           # Multi-provider VLM abstraction
+│   └── vision_prompts.py           # Diagram/photo/generic prompt templates
+├── ocr/
+│   ├── enhanced_ocr_engine.py      # 3-layer OCR cascade
+│   └── layout_aware_processor.py   # Layout-based region detection + OCR
+├── validators/
+│   ├── token_validator.py          # QA-CHECK-01 token balance
+│   └── quality_filter_tracker.py   # Filtering analytics
+└── state/context_state.py          # Breadcrumb hierarchy state machine
+```
+
+---
+
+## Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| No text from scanned PDF | OCR auto-enables for scans since v2.6. For older behavior, add `--enable-ocr` |
+| Memory error on large PDF | Reduce `--batch-size` (try 3 or 5) |
+| Slow VLM processing | VLM processes each image individually. Reduce pages with `--pages 20` or use `--vision-provider none` for text-only |
+| No images extracted | Increase `--sensitivity` (try 0.8) |
 | `ModuleNotFoundError: tiktoken` | `pip install tiktoken` |
-| `Ollama connection refused` | Run `ollama serve` in another terminal |
-| `Memory error on large PDF` | Reduce `--batch-size` (try 5) |
-| `Token validation failed` | Check if ads/headers were incorrectly included |
-| `No images extracted` | Increase `--sensitivity` (try 0.8) |
-| `page_width/page_height is null` | Update to latest version (fixed in v2.4) |
-
-### Debug Mode
-
-```bash
-# Verbose logging
-mmrag-v2 process document.pdf --verbose
-
-# Process single batch for testing
-mmrag-v2 process document.pdf --pages 10 --batch-size 10
-```
+| Ollama connection refused | Run `ollama serve` in another terminal |
 
 ---
 
-## 📊 Performance Benchmarks
+## License
 
-| Document | Pages | Time | Chunks | Assets | RAM Peak |
-|----------|-------|------|--------|--------|----------|
-| Combat Aircraft (Aug 2025) | 244 | 8m 32s | 1,847 | 244 | 4.2 GB |
-| Technical Manual | 120 | 3m 15s | 892 | 45 | 2.1 GB |
-| Photo Book | 80 | 5m 48s | 423 | 156 | 3.8 GB |
-
-*Benchmarks on M2 Max 32GB with Ollama llava:latest*
-
----
-
-## 🛡️ SRS Compliance
-
-This implementation is fully compliant with **SRS Multimodal Ingestion v2.4.1-stable**:
-
-| Requirement | Status | Implementation |
-|-------------|--------|----------------|
-| IRON-01: Atomic tables/figures | ✅ | Never split across chunks |
-| IRON-07: Full-Page Guard | ✅ | Area ratio > 0.95 rejected |
-| QA-CHECK-01: Token validation | ✅ | TokenValidator with 10% tolerance |
-| REQ-COORD-01: Normalized bbox | ✅ | Integer range [0, 1000] |
-| REQ-COORD-02: Page dimensions | ✅ | page_width, page_height populated |
-| REQ-CHUNK-03: DSO overlap | ✅ | SemanticOverlapManager |
-
----
-
-## 🧪 Running Tests
-
-### Test Infrastructure Overview
-
-The test suite is organized into two categories:
-
-1. **pytest Unit Tests** (in `tests/`) - Automated tests for CI/CD
-2. **CLI Test Scripts** (in `scripts/`) - Manual testing scripts for specific features
-
-### Running pytest Tests
-
-```bash
-# Activate conda environment
-conda activate ./env
-
-# Run all tests
-pytest tests/ -v
-
-# Run specific test file
-pytest tests/test_token_validator.py -v
-
-# Run tests with coverage
-pytest tests/ --cov=mmrag_v2 --cov-report=html
-
-# Run only fast tests (skip slow integration tests)
-pytest tests/ -v -m "not slow"
-```
-
-### Available pytest Test Suites
-
-| Test File | Purpose | Fast/Slow |
-|-----------|---------|-----------|
-| `test_token_validator.py` | QA-CHECK-01 token balance validation | Fast |
-| `test_strategy_profiles.py` | Profile selection and parameter isolation | Fast |
-| `test_vlm_text_detection.py` | VLM text transcription detection | Fast |
-| `test_domain_detection_parity.py` | Domain detection accuracy | Fast |
-| `test_full_page_guard.py` | Full-page asset validation (IRON-07) | Fast |
-| `test_semantic_overlap.py` | Dynamic Semantic Overlap (DSO) | Fast |
-| `test_universal_pipeline.py` | End-to-end pipeline integration | Slow |
-| `test_magazine_layout.py` | Magazine-specific layout processing | Slow |
-
-### CLI Test Scripts (Manual Execution)
-
-These scripts are NOT run by pytest and require manual execution with specific PDF files:
-
-```bash
-# Layout-Aware OCR testing
-python scripts/test_layout_aware_ocr.py \
-    --pdf data/raw/vintage_catalog.pdf \
-    --page 21 \
-    --output ./test_results
-
-# Benchmark OCR cascade sequences
-python tests/benchmark_ocr_cascade_sequences.py
-
-# Quick Docling integration test
-python tests/quick_docling_test.py
-```
-
-### Test Execution Best Practices
-
-**Before Running Tests:**
-
-1. Ensure conda environment is activated: `conda activate ./env`
-2. Verify dependencies: `pip install -e .`
-3. Check that test data exists in `data/raw/` (if required by test)
-
-**PDF-Only Test Runs:**
-
-To test only PDF processing without VLM/OCR overhead:
-
-```bash
-# Process PDF without vision provider
-mmrag-v2 process document.pdf --vision-provider none --no-ocr
-
-# Run tests with minimal dependencies
-pytest tests/test_token_validator.py tests/test_strategy_profiles.py -v
-```
-
-**Debugging Test Failures:**
-
-```bash
-# Run single test with verbose output
-pytest tests/test_token_validator.py::test_simple_text_exact_match -v -s
-
-# Run with debugger on failure
-pytest tests/test_strategy_profiles.py --pdb
-
-# Show local variables on failure
-pytest tests/ -v -l
-```
-
-### Continuous Integration
-
-The test suite is designed to run in CI/CD pipelines:
-
-```yaml
-# Example GitHub Actions workflow
-- name: Run Tests
-  run: conda run -p ./env pytest tests/ -v --cov=mmrag_v2
-```
-
-### Test Coverage Goals
-
-| Component | Coverage Target | Current |
-|-----------|----------------|---------|
-| Core Processing | 80%+ | ✅ 85% |
-| Validators | 90%+ | ✅ 92% |
-| Vision/VLM | 70%+ | ✅ 75% |
-| OCR Engines | 70%+ | ✅ 73% |
-
----
-
-## 📄 License
-
-Internal Project - SRS v2.4 Compliant
-
----
-
-**Built with ❤️ for Advanced RAG Systems**
+See LICENSE file for details.
