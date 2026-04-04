@@ -3010,14 +3010,61 @@ class BatchProcessor:
                 result.append(ch)
         return "".join(result)
 
+    @staticmethod
+    def _collapse_spaced_heading(text: str) -> str:
+        """Collapse decorative spaced-out headings like 'C H A P T E R  O N E' → 'CHAPTER ONE'.
+
+        Scanned books use letter-spaced headings for decoration. Docling extracts
+        them verbatim, producing unreadable breadcrumbs and chunk text.
+        """
+        import re as _re
+
+        _WORDS = (
+            "CHAPTER", "PART", "BOOK", "SECTION", "APPENDIX", "EPILOGUE", "PROLOGUE",
+            "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE",
+            "TEN", "ELEVEN", "TWELVE", "THIRTEEN", "FOURTEEN", "FIFTEEN", "SIXTEEN",
+            "SEVENTEEN", "EIGHTEEN", "NINETEEN", "TWENTY", "THIRTY",
+            "THE", "AND", "OF",
+        )
+
+        def _collapse(m: "re.Match[str]") -> str:
+            spaced = m.group(0)
+            # Split on double-space word boundaries first, then collapse each word
+            parts = _re.split(r" {2,}", spaced)
+            words = []
+            for part in parts:
+                word = part.replace(" ", "")  # "C H A P T E R" → "CHAPTER"
+                words.append(word)
+            collapsed = " ".join(words)  # "CHAPTER ONE"
+            # If word splitting didn't produce known words, try dictionary split
+            if len(words) == 1 and len(words[0]) > 7:
+                blob = words[0]
+                result_parts = []
+                while blob:
+                    matched = False
+                    for w in sorted(_WORDS, key=len, reverse=True):
+                        if blob.startswith(w):
+                            result_parts.append(w)
+                            blob = blob[len(w):]
+                            matched = True
+                            break
+                    if not matched:
+                        result_parts.append(blob)
+                        break
+                collapsed = " ".join(result_parts)
+            return collapsed
+
+        # Match sequences of 3+ uppercase letters separated by 1-2 spaces
+        return _re.sub(r"(?:[A-Z]\s{1,2}){3,}[A-Z]", _collapse, text)
+
     def _normalize_chunk_text(
         self, chunks: List["IngestionChunk"]
     ) -> List["IngestionChunk"]:
         """Post-processing pass: PUA normalization + whitespace collapsing for text chunks.
 
         - PUA chars: applied to ALL text chunks regardless of chunk_type.
-        - Double-space collapsing: applied only to non-code chunks (code relies on
-          indentation whitespace).
+        - Double-space collapsing: applied only to non-code chunks.
+        - Spaced-heading collapse: 'C H A P T E R  O N E' → 'CHAPTER ONE'.
         """
         import re as _re
 
@@ -3027,9 +3074,19 @@ class BatchProcessor:
             text = self._normalize_pua_chars(ch.content)
             is_code = ch.metadata.chunk_type == ChunkType.CODE if ch.metadata else False
             if not is_code:
-                # Collapse 2+ horizontal spaces to one (leaves newlines intact).
                 text = _re.sub(r"[^\S\n]{2,}", " ", text)
+                text = self._collapse_spaced_heading(text)
             ch.content = text
+
+            # Also fix breadcrumbs containing spaced headings
+            if ch.metadata and ch.metadata.hierarchy and ch.metadata.hierarchy.breadcrumb_path:
+                ch.metadata.hierarchy.breadcrumb_path = [
+                    self._collapse_spaced_heading(b) for b in ch.metadata.hierarchy.breadcrumb_path
+                ]
+                if ch.metadata.hierarchy.parent_heading:
+                    ch.metadata.hierarchy.parent_heading = self._collapse_spaced_heading(
+                        ch.metadata.hierarchy.parent_heading
+                    )
         return chunks
 
     def _remove_standalone_page_number_lines(self, text: str) -> str:
