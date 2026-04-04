@@ -855,11 +855,15 @@ class LayoutAwareOCRProcessor:
             f"saved to {asset_filename}"
         )
 
+        # Convert raw OCR text to markdown table format.
+        # Without this, table content is dumped as a single garbled string.
+        table_text = self._ocr_text_to_markdown_table(ocr_result.text)
+
         # Return chunk with asset_ref (QA-CHECK-05 requirement)
         return ProcessedChunk(
             chunk_id=chunk_id,
             modality="table",
-            content=ocr_result.text,
+            content=table_text,
             bbox=region.bbox,
             page_number=page_number,
             extraction_method="layout_aware_ocr",
@@ -873,6 +877,49 @@ class LayoutAwareOCRProcessor:
                 "height_px": int(table_pil.size[1]) if "table_pil" in locals() else table_crop.shape[0],
             },
         )
+
+    @staticmethod
+    def _ocr_text_to_markdown_table(text: str) -> str:
+        """Convert raw OCR text from a table region to markdown table format.
+
+        Detects tab-separated or multi-space-aligned columns and converts to
+        pipe-separated markdown. Falls back to a single-column table to
+        preserve content for RAG retrieval.
+        """
+        import re
+
+        lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+        if not lines:
+            return text or ""
+
+        # Already has pipe separators → treat as markdown
+        if sum(1 for ln in lines if "|" in ln) >= 2:
+            return "\n".join(lines)
+
+        # Detect columns from tabs or multi-space alignment
+        parsed_rows: list[list[str]] = []
+        for ln in lines:
+            cols = [c.strip() for c in re.split(r"\t+|\s{2,}", ln) if c.strip()]
+            if len(cols) >= 2:
+                parsed_rows.append(cols)
+
+        if parsed_rows:
+            max_cols = max(len(r) for r in parsed_rows)
+            header = parsed_rows[0] + [""] * (max_cols - len(parsed_rows[0]))
+            md = [
+                "| " + " | ".join(header) + " |",
+                "| " + " | ".join(["---"] * max_cols) + " |",
+            ]
+            for row in parsed_rows[1:]:
+                padded = row + [""] * (max_cols - len(row))
+                md.append("| " + " | ".join(padded) + " |")
+            return "\n".join(md)
+
+        # Single-column fallback: wrap every line in a table row
+        md = ["| Content |", "| --- |"]
+        for ln in lines:
+            md.append("| " + ln.replace("|", "\\|") + " |")
+        return "\n".join(md)
 
     def _calculate_text_confidence(self, text: Optional[str], region_type: str) -> float:
         """
