@@ -4060,7 +4060,6 @@ class BatchProcessor:
         while i < len(chunks):
             cur = chunks[i]
 
-            # Only merge TEXT chunks on the same page
             if (
                 cur.modality != Modality.TEXT
                 or not cur.content
@@ -4074,9 +4073,6 @@ class BatchProcessor:
             if (
                 nxt.modality != Modality.TEXT
                 or not nxt.content
-                or not cur.metadata
-                or not nxt.metadata
-                or cur.metadata.page_number != nxt.metadata.page_number
             ):
                 merged.append(cur)
                 i += 1
