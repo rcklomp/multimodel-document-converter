@@ -2122,6 +2122,20 @@ class BatchProcessor:
         # Initialize quality filter tracker for this document
         self._quality_filter_tracker = create_quality_filter_tracker()
 
+        # For scanned/degraded documents, lower the refiner threshold to 0.0
+        # so ALL OCR text gets refined. OCR on degraded scans is never trustworthy —
+        # even "clean-looking" text like "Jamu la Frizgi" (should be "J.B. Wood")
+        # scores corruption=0.0 because it looks like valid text to pattern matchers.
+        if self._refiner and doc_modality in ("scanned_degraded", "scanned_clean"):
+            try:
+                self._refiner.config.min_refine_threshold = 0.0
+                logger.info(
+                    f"[REFINER] Lowered threshold to 0.0 for {doc_modality} — "
+                    "all OCR text will be refined"
+                )
+            except Exception:
+                pass
+
         # OCR strategy: respect user flags, but auto-disable for digital-like PDFs
         # (native_digital or image_heavy) unless --force-ocr is explicitly set.
         #
@@ -3989,6 +4003,74 @@ class BatchProcessor:
             )
         return result
 
+    def _merge_mid_sentence_chunks(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
+        """Merge consecutive text chunks split mid-sentence.
+
+        Layout-aware OCR creates one chunk per detected region. When a sentence
+        spans two regions, each chunk gets half — producing fragments like
+        "...court cases in" followed by "which the gun was". Merging these
+        produces coherent text for embedding and retrieval.
+        """
+        import re as _re
+
+        merged: list[IngestionChunk] = []
+        merge_count = 0
+        i = 0
+
+        while i < len(chunks):
+            cur = chunks[i]
+
+            # Only merge TEXT chunks on the same page
+            if (
+                cur.modality != Modality.TEXT
+                or not cur.content
+                or i == len(chunks) - 1
+            ):
+                merged.append(cur)
+                i += 1
+                continue
+
+            nxt = chunks[i + 1]
+            if (
+                nxt.modality != Modality.TEXT
+                or not nxt.content
+                or not cur.metadata
+                or not nxt.metadata
+                or cur.metadata.page_number != nxt.metadata.page_number
+            ):
+                merged.append(cur)
+                i += 1
+                continue
+
+            # Check: does current end mid-sentence and next start lowercase?
+            cur_text = cur.content.rstrip()
+            nxt_text = nxt.content.lstrip()
+            ends_mid = not _re.search(r"[.!?:;\"')\]}\d]\s*$", cur_text)
+            starts_lower = bool(nxt_text) and nxt_text[0].islower()
+
+            if ends_mid and starts_lower:
+                # Merge: append next content to current
+                cur.content = cur_text + " " + nxt_text
+                if cur.metadata.refined_content and nxt.metadata.refined_content:
+                    cur.metadata.refined_content = (
+                        cur.metadata.refined_content.rstrip() + " " +
+                        nxt.metadata.refined_content.lstrip()
+                    )
+                merge_count += 1
+                i += 2  # skip the merged chunk
+            else:
+                merged.append(cur)
+                i += 1
+
+        # Don't forget the last chunk if not merged
+        if i == len(chunks) - 1:
+            merged.append(chunks[-1])
+
+        if merge_count:
+            logger.info(f"[MID-SENTENCE-MERGE] Merged {merge_count} mid-sentence chunk boundaries")
+
+        return merged
+
     def _remove_near_duplicate_chunks(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
         """Remove text chunks that are near-duplicates of earlier chunks.
 
@@ -5254,6 +5336,12 @@ class BatchProcessor:
         # flat code chunks. Without this, academic papers with code snippets produce
         # unreadable single-line output (e.g., "class Foo: def __init__(self):...").
         valid_chunks = self._apply_code_hygiene(valid_chunks)
+
+        # Step 3a1b: Merge mid-sentence chunk boundaries.
+        # Layout-aware OCR creates one chunk per region. When a sentence spans
+        # two regions, each chunk gets half. Merge consecutive TEXT chunks where
+        # the first ends without sentence punctuation and the second starts lowercase.
+        valid_chunks = self._merge_mid_sentence_chunks(valid_chunks)
 
         # Step 3a2: Cross-chunk hyphenation repair — rejoin words split at chunk boundaries.
         # "man-" at end of chunk + "age" at start of next → "manage" + "".
