@@ -3080,9 +3080,10 @@ class BatchProcessor:
                 text = self._collapse_spaced_heading(text)
                 # De-hyphenate line-broken words: "man-\nage" → "manage"
                 text = _re.sub(r"(\w)-\n\s*(\w)", r"\1\2", text)
-                # Also handle trailing hyphen at end of chunk: "man- " → "man-"
-                # (can't rejoin across chunks, but clean the trailing space)
-                text = _re.sub(r"(\w)-\s+$", r"\1-", text)
+                # Strip orphan trailing hyphens where the continuation is lost
+                # (Docling splits across pages). "mechanisms to man-" → "mechanisms to man"
+                # The stem still embeds better than "man-" for search.
+                text = _re.sub(r"(\w)-\s*$", r"\1", text)
             ch.content = text
 
             # Also fix breadcrumbs containing spaced headings
