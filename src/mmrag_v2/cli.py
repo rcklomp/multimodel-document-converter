@@ -41,6 +41,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from .version import __engine_version__, __schema_version__  # Single source of version truth
 from .utils.image_quality import sample_blur_variance
+from .config import load_config, AppConfig
 
 # Get logger for V2.4 metadata logging
 logger = logging.getLogger(__name__)
@@ -415,11 +416,11 @@ def process_document(
         "-o",
         help="Directory for output files (JSONL and assets)",
     ),
-    vision_provider: VisionProviderType = typer.Option(
-        VisionProviderType.OLLAMA,
+    vision_provider: Optional[VisionProviderType] = typer.Option(
+        None,
         "--vision-provider",
         "-v",
-        help="Vision provider for image enrichment (default: ollama)",
+        help="Vision provider for image enrichment (default: from config or none)",
         case_sensitive=False,
     ),
     vision_model: Optional[str] = typer.Option(
@@ -616,6 +617,36 @@ def process_document(
     """
     setup_logging(verbose)
     logger.info(f"[SYSTEM] MMRAG Engine Version: {__engine_version__}")
+
+    # ================================================================
+    # CONFIG FILE: Load defaults from ~/.mmrag-v2.yml
+    # CLI flags override config values. Config provides defaults so
+    # you don't need to type --vision-provider --api-key etc. every time.
+    # ================================================================
+    cfg = load_config()
+    if cfg.loaded_from:
+        console.print(f"[dim]Config: {cfg.loaded_from}[/dim]")
+
+    # Apply config defaults where CLI didn't provide values.
+    # vision_provider is None when user didn't pass -v flag.
+    if vision_provider is None:
+        vision_provider = VisionProviderType(cfg.vlm.provider) if cfg.vlm.provider != "none" else VisionProviderType.NONE
+    if vision_model is None and cfg.vlm.model:
+        vision_model = cfg.vlm.model
+    if vision_base_url is None and cfg.vlm.base_url:
+        vision_base_url = cfg.vlm.base_url
+    if api_key is None and cfg.vlm.api_key:
+        api_key = cfg.vlm.api_key
+    if vlm_timeout == 180 and cfg.vlm.timeout != 120:
+        vlm_timeout = cfg.vlm.timeout
+    if not enable_refiner and cfg.refiner.enabled:
+        enable_refiner = True
+        if refiner_provider == "ollama" and cfg.refiner.provider:
+            refiner_provider = cfg.refiner.provider
+        if refiner_model is None and cfg.refiner.model:
+            refiner_model = cfg.refiner.model
+        if refiner_base_url is None and cfg.refiner.base_url:
+            refiner_base_url = cfg.refiner.base_url
 
     batch_size_pages = batch_size
 
