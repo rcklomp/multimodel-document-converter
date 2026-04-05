@@ -2549,6 +2549,30 @@ class BatchProcessor:
             )
             f.write(json.dumps(meta_record.model_dump(mode="json"), ensure_ascii=False) + "\n")
 
+            # Filter redundant FULL-PAGE EDITORIAL images on pages that already have text.
+            # Scanned documents produce both OCR text chunks AND a full-page image with
+            # VLM description for the same page. The image description is redundant.
+            pages_with_text = {
+                c.metadata.page_number for c in export_chunks
+                if c.modality == Modality.TEXT and c.metadata and c.metadata.page_number
+            }
+            _pre_filter = len(export_chunks)
+            export_chunks = [
+                c for c in export_chunks
+                if not (
+                    c.modality == Modality.IMAGE
+                    and c.content
+                    and "[FULL-PAGE EDITORIAL" in c.content
+                    and c.metadata
+                    and c.metadata.page_number in pages_with_text
+                )
+            ]
+            _editorial_filtered = _pre_filter - len(export_chunks)
+            if _editorial_filtered:
+                logger.info(
+                    f"[FINALIZE] Filtered {_editorial_filtered} redundant FULL-PAGE EDITORIAL images"
+                )
+
             write_buffer: List[str] = []
 
             # Process chunks with streaming writes
@@ -2648,6 +2672,13 @@ class BatchProcessor:
 
                                 except Exception as hash_e:
                                     logger.warning(f"pHash check failed for {asset_file}: {hash_e}")
+
+                    # Safety net: ensure refined_content is never null for text chunks.
+                    # Some code paths (list_items, ads, edge cases) may skip the default.
+                    if chunk_dict.get("modality") == "text":
+                        meta = chunk_dict.get("metadata", {})
+                        if meta.get("refined_content") is None:
+                            meta["refined_content"] = chunk_dict.get("content", "")
 
                     json_line = json.dumps(chunk_dict, ensure_ascii=False)
                     write_buffer.append(json_line)
@@ -3958,6 +3989,58 @@ class BatchProcessor:
             )
         return result
 
+    def _remove_near_duplicate_chunks(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
+        """Remove text chunks that are near-duplicates of earlier chunks.
+
+        Technical manuals repeat short instructions across sections (e.g.,
+        "Remove the trigger housing downward" appears for every gun model).
+        These pollute RAG retrieval with identical results.
+
+        Uses word-set overlap: if >85% of words in a shorter chunk appear
+        in an earlier chunk, drop the shorter one.
+        """
+        import re as _re
+
+        seen_word_sets: list[set[str]] = []
+        kept: list[IngestionChunk] = []
+        dropped = 0
+
+        for ch in chunks:
+            if ch.modality != Modality.TEXT or not ch.content:
+                kept.append(ch)
+                continue
+
+            words = set(_re.findall(r"[a-zA-Z]{3,}", ch.content.lower()))
+            if len(words) < 5:
+                # Very short chunks — keep (headings, labels)
+                kept.append(ch)
+                seen_word_sets.append(words)
+                continue
+
+            is_dup = False
+            for seen in seen_word_sets:
+                if not seen:
+                    continue
+                overlap = len(words & seen) / len(words)
+                if overlap > 0.85:
+                    is_dup = True
+                    break
+
+            if is_dup:
+                dropped += 1
+                logger.debug(
+                    f"[NEAR-DEDUP] Dropped near-duplicate chunk ({len(ch.content)} chars, "
+                    f"{overlap:.0%} overlap)"
+                )
+            else:
+                kept.append(ch)
+                seen_word_sets.append(words)
+
+        if dropped:
+            logger.info(f"[NEAR-DEDUP] Removed {dropped} near-duplicate text chunks")
+
+        return kept
+
     def _deduplicate_chunk_overlap(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
         """Remove duplicated text at chunk boundaries.
 
@@ -3976,24 +4059,28 @@ class BatchProcessor:
             if not prev.content or not cur.content:
                 continue
 
-            # Find exact overlap: tail of prev == head of cur
+            # Find longest exact overlap: tail of prev == head of cur.
+            # Search from longest to shortest (greedy) for efficiency.
             max_check = min(len(prev.content), len(cur.content), 300)
             overlap_len = 0
-            for length in range(10, max_check):
+            for length in range(max_check, 9, -1):
                 if prev.content[-length:] == cur.content[:length]:
                     overlap_len = length
+                    break
 
             if overlap_len > 0:
                 cur.content = cur.content[overlap_len:].lstrip()
                 # Also trim refined_content
-                if cur.metadata and cur.metadata.refined_content:
+                if cur.metadata and cur.metadata.refined_content and prev.metadata and prev.metadata.refined_content:
+                    prev_rc = prev.metadata.refined_content
                     rc = cur.metadata.refined_content
-                    if len(rc) > overlap_len and prev.metadata and prev.metadata.refined_content:
-                        prev_rc = prev.metadata.refined_content
-                        for length in range(10, min(len(prev_rc), len(rc), 300)):
-                            if prev_rc[-length:] == rc[:length]:
-                                overlap_len = length
-                        cur.metadata.refined_content = rc[overlap_len:].lstrip()
+                    rc_overlap = 0
+                    for length in range(min(len(prev_rc), len(rc), 300), 9, -1):
+                        if prev_rc[-length:] == rc[:length]:
+                            rc_overlap = length
+                            break
+                    if rc_overlap > 0:
+                        cur.metadata.refined_content = rc[rc_overlap:].lstrip()
                 trimmed += 1
 
         if trimmed:
@@ -5166,7 +5253,12 @@ class BatchProcessor:
         # "man-" at end of chunk + "age" at start of next → "manage" + "".
         valid_chunks = self._repair_cross_chunk_hyphenation(valid_chunks)
 
-        # Step 3a3: Remove content overlap between consecutive chunks.
+        # Step 3a3: Remove near-duplicate chunks (>85% word overlap).
+        # Firearms-type manuals repeat instructions across gun models
+        # ("Remove the trigger housing downward" × 6). These pollute RAG top-k.
+        valid_chunks = self._remove_near_duplicate_chunks(valid_chunks)
+
+        # Step 3a4: Remove content overlap between consecutive chunks.
         # DSO adds ~55 chars of overlap at chunk boundaries for context continuity,
         # but this duplicates sentences in the vector index. The context is already
         # preserved in prev_text_snippet/next_text_snippet — no need to duplicate
