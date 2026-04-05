@@ -1050,12 +1050,67 @@ class LayoutAwareOCRProcessor:
             result = json.loads(resp.read())
             text = result["choices"][0]["message"]["content"]
 
-            if text and len(text.strip()) > 20:
-                logger.debug(
-                    f"[VLM-TRANSCRIBE] Page {page_number}: "
-                    f"{len(text)} chars transcribed (max_tokens=4096)"
-                )
-                return text.strip()
+            if not text or len(text.strip()) < 20:
+                return None
+
+            # Detect truncation: if response ends mid-word or mid-sentence,
+            # request a continuation. VLM token limits can cut off dense pages.
+            import re as _re
+            full_text = text.strip()
+            max_continuations = 3
+            for _ in range(max_continuations):
+                ends_clean = bool(_re.search(r"[.!?:;\"')\]}\d]\s*$", full_text.rstrip()))
+                if ends_clean:
+                    break
+                # Request continuation
+                try:
+                    cont_data = json.dumps({
+                        "model": model,
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                                    {"type": "text", "text": (
+                                        "Transcribe ALL text on this scanned page exactly as written. "
+                                        "Output ONLY the transcribed text."
+                                    )}
+                                ]
+                            },
+                            {
+                                "role": "assistant",
+                                "content": full_text[-200:]  # Last 200 chars as context
+                            },
+                            {
+                                "role": "user",
+                                "content": "Continue transcribing from where you left off. Output ONLY the remaining text."
+                            }
+                        ],
+                        "max_tokens": 2048,
+                        "temperature": 0.0,
+                    }).encode()
+                    cont_req = urllib.request.Request(url, data=cont_data)
+                    cont_req.add_header("Authorization", f"Bearer {api_key}")
+                    cont_req.add_header("Content-Type", "application/json")
+                    cont_resp = urllib.request.urlopen(cont_req, timeout=120)
+                    cont_result = json.loads(cont_resp.read())
+                    continuation = cont_result["choices"][0]["message"]["content"].strip()
+                    if continuation and len(continuation) > 10:
+                        full_text = full_text.rstrip() + " " + continuation
+                        logger.debug(
+                            f"[VLM-TRANSCRIBE] Page {page_number}: "
+                            f"continuation added (+{len(continuation)} chars)"
+                        )
+                    else:
+                        break
+                except Exception:
+                    break
+
+            logger.debug(
+                f"[VLM-TRANSCRIBE] Page {page_number}: "
+                f"{len(full_text)} chars transcribed"
+            )
+            return full_text.strip()
 
         except Exception as e:
             logger.warning(f"[VLM-TRANSCRIBE] Page {page_number} failed: {e}")
