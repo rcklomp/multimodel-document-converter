@@ -2122,6 +2122,15 @@ class BatchProcessor:
         # Initialize quality filter tracker for this document
         self._quality_filter_tracker = create_quality_filter_tracker()
 
+        # OCR strategy: respect user flags, but auto-disable for digital-like PDFs
+        # (native_digital or image_heavy) unless --force-ocr is explicitly set.
+        #
+        # Per AGENTS.md: "Combat Aircraft" / text-in-graphics recovery is known debt.
+        # We keep the pipeline simple and stable here.
+        doc_modality = self._intelligence_metadata.get("document_modality")
+        profile_type = (self._intelligence_metadata.get("profile_type") or "").lower()
+        is_digital_like = doc_modality in ("native_digital", "image_heavy")
+
         # For scanned/degraded documents, lower the refiner threshold to 0.0
         # so ALL OCR text gets refined. OCR on degraded scans is never trustworthy —
         # even "clean-looking" text like "Jamu la Frizgi" (should be "J.B. Wood")
@@ -2135,15 +2144,6 @@ class BatchProcessor:
                 )
             except Exception:
                 pass
-
-        # OCR strategy: respect user flags, but auto-disable for digital-like PDFs
-        # (native_digital or image_heavy) unless --force-ocr is explicitly set.
-        #
-        # Per AGENTS.md: "Combat Aircraft" / text-in-graphics recovery is known debt.
-        # We keep the pipeline simple and stable here.
-        doc_modality = self._intelligence_metadata.get("document_modality")
-        profile_type = (self._intelligence_metadata.get("profile_type") or "").lower()
-        is_digital_like = doc_modality in ("native_digital", "image_heavy")
 
         # REQ-STRUCT-02: Override OCR guard when encoding corruption is detected.
         # Even if the document looks digital (native_digital), if the text layer is
