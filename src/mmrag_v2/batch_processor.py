@@ -773,8 +773,10 @@ class BatchProcessor:
             # This improves performance by ~70% without quality loss.
             # Rationale: High-confidence OCR text doesn't need LLM refinement.
             # ================================================================
-            # CRITICAL: Initialize variables BEFORE any conditional logic
-            refined_content = None
+            # CRITICAL: Initialize variables BEFORE any conditional logic.
+            # Default refined_content to the raw content so downstream consumers
+            # always have a non-null value (even when the refiner is disabled or skips).
+            refined_content = pc.content if modality == Modality.TEXT else None
             refinement_applied = False
             corruption_score = None
             refinement_provider = None
@@ -790,8 +792,8 @@ class BatchProcessor:
                         f"[REFINER-BYPASS] Page {page_number}: "
                         f"Skipping refiner (ocr_confidence={ocr_conf:.2f} >= 0.90)"
                     )
-                    # Keep original values (no refinement)
-                    refined_content = None
+                    # Keep refined_content = raw content (no refinement needed)
+                    refined_content = pc.content
                     refinement_applied = False
                     corruption_score = None
                     refinement_provider = None
@@ -3076,6 +3078,11 @@ class BatchProcessor:
             if not is_code:
                 text = _re.sub(r"[^\S\n]{2,}", " ", text)
                 text = self._collapse_spaced_heading(text)
+                # De-hyphenate line-broken words: "man-\nage" → "manage"
+                text = _re.sub(r"(\w)-\n\s*(\w)", r"\1\2", text)
+                # Also handle trailing hyphen at end of chunk: "man- " → "man-"
+                # (can't rejoin across chunks, but clean the trailing space)
+                text = _re.sub(r"(\w)-\s+$", r"\1-", text)
             ch.content = text
 
             # Also fix breadcrumbs containing spaced headings

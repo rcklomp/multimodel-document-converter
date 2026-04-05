@@ -178,7 +178,8 @@ def main():
     for i, chunk in enumerate(chunks):
         chunk_id = chunk.get("chunk_id", f"chunk_{i}")
         modality = chunk.get("modality", "text")
-        content = chunk.get("content", "")
+        # Prefer refined_content (has hyphenation fixes, OCR cleanup) over raw content
+        content = chunk.get("metadata", {}).get("refined_content") or chunk.get("content", "")
         page = chunk.get("metadata", {}).get("page_number", 0)
 
         # Build embedding
