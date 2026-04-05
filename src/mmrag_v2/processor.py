@@ -3017,7 +3017,9 @@ class V2DocumentProcessor:
                     if i + 1 < len(text_chunks):
                         next_text_context = text_chunks[i + 1][0][:CONTEXT_SNIPPET_LENGTH]
 
-                    refined_content = None
+                    # Default refined_content to raw text so downstream always
+                    # has a non-null value (even when refiner is disabled or skips).
+                    refined_content = chunk_text
                     refinement_applied = False
                     corruption_score = None
                     refinement_provider = None

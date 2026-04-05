@@ -3957,6 +3957,107 @@ class BatchProcessor:
             )
         return result
 
+    def _deduplicate_chunk_overlap(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
+        """Remove duplicated text at chunk boundaries.
+
+        DSO adds overlap so consecutive chunks share ~1 sentence. This helps
+        context continuity during extraction but pollutes vector search with
+        near-identical results. The context is already preserved in
+        prev_text_snippet/next_text_snippet, so the content duplication is
+        unnecessary for RAG.
+        """
+        trimmed = 0
+        for i in range(1, len(chunks)):
+            prev = chunks[i - 1]
+            cur = chunks[i]
+            if prev.modality != Modality.TEXT or cur.modality != Modality.TEXT:
+                continue
+            if not prev.content or not cur.content:
+                continue
+
+            # Find exact overlap: tail of prev == head of cur
+            max_check = min(len(prev.content), len(cur.content), 300)
+            overlap_len = 0
+            for length in range(10, max_check):
+                if prev.content[-length:] == cur.content[:length]:
+                    overlap_len = length
+
+            if overlap_len > 0:
+                cur.content = cur.content[overlap_len:].lstrip()
+                # Also trim refined_content
+                if cur.metadata and cur.metadata.refined_content:
+                    rc = cur.metadata.refined_content
+                    if len(rc) > overlap_len and prev.metadata and prev.metadata.refined_content:
+                        prev_rc = prev.metadata.refined_content
+                        for length in range(10, min(len(prev_rc), len(rc), 300)):
+                            if prev_rc[-length:] == rc[:length]:
+                                overlap_len = length
+                        cur.metadata.refined_content = rc[overlap_len:].lstrip()
+                trimmed += 1
+
+        if trimmed:
+            logger.info(f"[DEDUP-OVERLAP] Trimmed content overlap from {trimmed} chunk boundaries")
+
+        return chunks
+
+    def _repair_cross_chunk_hyphenation(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
+        """Rejoin words split by hyphens across chunk boundaries.
+
+        When a chunk ends with "man-" and the next starts with "age...", the
+        word "manage" is broken across two chunks. Neither chunk embeds well
+        for a query about "management".
+
+        Fix: append the continuation fragment to the current chunk's last word,
+        and remove it from the next chunk's start.
+        """
+        import re as _re
+
+        repaired = 0
+        for i in range(len(chunks) - 1):
+            cur = chunks[i]
+            nxt = chunks[i + 1]
+            if cur.modality != Modality.TEXT or nxt.modality != Modality.TEXT:
+                continue
+            if not cur.content or not nxt.content:
+                continue
+
+            # Does current chunk end with a hyphenated word break?
+            match = _re.search(r"([a-zA-Z]{2,})-\s*$", cur.content)
+            if not match:
+                continue
+
+            # Does next chunk start with a lowercase continuation?
+            next_match = _re.match(r"^([a-z]{2,})\b", nxt.content.lstrip())
+            if not next_match:
+                continue
+
+            word_start = match.group(1)
+            word_end = next_match.group(1)
+            full_word = word_start + word_end
+
+            # Repair: replace trailing "word-" with "word" + continuation
+            cur.content = _re.sub(r"([a-zA-Z]{2,})-\s*$", full_word, cur.content)
+            # Remove the continuation fragment from next chunk start
+            nxt.content = _re.sub(r"^" + _re.escape(word_end) + r"\b\s*", "", nxt.content.lstrip())
+
+            # Also fix refined_content if present
+            if cur.metadata and cur.metadata.refined_content:
+                cur.metadata.refined_content = _re.sub(
+                    r"([a-zA-Z]{2,})-\s*$", full_word, cur.metadata.refined_content
+                )
+            if nxt.metadata and nxt.metadata.refined_content:
+                nxt.metadata.refined_content = _re.sub(
+                    r"^" + _re.escape(word_end) + r"\b\s*", "", nxt.metadata.refined_content.lstrip()
+                )
+
+            repaired += 1
+            logger.debug(f"[DEHYPHEN] Rejoined '{word_start}-' + '{word_end}' → '{full_word}'")
+
+        if repaired:
+            logger.info(f"[DEHYPHEN] Repaired {repaired} cross-chunk hyphenations")
+
+        return chunks
+
     def _apply_code_hygiene(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
         """
         Detect, reclassify, and reflow code chunks for ALL profiles.
@@ -5059,6 +5160,17 @@ class BatchProcessor:
         # flat code chunks. Without this, academic papers with code snippets produce
         # unreadable single-line output (e.g., "class Foo: def __init__(self):...").
         valid_chunks = self._apply_code_hygiene(valid_chunks)
+
+        # Step 3a2: Cross-chunk hyphenation repair — rejoin words split at chunk boundaries.
+        # "man-" at end of chunk + "age" at start of next → "manage" + "".
+        valid_chunks = self._repair_cross_chunk_hyphenation(valid_chunks)
+
+        # Step 3a3: Remove content overlap between consecutive chunks.
+        # DSO adds ~55 chars of overlap at chunk boundaries for context continuity,
+        # but this duplicates sentences in the vector index. The context is already
+        # preserved in prev_text_snippet/next_text_snippet — no need to duplicate
+        # it in the actual content.
+        valid_chunks = self._deduplicate_chunk_overlap(valid_chunks)
 
         # Step 3b: Profile-specific text hygiene (technical manuals are sensitive to
         # embedded page numbers, control chars, hyphenation, and broken chunk joins).
