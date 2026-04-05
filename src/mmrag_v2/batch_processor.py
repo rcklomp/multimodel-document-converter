@@ -4055,52 +4055,38 @@ class BatchProcessor:
 
         merged: list[IngestionChunk] = []
         merge_count = 0
-        i = 0
 
-        while i < len(chunks):
-            cur = chunks[i]
+        # Build index: for each text chunk, find the NEXT text chunk (skipping images)
+        text_indices = [i for i, ch in enumerate(chunks) if ch.modality == Modality.TEXT and ch.content]
+        merge_targets: set[int] = set()  # indices of chunks consumed by merge
 
-            if (
-                cur.modality != Modality.TEXT
-                or not cur.content
-                or i == len(chunks) - 1
-            ):
-                merged.append(cur)
-                i += 1
+        for ti in range(len(text_indices) - 1):
+            cur_idx = text_indices[ti]
+            nxt_idx = text_indices[ti + 1]
+
+            if cur_idx in merge_targets or nxt_idx in merge_targets:
                 continue
 
-            nxt = chunks[i + 1]
-            if (
-                nxt.modality != Modality.TEXT
-                or not nxt.content
-            ):
-                merged.append(cur)
-                i += 1
-                continue
+            cur = chunks[cur_idx]
+            nxt = chunks[nxt_idx]
 
-            # Check: does current end mid-sentence and next start lowercase?
             cur_text = cur.content.rstrip()
             nxt_text = nxt.content.lstrip()
             ends_mid = not _re.search(r"[.!?:;\"')\]}\d]\s*$", cur_text)
             starts_lower = bool(nxt_text) and nxt_text[0].islower()
 
             if ends_mid and starts_lower:
-                # Merge: append next content to current
                 cur.content = cur_text + " " + nxt_text
                 if cur.metadata.refined_content and nxt.metadata.refined_content:
                     cur.metadata.refined_content = (
                         cur.metadata.refined_content.rstrip() + " " +
                         nxt.metadata.refined_content.lstrip()
                     )
+                merge_targets.add(nxt_idx)
                 merge_count += 1
-                i += 2  # skip the merged chunk
-            else:
-                merged.append(cur)
-                i += 1
 
-        # Don't forget the last chunk if not merged
-        if i == len(chunks) - 1:
-            merged.append(chunks[-1])
+        # Build output: keep all non-merged chunks in order
+        merged = [ch for i, ch in enumerate(chunks) if i not in merge_targets]
 
         if merge_count:
             logger.info(f"[MID-SENTENCE-MERGE] Merged {merge_count} mid-sentence chunk boundaries")
