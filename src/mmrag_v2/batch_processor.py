@@ -4051,12 +4051,16 @@ class BatchProcessor:
         unnecessary for RAG.
         """
         trimmed = 0
-        for i in range(1, len(chunks)):
-            prev = chunks[i - 1]
+        last_text_idx = -1
+        for i in range(len(chunks)):
             cur = chunks[i]
-            if prev.modality != Modality.TEXT or cur.modality != Modality.TEXT:
+            if cur.modality != Modality.TEXT or not cur.content:
                 continue
-            if not prev.content or not cur.content:
+            if last_text_idx < 0:
+                last_text_idx = i
+                continue
+            prev = chunks[last_text_idx]
+            if not prev.content:
                 continue
 
             # Find longest exact overlap: tail of prev == head of cur.
@@ -4082,6 +4086,8 @@ class BatchProcessor:
                     if rc_overlap > 0:
                         cur.metadata.refined_content = rc[rc_overlap:].lstrip()
                 trimmed += 1
+
+            last_text_idx = i
 
         if trimmed:
             logger.info(f"[DEDUP-OVERLAP] Trimmed content overlap from {trimmed} chunk boundaries")
