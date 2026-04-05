@@ -4084,6 +4084,10 @@ class BatchProcessor:
                     )
                 merge_targets.add(nxt_idx)
                 merge_count += 1
+                logger.info(
+                    f"[MID-SENTENCE-MERGE] Merged pg {cur.metadata.page_number}→"
+                    f"{nxt.metadata.page_number}: ...{cur_text[-20:]} + {nxt_text[:20]}..."
+                )
 
         # Build output: keep all non-merged chunks in order
         merged = [ch for i, ch in enumerate(chunks) if i not in merge_targets]
