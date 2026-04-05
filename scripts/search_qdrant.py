@@ -31,6 +31,11 @@ BLUE = "\033[34m"
 
 MIN_SCORE = 0.55  # Don't show results below this relevance
 
+# Reranker config (Alibaba Dashscope)
+RERANK_MODEL = "qwen3-rerank"
+RERANK_API_KEY = "sk-5813a0a803ca4b96ab8755b1068f10fd"
+RERANK_URL = "https://dashscope-intl.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+
 
 # ── API helpers ──────────────────────────────────────────────────────────────
 
@@ -61,6 +66,53 @@ def search(query_vector: list[float], collection: str, limit: int = 5,
     req = urllib.request.Request(f"{qdrant_url}/collections/{collection}/points/search", data=data)
     req.add_header("Content-Type", "application/json")
     return json.loads(urllib.request.urlopen(req, timeout=30).read())["result"]
+
+
+def rerank(query: str, results: list[dict], top_n: int = 5) -> list[dict]:
+    """Rerank search results using qwen3-rerank for semantic precision."""
+    if not results:
+        return results
+
+    documents = []
+    for r in results:
+        p = r["payload"]
+        text = p.get("content", "")
+        if p.get("modality") == "image":
+            text = p.get("visual_description", "") or text
+        documents.append(text[:500])  # Cap length for API
+
+    body = {
+        "model": RERANK_MODEL,
+        "input": {
+            "query": query,
+            "documents": documents,
+        },
+        "parameters": {"top_n": min(top_n, len(documents))},
+    }
+
+    try:
+        data = json.dumps(body).encode()
+        req = urllib.request.Request(RERANK_URL, data=data)
+        req.add_header("Authorization", f"Bearer {RERANK_API_KEY}")
+        req.add_header("Content-Type", "application/json")
+        resp = urllib.request.urlopen(req, timeout=30)
+        rr = json.loads(resp.read())
+
+        if "output" not in rr or "results" not in rr["output"]:
+            return results[:top_n]
+
+        reranked = []
+        for item in rr["output"]["results"]:
+            idx = item["index"]
+            r = results[idx].copy()
+            r["score"] = item["relevance_score"]
+            r["reranked"] = True
+            reranked.append(r)
+        return reranked
+
+    except Exception as e:
+        print(f"  {DIM}Reranker unavailable ({e}), using vector scores{RESET}", file=sys.stderr)
+        return results[:top_n]
 
 
 # ── Display ──────────────────────────────────────────────────────────────────
@@ -146,6 +198,7 @@ def main():
     parser.add_argument("-n", "--limit", type=int, default=5, help="Max results per collection")
     parser.add_argument("-m", "--modality", choices=["text", "image", "table"], help="Filter by type")
     parser.add_argument("-l", "--list", action="store_true", help="List collections")
+    parser.add_argument("--no-rerank", action="store_true", help="Skip reranking (vector scores only)")
     parser.add_argument("--min-score", type=float, default=MIN_SCORE, help="Minimum relevance")
     parser.add_argument("--qdrant-url", default="http://localhost:6333")
     parser.add_argument("--ollama-url", default="http://localhost:11434")
@@ -171,16 +224,31 @@ def main():
 
     vector = embed(query, ollama_url=args.ollama_url)
 
+    use_rerank = not args.no_rerank
+
     print(f"\n{BOLD}Searching:{RESET} {query}")
     if args.modality:
         print(f"{DIM}Filter: {args.modality} only{RESET}")
+    if use_rerank:
+        print(f"{DIM}Reranking: qwen3-rerank{RESET}")
 
     any_results = False
 
     for collection in targets:
-        results = search(vector, collection, args.limit, args.modality, args.qdrant_url)
-        # Filter by minimum score
+        # Retrieve wide for reranking (4x the requested limit)
+        retrieve_limit = args.limit * 4 if use_rerank else args.limit
+        results = search(vector, collection, retrieve_limit, args.modality, args.qdrant_url)
+        # Filter by minimum vector score
         results = [r for r in results if r["score"] >= args.min_score]
+        if not results:
+            continue
+
+        # Rerank for semantic precision
+        if use_rerank and len(results) > 1:
+            results = rerank(query, results, top_n=args.limit)
+        else:
+            results = results[:args.limit]
+
         if not results:
             continue
 
