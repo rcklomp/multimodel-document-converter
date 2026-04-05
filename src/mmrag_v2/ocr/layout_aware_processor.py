@@ -986,27 +986,76 @@ class LayoutAwareOCRProcessor:
 
         VLMs understand language and context, producing far superior text
         extraction on degraded scans compared to traditional OCR.
+        Bypasses the normal describe_image 2000-token cap — page transcription
+        needs 4000+ tokens for dense text pages.
         """
         try:
+            import base64
+            import io
+            import json
+            import urllib.request
             from PIL import Image as _PILImage
+
             pil_img = _PILImage.fromarray(page_image)
 
-            # Use the VLM provider directly (not enrich_image which adds visual prompts)
+            # Get provider config
             provider = self.vlm_manager._provider
-            prompt = (
-                "Transcribe ALL text on this scanned page exactly as written. "
-                "Preserve paragraph structure and line breaks between sections. "
-                "Output ONLY the transcribed text, nothing else. "
-                "Do not describe images or diagrams — only transcribe printed text."
-            )
-            response = provider.describe_image(pil_img, prompt)
+            model = getattr(provider, "model", None) or getattr(provider, "_model", "")
+            base_url = getattr(provider, "base_url", None) or getattr(provider, "_base_url", "")
+            api_key = getattr(provider, "api_key", None) or getattr(provider, "_api_key", "")
 
-            if response and len(response.strip()) > 20:
+            if not base_url or not api_key:
+                # Fallback to provider.describe_image if we can't get credentials
+                prompt = (
+                    "Transcribe ALL text on this scanned page exactly as written. "
+                    "Preserve paragraph structure. Output ONLY the transcribed text."
+                )
+                response = provider.describe_image(pil_img, prompt)
+                return response.strip() if response and len(response.strip()) > 20 else None
+
+            # Encode image
+            buf = io.BytesIO()
+            if pil_img.mode != "RGB":
+                pil_img = pil_img.convert("RGB")
+            pil_img.save(buf, format="JPEG", quality=85)
+            b64 = base64.b64encode(buf.getvalue()).decode()
+
+            # Direct API call with high max_tokens
+            data = json.dumps({
+                "model": model,
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                        {"type": "text", "text": (
+                            "Transcribe ALL text on this scanned page exactly as written. "
+                            "Preserve paragraph structure and line breaks between sections. "
+                            "Output ONLY the transcribed text, nothing else. "
+                            "Do not describe images or diagrams — only transcribe printed text."
+                        )}
+                    ]
+                }],
+                "max_tokens": 4096,
+                "temperature": 0.0,
+            }).encode()
+
+            url = base_url.rstrip("/")
+            if not url.endswith("/chat/completions"):
+                url += "/chat/completions"
+
+            req = urllib.request.Request(url, data=data)
+            req.add_header("Authorization", f"Bearer {api_key}")
+            req.add_header("Content-Type", "application/json")
+            resp = urllib.request.urlopen(req, timeout=120)
+            result = json.loads(resp.read())
+            text = result["choices"][0]["message"]["content"]
+
+            if text and len(text.strip()) > 20:
                 logger.debug(
                     f"[VLM-TRANSCRIBE] Page {page_number}: "
-                    f"{len(response)} chars transcribed"
+                    f"{len(text)} chars transcribed (max_tokens=4096)"
                 )
-                return response.strip()
+                return text.strip()
 
         except Exception as e:
             logger.warning(f"[VLM-TRANSCRIBE] Page {page_number} failed: {e}")

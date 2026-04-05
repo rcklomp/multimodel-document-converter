@@ -4003,6 +4003,46 @@ class BatchProcessor:
             )
         return result
 
+    def _remove_subset_chunks(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
+        """Remove text chunks that are subsets of another chunk on the same page.
+
+        When VLM transcription and Docling both produce text for the same page,
+        one may be a subset of the other. Keep only the longer version.
+        """
+        import re as _re
+
+        # Group text chunks by page
+        page_chunks: dict[int, list[int]] = {}
+        for i, ch in enumerate(chunks):
+            if ch.modality == Modality.TEXT and ch.metadata and ch.metadata.page_number:
+                page_chunks.setdefault(ch.metadata.page_number, []).append(i)
+
+        drop_indices: set[int] = set()
+        for pg, indices in page_chunks.items():
+            if len(indices) < 2:
+                continue
+            for a_idx in indices:
+                if a_idx in drop_indices:
+                    continue
+                a_words = set(_re.findall(r"[a-zA-Z]{3,}", chunks[a_idx].content.lower()))
+                for b_idx in indices:
+                    if b_idx <= a_idx or b_idx in drop_indices:
+                        continue
+                    b_words = set(_re.findall(r"[a-zA-Z]{3,}", chunks[b_idx].content.lower()))
+                    if not a_words or not b_words:
+                        continue
+                    # If shorter is >80% contained in longer, drop the shorter
+                    shorter, longer = (a_words, b_words) if len(a_words) < len(b_words) else (b_words, a_words)
+                    overlap = len(shorter & longer) / len(shorter)
+                    if overlap > 0.80:
+                        drop_idx = a_idx if len(a_words) < len(b_words) else b_idx
+                        drop_indices.add(drop_idx)
+
+        if drop_indices:
+            logger.info(f"[SUBSET-DEDUP] Removed {len(drop_indices)} subset text chunks")
+
+        return [ch for i, ch in enumerate(chunks) if i not in drop_indices]
+
     def _merge_mid_sentence_chunks(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
         """Merge consecutive text chunks split mid-sentence.
 
@@ -5346,6 +5386,11 @@ class BatchProcessor:
         # Step 3a2: Cross-chunk hyphenation repair — rejoin words split at chunk boundaries.
         # "man-" at end of chunk + "age" at start of next → "manage" + "".
         valid_chunks = self._repair_cross_chunk_hyphenation(valid_chunks)
+
+        # Step 3a2b: Remove same-page text subset chunks.
+        # VLM transcription + Docling fallback can produce two text chunks for
+        # the same page where one is a subset of the other. Keep the longer one.
+        valid_chunks = self._remove_subset_chunks(valid_chunks)
 
         # Step 3a3: Remove near-duplicate chunks (>85% word overlap).
         # Firearms-type manuals repeat instructions across gun models
