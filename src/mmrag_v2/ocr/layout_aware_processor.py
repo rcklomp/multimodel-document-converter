@@ -136,6 +136,9 @@ class LayoutAwareOCRProcessor:
             enable_doctr=enable_doctr,
         )
 
+        # VLM manager for page transcription (scanned docs)
+        self.vlm_manager = vlm_manager
+
         # Initialize preprocessor
         self.preprocessor = ImagePreprocessor()
 
@@ -197,6 +200,44 @@ class LayoutAwareOCRProcessor:
             f"[LAYOUT-OCR] Detected {len(regions)} regions: "
             f"{text_count} text, {image_count} image, {table_count} table"
         )
+
+        # Step 1a: VLM page transcription for scanned pages.
+        # VLMs read text FAR better than OCR on degraded scans because they
+        # understand language and context. "Jamu la Frizgi" becomes "J.B. Wood".
+        # Use VLM transcription as primary text source when available.
+        if self.vlm_manager and text_count > 0 and image_count <= 2:
+            vlm_text = self._vlm_transcribe_page(page_image, page_number)
+            if vlm_text and len(vlm_text.strip()) > 50:
+                logger.info(
+                    f"[LAYOUT-OCR] Page {page_number}: VLM transcription "
+                    f"({len(vlm_text)} chars) — using instead of OCR"
+                )
+                page_h, page_w = page_image.shape[:2]
+                chunks = []
+                # Create text chunk from VLM transcription
+                chunk_id = self._generate_chunk_id(doc_id, page_number, "text", 0)
+                chunks.append(ProcessedChunk(
+                    chunk_id=chunk_id,
+                    modality="text",
+                    content=vlm_text.strip(),
+                    bbox=self._normalize_bbox([0, 0, page_w, page_h], page_w, page_h),
+                    page_number=page_number,
+                    extraction_method="vlm_transcription",
+                    ocr_confidence=0.95,
+                    ocr_layer="vlm",
+                ))
+                # Still process image regions for visual descriptions
+                for i, region in enumerate(regions):
+                    if region.type in ("image", "picture"):
+                        img_chunk = self._process_image_region(
+                            page_image, region, page_number, doc_id, i
+                        )
+                        if img_chunk:
+                            img_chunk.bbox = self._normalize_bbox(
+                                img_chunk.bbox, page_w, page_h
+                            )
+                            chunks.append(img_chunk)
+                return chunks
 
         # Step 1b: Full-page Tesseract baseline for scanned pages.
         # Region-by-region OCR loses context on degraded scans with multi-column
@@ -939,6 +980,38 @@ class LayoutAwareOCRProcessor:
                 "height_px": int(table_pil.size[1]) if "table_pil" in locals() else table_crop.shape[0],
             },
         )
+
+    def _vlm_transcribe_page(self, page_image: np.ndarray, page_number: int) -> Optional[str]:
+        """Use the VLM to transcribe text from a scanned page image.
+
+        VLMs understand language and context, producing far superior text
+        extraction on degraded scans compared to traditional OCR.
+        """
+        try:
+            from PIL import Image as _PILImage
+            pil_img = _PILImage.fromarray(page_image)
+
+            # Use the VLM provider directly (not enrich_image which adds visual prompts)
+            provider = self.vlm_manager._provider
+            prompt = (
+                "Transcribe ALL text on this scanned page exactly as written. "
+                "Preserve paragraph structure and line breaks between sections. "
+                "Output ONLY the transcribed text, nothing else. "
+                "Do not describe images or diagrams — only transcribe printed text."
+            )
+            response = provider.describe_image(pil_img, prompt)
+
+            if response and len(response.strip()) > 20:
+                logger.debug(
+                    f"[VLM-TRANSCRIBE] Page {page_number}: "
+                    f"{len(response)} chars transcribed"
+                )
+                return response.strip()
+
+        except Exception as e:
+            logger.warning(f"[VLM-TRANSCRIBE] Page {page_number} failed: {e}")
+
+        return None
 
     @staticmethod
     def _ocr_text_to_markdown_table(text: str) -> str:
