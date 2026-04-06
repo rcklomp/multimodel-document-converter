@@ -4066,31 +4066,40 @@ class BatchProcessor:
         for ch in chunks:
             if ch.modality != Modality.TEXT or not ch.content:
                 continue
-            # Split on double-newlines (paragraph boundaries)
-            paragraphs = [p.strip() for p in ch.content.split("\n\n") if p.strip()]
-            if len(paragraphs) < 2:
+            # Split into lines and detect repeated blocks.
+            # VLM can repeat title text as individual lines within one paragraph.
+            lines = ch.content.split("\n")
+            if len(lines) < 4:
                 continue
-            # Keep unique paragraphs in first-seen order
-            seen: set[str] = set()
-            unique: list[str] = []
-            for p in paragraphs:
-                key = p.lower().strip()
-                if key not in seen:
-                    seen.add(key)
-                    unique.append(p)
-            if len(unique) < len(paragraphs):
-                ch.content = "\n\n".join(unique)
+            # Find the longest non-repeating prefix
+            seen_lines: list[str] = []
+            seen_keys: set[str] = set()
+            for line in lines:
+                key = line.strip().lower()
+                if not key:
+                    seen_lines.append(line)  # keep blank lines
+                    continue
+                if key in seen_keys and len(key) > 5:
+                    continue  # skip repeated line
+                seen_keys.add(key)
+                seen_lines.append(line)
+            deduped = "\n".join(seen_lines).strip()
+            if len(deduped) < len(ch.content.strip()) * 0.9:
+                ch.content = deduped
                 if ch.metadata and ch.metadata.refined_content:
-                    # Apply same dedup to refined_content
-                    rc_paras = [p.strip() for p in ch.metadata.refined_content.split("\n\n") if p.strip()]
-                    rc_seen: set[str] = set()
-                    rc_unique: list[str] = []
-                    for p in rc_paras:
-                        key = p.lower().strip()
-                        if key not in rc_seen:
-                            rc_seen.add(key)
-                            rc_unique.append(p)
-                    ch.metadata.refined_content = "\n\n".join(rc_unique)
+                    rc_lines = ch.metadata.refined_content.split("\n")
+                    rc_seen_keys: set[str] = set()
+                    rc_deduped: list[str] = []
+                    for line in rc_lines:
+                        key = line.strip().lower()
+                        if not key:
+                            rc_deduped.append(line)
+                            continue
+                        if key in rc_seen_keys and len(key) > 5:
+                            continue
+                        rc_seen_keys.add(key)
+                        rc_deduped.append(line)
+                    ch.metadata.refined_content = "\n".join(rc_deduped).strip()
                 fixed += 1
         if fixed:
             logger.info(f"[INTRA-DEDUP] Removed repeated paragraphs in {fixed} chunks")
