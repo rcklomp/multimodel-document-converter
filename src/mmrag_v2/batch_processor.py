@@ -2526,6 +2526,11 @@ class BatchProcessor:
         all_chunks = self._merge_mid_sentence_chunks(all_chunks)
         all_chunks = self._deduplicate_chunk_overlap(all_chunks)
 
+        # Deduplicate repeated paragraphs WITHIN individual chunks.
+        # VLM transcription on cover pages can repeat the same text 3-4x
+        # when it reads title, spine, and bleed-through as separate instances.
+        all_chunks = self._dedup_intra_chunk_repeats(all_chunks)
+
         # Write aggregated output to master JSONL with deduplication
         output_jsonl = self.output_dir / "ingestion.jsonl"
         written_chunks = 0
@@ -4047,6 +4052,49 @@ class BatchProcessor:
             logger.info(f"[SUBSET-DEDUP] Removed {len(drop_indices)} subset text chunks")
 
         return [ch for i, ch in enumerate(chunks) if i not in drop_indices]
+
+    def _dedup_intra_chunk_repeats(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
+        """Remove repeated paragraphs within a single chunk.
+
+        VLM transcription on cover/title pages can read the same text 3-4x
+        (title on cover, spine, back cover bleed-through). The result is one
+        chunk with the entire cover text repeated four times.
+
+        Fix: split chunk into paragraphs, keep only unique ones in order.
+        """
+        fixed = 0
+        for ch in chunks:
+            if ch.modality != Modality.TEXT or not ch.content:
+                continue
+            # Split on double-newlines (paragraph boundaries)
+            paragraphs = [p.strip() for p in ch.content.split("\n\n") if p.strip()]
+            if len(paragraphs) < 2:
+                continue
+            # Keep unique paragraphs in first-seen order
+            seen: set[str] = set()
+            unique: list[str] = []
+            for p in paragraphs:
+                key = p.lower().strip()
+                if key not in seen:
+                    seen.add(key)
+                    unique.append(p)
+            if len(unique) < len(paragraphs):
+                ch.content = "\n\n".join(unique)
+                if ch.metadata and ch.metadata.refined_content:
+                    # Apply same dedup to refined_content
+                    rc_paras = [p.strip() for p in ch.metadata.refined_content.split("\n\n") if p.strip()]
+                    rc_seen: set[str] = set()
+                    rc_unique: list[str] = []
+                    for p in rc_paras:
+                        key = p.lower().strip()
+                        if key not in rc_seen:
+                            rc_seen.add(key)
+                            rc_unique.append(p)
+                    ch.metadata.refined_content = "\n\n".join(rc_unique)
+                fixed += 1
+        if fixed:
+            logger.info(f"[INTRA-DEDUP] Removed repeated paragraphs in {fixed} chunks")
+        return chunks
 
     def _merge_mid_sentence_chunks(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
         """Merge consecutive text chunks split mid-sentence.
