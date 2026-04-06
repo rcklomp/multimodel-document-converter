@@ -2134,6 +2134,7 @@ class V2DocumentProcessor:
                     source_file=source_file,
                     file_type=file_type,
                     page_dims=page_dims,
+                    page_offset=self._page_offset,
                 )
                 logger.info(
                     f"[HYBRID-CHUNKER] Produced {len(_hybrid_text_chunks)} text chunks"
@@ -2302,6 +2303,7 @@ class V2DocumentProcessor:
         source_file: str,
         file_type: "FileType",
         page_dims: Dict[int, Tuple[float, float]],
+        page_offset: int = 0,
     ) -> List["IngestionChunk"]:
         """Process text elements using Docling's HybridChunker.
 
@@ -2345,7 +2347,7 @@ class V2DocumentProcessor:
                 first_item = dc.meta.doc_items[0]
                 if hasattr(first_item, "prov") and first_item.prov:
                     prov = first_item.prov[0] if isinstance(first_item.prov, list) else first_item.prov
-                    page_no = getattr(prov, "page_no", 1) or 1
+                    page_no = (getattr(prov, "page_no", 1) or 1) + page_offset
                     prov_bbox = getattr(prov, "bbox", None)
                     if prov_bbox:
                         # Convert Docling bbox to normalized [0, 1000] coords
