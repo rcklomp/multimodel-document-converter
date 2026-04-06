@@ -2532,6 +2532,9 @@ class BatchProcessor:
         # and use them as parent_heading in the breadcrumb.
         all_chunks = self._infer_headings_from_text(all_chunks)
 
+        # Remove empty chunks created by merging/dedup
+        all_chunks = [c for c in all_chunks if c.content and c.content.strip()]
+
         # Deduplicate repeated paragraphs WITHIN individual chunks.
         # VLM transcription on cover pages can repeat the same text 3-4x
         # when it reads title, spine, and bleed-through as separate instances.
@@ -4312,7 +4315,7 @@ class BatchProcessor:
                 if not seen:
                     continue
                 overlap = len(words & seen) / len(words)
-                if overlap > 0.85:
+                if overlap > 0.95:
                     is_dup = True
                     break
 
