@@ -2521,6 +2521,11 @@ class BatchProcessor:
         all_chunks = self._filter_repetition_garbage(all_chunks)
         all_chunks = self._apply_table_recovery_highlander_dedup(all_chunks)
 
+        # Strip trailing section headings that Docling appended to paragraphs.
+        # Digital PDFs often have "...end of paragraph. preface" where "preface"
+        # is the next section heading concatenated by the layout parser.
+        all_chunks = self._strip_trailing_headings(all_chunks)
+
         # Final cross-batch mid-sentence merge + dedup.
         # Per-batch processing can't merge sentences split across batch boundaries.
         all_chunks = self._merge_mid_sentence_chunks(all_chunks)
@@ -4226,6 +4231,51 @@ class BatchProcessor:
                 fixed += 1
         if fixed:
             logger.info(f"[INTRA-DEDUP] Removed repeated paragraphs in {fixed} chunks")
+        return chunks
+
+    def _strip_trailing_headings(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
+        """Strip section headings that Docling appended to the end of paragraphs.
+
+        Docling sometimes concatenates the next section heading to the end of
+        the previous paragraph: "...end of text. preface" or "...text contents".
+        Detect these by collecting all known headings from the document and
+        checking if any chunk ends with one.
+        """
+        import re as _re
+
+        # Collect all headings used in the document
+        known_headings: set[str] = set()
+        for ch in chunks:
+            if ch.metadata and ch.metadata.hierarchy:
+                ph = ch.metadata.hierarchy.parent_heading
+                if ph and len(ph) > 2:
+                    known_headings.add(ph.lower().strip())
+
+        if not known_headings:
+            return chunks
+
+        stripped = 0
+        for ch in chunks:
+            if ch.modality != Modality.TEXT or not ch.content:
+                continue
+            text = ch.content.rstrip()
+            # Check if the last line matches a known heading
+            lines = text.split("\n")
+            if len(lines) < 2:
+                continue
+            last_line = lines[-1].strip().lower()
+            if last_line in known_headings and len(last_line) < 40:
+                # Remove the trailing heading
+                ch.content = "\n".join(lines[:-1]).rstrip()
+                if ch.metadata and ch.metadata.refined_content:
+                    rc_lines = ch.metadata.refined_content.rstrip().split("\n")
+                    if rc_lines and rc_lines[-1].strip().lower() in known_headings:
+                        ch.metadata.refined_content = "\n".join(rc_lines[:-1]).rstrip()
+                stripped += 1
+
+        if stripped:
+            logger.info(f"[TRAILING-HEADING] Stripped {stripped} appended section headings")
+
         return chunks
 
     def _merge_mid_sentence_chunks(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
