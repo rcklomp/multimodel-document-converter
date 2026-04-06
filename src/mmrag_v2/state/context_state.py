@@ -100,18 +100,10 @@ def is_valid_heading(text: str) -> bool:
         "cover designer", "copy editor", "typesetter", "proofreader",
         "review editor", "technical editor", "production editor",
         "managing editor", "acquisitions editor", "project editor",
-        "development editor", "editorial director",
         "isbn", "printed in", "library of congress",
     )
-    _CREDIT_CONTAINS = ("©", "all rights reserved", "manning publications",
-                        "o'reilly", "wiley", "springer", "packt", "apress")
     text_lower = text.lower()
     if any(text_lower.startswith(p) for p in _CREDIT_PATTERNS):
-        return False
-    if any(p in text_lower for p in _CREDIT_CONTAINS):
-        return False
-    # TOC-like lines with dots/periods as fill
-    if text_lower.count(".") > 5 and "...." in text_lower:
         return False
 
     # Must contain at least one letter
