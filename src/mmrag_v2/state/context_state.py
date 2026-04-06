@@ -95,6 +95,17 @@ def is_valid_heading(text: str) -> bool:
     if PAGE_NUMBER_PATTERN.match(text):
         return False
 
+    # Filter out credit/role lines that Docling misdetects as headings
+    _CREDIT_PATTERNS = (
+        "cover designer", "copy editor", "typesetter", "proofreader",
+        "review editor", "technical editor", "production editor",
+        "managing editor", "acquisitions editor", "project editor",
+        "isbn", "printed in", "library of congress",
+    )
+    text_lower = text.lower()
+    if any(text_lower.startswith(p) for p in _CREDIT_PATTERNS):
+        return False
+
     # Must contain at least one letter
     if not any(c.isalpha() for c in text):
         return False

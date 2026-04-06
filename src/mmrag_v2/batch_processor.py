@@ -3147,9 +3147,9 @@ class BatchProcessor:
                 # De-hyphenate line-broken words: "man-\nage" → "manage"
                 text = _re.sub(r"(\w)-\n\s*(\w)", r"\1\2", text)
                 # Strip orphan trailing hyphens where the continuation is lost
-                # (Docling splits across pages). "mechanisms to man-" → "mechanisms to man"
-                # The stem still embeds better than "man-" for search.
                 text = _re.sub(r"(\w)-\s*$", r"\1", text)
+                # Split uppercase-to-titlecase merges: "TORetrieval" → "TO Retrieval"
+                text = _re.sub(r"([A-Z]{2,})([A-Z][a-z]{2,})", r"\1 \2", text)
             ch.content = text
 
             # Also fix breadcrumbs containing spaced headings
