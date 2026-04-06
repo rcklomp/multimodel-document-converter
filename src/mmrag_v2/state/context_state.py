@@ -95,15 +95,24 @@ def is_valid_heading(text: str) -> bool:
     if PAGE_NUMBER_PATTERN.match(text):
         return False
 
-    # Filter out credit/role lines that Docling misdetects as headings
-    _CREDIT_PATTERNS = (
-        "cover designer", "copy editor", "typesetter", "proofreader",
-        "review editor", "technical editor", "production editor",
-        "managing editor", "acquisitions editor", "project editor",
-        "isbn", "printed in", "library of congress",
-    )
-    text_lower = text.lower()
-    if any(text_lower.startswith(p) for p in _CREDIT_PATTERNS):
+    # Structural filters — language-agnostic patterns that indicate
+    # non-heading content (credit lines, copyright notices, TOC lines).
+    import re as _re
+
+    # "Role: Name" pattern (credit lines in any language)
+    if _re.match(r"^[A-Za-z\s]{3,30}:\s+[A-Z]", text):
+        return False
+
+    # Copyright symbol anywhere
+    if "©" in text:
+        return False
+
+    # ISBN/ISSN pattern
+    if _re.search(r"\bISBN\b|\bISSN\b", text, _re.IGNORECASE):
+        return False
+
+    # TOC-like lines (many dots as fill characters)
+    if text.count(".") > 5 and "...." in text:
         return False
 
     # Must contain at least one letter

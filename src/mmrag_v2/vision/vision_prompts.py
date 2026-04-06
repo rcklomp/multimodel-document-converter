@@ -419,7 +419,18 @@ def validate_vlm_response(response: str) -> "VLMValidationResult":
             issues=["Empty after cleaning"],
         )
 
-    # Check 3: Generic fallback responses (after cleaning)
+    # Check 3: Prompt echo — VLM returned template placeholders instead of a description.
+    # [Type], [Subject], [Key Visual Features] are from our prompt templates.
+    # Language-agnostic: square-bracket placeholders never appear in real descriptions.
+    import re as _re
+    bracket_placeholders = _re.findall(r"\[[A-Z][a-zA-Z ]{2,}\]", cleaned)
+    if len(bracket_placeholders) >= 2:
+        issues.append(f"Prompt echo: {bracket_placeholders}")
+        return VLMValidationResult(
+            is_valid=False, text_reading_detected=False, cleaned_response="", issues=issues
+        )
+
+    # Check 4: Generic fallback responses (after cleaning)
     fallback_phrases = [
         "unable to describe",
         "cannot describe",
