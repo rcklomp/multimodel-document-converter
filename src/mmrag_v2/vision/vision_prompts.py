@@ -419,7 +419,21 @@ def validate_vlm_response(response: str) -> "VLMValidationResult":
             issues=["Empty after cleaning"],
         )
 
-    # Check 3: Generic fallback responses (after cleaning)
+    # Check 3: Prompt echo detection — VLM returned the prompt template instead of a description
+    prompt_echo_phrases = [
+        "[type] of [subject]",
+        "[key visual features]",
+        "analyze this diagram now",
+        "analyze this photograph now",
+        "the provided input is not",
+    ]
+    if any(phrase in response_lower for phrase in prompt_echo_phrases):
+        issues.append("VLM echoed the prompt template")
+        return VLMValidationResult(
+            is_valid=False, text_reading_detected=False, cleaned_response="", issues=issues
+        )
+
+    # Check 4: Generic fallback responses (after cleaning)
     fallback_phrases = [
         "unable to describe",
         "cannot describe",
