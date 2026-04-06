@@ -2162,6 +2162,21 @@ class V2DocumentProcessor:
                             _hc.metadata.refined_content = _hc.content
                     logger.info(f"[HYBRID-CHUNKER] Refined {_refined_count} text chunks")
 
+                # Contextualize AFTER refining: prepend heading context to the
+                # (possibly refined) text. This ensures the embedded text has
+                # both clean content and heading context.
+                for _hc in _hybrid_text_chunks:
+                    dc_ref = getattr(_hc, "_dc_ref", None)
+                    if dc_ref:
+                        try:
+                            contextualized = chunker.contextualize(dc_ref)
+                            # Prepend heading context if contextualize added something
+                            if len(contextualized) > len(_hc.metadata.refined_content or ""):
+                                _hc.metadata.refined_content = contextualized.strip()
+                        except Exception:
+                            pass
+                        delattr(_hc, "_dc_ref")
+
             except Exception as _hc_err:
                 logger.warning(
                     f"[HYBRID-CHUNKER] Failed, falling back to element-by-element: {_hc_err}"
@@ -2410,13 +2425,9 @@ class V2DocumentProcessor:
                 **self._intelligence_metadata,
             )
             chunk.semantic_context = semantic_context
-            # Use contextualize() for heading-enriched text (better for embedding).
-            # Falls back to raw text if contextualize fails.
-            try:
-                contextualized = chunker.contextualize(dc)
-                chunk.metadata.refined_content = contextualized.strip()
-            except Exception:
-                chunk.metadata.refined_content = text.strip()
+            chunk.metadata.refined_content = text.strip()
+            # Store the DocChunk reference for post-refiner contextualization
+            chunk._dc_ref = dc  # type: ignore[attr-defined]
 
             chunks.append(chunk)
 

@@ -2478,6 +2478,42 @@ class BatchProcessor:
         else:
             all_chunks = filtered_chunks
 
+        # Re-split oversize recovery chunks using semchunk (sentence-aware).
+        # Recovery creates large text blobs; our custom splitter cuts mid-sentence.
+        try:
+            import semchunk as _sc
+            _resplit = 0
+            _resplit_out: List[IngestionChunk] = []
+            for ch in all_chunks:
+                em = ch.metadata.extraction_method if ch.metadata else ""
+                if (
+                    ch.modality == Modality.TEXT
+                    and em in ("recovery_scan", "recovery_gap_fill")
+                    and ch.content
+                    and len(ch.content) > 1200
+                ):
+                    parts = _sc.chunk(ch.content, chunk_size=1200, memoize=False)
+                    if len(parts) > 1:
+                        for j, part in enumerate(parts):
+                            if not part.strip():
+                                continue
+                            clone = ch.model_copy(deep=True)
+                            clone.content = part.strip()
+                            clone.chunk_id = f"{ch.chunk_id}_s{j}"
+                            if clone.metadata and clone.metadata.refined_content:
+                                clone.metadata.refined_content = part.strip()
+                            _resplit_out.append(clone)
+                        _resplit += 1
+                    else:
+                        _resplit_out.append(ch)
+                else:
+                    _resplit_out.append(ch)
+            if _resplit:
+                all_chunks = _resplit_out
+                logger.info(f"[SEMCHUNK] Re-split {_resplit} oversize recovery chunks")
+        except ImportError:
+            pass
+
         # Summary of recovery vs. filtered chunks for observability
         recovered_delta = len(all_chunks) - filtered_baseline_count
         # Flag potentially suspicious rescues: large positive or negative delta

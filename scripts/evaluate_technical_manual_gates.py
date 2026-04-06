@@ -112,6 +112,11 @@ def count_infix_artifacts(text: str) -> int:
         # Skip list starts / sentence starts where numbering is often legitimate.
         if left.endswith(("\n", "\r", ". ", ": ", "; ", "! ", "? ")):
             continue
+        # Also check: is there a newline between prev and num?
+        # "paper\n8. powertrain" — the \n means 8. starts a list item.
+        between = (text or "")[m.start("prev"):m.start("num")]
+        if "\n" in between:
+            continue
         # Mid-sentence artifacts usually bridge normal words.
         if len(prev) <= 1 or len(nxt) <= 1:
             continue
