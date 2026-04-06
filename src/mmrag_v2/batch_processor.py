@@ -2482,6 +2482,7 @@ class BatchProcessor:
         # Recovery creates large text blobs; our custom splitter cuts mid-sentence.
         try:
             import semchunk as _sc
+            _token_counter = len  # Use char count as proxy — 1200 chars ≈ 300 tokens
             _resplit = 0
             _resplit_out: List[IngestionChunk] = []
             for ch in all_chunks:
@@ -2492,7 +2493,7 @@ class BatchProcessor:
                     and ch.content
                     and len(ch.content) > 1200
                 ):
-                    parts = _sc.chunk(ch.content, chunk_size=1200, memoize=False)
+                    parts = _sc.chunk(ch.content, chunk_size=1200, token_counter=_token_counter, memoize=False)
                     if len(parts) > 1:
                         for j, part in enumerate(parts):
                             if not part.strip():
