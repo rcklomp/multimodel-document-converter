@@ -2526,6 +2526,12 @@ class BatchProcessor:
         all_chunks = self._merge_mid_sentence_chunks(all_chunks)
         all_chunks = self._deduplicate_chunk_overlap(all_chunks)
 
+        # Detect section headings from VLM-transcribed text for scanned documents.
+        # Scanned docs have flat hierarchy because Docling can't detect headings.
+        # Look for prominent text patterns (all-caps lines, numbered sections)
+        # and use them as parent_heading in the breadcrumb.
+        all_chunks = self._infer_headings_from_text(all_chunks)
+
         # Deduplicate repeated paragraphs WITHIN individual chunks.
         # VLM transcription on cover pages can repeat the same text 3-4x
         # when it reads title, spine, and bleed-through as separate instances.
@@ -2565,7 +2571,9 @@ class BatchProcessor:
                 is_scan=_is_scan,
                 total_pages=self._doc_total_pages,
                 image_density=self._doc_image_density,
-                avg_text_per_page=self._doc_avg_text_per_page,
+                # Recalculate avg_text_per_page from actual extracted text
+                # (not PyMuPDF native text, which is 0 for scanned docs).
+                avg_text_per_page=self._calculate_actual_avg_text(export_chunks),
                 has_flat_text_corruption=self.has_flat_text_corruption,
                 has_encoding_corruption=self.has_encoding_corruption,
                 chunk_count=len(export_chunks),
@@ -4053,6 +4061,72 @@ class BatchProcessor:
 
         return [ch for i, ch in enumerate(chunks) if i not in drop_indices]
 
+    def _infer_headings_from_text(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
+        """Infer section headings from text content for scanned documents.
+
+        Scanned documents have flat hierarchy because Docling can't detect
+        headings from pixel-based extraction. This method looks for heading
+        patterns in the text and assigns them as parent_heading/breadcrumb.
+        """
+        import re as _re
+
+        current_heading: Optional[str] = None
+        updated = 0
+
+        for ch in chunks:
+            if ch.modality != Modality.TEXT or not ch.content:
+                continue
+
+            # Look for heading patterns at the start of a chunk:
+            # - All-caps line (e.g., "MAUSER 1898", "TOOLS", "INTRODUCTION")
+            # - Title-case with model number (e.g., "British SMLE No. 1, MKIII")
+            first_line = ch.content.strip().split("\n")[0].strip()
+
+            is_heading = False
+            if (
+                len(first_line) > 3
+                and len(first_line) < 60
+                and first_line == first_line.upper()
+                and any(c.isalpha() for c in first_line)
+                and not first_line.startswith(("THE ", "A ", "IN ", "ON ", "TO "))
+            ):
+                # All-caps heading: "MAUSER 1898", "TOOLS", "DISASSEMBLY"
+                is_heading = True
+            elif _re.match(r"^[A-Z][a-z].*(?:No\.|Model|Mk|Type|Mark)\s", first_line):
+                # Title-case with model identifier
+                is_heading = True
+
+            if is_heading:
+                current_heading = first_line
+
+            if current_heading and ch.metadata and ch.metadata.hierarchy:
+                old_heading = ch.metadata.hierarchy.parent_heading
+                if not old_heading or old_heading == "Firearms" or old_heading == ch.metadata.source_file:
+                    ch.metadata.hierarchy.parent_heading = current_heading
+                    # Update breadcrumb
+                    bp = ch.metadata.hierarchy.breadcrumb_path
+                    if bp and len(bp) >= 2:
+                        ch.metadata.hierarchy.breadcrumb_path = [bp[0], current_heading, bp[-1]]
+                    updated += 1
+
+        if updated:
+            logger.info(f"[HEADING-INFER] Assigned inferred headings to {updated} chunks")
+
+        return chunks
+
+    def _calculate_actual_avg_text(self, chunks: List["IngestionChunk"]) -> float:
+        """Calculate avg text chars per page from actual extracted chunks."""
+        page_chars: dict[int, int] = {}
+        for ch in chunks:
+            if ch.modality != Modality.TEXT or not ch.content or not ch.metadata:
+                continue
+            pg = ch.metadata.page_number or 0
+            if pg > 0:
+                page_chars[pg] = page_chars.get(pg, 0) + len(ch.content)
+        if not page_chars:
+            return self._doc_avg_text_per_page or 0.0
+        return sum(page_chars.values()) / len(page_chars)
+
     def _dedup_intra_chunk_repeats(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
         """Remove repeated paragraphs within a single chunk.
 
@@ -4071,21 +4145,39 @@ class BatchProcessor:
             lines = ch.content.split("\n")
             if len(lines) < 4:
                 continue
-            # Find the longest non-repeating prefix
-            seen_lines: list[str] = []
-            seen_keys: set[str] = set()
-            for line in lines:
-                key = line.strip().lower()
-                if not key:
-                    seen_lines.append(line)  # keep blank lines
+            # Detect the repeat boundary: find longest prefix of content
+            # that, when repeated, reconstructs most of the content.
+            # This handles VLM reading cover text 2-4x.
+            content_stripped = ch.content.strip()
+            found_repeat = False
+            for frac in (2, 3, 4):
+                prefix_len = len(content_stripped) // frac
+                if prefix_len < 30:
                     continue
-                if key in seen_keys and len(key) > 5:
-                    continue  # skip repeated line
-                seen_keys.add(key)
-                seen_lines.append(line)
-            deduped = "\n".join(seen_lines).strip()
-            if len(deduped) < len(ch.content.strip()) * 0.9:
-                ch.content = deduped
+                prefix = content_stripped[:prefix_len].rstrip()
+                # Check if the rest starts with a repeat of the prefix
+                rest = content_stripped[prefix_len:].lstrip()
+                if rest.startswith(prefix[:min(len(prefix), 40)]):
+                    ch.content = prefix
+                    found_repeat = True
+                    break
+
+            if not found_repeat:
+                # Fallback: line-level dedup
+                seen_keys: set[str] = set()
+                kept_lines: list[str] = []
+                for line in lines:
+                    key = line.strip().lower()
+                    if not key:
+                        kept_lines.append(line)
+                        continue
+                    if key in seen_keys and len(key) > 5:
+                        continue
+                    seen_keys.add(key)
+                    kept_lines.append(line)
+                deduped = "\n".join(kept_lines).strip()
+                if len(deduped) < len(ch.content.strip()) * 0.9:
+                    ch.content = deduped
                 if ch.metadata and ch.metadata.refined_content:
                     rc_lines = ch.metadata.refined_content.split("\n")
                     rc_seen_keys: set[str] = set()
