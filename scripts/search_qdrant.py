@@ -58,10 +58,17 @@ def list_collections(qdrant_url: str = "http://localhost:6333") -> list[dict]:
 
 
 def search(query_vector: list[float], collection: str, limit: int = 5,
-           modality: str | None = None, qdrant_url: str = "http://localhost:6333") -> list[dict]:
+           modality: str | None = None, keyword: str | None = None,
+           qdrant_url: str = "http://localhost:6333") -> list[dict]:
     body: dict = {"vector": query_vector, "limit": limit, "with_payload": True}
+    must_filters = []
     if modality:
-        body["filter"] = {"must": [{"key": "modality", "match": {"value": modality}}]}
+        must_filters.append({"key": "modality", "match": {"value": modality}})
+    if keyword:
+        # For short queries, require the keyword to appear in content
+        must_filters.append({"key": "content", "match": {"text": keyword}})
+    if must_filters:
+        body["filter"] = {"must": must_filters}
     data = json.dumps(body).encode()
     req = urllib.request.Request(f"{qdrant_url}/collections/{collection}/points/search", data=data)
     req.add_header("Content-Type", "application/json")
@@ -237,7 +244,9 @@ def main():
     for collection in targets:
         # Retrieve wide for reranking (4x the requested limit)
         retrieve_limit = args.limit * 4 if use_rerank else args.limit
-        results = search(vector, collection, retrieve_limit, args.modality, args.qdrant_url)
+        # For short queries (1-2 words), add keyword filter for precision
+        keyword = query.strip().split()[0] if len(query.strip().split()) <= 2 else None
+        results = search(vector, collection, retrieve_limit, args.modality, keyword, args.qdrant_url)
         # Filter by minimum vector score
         results = [r for r in results if r["score"] >= args.min_score]
         if not results:
