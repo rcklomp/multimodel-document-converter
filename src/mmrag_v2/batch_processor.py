@@ -2537,8 +2537,21 @@ class BatchProcessor:
         # and use them as parent_heading in the breadcrumb.
         all_chunks = self._infer_headings_from_text(all_chunks)
 
-        # Remove empty chunks created by merging/dedup
-        all_chunks = [c for c in all_chunks if c.content and c.content.strip()]
+        # Remove empty chunks and garbled TOC/table chunks.
+        # Docling leaks internal cell markers (", 1 =", ", 2 =") into TOC text.
+        # These are navigation metadata, not RAG content — the heading hierarchy
+        # already captures the document structure.
+        import re as _re
+        _TOC_MARKER = _re.compile(r",\s*\d+\s*=")
+
+        def _is_garbled_toc(content: str) -> bool:
+            return len(_TOC_MARKER.findall(content)) >= 3
+
+        all_chunks = [
+            c for c in all_chunks
+            if c.content and c.content.strip()
+            and not (c.modality == Modality.TEXT and _is_garbled_toc(c.content))
+        ]
 
         # Final oversize breaker — catches chunks created or enlarged by
         # recovery, merging, or other post-processing passes.
