@@ -244,9 +244,15 @@ def main():
     for collection in targets:
         # Retrieve wide for reranking (4x the requested limit)
         retrieve_limit = args.limit * 4 if use_rerank else args.limit
-        # For short queries (1-2 words), add keyword filter for precision
-        keyword = query.strip().split()[0] if len(query.strip().split()) <= 2 else None
+        # Extract the most distinctive keyword for filtering.
+        # Pick the longest non-common word — model names, technical terms.
+        _COMMON = {"the","a","an","of","to","in","for","and","or","is","it","on","by","how","what","why","can","do","this","that","with"}
+        _words = [w for w in query.strip().split() if w.lower() not in _COMMON and len(w) > 1]
+        keyword = max(_words, key=len) if _words else None
         results = search(vector, collection, retrieve_limit, args.modality, keyword, args.qdrant_url)
+        # If keyword filter returns nothing, retry without it
+        if not results and keyword:
+            results = search(vector, collection, retrieve_limit, args.modality, None, args.qdrant_url)
         # Filter by minimum vector score
         results = [r for r in results if r["score"] >= args.min_score]
         if not results:
