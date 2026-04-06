@@ -205,7 +205,7 @@ class LayoutAwareOCRProcessor:
         # VLMs read text FAR better than OCR on degraded scans because they
         # understand language and context. "Jamu la Frizgi" becomes "J.B. Wood".
         # Use VLM transcription as primary text source when available.
-        if self.vlm_manager and text_count > 0 and image_count <= 2:
+        if self.vlm_manager and text_count > 0:
             vlm_text = self._vlm_transcribe_page(page_image, page_number)
             if vlm_text and len(vlm_text.strip()) > 50:
                 logger.info(
