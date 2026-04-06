@@ -2521,6 +2521,11 @@ class BatchProcessor:
         all_chunks = self._filter_repetition_garbage(all_chunks)
         all_chunks = self._apply_table_recovery_highlander_dedup(all_chunks)
 
+        # Final cross-batch mid-sentence merge + dedup.
+        # Per-batch processing can't merge sentences split across batch boundaries.
+        all_chunks = self._merge_mid_sentence_chunks(all_chunks)
+        all_chunks = self._deduplicate_chunk_overlap(all_chunks)
+
         # Write aggregated output to master JSONL with deduplication
         output_jsonl = self.output_dir / "ingestion.jsonl"
         written_chunks = 0
