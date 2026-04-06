@@ -115,6 +115,10 @@ def is_valid_heading(text: str) -> bool:
     if text.count(".") > 5 and "...." in text:
         return False
 
+    # Quoted text is dialogue/speech, not a heading (language-agnostic)
+    if text.startswith(("'", '"', "\u2018", "\u201c")) and text.endswith(("'", '"', "\u2019", "\u201d", "!'", '?"', "!'")):
+        return False
+
     # Must contain at least one letter
     if not any(c.isalpha() for c in text):
         return False
