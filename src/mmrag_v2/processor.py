@@ -381,7 +381,9 @@ class V2DocumentProcessor:
         if hasattr(pipeline_options, "do_table_structure"):
             pipeline_options.do_table_structure = True
         if hasattr(pipeline_options, "do_cell_matching"):
-            pipeline_options.do_cell_matching = True
+            # False: use structure model's own text cells instead of PDF backend cells.
+            # Prevents ", 1 =" cell marker artifacts leaking into TOC/table text.
+            pipeline_options.do_cell_matching = False
 
         # REQ: ZERO-LATENCY PARAMETER ENFORCEMENT
         # Note: Page limiting is enforced at the batch splitting stage,
@@ -2300,6 +2302,19 @@ class V2DocumentProcessor:
         )
         doc_chunks = list(chunker.chunk(doc))
 
+        # Filter out DOCUMENT_INDEX (TOC) elements
+        try:
+            from docling_core.types.doc.labels import DocItemLabel
+            doc_chunks = [
+                dc for dc in doc_chunks
+                if not any(
+                    getattr(item, "label", "") == DocItemLabel.DOCUMENT_INDEX
+                    for item in (dc.meta.doc_items if dc.meta and dc.meta.doc_items else [])
+                )
+            ]
+        except (ImportError, AttributeError):
+            pass  # Older docling-core without DocItemLabel
+
         chunks: List[IngestionChunk] = []
         for i, dc in enumerate(doc_chunks):
             text = dc.text
@@ -2395,8 +2410,13 @@ class V2DocumentProcessor:
                 **self._intelligence_metadata,
             )
             chunk.semantic_context = semantic_context
-            # Set refined_content to content (will be updated by refiner if enabled)
-            chunk.metadata.refined_content = text.strip()
+            # Use contextualize() for heading-enriched text (better for embedding).
+            # Falls back to raw text if contextualize fails.
+            try:
+                contextualized = chunker.contextualize(dc)
+                chunk.metadata.refined_content = contextualized.strip()
+            except Exception:
+                chunk.metadata.refined_content = text.strip()
 
             chunks.append(chunk)
 
