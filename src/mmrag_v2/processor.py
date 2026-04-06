@@ -2272,7 +2272,7 @@ class V2DocumentProcessor:
 
         chunker = HybridChunker(
             tokenizer="sentence-transformers/all-MiniLM-L6-v2",
-            max_tokens=512,
+            max_tokens=350,  # ~1400 chars — keeps chunks under the 1500-char oversize gate
         )
         doc_chunks = list(chunker.chunk(doc))
 

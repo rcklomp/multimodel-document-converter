@@ -2540,6 +2540,10 @@ class BatchProcessor:
         # Remove empty chunks created by merging/dedup
         all_chunks = [c for c in all_chunks if c.content and c.content.strip()]
 
+        # Final oversize breaker — catches chunks created or enlarged by
+        # recovery, merging, or other post-processing passes.
+        all_chunks = self._apply_oversize_breaker(all_chunks, max_chars=1500)
+
         # Deduplicate repeated paragraphs WITHIN individual chunks.
         # VLM transcription on cover pages can repeat the same text 3-4x
         # when it reads title, spine, and bleed-through as separate instances.
