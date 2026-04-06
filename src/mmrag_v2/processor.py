@@ -2373,7 +2373,9 @@ class V2DocumentProcessor:
                         headings.append(h_text)
 
             # Build hierarchy
-            breadcrumb = [source_file]
+            # Use cleaned source name (no extension, spaces instead of underscores)
+            _clean_name = Path(source_file).stem.replace("_", " ") if source_file else "Document"
+            breadcrumb = [_clean_name]
             if headings:
                 breadcrumb.extend(headings)
             breadcrumb.append(f"Page {page_no}")
