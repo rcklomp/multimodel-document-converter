@@ -4150,17 +4150,28 @@ class BatchProcessor:
             # This handles VLM reading cover text 2-4x.
             content_stripped = ch.content.strip()
             found_repeat = False
-            for frac in (2, 3, 4):
-                prefix_len = len(content_stripped) // frac
-                if prefix_len < 30:
-                    continue
-                prefix = content_stripped[:prefix_len].rstrip()
-                # Check if the rest starts with a repeat of the prefix
-                rest = content_stripped[prefix_len:].lstrip()
-                if rest.startswith(prefix[:min(len(prefix), 40)]):
-                    ch.content = prefix
-                    found_repeat = True
-                    break
+            # Loop: cut repeated prefixes until clean (4x→2x→1x)
+            changed = True
+            while changed and len(content_stripped) > 60:
+                changed = False
+                for frac in (2, 3, 4):
+                    prefix_len = len(content_stripped) // frac
+                    if prefix_len < 30:
+                        continue
+                    prefix = content_stripped[:prefix_len].rstrip()
+                    rest = content_stripped[prefix_len:].lstrip()
+                    if rest.startswith(prefix[:min(len(prefix), 40)]):
+                        logger.info(
+                            f"[INTRA-DEDUP] Prefix repeat on pg "
+                            f"{ch.metadata.page_number}: {len(content_stripped)}→{len(prefix)} chars"
+                        )
+                        content_stripped = prefix
+                        found_repeat = True
+                        changed = True
+                        break
+            if found_repeat:
+                ch.content = content_stripped
+                fixed += 1
 
             if not found_repeat:
                 # Fallback: line-level dedup
