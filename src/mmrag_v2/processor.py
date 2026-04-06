@@ -2115,9 +2115,35 @@ class V2DocumentProcessor:
                 height = getattr(page, "height", 792.0) or 792.0
                 page_dims[pg_no] = (width, height)
 
+        # ================================================================
+        # HYBRID CHUNKER PATH (Phase 1 of migration)
+        # ================================================================
+        # Use Docling's HybridChunker for text elements (sentence-aware
+        # splitting, proper heading hierarchy). Process IMAGE/TABLE
+        # elements through the existing element-by-element pipeline.
+        # ================================================================
+        _use_hybrid = True
+        _hybrid_text_chunks: List[IngestionChunk] = []
+        if _use_hybrid:
+            try:
+                _hybrid_text_chunks = self._process_text_with_hybrid_chunker(
+                    doc=doc,
+                    doc_hash=doc_hash,
+                    source_file=source_file,
+                    file_type=file_type,
+                    page_dims=page_dims,
+                )
+                logger.info(
+                    f"[HYBRID-CHUNKER] Produced {len(_hybrid_text_chunks)} text chunks"
+                )
+            except Exception as _hc_err:
+                logger.warning(
+                    f"[HYBRID-CHUNKER] Failed, falling back to element-by-element: {_hc_err}"
+                )
+                _use_hybrid = False
+                _hybrid_text_chunks = []
+
         # V3.0.0: Pending context queue for IMAGE and TABLE next_text_snippet
-        # IMAGE/TABLE chunks are held until next TEXT chunk arrives, then their
-        # next_text_snippet is filled with the subsequent text content.
         pending_visual_chunks: List[IngestionChunk] = []
 
         for item_tuple in self._get_ordered_doc_items(doc):
@@ -2134,6 +2160,7 @@ class V2DocumentProcessor:
                 page_images=page_images,
                 page_dims=page_dims,
                 page_offset=self._page_offset,
+                skip_text=_use_hybrid,  # Skip text if HybridChunker handled it
             ):
                 # V3.0.0: Deferred yield for IMAGE and TABLE chunks (pending context)
                 from .schema.ingestion_schema import Modality
@@ -2195,6 +2222,11 @@ class V2DocumentProcessor:
             else:
                 yield shadow_chunk
 
+        # Yield HybridChunker text chunks (if used)
+        if _use_hybrid and _hybrid_text_chunks:
+            for hc_chunk in _hybrid_text_chunks:
+                yield hc_chunk
+
         # Flush any remaining pending IMAGE/TABLE chunks (no following text)
         for pending in pending_visual_chunks:
             logger.debug(
@@ -2222,6 +2254,139 @@ class V2DocumentProcessor:
             except Exception:
                 pass
 
+    def _process_text_with_hybrid_chunker(
+        self,
+        doc: Any,
+        doc_hash: str,
+        source_file: str,
+        file_type: "FileType",
+        page_dims: Dict[int, Tuple[float, float]],
+    ) -> List["IngestionChunk"]:
+        """Process text elements using Docling's HybridChunker.
+
+        Replaces custom element-by-element text chunking with Docling's
+        sentence-boundary-aware chunker. Produces IngestionChunks with
+        proper heading hierarchy from the document structure.
+        """
+        from docling_core.transforms.chunker import HybridChunker
+
+        chunker = HybridChunker(
+            tokenizer="sentence-transformers/all-MiniLM-L6-v2",
+            max_tokens=512,
+        )
+        doc_chunks = list(chunker.chunk(doc))
+
+        chunks: List[IngestionChunk] = []
+        for i, dc in enumerate(doc_chunks):
+            text = dc.text
+            if not text or not text.strip():
+                continue
+
+            # Extract page number and bbox from doc_items
+            page_no = 1
+            bbox: Optional[List[int]] = None
+            page_w, page_h = 612.0, 792.0
+
+            if dc.meta and dc.meta.doc_items:
+                first_item = dc.meta.doc_items[0]
+                if hasattr(first_item, "prov") and first_item.prov:
+                    prov = first_item.prov[0] if isinstance(first_item.prov, list) else first_item.prov
+                    page_no = getattr(prov, "page_no", 1) or 1
+                    prov_bbox = getattr(prov, "bbox", None)
+                    if prov_bbox:
+                        # Convert Docling bbox to normalized [0, 1000] coords
+                        pw, ph = page_dims.get(page_no, (612.0, 792.0))
+                        page_w, page_h = pw, ph
+                        x0 = int(float(getattr(prov_bbox, "l", 0)) / pw * COORD_SCALE)
+                        y0 = int(float(getattr(prov_bbox, "t", 0)) / ph * COORD_SCALE)
+                        x1 = int(float(getattr(prov_bbox, "r", pw)) / pw * COORD_SCALE)
+                        y1 = int(float(getattr(prov_bbox, "b", ph)) / ph * COORD_SCALE)
+                        bbox = [
+                            max(0, min(COORD_SCALE, x0)),
+                            max(0, min(COORD_SCALE, min(y0, y1))),
+                            max(0, min(COORD_SCALE, x1)),
+                            max(0, min(COORD_SCALE, max(y0, y1))),
+                        ]
+
+            # Extract headings from HybridChunker metadata
+            headings = []
+            if dc.meta and dc.meta.headings:
+                headings = [
+                    h if isinstance(h, str) else getattr(h, "text", str(h))
+                    for h in dc.meta.headings
+                ]
+
+            # Build hierarchy
+            breadcrumb = [source_file]
+            if headings:
+                breadcrumb.extend(headings)
+            breadcrumb.append(f"Page {page_no}")
+
+            parent_heading = headings[-1] if headings else None
+
+            hierarchy = HierarchyMetadata(
+                parent_heading=parent_heading,
+                breadcrumb_path=breadcrumb,
+                level=min(len(breadcrumb), 5),
+            )
+
+            # Determine chunk type
+            chunk_type = ChunkType.PARAGRAPH
+            label = ""
+            if dc.meta and dc.meta.doc_items:
+                label = getattr(dc.meta.doc_items[0], "label", "")
+            if label == "code":
+                chunk_type = ChunkType.CODE
+            elif label == "list_item":
+                chunk_type = ChunkType.LIST_ITEM
+            elif "heading" in label or "title" in label:
+                chunk_type = ChunkType.HEADING
+
+            # Create chunk ID
+            chunk_id = self._generate_chunk_id(doc_hash, page_no, i)
+
+            # Semantic context (prev/next snippets)
+            prev_snippet = chunks[-1].content[-CONTEXT_SNIPPET_LENGTH:] if chunks else None
+            semantic_context = SemanticContext(
+                prev_text_snippet=prev_snippet,
+                next_text_snippet=None,  # filled by lookahead later
+                parent_heading=parent_heading,
+                breadcrumb_path=breadcrumb,
+            )
+
+            chunk = create_text_chunk(
+                doc_id=doc_hash,
+                content=text.strip(),
+                source_file=source_file,
+                file_type=file_type,
+                page_number=page_no,
+                bbox=bbox or [0, 0, COORD_SCALE, COORD_SCALE],
+                hierarchy=hierarchy,
+                chunk_type=chunk_type,
+                page_width=int(page_w),
+                page_height=int(page_h),
+                extraction_method="hybrid_chunker",
+                **self._intelligence_metadata,
+            )
+            chunk.semantic_context = semantic_context
+            # Set refined_content to content (will be updated by refiner if enabled)
+            chunk.metadata.refined_content = text.strip()
+
+            chunks.append(chunk)
+
+        # Fill next_text_snippet
+        for i in range(len(chunks) - 1):
+            chunks[i].semantic_context.next_text_snippet = chunks[i + 1].content[:CONTEXT_SNIPPET_LENGTH]
+
+        return chunks
+
+    def _generate_chunk_id(self, doc_hash: str, page_no: int, index: int) -> str:
+        """Generate a deterministic chunk ID."""
+        import hashlib
+        raw = f"{doc_hash}_{page_no:03d}_{index:04d}"
+        h = hashlib.md5(raw.encode()).hexdigest()[:16]
+        return f"{doc_hash}_{page_no:03d}_text_{h}"
+
     def _process_element_v2(
         self,
         element: Any,
@@ -2234,6 +2399,7 @@ class V2DocumentProcessor:
         page_images: Dict[int, Image.Image],
         page_dims: Dict[int, Tuple[float, float]],
         page_offset: int = 0,
+        skip_text: bool = False,
     ) -> Generator[IngestionChunk, None, None]:
         """
         Process a single document element with VLM enrichment.
@@ -2241,6 +2407,7 @@ class V2DocumentProcessor:
         Args:
             page_offset: Offset to add to page numbers (for batch processing).
                         If batch starts at page 11, offset=10, so batch page 1 → actual page 11.
+            skip_text: If True, skip text elements (handled by HybridChunker).
         """
         label_obj = getattr(element, "label", None)
         if label_obj is not None:
@@ -2837,6 +3004,14 @@ class V2DocumentProcessor:
         )
 
         # Handle TEXT elements (with or without content)
+        # If HybridChunker handles text, skip text element processing here.
+        if skip_text and is_text_label and not is_image_label and "table" not in label_lower:
+            # Still update state for heading tracking (needed by image/table context)
+            heading_level = self._extract_heading_level(label)
+            if heading_level and text.strip():
+                state.update_on_heading(text.strip(), heading_level)
+            return
+
         if is_text_label and not is_image_label and "table" not in label_lower:
             # Get prev_text for semantic context BEFORE processing
             prev_text_context = " ".join(text_buffer[-3:]) if text_buffer else None
