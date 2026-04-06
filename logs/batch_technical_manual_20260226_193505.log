@@ -1,0 +1,11 @@
+Batch started: Thu Feb 26 19:35:05 CET 2026
+
+========================================
+START: devlin_llm_agents  (Thu Feb 26 19:35:05 CET 2026)
+FILE:  Devlin M. Building LLM Agents with RAG, Knowledge Graphs and Reflection...2025.pdf
+========================================
+Usage: mmrag-v2 process [OPTIONS] INPUT_FILE
+Try 'mmrag-v2 process --help' for help.
+╭─ Error ──────────────────────────────────────────────────────────────────────╮
+│ No such option: --profile-override                                           │
+╰──────────────────────────────────────────────────────────────────────────────╯
