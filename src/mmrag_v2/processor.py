@@ -2332,13 +2332,15 @@ class V2DocumentProcessor:
                             max(0, min(COORD_SCALE, max(y0, y1))),
                         ]
 
-            # Extract headings from HybridChunker metadata
+            # Extract headings from HybridChunker metadata, filtered through
+            # our heading validator (rejects credit lines, copyright, TOC fill)
+            from .state.context_state import is_valid_heading
             headings = []
             if dc.meta and dc.meta.headings:
-                headings = [
-                    h if isinstance(h, str) else getattr(h, "text", str(h))
-                    for h in dc.meta.headings
-                ]
+                for h in dc.meta.headings:
+                    h_text = h if isinstance(h, str) else getattr(h, "text", str(h))
+                    if is_valid_heading(h_text):
+                        headings.append(h_text)
 
             # Build hierarchy
             breadcrumb = [source_file]
