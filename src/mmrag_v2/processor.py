@@ -2136,6 +2136,30 @@ class V2DocumentProcessor:
                 logger.info(
                     f"[HYBRID-CHUNKER] Produced {len(_hybrid_text_chunks)} text chunks"
                 )
+
+                # Phase 2: Apply refiner to HybridChunker text chunks
+                if self._refiner and _hybrid_text_chunks:
+                    _refined_count = 0
+                    for _hc in _hybrid_text_chunks:
+                        if _hc.metadata.chunk_type == ChunkType.CODE:
+                            continue  # Never refine code
+                        try:
+                            _ref_result = self._refiner.process(
+                                raw_text=_hc.content,
+                                visual_description=None,
+                                semantic_context=_hc.semantic_context,
+                            )
+                            if _ref_result.refinement_applied and _ref_result.refined_text != _hc.content:
+                                _hc.metadata.refined_content = _ref_result.refined_text
+                                _hc.metadata.refinement_applied = True
+                                _hc.metadata.corruption_score = _ref_result.corruption_score
+                                _refined_count += 1
+                            else:
+                                _hc.metadata.refined_content = _hc.content
+                        except Exception:
+                            _hc.metadata.refined_content = _hc.content
+                    logger.info(f"[HYBRID-CHUNKER] Refined {_refined_count} text chunks")
+
             except Exception as _hc_err:
                 logger.warning(
                     f"[HYBRID-CHUNKER] Failed, falling back to element-by-element: {_hc_err}"
