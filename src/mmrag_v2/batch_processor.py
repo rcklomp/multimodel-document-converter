@@ -4171,6 +4171,23 @@ class BatchProcessor:
                         break
             if found_repeat:
                 ch.content = content_stripped
+                # Apply same dedup to refined_content
+                if ch.metadata and ch.metadata.refined_content:
+                    rc = ch.metadata.refined_content.strip()
+                    rc_changed = True
+                    while rc_changed and len(rc) > 60:
+                        rc_changed = False
+                        for frac in (2, 3, 4):
+                            rc_prefix_len = len(rc) // frac
+                            if rc_prefix_len < 30:
+                                continue
+                            rc_prefix = rc[:rc_prefix_len].rstrip()
+                            rc_rest = rc[rc_prefix_len:].lstrip()
+                            if rc_rest.startswith(rc_prefix[:min(len(rc_prefix), 40)]):
+                                rc = rc_prefix
+                                rc_changed = True
+                                break
+                    ch.metadata.refined_content = rc
                 fixed += 1
 
             if not found_repeat:
