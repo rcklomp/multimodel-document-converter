@@ -202,7 +202,7 @@ def main():
     )
     parser.add_argument("query", nargs="?", help="Search query")
     parser.add_argument("-c", "--collection", default=None, help="Specific collection")
-    parser.add_argument("-n", "--limit", type=int, default=5, help="Max results per collection")
+    parser.add_argument("-n", "--limit", type=int, default=5, help="Max results shown per collection")
     parser.add_argument("-m", "--modality", choices=["text", "image", "table"], help="Filter by type")
     parser.add_argument("-l", "--list", action="store_true", help="List collections")
     parser.add_argument("--no-rerank", action="store_true", help="Skip reranking (vector scores only)")
@@ -243,12 +243,19 @@ def main():
 
     for collection in targets:
         # Retrieve wide for reranking (4x the requested limit)
-        retrieve_limit = args.limit * 4 if use_rerank else args.limit
+        retrieve_limit = args.limit * 8 if use_rerank else args.limit
         # Extract the most distinctive keyword for filtering.
-        # Pick the longest non-common word — model names, technical terms.
-        _COMMON = {"the","a","an","of","to","in","for","and","or","is","it","on","by","how","what","why","can","do","this","that","with"}
-        _words = [w for w in query.strip().split() if w.lower() not in _COMMON and len(w) > 1]
-        keyword = max(_words, key=len) if _words else None
+        # Pick proper nouns and technical terms over common words.
+        import re as _re
+        _COMMON = {"the","a","an","of","to","in","for","and","or","is","it","on","by",
+                    "how","what","why","can","do","this","that","with","was","were","are",
+                    "been","being","has","had","have","not","but","from","they","them",
+                    "would","could","should","will","shall","may","might","did","does"}
+        _clean_words = [_re.sub(r"[^a-zA-Z0-9._-]", "", w) for w in query.strip().split()]
+        _clean_words = [w for w in _clean_words if w.lower() not in _COMMON and len(w) > 2]
+        # Prefer capitalized words (proper nouns, model names) over common words
+        _proper = [w for w in _clean_words if w[0].isupper()] if _clean_words else []
+        keyword = max(_proper, key=len) if _proper else (max(_clean_words, key=len) if _clean_words else None)
         results = search(vector, collection, retrieve_limit, args.modality, keyword, args.qdrant_url)
         # If keyword filter returns nothing, retry without it
         if not results and keyword:
