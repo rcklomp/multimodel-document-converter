@@ -2140,7 +2140,18 @@ class V2DocumentProcessor:
                     f"[HYBRID-CHUNKER] Produced {len(_hybrid_text_chunks)} text chunks"
                 )
 
-                # Phase 2: Apply refiner to HybridChunker text chunks
+                # Phase 2: Apply refiner to HybridChunker text chunks.
+                # When encoding corruption is detected, force-refine ALL chunks
+                # (the text layer has /C211 etc. that need LLM reconstruction).
+                # This is "Heal-over" — keep HybridChunker's structure, fix the text.
+                _encoding_corrupt = self._intelligence_metadata.get("has_encoding_corruption", False)
+                if self._refiner and _encoding_corrupt:
+                    try:
+                        self._refiner.config.min_refine_threshold = 0.0
+                        logger.info("[HYBRID-CHUNKER] Encoding corruption → refiner threshold=0.0")
+                    except Exception:
+                        pass
+
                 if self._refiner and _hybrid_text_chunks:
                     _refined_count = 0
                     for _hc in _hybrid_text_chunks:

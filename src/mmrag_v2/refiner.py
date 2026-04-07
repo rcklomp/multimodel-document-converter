@@ -72,6 +72,7 @@ CORRUPTION_PATTERNS: Dict[str, Tuple[str, float]] = {
     "accent_on_ascii": (r"[éèêëàâäùûüôöîï][a-z]{2,}", 0.2),  # "célls", "détails" (accent on common English)
     "dot_stuck_to_word": (r"[a-z]\.[a-z]{2,}", 0.15),  # "rooms.and", "to.grow"
     "truncated_start": (r"(?:^|\n)[a-z]{1,3}\b\s+[a-z]", 0.2),  # "bviously" (missing first letter)
+    "encoding_glyph": (r"/C\d{1,3}\b|\\x[0-9a-f]{2}", 0.4),  # "/C211", "\xc3" — PDF encoding failures
 }
 
 # Minimum hits per pattern to count (prevents false positives on short text)
