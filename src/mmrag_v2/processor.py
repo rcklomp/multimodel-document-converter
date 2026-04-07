@@ -2124,13 +2124,7 @@ class V2DocumentProcessor:
         # splitting, proper heading hierarchy). Process IMAGE/TABLE
         # elements through the existing element-by-element pipeline.
         # ================================================================
-        # Don't use HybridChunker when the text layer is corrupted —
-        # it would chunk garbage. Fall back to OCR/element path which
-        # reads from pixels, not the broken text layer.
-        _encoding_corrupt = self._intelligence_metadata.get("has_encoding_corruption", False)
-        _use_hybrid = not _encoding_corrupt
-        if _encoding_corrupt:
-            logger.info("[HYBRID-CHUNKER] Disabled: has_encoding_corruption=True, using OCR path")
+        _use_hybrid = True
         _hybrid_text_chunks: List[IngestionChunk] = []
         if _use_hybrid:
             try:
