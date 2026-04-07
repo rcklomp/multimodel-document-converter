@@ -4266,7 +4266,7 @@ class BatchProcessor:
                     seen_keys.add(key)
                     kept_lines.append(line)
                 deduped = "\n".join(kept_lines).strip()
-                if len(deduped) < len(ch.content.strip()) * 0.9:
+                if deduped != ch.content.strip():
                     ch.content = deduped
                 if ch.metadata and ch.metadata.refined_content:
                     rc_lines = ch.metadata.refined_content.split("\n")
