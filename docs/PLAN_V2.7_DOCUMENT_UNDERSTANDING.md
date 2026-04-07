@@ -130,3 +130,34 @@ in v2.6), ensure `ingest_to_qdrant.py` uses contextualized text.
 - [Anthropic Contextual Retrieval](https://www.anthropic.com/news/contextual-retrieval)
 - [Docling Pipeline Options](https://docling-project.github.io/docling/reference/pipeline_options/)
 - [Docling Issue #287: Heading Hierarchy](https://github.com/docling-project/docling/issues/287)
+
+## Updated Architecture (from Gemini Pro, April 7 2026)
+
+### Principle: Stop deleting artifacts. Start validating multimodally.
+
+The v2.6 approach of string-length rules and hardcoded skips is overfitting.
+The v2.7 approach uses OCR confidence, VLM descriptions, and POS tagging
+as validation signals — not just text pattern matching.
+
+### 1. CorruptionInterceptor (replaces threshold-based refiner bypass)
+- Per-bbox OCR patching: when a chunk contains /C211 or fails dictionary
+  token ratio, re-extract ONLY that bbox via OCR
+- Keep HybridChunker structure (headings, tables, hierarchy)
+- Replace only the corrupted text spans
+
+### 2. POS Boundary Logic (replaces character-count orphan stripping)
+- Check if trailing word is a "Hungry Operator" (BY, FOR, OF, WITH)
+- If next chunk starts with Proper Noun → merge operator into next chunk
+- "END", "VOID", "N/A" are Nouns → stay where they are
+- Language-agnostic: prepositions are structurally incomplete without objects
+
+### 3. Vision-Gated Hierarchy (replaces quote/credit pattern filters)
+- When heading detected on high-image-density page, check VLM description
+- If description contains "Cover", "Logo", "Sketch" → demote heading to
+  "Front Matter" via MetadataRefiner pass
+- Uses multimodal signals, not text heuristics
+
+### 4. Content-Type Classification (replaces hardcoded search_priority)
+- Lightweight classifier or regex-weighted score per chunk
+- High density of legal/boilerplate tokens → search_priority: "low"
+- Works globally for all books and papers, not document-specific
