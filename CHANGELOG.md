@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file. This projec
 
 > **Versioning note:** Historical entries before the `v2.4.x` line used an internal `v18.x` milestone scheme during rapid iteration and test/fix cycles. Only stable or decision-worthy checkpoints were recorded, so intermediate builds are intentionally omitted. From `v2.4` onward, entries follow the current public semantic line.
 
-## [v2.6.0] - 2026-04-04
+## [v2.6.0] - 2026-04-07
 
 ### Added
 - **Profile consolidation (7→5):** Merged `scanned_clean`, `scanned_literature`,
@@ -28,6 +28,17 @@ All notable changes to this project will be documented in this file. This projec
   pipe-separated markdown instead of raw garbled text.
 - **Makefile:** `make test`, `make lint`, `make smoke`, `make acceptance`, etc.
 - **Gitea CI:** `.gitea/workflows/ci.yml` — lint + test on push/PR.
+- **HybridChunker integration:** Replaced custom 30-pass text chunking pipeline
+  with Docling's built-in HybridChunker (sentence-aware, structure-aware).
+  Text chunks now get proper heading hierarchy from document structure.
+- **VLM page transcription:** Scanned documents use VLM to transcribe text
+  directly from page images instead of OCR. Produces clean text on degraded scans.
+- **Config file:** `~/.mmrag-v2.yml` provides VLM + refiner defaults.
+  No more typing 6 flags per conversion.
+- **Qdrant tools:** `ingest_to_qdrant.py` (ingestion), `search_qdrant.py`
+  (semantic search with reranking), `validate_qdrant.py` (RAG readiness check).
+- **Refiner degraded scan patterns:** Detects merged words, symbol noise,
+  accent artifacts. Threshold 0.0 for scanned_degraded (all OCR text refined).
 
 ### Fixed
 - **Token variance waiver retired:** IMAGE-bbox-aware source text extraction excludes

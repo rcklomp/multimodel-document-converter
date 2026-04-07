@@ -87,7 +87,7 @@ Companion docs:
 
 ## 📍 5. CURRENT STATE & DIRECTIVES (April 2026)
 
-**Version:** `v2.6.0-dev` (schema version 2.5.0)  
+**Version:** `v2.6.0` (schema version 2.6.0)  
 **Phase:** Multi-profile expansion — moving from technical-manual-only validation to full cross-category acceptance.
 
 **Active architecture decisions:**
