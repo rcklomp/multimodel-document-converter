@@ -2563,16 +2563,34 @@ class BatchProcessor:
         # is the next section heading concatenated by the layout parser.
         all_chunks = self._strip_trailing_headings(all_chunks)
 
+        # POS Boundary Logic: merge orphan prepositions into next chunk.
+        # "BY" at end of chunk + "Mary GrandPré" at start of next → merge.
+        # "END" stays (it's a noun, not a hungry preposition).
+        all_chunks = self._merge_hungry_operators(all_chunks)
+
         # Final cross-batch mid-sentence merge + dedup.
         # Per-batch processing can't merge sentences split across batch boundaries.
         all_chunks = self._merge_mid_sentence_chunks(all_chunks)
         all_chunks = self._deduplicate_chunk_overlap(all_chunks)
+
+        # Vision-Gated Hierarchy: demote headings to "Front Matter" when
+        # the page has cover/logo images (multimodal validation).
+        all_chunks = self._vision_gate_headings(all_chunks)
 
         # Detect section headings from VLM-transcribed text for scanned documents.
         # Scanned docs have flat hierarchy because Docling can't detect headings.
         # Look for prominent text patterns (all-caps lines, numbered sections)
         # and use them as parent_heading in the breadcrumb.
         all_chunks = self._infer_headings_from_text(all_chunks)
+
+        # Selective OCR patching for encoding-corrupted chunks.
+        # Keeps HybridChunker structure, replaces only the corrupted text spans.
+        if self._intelligence_metadata.get("has_encoding_corruption"):
+            try:
+                from .validators.corruption_interceptor import patch_corrupted_chunks
+                all_chunks = patch_corrupted_chunks(all_chunks, self._current_pdf_path)
+            except Exception as _ci_err:
+                logger.warning(f"[CORRUPTION-INTERCEPTOR] Failed: {_ci_err}")
 
         # Remove empty chunks and garbled TOC/table chunks.
         # Docling leaks internal cell markers (", 1 =", ", 2 =") into TOC text.
@@ -2766,6 +2784,21 @@ class BatchProcessor:
 
                                 except Exception as hash_e:
                                     logger.warning(f"pHash check failed for {asset_file}: {hash_e}")
+
+                    # Content-Type Classification: demote boilerplate to low priority.
+                    if chunk_dict.get("modality") == "text":
+                        _content = chunk_dict.get("content", "")
+                        _BOILERPLATE_RE = re.compile(
+                            r"\bISBN\b|\bISSN\b|Library of Congress|All rights reserved"
+                            r"|Printed in .{2,20}$|First .{2,20} edition"
+                            r"|©\s*\d{4}",
+                            re.IGNORECASE,
+                        )
+                        _boilerplate_hits = len(_BOILERPLATE_RE.findall(_content))
+                        if _boilerplate_hits >= 2:
+                            meta = chunk_dict.get("metadata", {})
+                            meta["search_priority"] = "low"
+                            chunk_dict["metadata"] = meta
 
                     # Safety net: ensure refined_content is never null for text chunks.
                     # Some code paths (list_items, ads, edge cases) may skip the default.
@@ -4188,6 +4221,135 @@ class BatchProcessor:
         if not page_chars:
             return self._doc_avg_text_per_page or 0.0
         return sum(page_chars.values()) / len(page_chars)
+
+    def _vision_gate_headings(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
+        """Demote headings to 'Front Matter' on pages with cover/logo images.
+
+        Uses multimodal signals: if a page has IMAGE chunks whose VLM
+        description mentions cover, logo, illustration, or portrait,
+        any heading on that page that isn't a chapter pattern gets
+        demoted to 'Front Matter'.
+        """
+        import re as _re
+
+        # Build per-page image description index
+        page_has_cover: set[int] = set()
+        _COVER_SIGNALS = _re.compile(
+            r"cover|logo|portrait|illustration|sketch|ornament|decoration",
+            _re.IGNORECASE,
+        )
+        for ch in chunks:
+            if ch.modality != Modality.IMAGE:
+                continue
+            vd = ""
+            if ch.metadata and ch.metadata.visual_description:
+                vd = ch.metadata.visual_description
+            elif ch.content:
+                vd = ch.content
+            if _COVER_SIGNALS.search(vd):
+                pg = ch.metadata.page_number if ch.metadata else 0
+                if pg:
+                    page_has_cover.add(pg)
+
+        if not page_has_cover:
+            return chunks
+
+        # Find the first chapter-like heading to identify front matter boundary
+        _CHAPTER_RE = _re.compile(r"chapter|teil|hoofdstuk|chapitre|\d+\.\d+\s", _re.IGNORECASE)
+        first_chapter_page = 9999
+        for ch in chunks:
+            if ch.modality != Modality.TEXT or not ch.metadata:
+                continue
+            ph = ch.metadata.hierarchy.parent_heading if ch.metadata.hierarchy else ""
+            if ph and _CHAPTER_RE.search(ph):
+                pg = ch.metadata.page_number or 9999
+                first_chapter_page = min(first_chapter_page, pg)
+
+        # Demote headings on cover pages before first chapter
+        demoted = 0
+        for ch in chunks:
+            if ch.modality != Modality.TEXT or not ch.metadata or not ch.metadata.hierarchy:
+                continue
+            pg = ch.metadata.page_number or 0
+            if pg not in page_has_cover or pg >= first_chapter_page:
+                continue
+            ph = ch.metadata.hierarchy.parent_heading
+            if ph and not _CHAPTER_RE.search(ph):
+                ch.metadata.hierarchy.parent_heading = "Front Matter"
+                # Update breadcrumb
+                bp = ch.metadata.hierarchy.breadcrumb_path
+                if bp and len(bp) >= 2:
+                    ch.metadata.hierarchy.breadcrumb_path = [bp[0], "Front Matter", bp[-1]]
+                demoted += 1
+
+        if demoted:
+            logger.info(f"[VISION-GATE] Demoted {demoted} headings to 'Front Matter' on cover pages")
+
+        return chunks
+
+    def _merge_hungry_operators(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
+        """Merge trailing prepositions into the next chunk using POS logic.
+
+        Prepositions (BY, FOR, OF, WITH, FROM) are syntactically incomplete
+        without their object. When a chunk ends with one and the next chunk
+        starts with a proper noun, merge the preposition into the next chunk.
+
+        "END", "VOID", "N/A" are nouns — they stay where they are.
+        Language-agnostic: prepositions exist in all European languages.
+        """
+        # Prepositions that are syntactically "hungry" for a following noun
+        _HUNGRY = {
+            # English
+            "by", "for", "of", "with", "from", "to", "in", "at", "on",
+            # German
+            "von", "für", "mit", "aus", "bei", "nach", "zu",
+            # Dutch
+            "van", "voor", "met", "uit", "bij", "naar", "door",
+            # French
+            "par", "pour", "de", "avec",
+        }
+
+        merged = 0
+        text_indices = [i for i, ch in enumerate(chunks)
+                        if ch.modality == Modality.TEXT and ch.content]
+
+        for ti in range(len(text_indices) - 1):
+            cur_idx = text_indices[ti]
+            nxt_idx = text_indices[ti + 1]
+            cur = chunks[cur_idx]
+            nxt = chunks[nxt_idx]
+
+            # Get last word of current chunk
+            last_line = cur.content.rstrip().split("\n")[-1].strip()
+            last_word = last_line.split()[-1].rstrip(".,;:!?") if last_line.split() else ""
+
+            if last_word.lower() not in _HUNGRY:
+                continue
+
+            # Check if next chunk starts with a proper noun (capitalized)
+            first_word = nxt.content.lstrip().split()[0] if nxt.content.strip() else ""
+            if not first_word or not first_word[0].isupper():
+                continue
+
+            # Pull the preposition line from current chunk to next chunk
+            lines = cur.content.rstrip().split("\n")
+            if lines and lines[-1].strip().lower() in _HUNGRY:
+                prep = lines.pop()
+                cur.content = "\n".join(lines).rstrip()
+                nxt.content = prep.strip() + " " + nxt.content.lstrip()
+                if cur.metadata and cur.metadata.refined_content:
+                    rc_lines = cur.metadata.refined_content.rstrip().split("\n")
+                    if rc_lines and rc_lines[-1].strip().lower() in _HUNGRY:
+                        rc_lines.pop()
+                        cur.metadata.refined_content = "\n".join(rc_lines).rstrip()
+                if nxt.metadata and nxt.metadata.refined_content:
+                    nxt.metadata.refined_content = prep.strip() + " " + nxt.metadata.refined_content.lstrip()
+                merged += 1
+
+        if merged:
+            logger.info(f"[POS-MERGE] Merged {merged} orphan prepositions into next chunk")
+
+        return chunks
 
     def _dedup_intra_chunk_repeats(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
         """Remove repeated paragraphs within a single chunk.
