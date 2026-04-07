@@ -6,7 +6,7 @@ scattering across the codebase.
 """
 
 # Schema version for ingestion output
-__schema_version__ = "2.6.0"
+__schema_version__ = "2.7.0"
 
 # Engine/runtime version (align with release as needed)
 __engine_version__ = __schema_version__

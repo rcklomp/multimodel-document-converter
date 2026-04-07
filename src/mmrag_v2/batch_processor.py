@@ -4327,6 +4327,16 @@ class BatchProcessor:
             if last_word.lower() not in _HUNGRY:
                 continue
 
+            # Only merge on same or adjacent pages — cross-page merges create garbage
+            cur_pg = cur.metadata.page_number if cur.metadata else 0
+            nxt_pg = nxt.metadata.page_number if nxt.metadata else 0
+            if abs(nxt_pg - cur_pg) > 1:
+                continue
+
+            # The preposition must be the ONLY word on the last line (true orphan)
+            if len(last_line.split()) > 1:
+                continue
+
             # Check if next chunk starts with a proper noun (capitalized)
             first_word = nxt.content.lstrip().split()[0] if nxt.content.strip() else ""
             if not first_word or not first_word[0].isupper():
