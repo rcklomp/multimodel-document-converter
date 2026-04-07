@@ -4265,6 +4265,9 @@ class BatchProcessor:
                         continue
                     seen_keys.add(key)
                     kept_lines.append(line)
+                # Strip trailing ultra-short all-caps lines (layout artifacts like "BY")
+                while kept_lines and kept_lines[-1].strip() and len(kept_lines[-1].strip()) <= 3 and kept_lines[-1].strip().isupper():
+                    kept_lines.pop()
                 deduped = "\n".join(kept_lines).strip()
                 if deduped != ch.content.strip():
                     ch.content = deduped
