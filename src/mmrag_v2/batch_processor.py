@@ -2787,12 +2787,13 @@ class BatchProcessor:
 
                     # Content-Type Classification: demote boilerplate to low priority.
                     if chunk_dict.get("modality") == "text":
+                        import re as _re_bp
                         _content = chunk_dict.get("content", "")
-                        _BOILERPLATE_RE = re.compile(
+                        _BOILERPLATE_RE = _re_bp.compile(
                             r"\bISBN\b|\bISSN\b|Library of Congress|All rights reserved"
                             r"|Printed in .{2,20}$|First .{2,20} edition"
                             r"|©\s*\d{4}",
-                            re.IGNORECASE,
+                            _re_bp.IGNORECASE,
                         )
                         _boilerplate_hits = len(_BOILERPLATE_RE.findall(_content))
                         if _boilerplate_hits >= 2:
