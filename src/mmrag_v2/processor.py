@@ -567,75 +567,47 @@ class V2DocumentProcessor:
     def _epub_to_html(epub_path: Path) -> Optional[Path]:
         """Extract XHTML content from an EPUB file into a temporary HTML file.
 
-        EPUB files are ZIP archives containing XHTML chapters. Docling 2.66.0
-        doesn't support EPUB natively, but it does support HTML. This method
-        extracts all chapter content into a single HTML file that Docling can
-        process.
+        Uses ebooklib + BeautifulSoup to extract clean body content from each
+        EPUB chapter. The previous ZIP-based approach produced malformed HTML
+        (SVG elements, XHTML namespaces) that Docling's HTML parser couldn't
+        handle, yielding 0 chunks.
 
         Returns:
             Path to a temporary HTML file, or None on failure.
         """
         import tempfile
-        import zipfile
-        from xml.etree import ElementTree as ET
 
         try:
+            import ebooklib
+            from ebooklib import epub
+            from bs4 import BeautifulSoup
+        except ImportError as e:
+            logger.warning(f"[EPUB] Missing dependency for EPUB: {e}")
+            return None
+
+        try:
+            book = epub.read_epub(str(epub_path), options={"ignore_ncx": True})
             parts: list[str] = []
-            with zipfile.ZipFile(epub_path, "r") as zf:
-                # Find the OPF file via container.xml
-                spine_items: list[str] = []
-                try:
-                    container = ET.fromstring(zf.read("META-INF/container.xml"))
-                    ns = {"c": "urn:oasis:names:tc:opendocument:xmlns:container"}
-                    rootfile = container.find(".//c:rootfile", ns)
-                    opf_path = rootfile.attrib["full-path"] if rootfile is not None else None
-                except Exception:
-                    opf_path = None
 
-                if opf_path:
-                    try:
-                        opf = ET.fromstring(zf.read(opf_path))
-                        opf_ns = {"opf": "http://www.idpf.org/2007/opf"}
-                        opf_dir = str(Path(opf_path).parent)
-                        manifest = {}
-                        for item in opf.findall(".//opf:manifest/opf:item", opf_ns):
-                            manifest[item.attrib.get("id", "")] = item.attrib.get("href", "")
-                        for itemref in opf.findall(".//opf:spine/opf:itemref", opf_ns):
-                            idref = itemref.attrib.get("idref", "")
-                            href = manifest.get(idref, "")
-                            if href:
-                                full = f"{opf_dir}/{href}" if opf_dir != "." else href
-                                spine_items.append(full)
-                    except Exception:
-                        pass
-
-                # Fallback: grab all .xhtml/.html files alphabetically
-                if not spine_items:
-                    spine_items = sorted(
-                        n for n in zf.namelist()
-                        if n.endswith((".xhtml", ".html", ".htm"))
-                        and "META-INF" not in n
-                    )
-
-                for item_path in spine_items:
-                    try:
-                        raw = zf.read(item_path).decode("utf-8", errors="replace")
-                        # Strip XML declaration and doctype for concatenation
-                        raw = raw.split("<body", 1)[-1] if "<body" in raw.lower() else raw
-                        if raw.startswith((" ", "\n", ">")):
-                            raw = "<body" + raw  # restore tag
-                        parts.append(raw)
-                    except Exception:
-                        continue
+            for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
+                soup = BeautifulSoup(item.get_content(), "html.parser")
+                body = soup.find("body")
+                if body:
+                    # Extract inner HTML of <body>, stripping SVG and script tags
+                    for tag in body.find_all(["svg", "script", "style"]):
+                        tag.decompose()
+                    inner = body.decode_contents()
+                    if inner.strip():
+                        parts.append(inner)
 
             if not parts:
                 return None
 
             html = (
                 "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-                f"<title>{epub_path.stem}</title></head>\n"
-                + "\n".join(parts)
-                + "\n</html>"
+                f"<title>{epub_path.stem}</title></head><body>\n"
+                + "\n<hr/>\n".join(parts)
+                + "\n</body></html>"
             )
 
             tmp = tempfile.NamedTemporaryFile(
@@ -643,6 +615,7 @@ class V2DocumentProcessor:
             )
             tmp.write(html)
             tmp.close()
+            logger.info(f"[EPUB] Extracted {len(parts)} chapters, {len(html)} bytes")
             return Path(tmp.name)
         except Exception as exc:
             logger.warning(f"[EPUB] Failed to convert EPUB to HTML: {exc}")

@@ -189,10 +189,18 @@ def main() -> int:
             md = o.get("metadata") or {}
             s = (o.get("content") or "").strip()
             rows.append((int(md.get("page_number") or 0), s, md))
-            strict += count_infix_artifacts(s)
+
+            is_code_chunk = (
+                str(md.get("chunk_type") or "").lower() == "code"
+                or str(md.get("content_classification") or "").lower() == "code"
+            )
+            # Skip infix artifact counting for code chunks — code naturally
+            # contains "word NUMBER. word" patterns (e.g., "width 3. print()")
+            if not is_code_chunk:
+                strict += count_infix_artifacts(s)
 
             rc = md.get("refined_content")
-            if isinstance(rc, str) and rc:
+            if isinstance(rc, str) and rc and not is_code_chunk:
                 ref_bad += count_infix_artifacts(rc)
 
             label = is_label_like(s)

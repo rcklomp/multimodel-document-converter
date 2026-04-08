@@ -10,6 +10,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 5. `docs/SRS_Multimodal_Ingestion_V2.5.md`
 6. `AGENTS.md`
 
+## Engineering Principles
+- **Libraries first, custom code last.** Before writing filters, heuristics, or workarounds, check whether the library (Docling, ebooklib, etc.) already has a configuration option or feature that solves the problem. The v2.4 script is a valid reference for what Docling can do natively.
+- **Keep configurations in sync.** `batch_processor.py` and `processor.py` each create their own `PdfPipelineOptions` independently. When changing Docling settings in one, check the other. There is no shared factory (known debt).
+- **Verify before converting.** Run the test suite and a single-document smoke test before starting batch conversions. Confirm schema version, chunk counts, and gate results on a real output before burning VLM credits.
+
 ## Project Invariants
 - Python is locked to 3.10 (`pyproject.toml`: `>=3.10,<3.11`).
 - Runtime target is Apple Silicon; prefer Torch MPS when available.

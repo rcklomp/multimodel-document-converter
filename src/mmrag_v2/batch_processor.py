@@ -927,16 +927,25 @@ class BatchProcessor:
         if self._docling_converter is None:
             pipeline_options = PdfPipelineOptions()
             pipeline_options.images_scale = 2.0
-            pipeline_options.generate_page_images = (
-                True  # ✅ REQ-PDF-04: FIXED - Enable page rendering for padding integrity
-            )
-            # MEMORY FIX: Disable picture/table image generation.
-            # We crop regions ourselves in layout_aware_processor using the
-            # PyMuPDF-rendered page image.  Docling's copies are never used
-            # and waste ~5-15 MB per batch that is never freed.
-            pipeline_options.generate_picture_images = False
+            pipeline_options.generate_page_images = True
+            # Use Docling's native image extraction — clean assets without
+            # white-space ghosts from page-render cropping.
+            pipeline_options.generate_picture_images = True
+            # Tables are extracted as markdown text, not images.
             pipeline_options.generate_table_images = False
             pipeline_options.do_ocr = True
+            # Prevent ", 1 =" cell-matching artifacts in table text.
+            # Must match processor.py setting (no shared factory yet).
+            if hasattr(pipeline_options, "do_cell_matching"):
+                pipeline_options.do_cell_matching = False
+            try:
+                from docling.datamodel.pipeline_options import TableStructureOptions, TableFormerMode
+                pipeline_options.table_structure_options = TableStructureOptions(
+                    do_cell_matching=False,
+                    mode=TableFormerMode.ACCURATE,
+                )
+            except ImportError:
+                pass
 
             self._docling_converter = DocumentConverter(
                 format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
@@ -5398,6 +5407,76 @@ class BatchProcessor:
         if removed:
             logger.info(
                 f"[VISUAL-FILTER] Removed {removed} no-visual-content image chunks "
+                f"({before} → {len(out)})"
+            )
+        return out
+
+    def _filter_blank_images(
+        self,
+        chunks: List[IngestionChunk],
+    ) -> List[IngestionChunk]:
+        """Remove image chunks whose asset file is blank or near-blank.
+
+        Docling sometimes extracts full-page background elements as images.
+        These are near-white (mean > 245, std < 20) or near-black pages that
+        add zero information to the RAG index.
+
+        Checks pixel statistics on the actual PNG file. If the file is missing
+        or can't be opened, the chunk is kept (fail-open).
+        """
+        try:
+            from PIL import Image
+            import numpy as np
+        except ImportError:
+            return chunks
+
+        before = len(chunks)
+        out: List[IngestionChunk] = []
+        removed = 0
+
+        for ch in chunks:
+            if ch.modality != Modality.IMAGE or not ch.asset_ref:
+                out.append(ch)
+                continue
+
+            asset_path = self.output_dir / ch.asset_ref.file_path
+            if not asset_path.exists():
+                out.append(ch)
+                continue
+
+            try:
+                img = Image.open(asset_path)
+                arr = np.array(img, dtype=np.float32)
+                mean_val = arr.mean()
+                std_val = arr.std()
+
+                # Near-white or near-black with very low variance = blank
+                is_blank = (
+                    (mean_val > 245 and std_val < 20)
+                    or (mean_val < 10 and std_val < 10)
+                )
+
+                if is_blank:
+                    logger.info(
+                        f"[BLANK-FILTER] Dropping blank image p{ch.metadata.page_number} "
+                        f"mean={mean_val:.1f} std={std_val:.1f}: {ch.asset_ref.file_path}"
+                    )
+                    # Delete the useless file from disk
+                    try:
+                        asset_path.unlink()
+                    except OSError:
+                        pass
+                    removed += 1
+                    continue
+
+            except Exception as e:
+                logger.debug(f"[BLANK-FILTER] Could not check {asset_path}: {e}")
+
+            out.append(ch)
+
+        if removed:
+            logger.info(
+                f"[BLANK-FILTER] Removed {removed} blank/near-blank images "
                 f"({before} → {len(out)})"
             )
         return out
