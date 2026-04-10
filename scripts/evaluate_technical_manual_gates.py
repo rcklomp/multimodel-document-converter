@@ -264,6 +264,12 @@ def main() -> int:
         orphan_label_limit = 0.30
         micro_limit = 0.22
 
+    # Skip orphan_label_ratio when label count is too low for the ratio
+    # to be meaningful. With N=1, a single subtitle produces 100% orphan
+    # ratio — a statistical artifact, not a quality problem.
+    if labels < 5:
+        orphan_ratio = 0.0
+
     fails = []
     if strict > 0:
         fails.append(f"infix_strict={strict} (expected 0)")

@@ -425,6 +425,19 @@ class BatchProcessor:
         self._enrich_asset_ref_from_disk(chunk)
         chunk_dict = chunk.model_dump(mode="json")
 
+        # Sanitize heading hierarchy: reject long headings that are clearly
+        # misclassified paragraphs/tables from Docling's layout model.
+        hierarchy = chunk_dict.get("metadata", {}).get("hierarchy")
+        if hierarchy:
+            ph = hierarchy.get("parent_heading")
+            if ph and (len(ph) > 80 or ph.count(". ") > 1):
+                hierarchy["parent_heading"] = None
+            # Also clean breadcrumb entries
+            bp = hierarchy.get("breadcrumb_path", [])
+            hierarchy["breadcrumb_path"] = [
+                b for b in bp if not isinstance(b, str) or len(b) <= 80
+            ]
+
         # Ensure schema_version is emitted in metadata for downstream versioning
         meta = chunk_dict.get("metadata", {})
         if meta.get("schema_version") is None:
@@ -989,9 +1002,23 @@ class BatchProcessor:
             label_obj = getattr(element, "label", None)
             label_ns = None
             if label_obj is not None:
-                label_ns = SimpleNamespace(
-                    value=str(label_obj.value) if hasattr(label_obj, "value") else str(label_obj)
-                )
+                label_val = str(label_obj.value) if hasattr(label_obj, "value") else str(label_obj)
+
+                # Fix Docling misclassification: table/paragraph text promoted to heading.
+                # A real heading is short (< 150 chars) and has at most 1 sentence.
+                # Multi-sentence or very long "headings" are body text that Docling's
+                # layout model failed to classify correctly.
+                if label_val in ("section_header", "title"):
+                    _htxt = str(getattr(element, "text", "")) if hasattr(element, "text") else ""
+                    _sentences = _htxt.count(". ") + _htxt.count(".\n")
+                    if len(_htxt) > 150 or _sentences > 2:
+                        label_val = "paragraph"
+                        logger.debug(
+                            f"[HEADING-FIX] Downgraded '{_htxt[:60]}...' to paragraph "
+                            f"(len={len(_htxt)}, sentences={_sentences})"
+                        )
+
+                label_ns = SimpleNamespace(value=label_val)
 
             text_val = str(getattr(element, "text", "")) if hasattr(element, "text") else ""
 
@@ -2115,6 +2142,10 @@ class BatchProcessor:
         self._doc_hash = self._compute_doc_hash(pdf_path)
         logger.info(f"Document hash: {self._doc_hash}")
 
+        # Extract TOC from PyMuPDF BEFORE splitting — gives us the correct
+        # heading hierarchy for every page, independent of batch boundaries.
+        self._toc_headings = self._extract_toc_headings(pdf_path)
+
         # Initialize global vision manager
         self._vision_manager = self._initialize_vision_manager()
         if self._vision_manager:
@@ -2591,6 +2622,7 @@ class BatchProcessor:
         # Look for prominent text patterns (all-caps lines, numbered sections)
         # and use them as parent_heading in the breadcrumb.
         all_chunks = self._infer_headings_from_text(all_chunks)
+        all_chunks = self._propagate_headings(all_chunks)
 
         # Selective OCR patching for encoding-corrupted chunks.
         # Keeps HybridChunker structure, replaces only the corrupted text spans.
@@ -4216,6 +4248,184 @@ class BatchProcessor:
 
         if updated:
             logger.info(f"[HEADING-INFER] Assigned inferred headings to {updated} chunks")
+
+        return chunks
+
+    @staticmethod
+    def _extract_toc_headings(pdf_path: Path) -> Dict[int, List[str]]:
+        """Extract TOC data from the PDF.
+
+        Returns two structures:
+        - page_map: page → breadcrumb at end of page [Part, Chapter, Section]
+        - heading_map: heading_title → full breadcrumb at the point where it appears
+
+        The heading_map is key: it maps each heading to its breadcrumb context,
+        so we can look up the correct hierarchy for a HybridChunker heading
+        regardless of which page the chunk is on.
+        """
+        try:
+            import fitz
+            doc = fitz.open(str(pdf_path))
+            toc = doc.get_toc()  # [(level, title, page), ...]
+            doc.close()
+
+            if not toc:
+                return {}
+
+            entries = [
+                (page, level, title.strip())
+                for level, title, page in toc
+                if title.strip() and len(title.strip()) <= 80
+            ]
+            if not entries:
+                return {}
+
+            # Build TWO maps:
+            # 1. page_map: page → breadcrumb (state at END of page, for chunks with no heading)
+            # 2. heading_map: normalized_title → breadcrumb (state WHEN that heading appears)
+
+            heading_map: Dict[str, List[str]] = {}  # norm_title → breadcrumb
+            page_map: Dict[int, List[str]] = {}
+
+            active: Dict[int, str] = {}
+            max_page = max(p for p, _, _ in entries) + 50
+
+            for entry_page, entry_level, entry_title in entries:
+                active[entry_level] = entry_title
+                for deeper in list(active.keys()):
+                    if deeper > entry_level:
+                        del active[deeper]
+                # Snapshot the breadcrumb at the moment this heading appears
+                bc = [active[lvl] for lvl in sorted(active.keys())]
+                import re as _re_tn
+                norm = _re_tn.sub(r"\s+", " ", entry_title.replace("\xa0", " ")).strip()
+                heading_map[norm] = bc
+
+            # Build page map (state at end of each page)
+            active = {}
+            for pg in range(1, max_page + 1):
+                for entry_page, entry_level, entry_title in entries:
+                    if entry_page > pg:
+                        break
+                    active[entry_level] = entry_title
+                    for deeper in list(active.keys()):
+                        if deeper > entry_level:
+                            del active[deeper]
+                if active:
+                    page_map[pg] = [active[lvl] for lvl in sorted(active.keys())]
+
+            logger.info(
+                f"[TOC] Extracted {len(entries)} TOC entries, "
+                f"{len(heading_map)} unique headings"
+            )
+
+            # Store both maps — page_map as the return value, heading_map as attribute
+            # We'll access heading_map via a class attribute set after this call
+            page_map["__heading_map__"] = heading_map  # type: ignore[assignment]
+            return page_map
+
+        except Exception as e:
+            logger.debug(f"[TOC] Could not extract TOC: {e}")
+            return {}
+
+    def _propagate_headings(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
+        """Assign heading hierarchy from the PDF's table of contents.
+
+        The TOC provides the authoritative document structure: Part > Chapter >
+        Section > Subsection. For each chunk, the breadcrumb is built from the
+        TOC based on page number. The parent_heading is the deepest (most
+        specific) level.
+
+        When HybridChunker already assigned a heading that appears in the TOC
+        hierarchy for that page, it's kept as the parent_heading (it's
+        position-accurate for page-boundary cases).
+
+        Falls back to forward-propagation when no TOC is available.
+        """
+        toc = getattr(self, "_toc_headings", {})
+        assigned = 0
+
+        if toc:
+            def _norm(s: str) -> str:
+                import re as _re_norm
+                return _re_norm.sub(r"\s+", " ", s.replace("\xa0", " ")).strip()
+
+            # heading_map: norm_title → breadcrumb at that heading's definition point
+            heading_map: Dict[str, List[str]] = toc.pop("__heading_map__", {})  # type: ignore[arg-type]
+
+            for ch in chunks:
+                if not ch.metadata or not ch.metadata.hierarchy:
+                    continue
+
+                pg = ch.metadata.page_number
+                toc_breadcrumb = toc.get(pg)
+                if not toc_breadcrumb:
+                    continue
+
+                existing_bp = ch.metadata.hierarchy.breadcrumb_path
+                doc_name = existing_bp[0] if existing_bp else "Document"
+                current_heading = ch.metadata.hierarchy.parent_heading
+
+                if current_heading:
+                    current_norm = _norm(current_heading)
+                    heading_bc = heading_map.get(current_norm)
+                    page_bc_norm = [_norm(b) for b in toc_breadcrumb]
+
+                    if heading_bc:
+                        heading_bc_norm = [_norm(b) for b in heading_bc]
+                        # The HybridChunker heading is only valid if it's a
+                        # child of the current page's TOC section. If its
+                        # parent chain belongs to a different section, it's
+                        # a stale heading from a previous batch boundary.
+                        is_child = all(
+                            hb in page_bc_norm
+                            for hb in heading_bc_norm
+                            if hb != current_norm
+                        )
+                        if is_child:
+                            # Valid: heading is within the page's section
+                            parent = current_heading
+                            new_bp = [doc_name] + heading_bc + [f"Page {pg}"]
+                        else:
+                            # Stale: heading belongs to a different section
+                            parent = toc_breadcrumb[-1]
+                            new_bp = [doc_name] + toc_breadcrumb + [f"Page {pg}"]
+                    elif current_norm in page_bc_norm:
+                        # Heading not in heading_map but matches a page TOC entry
+                        parent = current_heading
+                        new_bp = [doc_name] + toc_breadcrumb + [f"Page {pg}"]
+                    else:
+                        # Heading not in TOC at all — append to page breadcrumb
+                        parent = current_heading
+                        new_bp = [doc_name] + toc_breadcrumb + [current_heading, f"Page {pg}"]
+                else:
+                    parent = toc_breadcrumb[-1]
+                    new_bp = [doc_name] + toc_breadcrumb + [f"Page {pg}"]
+
+                ch.metadata.hierarchy.parent_heading = parent
+                ch.metadata.hierarchy.breadcrumb_path = new_bp
+                ch.metadata.hierarchy.level = min(len(new_bp), 5)
+                assigned += 1
+
+        else:
+            # No TOC — forward-propagate last known heading
+            last_heading: Optional[str] = None
+            for ch in chunks:
+                if ch.modality != Modality.TEXT or not ch.metadata or not ch.metadata.hierarchy:
+                    continue
+                ph = ch.metadata.hierarchy.parent_heading
+                if ph:
+                    last_heading = ph
+                elif last_heading:
+                    ch.metadata.hierarchy.parent_heading = last_heading
+                    bp = ch.metadata.hierarchy.breadcrumb_path
+                    if bp and len(bp) >= 2:
+                        ch.metadata.hierarchy.breadcrumb_path = [bp[0], last_heading, bp[-1]]
+                    assigned += 1
+
+        if assigned:
+            source = "TOC hierarchy" if toc else "forward-propagation"
+            logger.info(f"[HEADING-PROPAGATE] Assigned headings to {assigned} chunks via {source}")
 
         return chunks
 

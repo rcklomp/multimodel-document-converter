@@ -639,7 +639,11 @@ def process_document(
         api_key = cfg.vlm.api_key
     if vlm_timeout == 180 and cfg.vlm.timeout != 120:
         vlm_timeout = cfg.vlm.timeout
-    if not enable_refiner and cfg.refiner.enabled:
+    # Config provides default when user didn't explicitly set a flag.
+    # But --no-refiner on the CLI must win over the config file.
+    import sys as _sys
+    _refiner_explicitly_disabled = "--no-refiner" in _sys.argv
+    if not enable_refiner and cfg.refiner.enabled and not _refiner_explicitly_disabled:
         enable_refiner = True
         if refiner_provider == "ollama" and cfg.refiner.provider:
             refiner_provider = cfg.refiner.provider

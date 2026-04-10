@@ -226,9 +226,23 @@ class HierarchyMetadata(BaseModel):
     REQ-HIER-04: Breadcrumb depth MUST match hierarchy.level value.
     """
 
-    parent_heading: Optional[str] = Field(default=None)
+    parent_heading: Optional[str] = Field(default=None, max_length=80)
     breadcrumb_path: List[str] = Field(default_factory=list)
     level: Optional[int] = Field(default=None, ge=1, le=5)
+
+    @field_validator("parent_heading", mode="before")
+    @classmethod
+    def reject_long_headings(cls, v: Optional[str]) -> Optional[str]:
+        """Reject headings that are clearly misclassified paragraphs/tables.
+
+        Docling's layout model sometimes promotes body text to section_header.
+        Real chapter headings are concise (< 80 chars, ≤ 1 sentence).
+        """
+        if v is None:
+            return v
+        if len(v) > 80 or v.count(". ") > 1 or v.count(".\n") > 1:
+            return None
+        return v
 
     @model_validator(mode="after")
     def sync_level_with_breadcrumbs(self) -> "HierarchyMetadata":

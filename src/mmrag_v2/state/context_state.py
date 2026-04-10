@@ -87,6 +87,14 @@ def is_valid_heading(text: str) -> bool:
     if len(text) < MIN_HEADING_LENGTH:
         return False
 
+    # Too long or multi-sentence — real headings are concise. Docling's layout
+    # model sometimes misclassifies paragraphs/tables as section_header.
+    # Real chapter titles rarely exceed 80 chars.
+    if len(text) > 80:
+        return False
+    if text.count(". ") + text.count(".\n") > 1:
+        return False
+
     # Noise pattern (only symbols, bullets, etc.)
     if NOISE_PATTERN.match(text):
         return False
