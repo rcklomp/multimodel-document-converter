@@ -2682,23 +2682,33 @@ class BatchProcessor:
             # Derive is_scan from document_modality (key set by cli.py intelligence stack).
             _modality = intel.get("document_modality") or ""
             _is_scan: Optional[bool] = _modality.startswith("scanned") if _modality else None
+            # Compute provenance hashes
+            import hashlib as _hl
+            _src_hash = None
+            if self._current_pdf_path and self._current_pdf_path.exists():
+                _h = _hl.sha256()
+                with open(self._current_pdf_path, "rb") as _sf:
+                    for _blk in iter(lambda: _sf.read(8192), b""):
+                        _h.update(_blk)
+                _src_hash = _h.hexdigest()
+
             meta_record = IngestionMetadata(
                 schema_version=SCHEMA_VERSION,
                 doc_id=export_chunks[0].doc_id if export_chunks else "",
                 source_file=Path(self._current_pdf_path).name if self._current_pdf_path else "",
                 profile_type=intel.get("profile_type"),
-                document_type=intel.get("document_modality"),  # physical doc type: native_digital, scanned_clean, scanned_degraded, image_heavy
-                domain=intel.get("document_domain"),  # key is "document_domain" in intel dict
+                document_type=intel.get("document_modality"),
+                domain=intel.get("document_domain"),
                 is_scan=_is_scan,
                 total_pages=self._doc_total_pages,
                 image_density=self._doc_image_density,
-                # Recalculate avg_text_per_page from actual extracted text
-                # (not PyMuPDF native text, which is 0 for scanned docs).
                 avg_text_per_page=self._calculate_actual_avg_text(export_chunks),
                 has_flat_text_corruption=self.has_flat_text_corruption,
                 has_encoding_corruption=self.has_encoding_corruption,
                 chunk_count=len(export_chunks),
                 ingestion_timestamp=datetime.now(timezone.utc).isoformat(),
+                pipeline_version=SCHEMA_VERSION,
+                source_file_hash=_src_hash,
             )
             f.write(json.dumps(meta_record.model_dump(mode="json"), ensure_ascii=False) + "\n")
 

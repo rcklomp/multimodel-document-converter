@@ -21,6 +21,13 @@ import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# Current pipeline version for provenance comparison
+try:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+    from mmrag_v2.version import __schema_version__ as CURRENT_VERSION
+except ImportError:
+    CURRENT_VERSION = "unknown"
 from typing import Optional
 
 
@@ -97,6 +104,15 @@ def audit(jsonl_path: Path) -> AuditResult:
                 r.source_file = obj.get("source_file", "")
                 r.profile_type = obj.get("profile_type", "unknown")
                 r.schema_version = obj.get("schema_version", "")
+                # Provenance checks
+                pv = obj.get("pipeline_version", "")
+                if pv and pv != CURRENT_VERSION:
+                    r.add_issue("PROVENANCE", f"pipeline_version={pv} != current {CURRENT_VERSION}")
+                sv = obj.get("schema_version", "")
+                if sv and sv != CURRENT_VERSION:
+                    r.add_issue("PROVENANCE", f"schema_version={sv} != current {CURRENT_VERSION}")
+                if not obj.get("source_file_hash"):
+                    r.add_issue("PROVENANCE", "missing source_file_hash")
                 continue
 
             r.total_chunks += 1

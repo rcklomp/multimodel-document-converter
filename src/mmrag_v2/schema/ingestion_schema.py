@@ -574,6 +574,11 @@ class IngestionMetadata(BaseModel):
     chunk_count: Optional[int] = None
     ingestion_timestamp: str = ""
 
+    # Provenance fields — detect stale outputs from older pipeline versions
+    pipeline_version: Optional[str] = None
+    source_file_hash: Optional[str] = None  # SHA-256
+    config_hash: Optional[str] = None  # SHA-256 of relevant pipeline options
+
 
 # ============================================================================
 # HELPER FUNCTIONS
