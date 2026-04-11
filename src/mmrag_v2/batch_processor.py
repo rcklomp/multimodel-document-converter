@@ -4378,11 +4378,22 @@ class BatchProcessor:
                     logger.debug(f"[PYMUPDF-IMAGES] Could not extract xref {xref}: {e}")
                     continue
 
-                # Skip page background/layout images. Magazines embed
-                # rasterized page layouts as large images. Real editorial
-                # photos rarely exceed 30% of the page area.
-                img_area = pix.width * pix.height
-                if img_area / max(page_area, 1) > 0.30:
+                # Skip full-page background/layout images.
+                # Use pixel dimensions matching page dimensions as the
+                # signal: if the image is the same size as the page in
+                # pixels, it's a full-page background (rendered at 1:1).
+                is_full_page = (
+                    abs(pix.width - int(page_w)) < 20
+                    and abs(pix.height - int(page_h)) < 20
+                )
+                # For magazines: also skip images wider than the page
+                # (rasterized page layouts with text overlays)
+                is_page_layout = (
+                    _doc_mod == "image_heavy"
+                    and pix.width > int(page_w) * 0.9
+                    and pix.height > 200
+                )
+                if is_full_page or is_page_layout:
                     logger.debug(
                         f"[PYMUPDF-IMAGES] Skipping full-page image on pg {actual_page} "
                         f"({pix.width}x{pix.height})"
