@@ -4270,7 +4270,10 @@ class BatchProcessor:
             doc.close()
 
             if not toc:
-                return {}
+                doc2 = fitz.open(str(pdf_path))
+                result = BatchProcessor._extract_toc_from_content(doc2)
+                doc2.close()
+                return result
 
             entries = [
                 (page, level, title.strip())
@@ -4327,6 +4330,86 @@ class BatchProcessor:
         except Exception as e:
             logger.debug(f"[TOC] Could not extract TOC: {e}")
             return {}
+
+    @staticmethod
+    def _extract_toc_from_content(doc) -> Dict[int, List[str]]:
+        """Extract article titles from magazine TOC pages when no PDF bookmarks exist.
+
+        Scans pages 1-15 for TOC-like content: lines matching NUMBER TITLE
+        or TITLE NUMBER. Finds the page with the highest density of matches
+        (the actual TOC page) and uses only entries from that page.
+
+        Returns the same page_map + heading_map format as _extract_toc_headings.
+        Returns empty dict if confidence is too low (< 50% of entries valid).
+        """
+        import re
+
+        total_pages = len(doc)
+        if total_pages < 5:
+            return {}
+
+        # Scan pages 1-15 for TOC candidates
+        page_candidates: Dict[int, list] = {}  # page_idx → list of (ref_pg, title)
+        for pg_idx in range(min(15, total_pages)):
+            text = doc.load_page(pg_idx).get_text("text")
+            entries = []
+            for line in text.split("\n"):
+                line = line.strip()
+                if not line or len(line) < 5:
+                    continue
+                # Pattern: NUMBER TITLE (e.g., "28 Dancing with the Devils")
+                m = re.match(r"^(\d{1,3})\s+(.{5,60})$", line)
+                if m:
+                    ref_pg = int(m.group(1))
+                    title = m.group(2).strip()
+                    # Page ref must be within document and after this page
+                    if pg_idx + 1 < ref_pg <= total_pages:
+                        entries.append((ref_pg, title))
+            if entries:
+                page_candidates[pg_idx + 1] = entries
+
+        if not page_candidates:
+            logger.info("[TOC-CONTENT] No TOC candidates found on pages 1-15")
+            return {}
+
+        # Find the page with the most entries — that's the actual TOC page
+        toc_page = max(page_candidates, key=lambda p: len(page_candidates[p]))
+        entries = page_candidates[toc_page]
+
+        # Confidence check: need at least 3 entries
+        if len(entries) < 3:
+            logger.info(
+                f"[TOC-CONTENT] Only {len(entries)} entries on page {toc_page} — "
+                f"below confidence threshold, falling back to document-level breadcrumbs"
+            )
+            return {}
+
+        logger.info(
+            f"[TOC-CONTENT] Found {len(entries)} article entries on page {toc_page}"
+        )
+
+        # Sort entries by page number to build article ranges
+        entries.sort(key=lambda e: e[0])
+
+        # Build page_map: each page maps to its article title (flat, L1 only)
+        # Article A runs from its start page to the page before article B starts
+        heading_map: Dict[str, List[str]] = {}
+        page_map: Dict[int, List[str]] = {}
+
+        for i, (start_pg, title) in enumerate(entries):
+            end_pg = entries[i + 1][0] - 1 if i + 1 < len(entries) else total_pages
+            norm_title = re.sub(r"\s+", " ", title.replace("\xa0", " ")).strip()
+            heading_map[norm_title] = [title]  # flat hierarchy for magazines
+            for pg in range(start_pg, end_pg + 1):
+                page_map[pg] = [title]
+
+        logger.info(
+            f"[TOC-CONTENT] Built article ranges for {len(entries)} articles, "
+            f"covering pages {entries[0][0]}-{entries[-1][0]}"
+        )
+
+        page_map["__heading_map__"] = heading_map  # type: ignore[assignment]
+        return page_map
 
     def _propagate_headings(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
         """Assign heading hierarchy from the PDF's table of contents.
@@ -4395,9 +4478,12 @@ class BatchProcessor:
                         parent = current_heading
                         new_bp = [doc_name] + toc_breadcrumb + [f"Page {pg}"]
                     else:
-                        # Heading not in TOC at all — append to page breadcrumb
-                        parent = current_heading
-                        new_bp = [doc_name] + toc_breadcrumb + [current_heading, f"Page {pg}"]
+                        # Heading not in TOC at all. Use the TOC page heading
+                        # instead — the HybridChunker heading is likely OCR
+                        # noise from stylized magazine text or a misclassified
+                        # paragraph. The TOC article title is more reliable.
+                        parent = toc_breadcrumb[-1]
+                        new_bp = [doc_name] + toc_breadcrumb + [f"Page {pg}"]
                 else:
                     parent = toc_breadcrumb[-1]
                     new_bp = [doc_name] + toc_breadcrumb + [f"Page {pg}"]
