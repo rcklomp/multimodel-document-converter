@@ -68,6 +68,9 @@ class AuditResult:
     long_headings: int = 0            # parent_heading > 80 chars (misclassified)
     shallow_breadcrumbs: int = 0      # breadcrumb has only [doc, page] — no TOC hierarchy
     multi_sentence_headings: int = 0  # headings with > 1 sentence (". " count)
+    unique_headings: int = 0          # count of distinct parent_heading values
+    heading_fragmentation: float = 0.0  # unique_headings / text_chunks — high = noisy
+    suspicious_headings: int = 0      # headings matching non-heading patterns
 
     # Schema consistency
     version_mismatches: int = 0
@@ -91,6 +94,7 @@ def audit(jsonl_path: Path) -> AuditResult:
 
     versions = set()
     asset_refs = []
+    all_headings_seen: set = set()
 
     with open(jsonl_path, "r", encoding="utf-8") as f:
         for lineno, raw in enumerate(f, 1):
@@ -177,12 +181,23 @@ def audit(jsonl_path: Path) -> AuditResult:
 
                 if ph:
                     r.text_with_heading += 1
+                    all_headings_seen.add(ph)
                     if len(ph) > 80:
                         r.long_headings += 1
                         r.add_issue("HEADING", f"pg{meta.get('page_number')}: heading > 80 chars: \"{ph[:60]}...\"")
                     if ph.count(". ") > 1 or ph.count(".\n") > 1:
                         r.multi_sentence_headings += 1
                         r.add_issue("HEADING", f"pg{meta.get('page_number')}: multi-sentence heading: \"{ph[:60]}...\"")
+                    # Suspicious: structural markers misclassified as headings
+                    import re as _re_sh
+                    _ph_lower = ph.lower().strip()
+                    if _re_sh.match(
+                        r"^(this chapter covers|\(continued\)|listing \d[\d.]*\b"
+                        r"|figure \d[\d.]*\b|table \d[\d.]*\b"
+                        r"|example \d[\d.-]*\.)",  # "Example 4-20." not "Example 2: title"
+                        _ph_lower
+                    ):
+                        r.suspicious_headings += 1
                 else:
                     r.text_without_heading += 1
 
@@ -204,6 +219,11 @@ def audit(jsonl_path: Path) -> AuditResult:
             fp = asset_ref.get("file_path", "")
             if fp:
                 asset_refs.append(fp)
+
+    # Heading fragmentation: unique headings / text chunks
+    r.unique_headings = len(all_headings_seen)
+    if r.text_chunks > 0:
+        r.heading_fragmentation = r.unique_headings / r.text_chunks
 
     # Check asset files exist
     for ref in asset_refs:
@@ -301,22 +321,31 @@ def print_report(r: AuditResult, path: Path) -> bool:
 
     # Heading quality
     heading_coverage = r.text_with_heading / max(r.text_chunks, 1)
-    heading_ok = r.long_headings == 0 and r.multi_sentence_headings == 0 and heading_coverage >= 0.80
+    heading_ok = (
+        r.long_headings == 0
+        and r.multi_sentence_headings == 0
+        and heading_coverage >= 0.80
+        and r.suspicious_headings == 0
+    )
     if heading_coverage >= 0.90:
         cov_label = "PASS"
     elif heading_coverage >= 0.70:
         cov_label = "WARN"
     else:
         cov_label = "FAIL"
-    heading_label = "PASS" if heading_ok else ("WARN" if r.long_headings == 0 else "FAIL")
+    frag_label = "OK" if r.heading_fragmentation <= 0.40 else "HIGH"
+    heading_label = "PASS" if heading_ok else "FAIL"
     print(f"  HEADING:     {heading_label}")
     print(f"    coverage: {r.text_with_heading}/{r.text_chunks} ({heading_coverage:.0%}) [{cov_label}]")
+    print(f"    unique headings: {r.unique_headings} (fragmentation: {r.heading_fragmentation:.0%}) [{frag_label}]")
     if r.text_without_heading:
         print(f"    null_headings: {r.text_without_heading}")
     if r.long_headings:
         print(f"    long_headings (>80): {r.long_headings}")
     if r.multi_sentence_headings:
         print(f"    multi_sentence: {r.multi_sentence_headings}")
+    if r.suspicious_headings:
+        print(f"    suspicious_headings: {r.suspicious_headings}")
     if r.shallow_breadcrumbs:
         print(f"    shallow_breadcrumbs: {r.shallow_breadcrumbs} (advisory)")
 
@@ -342,6 +371,7 @@ def print_report(r: AuditResult, path: Path) -> bool:
         or not schema_ok
         or r.long_headings > 0
         or r.multi_sentence_headings > 0
+        or r.suspicious_headings > 0
     )
     passed = not hard_fail
     print(f"\n  {'AUDIT_PASS' if passed else 'AUDIT_FAIL'}")
