@@ -361,6 +361,35 @@ class VisionCache:
 
 
 # ============================================================================
+# SHARED HTTP HELPER
+# ============================================================================
+
+
+def _post_with_deadline(url, *, headers, json, connect_timeout=10, read_timeout=180, deadline=200):
+    """requests.post with a hard thread-based deadline.
+
+    The `requests` timeout only detects socket-level silence. A server
+    that keeps the TCP connection alive but never sends the response body
+    will hang forever. This wrapper runs the request in a daemon thread
+    and raises requests.Timeout if the deadline is exceeded.
+    """
+    import concurrent.futures
+    import requests
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            requests.post, url, headers=headers, json=json,
+            timeout=(connect_timeout, read_timeout),
+        )
+        try:
+            return future.result(timeout=deadline)
+        except concurrent.futures.TimeoutError:
+            future.cancel()
+            raise requests.Timeout(
+                f"Hard deadline {deadline}s exceeded (connect={connect_timeout}, read={read_timeout})"
+            )
+
+
+# ============================================================================
 # VISION PROVIDERS (Abstract Base)
 # ============================================================================
 
@@ -528,10 +557,13 @@ class OllamaProvider(VisionProvider):
                 f"[VLM-REQ {request_id}] provider=ollama model={self.model} "
                 f"timeout={self.timeout}s image_kb={img_size_kb:.1f}"
             )
-            response = requests.post(
+            response = _post_with_deadline(
                 f"{self.host}/api/generate",
+                headers={},
                 json=payload,
-                timeout=(10, self.timeout),
+                connect_timeout=10,
+                read_timeout=self.timeout,
+                deadline=self.timeout + 20,
             )
             response.raise_for_status()
             result = response.json()
@@ -621,28 +653,6 @@ class OpenAIProvider(VisionProvider):
         self._request_seq = 0
         self._resolved_model: Optional[str] = None
 
-    @staticmethod
-    def _post_with_deadline(url, *, headers, json, connect_timeout=10, read_timeout=180, deadline=200):
-        """requests.post with a hard thread-based deadline.
-
-        The `requests` timeout only detects socket-level silence. A server
-        that keeps the TCP connection alive but never sends the response body
-        will hang forever. This wrapper runs the request in a daemon thread
-        and raises requests.Timeout if the deadline is exceeded.
-        """
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(
-                requests.post, url, headers=headers, json=json,
-                timeout=(connect_timeout, read_timeout),
-            )
-            try:
-                return future.result(timeout=deadline)
-            except concurrent.futures.TimeoutError:
-                future.cancel()
-                raise requests.Timeout(
-                    f"Hard deadline {deadline}s exceeded (connect={connect_timeout}, read={read_timeout})"
-                )
         self._model_cache: Optional[Tuple[float, list[str]]] = None
         self._model_cache_ttl_sec: float = 120.0
 
@@ -864,7 +874,7 @@ class OpenAIProvider(VisionProvider):
                 f"[VLM-REQ {request_id}] provider=openai model={payload['model']} "
                 f"timeout={self.timeout}s endpoint={api_url}"
             )
-            response = self._post_with_deadline(
+            response = _post_with_deadline(
                 api_url,
                 headers=headers,
                 json=payload,
@@ -910,7 +920,7 @@ class OpenAIProvider(VisionProvider):
                     logger.warning(
                         f"[VLM-RETRY {request_id}] provider=openai model_not_found, retrying with model={resolved}"
                     )
-                    retry_response = self._post_with_deadline(
+                    retry_response = _post_with_deadline(
                         api_url,
                         headers=headers,
                         json=retry_payload,
@@ -1018,11 +1028,13 @@ class AnthropicProvider(VisionProvider):
         }
 
         try:
-            response = requests.post(
+            response = _post_with_deadline(
                 "https://api.anthropic.com/v1/messages",
                 headers=headers,
                 json=payload,
-                timeout=(10, self.timeout),
+                connect_timeout=10,
+                read_timeout=self.timeout,
+                deadline=self.timeout + 20,
             )
             response.raise_for_status()
             result = response.json()
