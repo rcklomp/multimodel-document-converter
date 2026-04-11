@@ -4388,6 +4388,7 @@ class BatchProcessor:
                 )
                 # For magazines: also skip images wider than the page
                 # (rasterized page layouts with text overlays)
+                _doc_mod = intel.get("document_modality", "")
                 is_page_layout = (
                     _doc_mod == "image_heavy"
                     and pix.width > int(page_w) * 0.9
