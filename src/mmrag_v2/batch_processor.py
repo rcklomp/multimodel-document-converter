@@ -2949,6 +2949,26 @@ class BatchProcessor:
             f"final attempted {len(export_chunks)})"
         )
 
+        # Clean up orphan assets: files saved to disk during extraction but
+        # not referenced in the final JSONL (e.g., Docling images skipped in
+        # favor of PyMuPDF extraction for digital PDFs).
+        assets_dir = self.output_dir / "assets"
+        if assets_dir.exists():
+            referenced_files = set()
+            with open(output_jsonl, "r", encoding="utf-8") as _rf:
+                for _rl in _rf:
+                    _robj = json.loads(_rl)
+                    _fp = (_robj.get("asset_ref") or {}).get("file_path", "")
+                    if _fp:
+                        referenced_files.add(Path(_fp).name)
+            orphans_removed = 0
+            for asset_file in assets_dir.iterdir():
+                if asset_file.suffix == ".png" and asset_file.name not in referenced_files:
+                    asset_file.unlink()
+                    orphans_removed += 1
+            if orphans_removed:
+                logger.info(f"[CLEANUP] Removed {orphans_removed} orphan asset files")
+
         # Get vision stats and flush cache
         # PHANTOM BUG FIX: Add try-except to catch IndexError during cache operations
         vision_stats = dict(prefinal_vision_stats) if prefinal_vision_stats else {}
@@ -4358,9 +4378,11 @@ class BatchProcessor:
                     logger.debug(f"[PYMUPDF-IMAGES] Could not extract xref {xref}: {e}")
                     continue
 
-                # Skip full-page background images
+                # Skip page background/layout images. Magazines embed
+                # rasterized page layouts as large images (>40% of page).
+                # Real editorial photos are smaller discrete elements.
                 img_area = pix.width * pix.height
-                if img_area / max(page_area, 1) > 0.90:
+                if img_area / max(page_area, 1) > 0.40:
                     logger.debug(
                         f"[PYMUPDF-IMAGES] Skipping full-page image on pg {actual_page} "
                         f"({pix.width}x{pix.height})"
