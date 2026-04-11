@@ -2297,23 +2297,6 @@ class V2DocumentProcessor:
         """
         from docling_core.transforms.chunker import HybridChunker
 
-        # Fix Docling misclassification: downgrade headings that are clearly
-        # body text (too long, multiple sentences). This fixes the document tree
-        # BEFORE the chunker builds its heading hierarchy from it.
-        try:
-            from docling_core.types.doc.labels import DocItemLabel
-            _heading_labels = {DocItemLabel.SECTION_HEADER, DocItemLabel.TITLE}
-            for item, _level in doc.iterate_items():
-                if getattr(item, "label", None) in _heading_labels:
-                    _txt = getattr(item, "text", "") or ""
-                    _sents = _txt.count(". ") + _txt.count(".\n")
-                    if len(_txt) > 150 or _sents > 2:
-                        item.label = DocItemLabel.PARAGRAPH
-                        logger.debug(
-                            f"[HEADING-FIX] Downgraded to paragraph: '{_txt[:60]}...'"
-                        )
-        except Exception as e:
-            logger.debug(f"[HEADING-FIX] Skipped: {e}")
 
         chunker = HybridChunker(
             tokenizer="sentence-transformers/all-MiniLM-L6-v2",
