@@ -103,9 +103,18 @@ def is_valid_heading(text: str) -> bool:
     if PAGE_NUMBER_PATTERN.match(text):
         return False
 
-    # Structural filters — language-agnostic patterns that indicate
-    # non-heading content (credit lines, copyright notices, TOC lines).
+    # Structural filters — patterns that indicate non-heading content.
     import re as _re
+
+    # Caption/reference patterns misclassified as headings by Docling
+    _lower = text.lower().strip()
+    if _re.match(
+        r"^(this chapter covers|\(continued\)"
+        r"|listing \d|figure \d|table \d"
+        r"|example \d[\d.-]*\.)",  # "Example 4-20." but not "Example 2: Title"
+        _lower,
+    ):
+        return False
 
     # "Role: Name" pattern (credit lines in any language)
     if _re.match(r"^[A-Za-z\s]{3,30}:\s+[A-Z]", text):
