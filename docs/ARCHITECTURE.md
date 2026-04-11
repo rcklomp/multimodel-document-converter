@@ -35,8 +35,21 @@ CORRECT OUTPUT:
 A **Universal Intermediate Representation (UIR)** that decouples format-specific extraction from quality-based processing, ensuring:
 
 1. TEXT regions → OCR cascade → `modality: "text"`
-2. IMAGE regions → VLM visual description → `modality: "image"`
+2. IMAGE regions → extraction strategy by document class → `modality: "image"`
 3. TABLE regions → Structure extraction → `modality: "table"`
+
+### Image Extraction Strategy (Classification-Driven)
+
+The document classifier (`document_modality`) determines the image extraction approach:
+
+| Document Class | Image Extraction | Rationale |
+|---|---|---|
+| `native_digital` | **PyMuPDF `page.get_images()`** — extract embedded image objects directly from the PDF stream | Digital PDFs store photos as discrete embedded objects with exact coordinates. No layout guessing needed. |
+| `image_heavy` (magazines) | **PyMuPDF embedded extraction** + size/position filtering | Magazines are digital PDFs with many embedded images. Layout model produces oversized bounding boxes that include text; direct extraction gives clean photos. |
+| `scanned_clean` | **Docling layout model** — detect image regions from rendered pages | Scanned pages ARE images; there are no embedded objects. Layout model segments the page into text/image regions. |
+| `scanned_degraded` | **Docling layout model** + VLM verification | Same as scanned_clean but with VLM gating for quality assurance on degraded pages. |
+
+This routing extends the existing classification-driven pipeline (which already routes OCR, chunking thresholds, and profile parameters) to image extraction.
 
 ---
 
