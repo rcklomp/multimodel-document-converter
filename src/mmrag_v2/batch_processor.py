@@ -943,13 +943,23 @@ class BatchProcessor:
             pipeline_options.generate_page_images = True
             # Use Docling's native image extraction — clean assets without
             # white-space ghosts from page-render cropping.
-            pipeline_options.generate_picture_images = True
-            # Classify pictures by type (photo, diagram, chart, etc.) and reject
-            # layout artifacts (full-page captures, thumbnails).
-            pipeline_options.do_picture_classification = True
-            pipeline_options.picture_description_options.classification_deny = [
-                "full_page_image", "page_thumbnail",
-            ]
+            # Image extraction strategy depends on document class.
+            # For digital PDFs, PyMuPDF extracts clean embedded images directly.
+            # For scanned docs, Docling's layout model detects image regions.
+            _doc_mod = self._intelligence_metadata.get("document_modality", "")
+            _is_digital = _doc_mod in ("native_digital", "image_heavy")
+            if _is_digital:
+                # Digital: skip Docling picture extraction — use PyMuPDF instead
+                pipeline_options.generate_picture_images = False
+                logger.info("[DOCLING-LAYOUT] Digital PDF: picture extraction disabled (PyMuPDF route)")
+            else:
+                # Scanned: use Docling layout model for image regions
+                pipeline_options.generate_picture_images = True
+                pipeline_options.do_picture_classification = True
+                pipeline_options.picture_description_options.classification_deny = [
+                    "full_page_image", "page_thumbnail",
+                ]
+                logger.info("[DOCLING-LAYOUT] Scanned PDF: Docling picture extraction + classification")
             # Tables are extracted as markdown text, not images.
             pipeline_options.generate_table_images = False
             pipeline_options.do_ocr = True
@@ -2043,19 +2053,21 @@ class BatchProcessor:
             )
 
         # ================================================================
-        # V2.4.0: STANDARD DOCLING PIPELINE + SHADOW SAFETY NET
+        # IMAGE EXTRACTION: Classification-driven routing
         # ================================================================
-        # Per SRS v2.4 Section 4.3:
-        # - Docling extracts structured elements (text, images, tables)
-        # - Shadow extraction runs AFTER Docling as safety net (REQ-MM-05/06/07)
-        # - Catches large images (300x300px OR 40% page area) Docling may miss
-        # - Full-page assets (>95% area) require VLM verification (IRON-07)
+        # Digital PDFs: PyMuPDF extracts embedded image objects directly
+        # Scanned PDFs: Docling layout model detects image regions
         # ================================================================
+        _doc_mod = self._intelligence_metadata.get("document_modality", "")
+        _is_digital = _doc_mod in ("native_digital", "image_heavy")
 
-        # Standard flow: Docling extraction (V3.0.0 architecture)
+        # Standard flow: Docling extraction for text + tables
         chunks: List[IngestionChunk] = []
         try:
             for chunk in processor.process_document(str(batch_info.batch_path)):
+                # For digital PDFs, skip Docling's image chunks (we use PyMuPDF instead)
+                if _is_digital and chunk.modality == Modality.IMAGE:
+                    continue
                 chunks.append(chunk)
         except IndexError as e:
             import traceback
@@ -2098,6 +2110,25 @@ class BatchProcessor:
             except Exception:
                 pass
             gc.collect()
+
+        # ================================================================
+        # PYMUPDF IMAGE EXTRACTION (digital PDFs only)
+        # ================================================================
+        # For native_digital and image_heavy documents, extract embedded
+        # image objects directly from the PDF. These are clean photos,
+        # diagrams, and charts — no layout model guessing needed.
+        # ================================================================
+        if _is_digital:
+            pymupdf_images = self._extract_embedded_images(
+                batch_path=batch_info.batch_path,
+                page_offset=batch_info.page_offset,
+                source_file=source_file,
+            )
+            chunks.extend(pymupdf_images)
+            logger.info(
+                f"[PYMUPDF-IMAGES] Batch {batch_info.batch_index + 1}: "
+                f"extracted {len(pymupdf_images)} embedded images"
+            )
 
         # REQ-STRUCT-01: Flat Code OCR Rescue — legacy-path post-pass.
         # The layout-aware path runs rescue inline (per page). For the legacy Docling path
@@ -4265,6 +4296,134 @@ class BatchProcessor:
         if updated:
             logger.info(f"[HEADING-INFER] Assigned inferred headings to {updated} chunks")
 
+        return chunks
+
+    def _extract_embedded_images(
+        self,
+        batch_path: Path,
+        page_offset: int,
+        source_file: str,
+    ) -> List[IngestionChunk]:
+        """Extract embedded image objects from a digital PDF using PyMuPDF.
+
+        For native_digital and image_heavy documents, the PDF contains discrete
+        embedded image objects (photos, diagrams, charts) with exact coordinates.
+        This is more accurate than Docling's layout model which guesses image
+        regions and often captures surrounding text.
+
+        Filters:
+        - Minimum size: 100x100 pixels (skip icons, bullets, decorations)
+        - Maximum area ratio: skip full-page background images (>90% of page)
+        """
+        import fitz
+        from .schema.ingestion_schema import (
+            create_image_chunk, FileType, HierarchyMetadata, COORD_SCALE,
+        )
+
+        chunks: List[IngestionChunk] = []
+        doc_hash = self._doc_hash or "unknown"
+        intel = self._intelligence_metadata or {}
+
+        try:
+            pdf = fitz.open(str(batch_path))
+        except Exception as e:
+            logger.warning(f"[PYMUPDF-IMAGES] Could not open {batch_path}: {e}")
+            return chunks
+
+        fig_index = 0
+
+        for page_idx in range(len(pdf)):
+            page = pdf.load_page(page_idx)
+            actual_page = page_idx + 1 + page_offset
+            page_w, page_h = page.rect.width, page.rect.height
+            page_area = page_w * page_h
+
+            for img_info in page.get_images(full=True):
+                xref = img_info[0]
+                img_w, img_h = img_info[2], img_info[3]
+
+                # Skip small images (icons, bullets, logos)
+                if img_w < 100 or img_h < 100:
+                    continue
+
+                # Extract the image
+                try:
+                    pix = fitz.Pixmap(pdf, xref)
+                    # Convert CMYK to RGB
+                    if pix.n > 4:
+                        pix = fitz.Pixmap(fitz.csRGB, pix)
+                    elif pix.n == 4:
+                        pix = fitz.Pixmap(fitz.csRGB, pix)
+                except Exception as e:
+                    logger.debug(f"[PYMUPDF-IMAGES] Could not extract xref {xref}: {e}")
+                    continue
+
+                # Skip full-page background images
+                img_area = pix.width * pix.height
+                if img_area / max(page_area, 1) > 0.90:
+                    logger.debug(
+                        f"[PYMUPDF-IMAGES] Skipping full-page image on pg {actual_page} "
+                        f"({pix.width}x{pix.height})"
+                    )
+                    continue
+
+                # Save to disk
+                fig_index += 1
+                asset_name = f"{doc_hash}_{actual_page:03d}_photo_{fig_index:02d}.png"
+                asset_path = f"assets/{asset_name}"
+                full_path = self.output_dir / "assets" / asset_name
+                full_path.parent.mkdir(parents=True, exist_ok=True)
+
+                try:
+                    pix.save(str(full_path))
+                except Exception as e:
+                    logger.debug(f"[PYMUPDF-IMAGES] Could not save {asset_name}: {e}")
+                    continue
+                finally:
+                    pix = None
+
+                # Get image position on page for bbox
+                img_rects = page.get_image_rects(xref)
+                if img_rects:
+                    rect = img_rects[0]
+                    bbox = [
+                        int(rect.x0 / page_w * COORD_SCALE),
+                        int(rect.y0 / page_h * COORD_SCALE),
+                        int(rect.x1 / page_w * COORD_SCALE),
+                        int(rect.y1 / page_h * COORD_SCALE),
+                    ]
+                    bbox = [max(0, min(COORD_SCALE, v)) for v in bbox]
+                else:
+                    bbox = [0, 0, COORD_SCALE, COORD_SCALE]
+
+                chunk = create_image_chunk(
+                    doc_id=doc_hash,
+                    content=f"[Embedded image on page {actual_page}]",
+                    source_file=source_file,
+                    file_type=FileType.PDF,
+                    page_number=actual_page,
+                    asset_path=asset_path,
+                    bbox=bbox,
+                    width_px=img_w,
+                    height_px=img_h,
+                    extraction_method="pymupdf",
+                    page_width=int(page_w),
+                    page_height=int(page_h),
+                    profile_type=intel.get("profile_type"),
+                    profile_sensitivity=intel.get("profile_sensitivity"),
+                    min_image_dims=intel.get("min_image_dims"),
+                    confidence_threshold=intel.get("confidence_threshold"),
+                    document_domain=intel.get("document_domain"),
+                    document_modality=intel.get("document_modality"),
+                )
+                chunks.append(chunk)
+
+                logger.debug(
+                    f"[PYMUPDF-IMAGES] pg{actual_page}: {asset_name} "
+                    f"({img_w}x{img_h})"
+                )
+
+        pdf.close()
         return chunks
 
     @staticmethod
