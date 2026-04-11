@@ -4379,10 +4379,10 @@ class BatchProcessor:
                     continue
 
                 # Skip page background/layout images. Magazines embed
-                # rasterized page layouts as large images (>40% of page).
-                # Real editorial photos are smaller discrete elements.
+                # rasterized page layouts as large images. Real editorial
+                # photos rarely exceed 30% of the page area.
                 img_area = pix.width * pix.height
-                if img_area / max(page_area, 1) > 0.40:
+                if img_area / max(page_area, 1) > 0.30:
                     logger.debug(
                         f"[PYMUPDF-IMAGES] Skipping full-page image on pg {actual_page} "
                         f"({pix.width}x{pix.height})"
