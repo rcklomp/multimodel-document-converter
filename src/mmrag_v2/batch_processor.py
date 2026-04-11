@@ -944,6 +944,12 @@ class BatchProcessor:
             # Use Docling's native image extraction — clean assets without
             # white-space ghosts from page-render cropping.
             pipeline_options.generate_picture_images = True
+            # Classify pictures by type (photo, diagram, chart, etc.) and reject
+            # layout artifacts (full-page captures, thumbnails).
+            pipeline_options.do_picture_classification = True
+            pipeline_options.picture_description_options.classification_deny = [
+                "full_page_image", "page_thumbnail",
+            ]
             # Tables are extracted as markdown text, not images.
             pipeline_options.generate_table_images = False
             pipeline_options.do_ocr = True
