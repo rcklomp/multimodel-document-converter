@@ -18,7 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Invariants
 - Python is locked to 3.10 (`pyproject.toml`: `>=3.10,<3.11`).
 - Runtime target is Apple Silicon; prefer Torch MPS when available.
-- `docling` is pinned to `2.66.0`.
+- `docling` minimum is `2.86.0` (upgraded from 2.66.0 — enables font metadata for heading classification).
 - Keep PDF batch size at `<=10` pages.
 - Use the `ProfileClassifier` in `orchestration/profile_classifier.py` for automatic routing; do not replace it with the V2.4.2 `DocumentClassifier` approach. Profile overrides (`--profile-override`) are for debugging only, never for production acceptance runs.
 - Spatial metadata `bbox` must be emitted as integer `[0,1000]` coordinates.

@@ -1247,7 +1247,7 @@ class V2DocumentProcessor:
             md_lines.append("| " + ln.replace("|", "\\|") + " |")
         return "\n".join(md_lines)
 
-    def _extract_docling_table_text(self, element: Any, page_no: int) -> str:
+    def _extract_docling_table_text(self, element: Any, page_no: int, doc: Any = None) -> str:
         """
         Best-effort extraction of richer table text from Docling table elements.
 
@@ -1267,10 +1267,17 @@ class V2DocumentProcessor:
             if not callable(method):
                 continue
             try:
-                value = method()
+                # New Docling API requires doc argument
+                if doc is not None:
+                    value = method(doc=doc)
+                else:
+                    value = method()
             except TypeError:
-                # Some implementations may require keyword args; skip silently.
-                continue
+                # Fallback for older API without doc parameter
+                try:
+                    value = method()
+                except Exception:
+                    continue
             except Exception as e:
                 logger.debug(
                     f"[TABLE-DOC-LING] Page {page_no}: {method_name} failed: {e}"
@@ -2881,7 +2888,7 @@ class V2DocumentProcessor:
 
             table_content = (text or "").strip()
             if self._is_table_placeholder_text(table_content, page_no):
-                recovered_table_text = self._extract_docling_table_text(element, page_no)
+                recovered_table_text = self._extract_docling_table_text(element, page_no, doc=doc)
                 if recovered_table_text:
                     table_content = recovered_table_text
 

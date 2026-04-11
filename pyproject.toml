@@ -32,7 +32,7 @@ dependencies = [
     
     # === DOCLING ENGINE (De Kern) ===
     # We installeren Docling met alle toeters en bellen (ocr en models)
-    "docling==2.66.0",
+    "docling>=2.86.0",
     "docling-core>=2.0.0",
     "docling-ibm-models>=3.0.0",          # Layout models packaged by IBM for docling
     
