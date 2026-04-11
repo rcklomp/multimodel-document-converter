@@ -2888,7 +2888,7 @@ class V2DocumentProcessor:
 
             table_content = (text or "").strip()
             if self._is_table_placeholder_text(table_content, page_no):
-                recovered_table_text = self._extract_docling_table_text(element, page_no, doc=doc)
+                recovered_table_text = self._extract_docling_table_text(element, page_no)
                 if recovered_table_text:
                     table_content = recovered_table_text
 
