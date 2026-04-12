@@ -4378,6 +4378,12 @@ class BatchProcessor:
                     logger.debug(f"[PYMUPDF-IMAGES] Could not extract xref {xref}: {e}")
                     continue
 
+                # Skip solid-color placeholder images (all black, all white)
+                samples = pix.samples
+                if len(set(samples[:1000])) <= 1:  # Check first 1000 bytes
+                    pix = None
+                    continue
+
                 # Skip full-page background/layout images.
                 # Use pixel dimensions matching page dimensions as the
                 # signal: if the image is the same size as the page in
