@@ -947,22 +947,16 @@ class BatchProcessor:
             # For digital PDFs, PyMuPDF extracts clean embedded images directly.
             # For scanned docs, Docling's layout model detects image regions.
             _doc_mod = self._intelligence_metadata.get("document_modality", "")
-            _is_native_digital = _doc_mod == "native_digital"
-            if _is_native_digital:
-                # Native digital (books, papers): PyMuPDF extracts clean
-                # embedded images directly. No layout model guessing needed.
-                pipeline_options.generate_picture_images = False
-                logger.info("[DOCLING-LAYOUT] Native digital: picture extraction disabled (PyMuPDF route)")
-            else:
-                # Scanned + magazines: Docling layout model detects image regions.
-                # Magazines store composite page layouts as single images —
-                # PyMuPDF can't separate photos from text backgrounds.
-                pipeline_options.generate_picture_images = True
-                pipeline_options.do_picture_classification = True
-                pipeline_options.picture_description_options.classification_deny = [
-                    "full_page_image", "page_thumbnail",
-                ]
-                logger.info(f"[DOCLING-LAYOUT] {_doc_mod}: Docling picture extraction + classification")
+            # All document types: use Docling's picture extraction with classification.
+            # PyMuPDF direct extraction doesn't work reliably:
+            # - magazines: composite page layouts (text+photo baked together)
+            # - academic papers: vector figures (not raster — PyMuPDF gets solid backgrounds)
+            # Future: ChatGPT-proposed rendered-region-crop architecture (see CONVERSION_PROFILES.md)
+            pipeline_options.generate_picture_images = True
+            pipeline_options.do_picture_classification = True
+            pipeline_options.picture_description_options.classification_deny = [
+                "full_page_image", "page_thumbnail",
+            ]
             # Tables are extracted as markdown text, not images.
             pipeline_options.generate_table_images = False
             pipeline_options.do_ocr = True
@@ -2061,16 +2055,10 @@ class BatchProcessor:
         # Digital PDFs: PyMuPDF extracts embedded image objects directly
         # Scanned PDFs: Docling layout model detects image regions
         # ================================================================
-        _doc_mod = self._intelligence_metadata.get("document_modality", "")
-        _is_digital = _doc_mod == "native_digital"
-
-        # Standard flow: Docling extraction for text + tables
+        # Standard flow: Docling extraction (text + images + tables)
         chunks: List[IngestionChunk] = []
         try:
             for chunk in processor.process_document(str(batch_info.batch_path)):
-                # For digital PDFs, skip Docling's image chunks (we use PyMuPDF instead)
-                if _is_digital and chunk.modality == Modality.IMAGE:
-                    continue
                 chunks.append(chunk)
         except IndexError as e:
             import traceback
@@ -2113,25 +2101,6 @@ class BatchProcessor:
             except Exception:
                 pass
             gc.collect()
-
-        # ================================================================
-        # PYMUPDF IMAGE EXTRACTION (digital PDFs only)
-        # ================================================================
-        # For native_digital and image_heavy documents, extract embedded
-        # image objects directly from the PDF. These are clean photos,
-        # diagrams, and charts — no layout model guessing needed.
-        # ================================================================
-        if _is_digital:
-            pymupdf_images = self._extract_embedded_images(
-                batch_path=batch_info.batch_path,
-                page_offset=batch_info.page_offset,
-                source_file=source_file,
-            )
-            chunks.extend(pymupdf_images)
-            logger.info(
-                f"[PYMUPDF-IMAGES] Batch {batch_info.batch_index + 1}: "
-                f"extracted {len(pymupdf_images)} embedded images"
-            )
 
         # REQ-STRUCT-01: Flat Code OCR Rescue — legacy-path post-pass.
         # The layout-aware path runs rescue inline (per page). For the legacy Docling path
