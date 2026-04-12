@@ -947,16 +947,16 @@ class BatchProcessor:
             # For digital PDFs, PyMuPDF extracts clean embedded images directly.
             # For scanned docs, Docling's layout model detects image regions.
             _doc_mod = self._intelligence_metadata.get("document_modality", "")
-            # All document types: use Docling's picture extraction with classification.
-            # PyMuPDF direct extraction doesn't work reliably:
-            # - magazines: composite page layouts (text+photo baked together)
-            # - academic papers: vector figures (not raster — PyMuPDF gets solid backgrounds)
-            # Future: ChatGPT-proposed rendered-region-crop architecture (see CONVERSION_PROFILES.md)
+            _is_scanned = _doc_mod in ("scanned_clean", "scanned_degraded")
             pipeline_options.generate_picture_images = True
-            pipeline_options.do_picture_classification = True
-            pipeline_options.picture_description_options.classification_deny = [
-                "full_page_image", "page_thumbnail",
-            ]
+            # Picture classification: useful for digital/magazine PDFs to reject
+            # full-page backgrounds. Disabled for scanned docs — loads a transformer
+            # model that hangs on 292-page scanned books with hundreds of image regions.
+            if not _is_scanned:
+                pipeline_options.do_picture_classification = True
+                pipeline_options.picture_description_options.classification_deny = [
+                    "full_page_image", "page_thumbnail",
+                ]
             # Tables are extracted as markdown text, not images.
             pipeline_options.generate_table_images = False
             pipeline_options.do_ocr = True
