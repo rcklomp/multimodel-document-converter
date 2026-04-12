@@ -947,19 +947,22 @@ class BatchProcessor:
             # For digital PDFs, PyMuPDF extracts clean embedded images directly.
             # For scanned docs, Docling's layout model detects image regions.
             _doc_mod = self._intelligence_metadata.get("document_modality", "")
-            _is_digital = _doc_mod in ("native_digital", "image_heavy")
-            if _is_digital:
-                # Digital: skip Docling picture extraction — use PyMuPDF instead
+            _is_native_digital = _doc_mod == "native_digital"
+            if _is_native_digital:
+                # Native digital (books, papers): PyMuPDF extracts clean
+                # embedded images directly. No layout model guessing needed.
                 pipeline_options.generate_picture_images = False
-                logger.info("[DOCLING-LAYOUT] Digital PDF: picture extraction disabled (PyMuPDF route)")
+                logger.info("[DOCLING-LAYOUT] Native digital: picture extraction disabled (PyMuPDF route)")
             else:
-                # Scanned: use Docling layout model for image regions
+                # Scanned + magazines: Docling layout model detects image regions.
+                # Magazines store composite page layouts as single images —
+                # PyMuPDF can't separate photos from text backgrounds.
                 pipeline_options.generate_picture_images = True
                 pipeline_options.do_picture_classification = True
                 pipeline_options.picture_description_options.classification_deny = [
                     "full_page_image", "page_thumbnail",
                 ]
-                logger.info("[DOCLING-LAYOUT] Scanned PDF: Docling picture extraction + classification")
+                logger.info(f"[DOCLING-LAYOUT] {_doc_mod}: Docling picture extraction + classification")
             # Tables are extracted as markdown text, not images.
             pipeline_options.generate_table_images = False
             pipeline_options.do_ocr = True
@@ -2059,7 +2062,7 @@ class BatchProcessor:
         # Scanned PDFs: Docling layout model detects image regions
         # ================================================================
         _doc_mod = self._intelligence_metadata.get("document_modality", "")
-        _is_digital = _doc_mod in ("native_digital", "image_heavy")
+        _is_digital = _doc_mod == "native_digital"
 
         # Standard flow: Docling extraction for text + tables
         chunks: List[IngestionChunk] = []
@@ -4384,23 +4387,37 @@ class BatchProcessor:
                     pix = None
                     continue
 
-                # Skip full-page background/layout images.
-                # Use pixel dimensions matching page dimensions as the
-                # signal: if the image is the same size as the page in
-                # pixels, it's a full-page background (rendered at 1:1).
-                is_full_page = (
-                    abs(pix.width - int(page_w)) < 20
-                    and abs(pix.height - int(page_h)) < 20
-                )
-                # For magazines: also skip images wider than the page
-                # (rasterized page layouts with text overlays)
-                _doc_mod = intel.get("document_modality", "")
-                is_page_layout = (
-                    _doc_mod == "image_heavy"
-                    and pix.width > int(page_w) * 0.9
-                    and pix.height > 200
-                )
-                if is_full_page or is_page_layout:
+                # Skip background/container images. A background image
+                # has other images placed ON TOP of it (overlapping
+                # children). This reliably detects page backgrounds
+                # without arbitrary size thresholds.
+                all_rects = {}
+                for other_img in page.get_images(full=True):
+                    other_xref = other_img[0]
+                    ow, oh = other_img[2], other_img[3]
+                    if ow < 100 or oh < 100:
+                        continue
+                    other_rects = page.get_image_rects(other_xref)
+                    if other_rects:
+                        all_rects[other_xref] = other_rects[0]
+
+                my_rect = all_rects.get(xref)
+                is_background = False
+                if my_rect:
+                    for other_xref, other_rect in all_rects.items():
+                        if other_xref == xref:
+                            continue
+                        # Check if other image is INSIDE this one
+                        if (other_rect.x0 >= my_rect.x0 - 5
+                            and other_rect.y0 >= my_rect.y0 - 5
+                            and other_rect.x1 <= my_rect.x1 + 5
+                            and other_rect.y1 <= my_rect.y1 + 5
+                            and other_rect.width * other_rect.height
+                                < my_rect.width * my_rect.height * 0.9):
+                            is_background = True
+                            break
+
+                if is_background:
                     logger.debug(
                         f"[PYMUPDF-IMAGES] Skipping full-page image on pg {actual_page} "
                         f"({pix.width}x{pix.height})"
