@@ -417,6 +417,21 @@ class ChunkMetadata(BaseModel):
         description="LLM model used for refinement (e.g., llama2, gpt-4o-mini) - audit trail",
     )
 
+    # V2.7 CODE BLOCK METADATA
+    is_code: Optional[bool] = Field(
+        default=None, description="True if chunk was classified as code"
+    )
+    code_repair_applied: Optional[bool] = Field(
+        default=None, description="True if code was reflowed/repaired from flat extraction"
+    )
+    code_parse_ok: Optional[bool] = Field(
+        default=None, description="True if code parses as valid Python (ast.parse)"
+    )
+    indentation_fidelity: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="1.0 = has indentation, 0.0 = flat code"
+    )
+
     # V2.4 INTELLIGENCE STACK METADATA (Observability Fix)
     # These fields provide proof that intelligent classification ran
     profile_type: Optional[str] = Field(

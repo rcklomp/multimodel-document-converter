@@ -3553,6 +3553,9 @@ class BatchProcessor:
     def _preserve_or_reflow_code_text(self, text: str) -> str:
         """
         Preserve multiline code exactly; best-effort reflow only for flattened one-line code.
+
+        Key principle: NEVER strip leading whitespace from code that already has
+        line breaks. Indentation is structural meaning in Python.
         """
         import re
 
@@ -3560,23 +3563,29 @@ class BatchProcessor:
         if not t:
             return t
         if "\n" in t:
-            lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
+            # Preserve original lines — do NOT strip leading whitespace.
+            # Only rstrip to remove trailing spaces/tabs.
+            raw_lines = [ln.rstrip() for ln in t.splitlines()]
+            lines = [ln for ln in raw_lines if ln.strip()]
             if not lines:
                 return t
-            has_repl = any(ln.startswith((">>>", "...")) for ln in lines)
+            has_repl = any(ln.lstrip().startswith((">>>", "...")) for ln in lines)
             has_indent = any(ln.startswith(("    ", "\t")) for ln in lines)
             if has_repl or has_indent:
-                return t
+                # Code already has structure — preserve exactly
+                return "\n".join(raw_lines).strip("\n")
+            # Code has newlines but no indentation — check if it looks like code
+            stripped_lines = [ln.strip() for ln in lines]
             stmt_like = re.compile(
                 r"^(%pip\s+|!?[A-Za-z_][\w\.]*\s*=|from\s+[A-Za-z_][\w\.]*\s+import\b|import\s+[A-Za-z_][\w\.,\s]*|[A-Za-z_][\w\.]*\s*\()"
             )
             codey_lines = sum(
                 1
-                for ln in lines
+                for ln in stripped_lines
                 if stmt_like.search(ln) is not None or re.search(r"[()\[\]{}=]", ln) is not None
             )
-            if codey_lines >= max(1, int(len(lines) * 0.6)):
-                return "\n".join(f">>> {ln}" for ln in lines)
+            if codey_lines >= max(1, int(len(stripped_lines) * 0.6)):
+                return "\n".join(f">>> {ln}" for ln in stripped_lines)
             return t
         if self._looks_like_code_text(t):
             return self._reflow_flat_code(t)
@@ -5307,20 +5316,169 @@ class BatchProcessor:
             # Demote false positives
             self._maybe_demote_false_code_chunk(ch)
 
-            # Reflow flat code
+            # Reflow flat code and track repair metadata
             if is_code_chunk(ch):
                 reflowed_txt = self._preserve_or_reflow_code_text(txt)
                 if reflowed_txt != txt:
                     ch.content = reflowed_txt
                     reflowed += 1
+                    try:
+                        ch.metadata.code_repair_applied = True
+                    except Exception:
+                        pass
+                # Track indentation fidelity and parse status on code chunks
+                try:
+                    code_lines = [ln for ln in (ch.content or "").splitlines() if ln.strip()]
+                    has_indent = any(ln.startswith(("    ", "\t")) for ln in code_lines)
+                    ch.metadata.is_code = True
+                    ch.metadata.indentation_fidelity = 1.0 if has_indent else 0.0
+                    # Try parsing as Python — structural validity check
+                    import ast as _ast
+                    try:
+                        _ast.parse(ch.content or "")
+                        ch.metadata.code_parse_ok = True
+                    except (SyntaxError, ValueError):
+                        ch.metadata.code_parse_ok = False
+                except Exception:
+                    pass
 
-        if reclassified or reflowed:
+        # PyMuPDF-based indentation recovery for flat code blocks
+        recovered = 0
+        if self._current_pdf_path and self._current_pdf_path.exists():
+            for ch in chunks:
+                if ch.modality != Modality.TEXT or not is_code_chunk(ch):
+                    continue
+                try:
+                    fidelity = getattr(ch.metadata, "indentation_fidelity", None)
+                    if fidelity is not None and fidelity > 0:
+                        continue  # Already has indentation
+                    repaired = self._recover_code_indentation_from_pdf(ch)
+                    if repaired:
+                        recovered += 1
+                except Exception as e:
+                    logger.debug(f"[CODE-INDENT] Recovery failed for {ch.chunk_id}: {e}")
+
+        if reclassified or reflowed or recovered:
             logger.info(
                 f"[CODE-HYGIENE] Reclassified {reclassified} chunks as code, "
-                f"reflowed {reflowed} flat code chunks"
+                f"reflowed {reflowed} flat code, "
+                f"recovered indentation for {recovered} chunks"
             )
 
         return chunks
+
+    def _recover_code_indentation_from_pdf(self, chunk: IngestionChunk) -> bool:
+        """
+        Re-extract code text from the PDF using PyMuPDF character x-coordinates
+        to recover original indentation that Docling's text layer lost.
+
+        Only applies to code chunks that are currently flat (indentation_fidelity=0).
+        Returns True if indentation was recovered.
+        """
+        import fitz
+
+        content = chunk.content or ""
+        if not content.strip():
+            return False
+
+        # Need page number and bbox to locate the code in the PDF
+        page_num = getattr(chunk.metadata, "page_number", None)
+        spatial = getattr(chunk.metadata, "spatial", None)
+        if not page_num or not spatial:
+            return False
+        bbox = getattr(spatial, "bbox", None)
+        if not bbox or len(bbox) < 4:
+            return False
+
+        try:
+            doc = fitz.open(str(self._current_pdf_path))
+            if page_num > len(doc):
+                doc.close()
+                return False
+            page = doc[page_num - 1]
+            pw, ph = page.rect.width, page.rect.height
+
+            # Convert normalized [0,1000] bbox to PDF points
+            x0 = bbox[0] / 1000.0 * pw
+            y0 = bbox[1] / 1000.0 * ph
+            x1 = bbox[2] / 1000.0 * pw
+            y1 = bbox[3] / 1000.0 * ph
+            clip = fitz.Rect(x0, y0, x1, y1)
+
+            # Extract text with character position data
+            blocks = page.get_text("dict", clip=clip, flags=fitz.TEXT_PRESERVE_WHITESPACE)
+            doc.close()
+
+            # Build lines from character spans, tracking x-positions
+            raw_lines: list = []  # [(y_center, x_start, text), ...]
+            for block in blocks.get("blocks", []):
+                if block.get("type") != 0:  # text block only
+                    continue
+                for line in block.get("lines", []):
+                    spans = line.get("spans", [])
+                    if not spans:
+                        continue
+                    y_center = (line["bbox"][1] + line["bbox"][3]) / 2
+                    x_start = spans[0]["bbox"][0]
+                    text = "".join(s.get("text", "") for s in spans)
+                    if text.strip():
+                        raw_lines.append((y_center, x_start, text.rstrip()))
+
+            if len(raw_lines) < 2:
+                return False
+
+            # Sort by y position (top to bottom)
+            raw_lines.sort(key=lambda t: t[0])
+
+            # Find the leftmost x-position (base indentation)
+            min_x = min(x for _, x, _ in raw_lines)
+
+            # Estimate character width from the most common font
+            # Use median span width / span char count as approximation
+            char_width = 7.0  # default monospace at ~10pt
+            all_widths = []
+            for block in blocks.get("blocks", []):
+                if block.get("type") != 0:
+                    continue
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        t = span.get("text", "")
+                        w = span["bbox"][2] - span["bbox"][0]
+                        if len(t) > 2 and w > 0:
+                            all_widths.append(w / len(t))
+            if all_widths:
+                all_widths.sort()
+                char_width = all_widths[len(all_widths) // 2]  # median
+
+            # Reconstruct lines with indentation
+            indented_lines = []
+            for _, x_start, text in raw_lines:
+                indent_chars = max(0, round((x_start - min_x) / char_width))
+                indented_lines.append(" " * indent_chars + text)
+
+            # Check if we actually recovered indentation
+            result = "\n".join(indented_lines)
+            has_indent = any(ln.startswith(("    ", "   ")) for ln in indented_lines if ln.strip())
+            if not has_indent:
+                return False
+
+            # Only replace content if we found indentation and the result is reasonable
+            chunk.content = result
+            chunk.metadata.indentation_fidelity = 1.0
+            chunk.metadata.code_repair_applied = True
+
+            # Re-check parse status
+            import ast as _ast
+            try:
+                _ast.parse(result)
+                chunk.metadata.code_parse_ok = True
+            except (SyntaxError, ValueError):
+                chunk.metadata.code_parse_ok = False
+
+            return True
+
+        except Exception:
+            return False
 
     def _apply_technical_manual_hygiene(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
         """
