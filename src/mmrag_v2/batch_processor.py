@@ -423,17 +423,22 @@ class BatchProcessor:
         REQ-COORD invariants for emitted output.
         """
         self._enrich_asset_ref_from_disk(chunk)
+
+        # Pre-sanitize: strip null bytes from content BEFORE Pydantic serialization.
+        # Pydantic's model_dump can crash with "source code string cannot contain
+        # null bytes" if \x00 is present in any string field.
+        _ctrl_table = {c: None for c in range(32) if c not in (10, 9)} | {127: None}
+        if hasattr(chunk, "content") and chunk.content and "\x00" in chunk.content:
+            chunk.content = chunk.content.translate(_ctrl_table)
+
         chunk_dict = chunk.model_dump(mode="json")
 
-        # Strip control characters (U+0000-U+001F except \n \t, plus U+007F)
-        # from text content. These leak from encoding-corrupted PDF text layers
-        # and cause serialization failures or invisible corruption in RAG indices.
+        # Strip remaining control characters (U+0001-U+001F except \n \t, plus U+007F)
+        # from serialized content. Catches chars that survived from encoding-corrupted
+        # PDF text layers.
         content = chunk_dict.get("content")
         if content and isinstance(content, str):
-            cleaned = content.translate(
-                {c: None for c in range(32) if c not in (10, 9)}  # keep \n, \t
-                | {127: None}
-            )
+            cleaned = content.translate(_ctrl_table)
             if cleaned != content:
                 chunk_dict["content"] = cleaned
 
@@ -6147,7 +6152,9 @@ class BatchProcessor:
             tree = ast.parse(t)
             if tree.body:
                 return True
-        except SyntaxError:
+        except (SyntaxError, ValueError):
+            # ValueError: "source code string cannot contain null bytes"
+            # from encoding-corrupted PDF text layers
             pass
 
         # ── 2. REPL session ───────────────────────────────────────────────────
@@ -6175,7 +6182,7 @@ class BatchProcessor:
                     )
                     if tree.body and any(isinstance(n, _CODE_NODES) for n in ast.walk(tree)):
                         return True
-                except SyntaxError:
+                except (SyntaxError, ValueError):
                     pass
                 # Extracted text didn't parse cleanly.
                 # An assignment operator is a reliable signal for real REPL code;
@@ -6191,7 +6198,7 @@ class BatchProcessor:
                         try:
                             ast.parse(e + "\n    pass")
                             return True
-                        except SyntaxError:
+                        except (SyntaxError, ValueError):
                             pass
             # REPL markers present but content looks like cross-references.
             return False
@@ -6224,7 +6231,7 @@ class BatchProcessor:
                 try:
                     ast.parse(stripped)
                     score += 4.0
-                except SyntaxError:
+                except (SyntaxError, ValueError):
                     score += 0.5  # prose: "from this perspective..."
                 continue
 
@@ -6233,11 +6240,11 @@ class BatchProcessor:
                 try:
                     ast.parse(stripped)
                     score += 3.0
-                except SyntaxError:
+                except (SyntaxError, ValueError):
                     try:
                         ast.parse(stripped + "\n    pass")
                         score += 3.0
-                    except SyntaxError:
+                    except (SyntaxError, ValueError):
                         score += 0.5  # keyword used as an English word
                 continue
 
