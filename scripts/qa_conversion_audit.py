@@ -200,6 +200,8 @@ class AuditResult:
     profile_type: str = ""
     schema_version: str = ""
     doc_class: str = ""  # "digital" or "scanned"
+    document_type: str = ""  # "book", "form", etc.
+    total_pages: int = 0
     total_chunks: int = 0
     text_chunks: int = 0
     image_chunks: int = 0
@@ -302,6 +304,7 @@ def audit(jsonl_path: Path) -> AuditResult:
                 r.source_file = obj.get("source_file", "")
                 r.profile_type = obj.get("profile_type", "unknown")
                 r.schema_version = obj.get("schema_version", "")
+                r.total_pages = int(obj.get("total_pages") or 0)
                 pv = obj.get("pipeline_version", "")
                 if pv and pv != CURRENT_VERSION:
                     r.add_issue("PROVENANCE", f"pipeline_version={pv} != current {CURRENT_VERSION}")
@@ -488,6 +491,15 @@ def audit(jsonl_path: Path) -> AuditResult:
     # Doc class inference
     r.doc_class = _infer_doc_class(r.profile_type, all_chunks)
 
+    # Document type inference: short scanned docs without heading structure are forms
+    heading_coverage = r.text_with_heading / max(r.text_chunks, 1)
+    if r.total_pages <= 5 and r.doc_class == "scanned" and heading_coverage < 0.10:
+        r.document_type = "form"
+    elif r.total_pages <= 5 and heading_coverage < 0.10:
+        r.document_type = "short_document"
+    else:
+        r.document_type = "book"
+
     # Asset file existence check
     for ref in asset_refs:
         asset_path = jsonl_path.parent / ref
@@ -640,12 +652,16 @@ def print_report(r: AuditResult, path: Path) -> bool:
     print(f"{'='*65}")
     print(f"AUDIT: {r.source_file or path.parent.name}")
     print(f"{'='*65}")
-    print(f"  Profile: {r.profile_type}  Class: {r.doc_class}  Content: {content_type}  Schema: {r.schema_version}")
-    print(f"  Chunks: {r.total_chunks} (text={r.text_chunks}, image={r.image_chunks}, table={r.table_chunks})")
+    doc_type_label = f"  Type: {r.document_type}" if r.document_type != "book" else ""
+    print(f"  Profile: {r.profile_type}  Class: {r.doc_class}  Content: {content_type}{doc_type_label}  Schema: {r.schema_version}")
+    print(f"  Chunks: {r.total_chunks} (text={r.text_chunks}, image={r.image_chunks}, table={r.table_chunks})  Pages: {r.total_pages}")
     print(f"  Assets: {r.total_assets}")
+    if r.document_type == "form":
+        print(f"  [UNSUPPORTED_HIERARCHICAL_RAG] Short scanned form — heading/label gates skipped")
     print()
 
     fails: list = []
+    is_form = r.document_type == "form"
 
     # --- STRUCTURAL ---
     struct_ok = (r.null_chunk_type == 0 and r.invalid_bbox == 0
@@ -717,7 +733,7 @@ def print_report(r: AuditResult, path: Path) -> bool:
         and r.oversize_chunks == 0
         and r.ctrl_chunks == 0
         and r.infix_artifacts == 0
-        and micro_ratio <= th["micro_non_label_ratio"]
+        and (is_form or micro_ratio <= th["micro_non_label_ratio"])
         and oversize_ratio <= th["oversize_ratio"]
     )
     # Encoding artifacts < 5 is WARN, not FAIL
@@ -788,53 +804,58 @@ def print_report(r: AuditResult, path: Path) -> bool:
     if not code_ok:
         fails.append("CODE")
 
-    # --- LABEL ---
+    # --- LABEL --- (skipped for forms)
     orphan_ratio = (r.orphan_labels / r.label_chunks) if r.label_chunks else 0.0
-    # Skip orphan check when label count is too low for ratio to be meaningful
-    if r.label_chunks < th["orphan_label_min_count"]:
-        orphan_ratio_gated = 0.0
+    if is_form:
+        print(f"  LABEL:       SKIP [form]")
     else:
-        orphan_ratio_gated = orphan_ratio
-    label_ok = orphan_ratio_gated <= th["orphan_label_ratio"]
-    print(f"  LABEL:       {'PASS' if label_ok else 'FAIL'}")
-    if r.label_chunks > 0:
-        print(f"    labels: {r.label_chunks}  orphans: {r.orphan_labels}  orphan_ratio: {orphan_ratio:.3f} (limit {th['orphan_label_ratio']})")
         if r.label_chunks < th["orphan_label_min_count"]:
-            print(f"    (skipped — fewer than {th['orphan_label_min_count']} labels)")
-    if not label_ok:
-        fails.append("LABEL")
+            orphan_ratio_gated = 0.0
+        else:
+            orphan_ratio_gated = orphan_ratio
+        label_ok = orphan_ratio_gated <= th["orphan_label_ratio"]
+        print(f"  LABEL:       {'PASS' if label_ok else 'FAIL'}")
+        if r.label_chunks > 0:
+            print(f"    labels: {r.label_chunks}  orphans: {r.orphan_labels}  orphan_ratio: {orphan_ratio:.3f} (limit {th['orphan_label_ratio']})")
+            if r.label_chunks < th["orphan_label_min_count"]:
+                print(f"    (skipped — fewer than {th['orphan_label_min_count']} labels)")
+        if not label_ok:
+            fails.append("LABEL")
 
-    # --- HEADING ---
+    # --- HEADING --- (skipped for forms)
     heading_coverage = r.text_with_heading / max(r.text_chunks, 1)
-    heading_ok = (
-        r.long_headings == 0
-        and r.multi_sentence_headings == 0
-        and heading_coverage >= 0.80
-        and r.suspicious_headings == 0
-    )
-    if heading_coverage >= 0.90:
-        cov_label = "PASS"
-    elif heading_coverage >= 0.70:
-        cov_label = "WARN"
+    if is_form:
+        print(f"  HEADING:     SKIP [form]")
     else:
-        cov_label = "FAIL"
-    frag_label = "OK" if r.heading_fragmentation <= 0.40 else "HIGH"
-    heading_label = "PASS" if heading_ok else "FAIL"
-    print(f"  HEADING:     {heading_label}")
-    print(f"    coverage: {r.text_with_heading}/{r.text_chunks} ({heading_coverage:.0%}) [{cov_label}]")
-    print(f"    unique headings: {r.unique_headings} (fragmentation: {r.heading_fragmentation:.0%}) [{frag_label}]")
-    if r.text_without_heading:
-        print(f"    null_headings: {r.text_without_heading}")
-    if r.long_headings:
-        print(f"    long_headings (>80): {r.long_headings}")
-    if r.multi_sentence_headings:
-        print(f"    multi_sentence: {r.multi_sentence_headings}")
-    if r.suspicious_headings:
-        print(f"    suspicious_headings: {r.suspicious_headings}")
-    if r.shallow_breadcrumbs:
-        print(f"    shallow_breadcrumbs: {r.shallow_breadcrumbs} (advisory)")
-    if not heading_ok:
-        fails.append("HEADING")
+        heading_ok = (
+            r.long_headings == 0
+            and r.multi_sentence_headings == 0
+            and heading_coverage >= 0.80
+            and r.suspicious_headings == 0
+        )
+        if heading_coverage >= 0.90:
+            cov_label = "PASS"
+        elif heading_coverage >= 0.70:
+            cov_label = "WARN"
+        else:
+            cov_label = "FAIL"
+        frag_label = "OK" if r.heading_fragmentation <= 0.40 else "HIGH"
+        heading_label = "PASS" if heading_ok else "FAIL"
+        print(f"  HEADING:     {heading_label}")
+        print(f"    coverage: {r.text_with_heading}/{r.text_chunks} ({heading_coverage:.0%}) [{cov_label}]")
+        print(f"    unique headings: {r.unique_headings} (fragmentation: {r.heading_fragmentation:.0%}) [{frag_label}]")
+        if r.text_without_heading:
+            print(f"    null_headings: {r.text_without_heading}")
+        if r.long_headings:
+            print(f"    long_headings (>80): {r.long_headings}")
+        if r.multi_sentence_headings:
+            print(f"    multi_sentence: {r.multi_sentence_headings}")
+        if r.suspicious_headings:
+            print(f"    suspicious_headings: {r.suspicious_headings}")
+        if r.shallow_breadcrumbs:
+            print(f"    shallow_breadcrumbs: {r.shallow_breadcrumbs} (advisory)")
+        if not heading_ok:
+            fails.append("HEADING")
 
     # --- SCHEMA ---
     schema_ok = r.version_mismatches == 0
@@ -853,9 +874,14 @@ def print_report(r: AuditResult, path: Path) -> bool:
 
     # --- Overall ---
     passed = len(fails) == 0
-    print(f"\n  {'AUDIT_PASS' if passed else 'AUDIT_FAIL'}", end="")
-    if fails:
-        print(f" ({', '.join(fails)})", end="")
+    if is_form:
+        print(f"\n  UNSUPPORTED_HIERARCHICAL_RAG", end="")
+        if fails:
+            print(f" — structural issues: {', '.join(fails)}", end="")
+    elif passed:
+        print(f"\n  AUDIT_PASS", end="")
+    else:
+        print(f"\n  AUDIT_FAIL ({', '.join(fails)})", end="")
     print()
     print()
     return passed
@@ -898,11 +924,26 @@ def main(argv: list[str]) -> int:
         print(f"{'='*65}")
         for path, r, passed in results:
             name = path.parent.name
-            status = "PASS" if passed else "FAIL"
-            print(f"  {'✓' if passed else '✗'} {name:45s} {r.total_chunks:5d} chunks  {r.doc_class:8s}  {status}")
-        total = len(results)
-        passed_count = sum(1 for _, _, p in results if p)
-        print(f"\n  {passed_count}/{total} passed")
+            if r.document_type == "form":
+                icon = "◻"
+                status = "UNSUPPORTED"
+            elif passed:
+                icon = "✓"
+                status = "PASS"
+            else:
+                icon = "✗"
+                status = "FAIL"
+            print(f"  {icon} {name:45s} {r.total_chunks:5d} chunks  {r.doc_class:8s}  {status}")
+        form_count = sum(1 for _, r, _ in results if r.document_type == "form")
+        auditable = len(results) - form_count
+        passed_count = sum(1 for _, r, p in results if p and r.document_type != "form")
+        failed_count = sum(1 for _, r, p in results if not p and r.document_type != "form")
+        summary_parts = [f"{passed_count}/{auditable} passed"]
+        if form_count:
+            summary_parts.append(f"{form_count} unsupported")
+        if failed_count:
+            summary_parts.append(f"{failed_count} failed")
+        print(f"\n  {', '.join(summary_parts)}")
 
     return 0 if all_passed else 1
 
