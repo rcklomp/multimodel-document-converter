@@ -393,6 +393,11 @@ class ProfileClassifier:
             doc_profile.median_image_width,
             doc_profile.median_image_height,
         )
+        # Guard: full-page renders (>= 1000px) are not editorial photos — they're
+        # artifacts from Docling extracting full pages as images. Cap to avoid
+        # triggering "large editorial photos" boost in digital_magazine scoring.
+        if median_dim >= 1000:
+            median_dim = 200  # Neutral value — won't boost any profile
 
         # Default features if no diagnostic report
         is_scan = False

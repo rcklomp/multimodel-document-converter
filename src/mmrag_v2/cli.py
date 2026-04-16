@@ -1044,6 +1044,24 @@ def process_document(
         if not is_pdf:
             effective_ocr_mode = ocr_mode
 
+        # Auto-pilot: encoding corruption requires OCR + refiner regardless of CLI defaults.
+        # The diagnostic engine detected that the text layer is garbage — the pipeline
+        # MUST enable recovery mechanisms or the conversion will fail/produce garbage.
+        if intelligence_metadata.get("has_encoding_corruption"):
+            if not enable_ocr:
+                enable_ocr = True
+                force_ocr = True
+                console.print(
+                    "[bold yellow]⚠ AUTO-OVERRIDE:[/bold yellow] enable_ocr=True, force_ocr=True "
+                    "(encoding corruption detected — text layer is unreliable)"
+                )
+            if not enable_refiner and not _refiner_explicitly_disabled:
+                enable_refiner = True
+                console.print(
+                    "[bold yellow]⚠ AUTO-OVERRIDE:[/bold yellow] enable_refiner=True "
+                    "(encoding corruption heal-over requires refiner)"
+                )
+
         if use_batching:
             # Use BatchProcessor for large PDFs (lazy import)
             # BUG-008 FIX: Pass vision_cache_dir based on enable_cache flag
@@ -1619,6 +1637,25 @@ def batch_process(
                 f"encoding_corrupt={intelligence_metadata['has_encoding_corruption']}"
             )
 
+            # Auto-pilot: encoding corruption requires OCR + refiner (parity with process cmd)
+            _file_enable_ocr = enable_ocr
+            _file_enable_refiner = enable_refiner
+            _file_force_ocr = force_ocr
+            if intelligence_metadata.get("has_encoding_corruption"):
+                if not _file_enable_ocr:
+                    _file_enable_ocr = True
+                    _file_force_ocr = True
+                    console.print(
+                        f"[bold yellow]⚠ AUTO-OVERRIDE ({doc_name}):[/bold yellow] enable_ocr=True, force_ocr=True "
+                        "(encoding corruption detected)"
+                    )
+                if not _file_enable_refiner and not _refiner_explicitly_disabled:
+                    _file_enable_refiner = True
+                    console.print(
+                        f"[bold yellow]⚠ AUTO-OVERRIDE ({doc_name}):[/bold yellow] enable_refiner=True "
+                        "(encoding corruption heal-over)"
+                    )
+
             # ================================================================
             # BUG-002 FIX: Use BatchProcessor for PDFs to enable all flags
             # BUG-007 FIX: Pass vision_cache_dir based on enable_cache
@@ -1634,12 +1671,12 @@ def batch_process(
                 vision_base_url=vision_base_url,
                 vlm_timeout=vlm_timeout,
                 vision_cache_dir=cache_dir,
-                enable_ocr=enable_ocr,
+                enable_ocr=_file_enable_ocr,
                 ocr_engine=ocr_engine.value,
                 extraction_strategy=extraction_strategy,
                 allow_fullpage_shadow=allow_fullpage_shadow,
                 strict_qa=strict_qa,
-                force_ocr=force_ocr,
+                force_ocr=_file_force_ocr,
                 semantic_overlap=semantic_overlap,
                 vlm_context_depth=vlm_context_depth,
                 ocr_mode=effective_ocr_mode.value,
@@ -1649,7 +1686,7 @@ def batch_process(
             processor_instance = processor
             _track_processor(processor_instance)
 
-            if enable_refiner:
+            if _file_enable_refiner:
                 processor.enable_refiner(
                     provider=refiner_provider,
                     model=refiner_model,

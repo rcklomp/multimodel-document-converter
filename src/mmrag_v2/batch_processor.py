@@ -425,6 +425,18 @@ class BatchProcessor:
         self._enrich_asset_ref_from_disk(chunk)
         chunk_dict = chunk.model_dump(mode="json")
 
+        # Strip control characters (U+0000-U+001F except \n \t, plus U+007F)
+        # from text content. These leak from encoding-corrupted PDF text layers
+        # and cause serialization failures or invisible corruption in RAG indices.
+        content = chunk_dict.get("content")
+        if content and isinstance(content, str):
+            cleaned = content.translate(
+                {c: None for c in range(32) if c not in (10, 9)}  # keep \n, \t
+                | {127: None}
+            )
+            if cleaned != content:
+                chunk_dict["content"] = cleaned
+
         # Sanitize heading hierarchy: reject long headings that are clearly
         # misclassified paragraphs/tables from Docling's layout model.
         hierarchy = chunk_dict.get("metadata", {}).get("hierarchy")
@@ -981,6 +993,18 @@ class BatchProcessor:
             logger.info("[DOCLING-LAYOUT] Reusing cached DocumentConverter")
 
         result = self._docling_converter.convert(str(batch_path))
+
+        # Font-based heading hierarchy: use docling-hierarchical-pdf to reclassify
+        # headings by font size/weight clustering. This corrects Docling's layout-only
+        # heading detection which misses headings or promotes non-headings.
+        try:
+            from hierarchical.postprocessor import ResultPostprocessor
+            hier_proc = ResultPostprocessor(result, source=str(batch_path))
+            hier_proc.process()
+            logger.info("[HEADING-HIERARCHY] Font-based heading reclassification applied")
+        except Exception as e:
+            logger.debug(f"[HEADING-HIERARCHY] Skipped: {e}")
+
         docling_doc = result.document
 
         # Group elements by page — convert to LIGHTWEIGHT dicts immediately
@@ -2197,11 +2221,17 @@ class BatchProcessor:
         # REQ-STRUCT-02: Override OCR guard when encoding corruption is detected.
         # Even if the document looks digital (native_digital), if the text layer is
         # encoding-garbage (CIDFont / broken char map), we MUST force full OCR.
-        if self.has_encoding_corruption and is_digital_like and not self.force_ocr:
-            self.force_ocr = True
+        # This auto-enables enable_ocr too — the governance layer must not override
+        # a pathology-driven decision.
+        if self.has_encoding_corruption and is_digital_like:
+            if not self.force_ocr:
+                self.force_ocr = True
+            if not self.enable_ocr:
+                self.enable_ocr = True
             logger.warning(
                 f"[OCR-GUARD] ENCODING CORRUPTION detected on digital-like PDF "
-                f"(modality={doc_modality}); overriding force_ocr=True to bypass corrupt text layer."
+                f"(modality={doc_modality}); overriding force_ocr=True, enable_ocr=True "
+                f"to bypass corrupt text layer."
             )
 
         # Default policy (AGENTS.md): avoid OCR cascade on digital-like PDFs unless user explicitly forces it.

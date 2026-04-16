@@ -1,5 +1,7 @@
 # Plan: v2.7 — Document Understanding Layer
 
+**Status (April 2026):** Features 1–3 and the 4 multimodal validation layers (bottom of doc) are **implemented and shipped** in v2.7.0. Features 4–6 are partially done or deferred. This plan is retained as architectural rationale — see `CHANGELOG.md` v2.7.0 and `docs/DECISIONS.md` for current state.
+
 ## Context
 
 v2.6 delivered HybridChunker integration, VLM transcription for scanned docs,

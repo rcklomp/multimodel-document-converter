@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with this repository.
 
 ## Read First
 1. `docs/DECISIONS.md`
@@ -11,9 +11,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 6. `AGENTS.md`
 
 ## Engineering Principles
-- **Libraries first, custom code last.** Before writing filters, heuristics, or workarounds, check whether the library (Docling, ebooklib, etc.) already has a configuration option or feature that solves the problem. The v2.4 script is a valid reference for what Docling can do natively.
+
+- **Think before coding.** State assumptions explicitly. If multiple interpretations exist, present them — don't pick silently. If something is unclear, stop and ask.
+- **Simplicity first.** Minimum code that solves the problem. No speculative features, abstractions for single-use code, or error handling for impossible scenarios. If 200 lines could be 50, rewrite it.
+- **Surgical changes.** Touch only what you must. Don't "improve" adjacent code, comments, or formatting. Match existing style. Remove only imports/variables/functions that YOUR changes made unused. Every changed line should trace directly to the request.
+- **Libraries first, custom code last.** Before writing filters, heuristics, or workarounds, check whether the library (Docling, ebooklib, etc.) already has a configuration option that solves the problem. The v2.4 script is a valid reference for what Docling can do natively.
 - **Keep configurations in sync.** `batch_processor.py` and `processor.py` each create their own `PdfPipelineOptions` independently. When changing Docling settings in one, check the other. There is no shared factory (known debt).
 - **Verify before converting.** Run the test suite and a single-document smoke test before starting batch conversions. Confirm schema version, chunk counts, and gate results on a real output before burning VLM credits.
+- **Goal-driven execution.** Transform tasks into verifiable goals with success criteria. For multi-step tasks, state a brief plan with verification checks at each step.
 
 ## Project Invariants
 - Python is locked to 3.10 (`pyproject.toml`: `>=3.10,<3.11`).

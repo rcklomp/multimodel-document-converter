@@ -4,7 +4,7 @@ Convert PDF, EPUB, HTML, and Office documents into structured JSONL datasets for
 
 The converter extracts text, images, and tables from complex documents while preserving spatial layout, document hierarchy, and semantic context. It handles everything from born-digital magazines to degraded scanned manuals.
 
-**Version 2.6.0** | Python 3.10 | Apple Silicon native | Docling 2.66.0
+**Version 2.7.0** | Python 3.10 | Apple Silicon native | Docling 2.86.0
 
 ---
 
@@ -201,7 +201,7 @@ The first line of `ingestion.jsonl` is a metadata record:
 ```json
 {
   "object_type": "ingestion_metadata",
-  "schema_version": "2.6.0",
+  "schema_version": "2.7.0",
   "doc_id": "a1b2c3d4e5f6",
   "source_file": "document.pdf",
   "profile_type": "digital_magazine",
@@ -242,7 +242,7 @@ All subsequent lines are content chunks. Three modalities:
     "prev_text_snippet": "...end of previous chunk for overlap.",
     "next_text_snippet": "Start of next chunk for context..."
   },
-  "schema_version": "2.6.0"
+  "schema_version": "2.7.0"
 }
 ```
 

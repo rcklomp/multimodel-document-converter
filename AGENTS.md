@@ -63,7 +63,7 @@ Companion docs:
 
 **G. Chunking by Profile, Validated by Evidence**
 - Do not enforce one global "optimal" chunk size.
-- Tune chunk-size behavior per profile (`technical_manual`, `scanned_degraded`, `digital_magazine`, etc.).
+- Tune chunk-size behavior per profile (`technical_manual`, `scanned_degraded`, `scanned`, `digital_magazine`, `academic_whitepaper`).
 - Treat chunk size as an empirical quality lever: changes require before/after acceptance metrics, not intuition.
 
 ---
@@ -87,19 +87,23 @@ Companion docs:
 
 ## 📍 5. CURRENT STATE & DIRECTIVES (April 2026)
 
-**Version:** `v2.6.0` (schema version 2.6.0)  
-**Phase:** Multi-profile expansion — moving from technical-manual-only validation to full cross-category acceptance.
+**Version:** `v2.7.0` (schema version 2.7.0)  
+**Phase:** Production acceptance — 17 of 31 documents AUDIT_PASS, 14 pending reconversion.
 
 **Active architecture decisions:**
 - PDF extraction pathway is determined by structural integrity pre-flight tests, not semantic profile. See `docs/DECISIONS.md` — "Structural Pathology over Semantic Profiling".
 - `IngestionMetadata` record is written as the first JSONL line (v2.6+); QA scripts must skip it.
 - VLM failure paths use differentiated sentinels (`[VLM_FAILED: response invalid]`, `[VLM_FAILED: call error]`, `[VLM_FAILED: parse error]`).
+- **Image extraction** uses Docling layout model for all document types. PyMuPDF `page.get_images()` was tested but reverted (unreliable for magazines/academic papers). See `docs/DECISIONS.md` — "Image Extraction Routing".
+- **Encoding corruption** uses heal-over strategy: keep HybridChunker for structure, force refiner on all chunks at `threshold=0.0`. See `docs/DECISIONS.md` — "Heal-Over for Encoding Corruption".
+- **4 multimodal validation layers** (v2.7): CorruptionInterceptor, POS Boundary Logic, Vision-Gated Hierarchy, Content-Type Classification. See `docs/DECISIONS.md`.
 
 **QA policy:** All profiles use the standard 10% token variance tolerance. See `docs/QUALITY_GATES.md`.
 
 ### Priority TODOs (Open)
-1. Establish per-category blind-test baselines for all document categories in the smoke test matrix.
-2. Keep chunk sizing profile-driven and acceptance-tested (no universal hard min/max invariant).
+1. Convert remaining 14 documents and achieve full AUDIT_PASS across all 31.
+2. Re-ingest to Qdrant after all documents pass.
+3. Establish per-category blind-test baselines for all document categories in the smoke test matrix.
 
 ### Recently Completed (Do Not Reopen)
 1. `--force-ocr` override is implemented.
@@ -108,6 +112,10 @@ Companion docs:
 4. `IngestionMetadata` record implemented (v2.6).
 5. Multi-profile smoke test + universal invariant checker implemented (`scripts/smoke_multiprofile.sh`, `scripts/qa_universal_invariants.py`).
 6. `digital_magazine` 18% token variance waiver retired — IMAGE-bbox-aware source text extraction brings all magazines under 10%.
+7. Docling upgrade 2.66.0 → 2.86.0 with picture classification.
+8. TOC-based heading hierarchy (PDF bookmarks + content-based magazine TOC).
+9. Output provenance (`pipeline_version`, `source_file_hash`, `config_hash`).
+10. 4 multimodal validation layers replacing heuristic-loop patching.
 
 ---
 

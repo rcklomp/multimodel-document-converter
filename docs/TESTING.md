@@ -1,6 +1,6 @@
-# Testing Guide (v2.6.0-dev)
+# Testing Guide (v2.7.0)
 
-**Version:** v2.6.0-dev  
+**Version:** v2.7.0  
 **Validation Policy:** Required for every test command
 
 ## Environment
@@ -19,73 +19,11 @@ For every test command in this file, validation is mandatory:
 3. A command is considered **Fail** if output includes any of: `stderr`, `FAIL`, `ERROR`, traceback, or non-zero exit code.
 4. On fail, stop and report the failing command with the relevant terminal excerpt before attempting any additional fixes.
 
-## BUG-009: Metadata Propagation (Verified)
-
-### Test 1: `process` (no batching)
-```bash
-rm -rf /tmp/test1-output
-conda run -n mmrag-v2 \
-  mmrag-v2 process \
-  "data/academic_journal/AIOS LLM Agent Operating System.pdf" \
-  --output-dir /tmp/test1-output \
-  --vision-provider none
-conda run -n mmrag-v2 \
-  python tests/test_bug009_metadata_propagation.py /tmp/test1-output/ingestion.jsonl
-```
-
-### Test 2: `process --batch-size`
-```bash
-rm -rf /tmp/test2-output
-conda run -n mmrag-v2 \
-  mmrag-v2 process \
-  "data/academic_journal/AIOS LLM Agent Operating System.pdf" \
-  --output-dir /tmp/test2-output \
-  --batch-size 3 \
-  --vision-provider none
-conda run -n mmrag-v2 \
-  python tests/test_bug009_metadata_propagation.py /tmp/test2-output/ingestion.jsonl
-```
-
-### Test 3: `batch` (multi-file)
-```bash
-rm -rf /tmp/test3-input /tmp/test3-output
-mkdir -p /tmp/test3-input
-cp "data/academic_journal/AIOS LLM Agent Operating System.pdf" /tmp/test3-input/doc1.pdf
-cp "data/academic_journal/A_comprehensive_review_on_hybrid_electri.pdf" /tmp/test3-input/doc2.pdf
-
-conda run -n mmrag-v2 \
-  mmrag-v2 batch /tmp/test3-input \
-  --output-dir /tmp/test3-output \
-  --vision-provider none
-
-conda run -n mmrag-v2 \
-  python tests/test_bug009_metadata_propagation.py /tmp/test3-output/doc1/ingestion.jsonl
-conda run -n mmrag-v2 \
-  python tests/test_bug009_metadata_propagation.py /tmp/test3-output/doc2/ingestion.jsonl
-```
-
-### Test 4: Layout-aware OCR (scanned document)
-```bash
-rm -rf /tmp/test4-output
-conda run -n mmrag-v2 \
-  mmrag-v2 process \
-  "data/scanned_literature/HarryPotter_and_the_Sorcerers_Stone.pdf" \
-  --output-dir /tmp/test4-output \
-  --batch-size 3 \
-  --ocr-mode layout-aware \
-  --enable-ocr \
-  --ocr-confidence-threshold 0.7 \
-  --vision-provider none
-
-conda run -n mmrag-v2 \
-  python tests/test_bug009_metadata_propagation.py /tmp/test4-output/ingestion.jsonl
-```
-
 ## Intelligence Stack Parity (Data-Agnostic)
 
 Representative test set (all present in `data/`):
 - `data/academic_journal/AIOS LLM Agent Operating System.pdf` — digital, high text density
-- `data/scanned_literature/HarryPotter_and_the_Sorcerers_Stone.pdf` — scanned long-form
+- `data/scanned/HarryPotter_and_the_Sorcerers_Stone.pdf` — scanned long-form
 - `data/technical_manual/Firearms.pdf` — scanned technical manual
 - `data/digital_magazine/PCWorld_July_2025_USA.pdf` — high image density, digital
 

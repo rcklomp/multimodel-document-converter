@@ -4,6 +4,87 @@ All notable changes to this project will be documented in this file. This projec
 
 > **Versioning note:** Historical entries before the `v2.4.x` line used an internal `v18.x` milestone scheme during rapid iteration and test/fix cycles. Only stable or decision-worthy checkpoints were recorded, so intermediate builds are intentionally omitted. From `v2.4` onward, entries follow the current public semantic line.
 
+## [v2.7.0] - 2026-04-16
+
+### Added
+- **4 multimodal validation layers** replacing heuristic-loop patching:
+  1. **CorruptionInterceptor:** Per-bbox OCR patching for `/C211`-class encoding
+     artifacts. Renders only the corrupted chunk's bbox at 300 DPI, runs Tesseract,
+     replaces text if OCR is cleaner. Preserves HybridChunker structure.
+  2. **POS Boundary Logic:** Merges trailing prepositions (`BY`, `FOR`, `OF`, `WITH`,
+     `von`, `für`, `van`, `voor`, `par`, `pour`) into next chunk when it starts with
+     a proper noun. Multilingual. Same-page guard prevents cross-page false merges.
+  3. **Vision-Gated Hierarchy:** When a page has cover/logo/illustration images
+     (detected via VLM description), demotes non-chapter headings to "Front Matter".
+     Uses multimodal signals, not text patterns.
+  4. **Content-Type Classification:** Chunks with 2+ boilerplate markers (ISBN, ©,
+     "All rights reserved", "Printed in") get `search_priority` downgraded to `low`.
+- **PyMuPDF image extraction for digital PDFs (I10):** Route image extraction by
+  document classification — `native_digital` uses `page.get_images()` for clean
+  embedded photo objects directly from the PDF stream. Scanned docs remain on
+  Docling layout model. Combat Aircraft: 336 → 109 images.
+- **Docling picture classification:** Enabled `DocumentFigureClassifier-v2.5`
+  (new in Docling 2.86.0). Deny filter rejects `full_page_image` and
+  `page_thumbnail` layout artifacts. Disabled for scanned docs (classifier hangs
+  on large books with hundreds of image regions).
+- **Magazine TOC extraction from page content (I1):** When PDF has no bookmarks,
+  scans pages 1–15 for `NUMBER TITLE` patterns and builds article page ranges.
+  Both Combat Aircraft and PCWorld now AUDIT_PASS with 98–100% heading coverage.
+- **TOC-based heading hierarchy:** PyMuPDF `get_toc()` extracts bookmarks before
+  batching; assigns correct breadcrumb hierarchy (Book > Part > Chapter > Section).
+  HybridChunker headings validated against TOC — stale headings from batch
+  boundaries detected and replaced.
+- **Output provenance (I7):** `pipeline_version`, `source_file_hash` (SHA-256),
+  and `config_hash` added to `IngestionMetadata`. `qa_conversion_audit.py` now
+  warns on version drift.
+- **Heading quality checks (I8):** `qa_conversion_audit.py` detects suspicious
+  headings misclassified by Docling ("This chapter covers", "Listing X.Y",
+  "Figure X.Y", "(continued)"). Heading fragmentation metric added as advisory.
+- **Heading validation:** `is_valid_heading()` rejects >80 chars, multi-sentence,
+  captions/listings. `_sanitize_chunk_for_export()` is the final heading gate
+  before JSONL write.
+- **`search_qdrant.py` enhancements:** `--stats`, `--page`, `--json` modes and
+  partial collection name matching.
+
+### Fixed
+- **Encoding corruption: heal-over, not fail-over.** Instead of disabling
+  HybridChunker for encoding-corrupted docs (losing structural metadata), the
+  refiner now cleans ALL chunks at `threshold=0.0`, preserving heading hierarchy
+  and table structures while fixing glyph placeholders.
+- **POS merger same-page guard:** Only merge prepositions on same or adjacent pages.
+  Prevents cross-page false merges (e.g. "BY ILLUSTRATIONS BY Mary GrandPré").
+- **Missing `re` import in boilerplate classifier:** `NameError` silently dropped
+  ALL text chunks (Harry Potter: 414 → 0).
+- **Caption/marker heading rejection (I9):** Reject "Listing X.Y", "Figure X.Y",
+  "Table X.Y", "Example X-Y.", "(continued)" from heading classification.
+- **VLM timeout for all providers (I3):** `_post_with_deadline()` moved to
+  module-level; applied to OpenAI, Ollama, and Anthropic providers. Hard
+  thread-based deadline prevents infinite hangs.
+- **Docling config sync:** `batch_processor.py` aligned with `processor.py`:
+  `generate_picture_images=True`, `generate_table_images=False`,
+  `do_cell_matching=False`, `TableFormerMode.ACCURATE`.
+- **CLI `--no-refiner` override:** Config file no longer overrides explicit flag.
+- **PyMuPDF image filtering:** Area threshold tuned, solid-color placeholders
+  skipped, full-page backgrounds rejected, orphan asset cleanup after JSONL
+  finalization.
+- **Image extraction routing:** ALL extraction routed back to Docling after
+  PyMuPDF proved unreliable for magazines (composite layouts) and academic papers
+  (vector figures). PyMuPDF method retained for future use.
+- **`NameError` fixes:** `doc` not defined in `_process_element_v2`;
+  `_doc_mod` undefined in `_extract_embedded_images` — caused silent 0-chunk
+  and 0-asset failures.
+
+### Changed
+- **Docling upgrade 2.66.0 → 2.86.0:** Enables `PdfTextCell.font_name` for
+  font-based heading classification and `docling-hierarchical-pdf` compatibility.
+- Removed dead code: `_filter_blank_images` (0 callers), redundant 150-char
+  heading downgrade in `processor.py` (I4, I5).
+- Gate script: skip infix counting for code chunks, skip orphan ratio when
+  label count < 5.
+- Version bumped to `2.7.0` in `version.py` and `pyproject.toml`.
+
+---
+
 ## [v2.6.0] - 2026-04-07
 
 ### Added

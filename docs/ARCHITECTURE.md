@@ -1,11 +1,12 @@
 # 🏗️ Universal Multi-Format RAG Pipeline Architecture
 
-**Version:** v2.6.0-dev (schema version 2.5.0)
+**Version:** v2.7.0 (schema version 2.7.0)
 **Date:** April 2026
-**Status:** IN DEVELOPMENT (v2.5.0-stable is the last tagged release)
-**Policy Update (v2.5.0):** PDF extraction pathway is now determined by **structural integrity tests** on the byte-stream, not by semantic content type. Three pre-flight checks (line-break health, visual-digital delta, geometry error rate) run before extraction and drive pathway decisions independently of the semantic profile. See `docs/DECISIONS.md` — "Structural Pathology over Semantic Profiling".
-**Policy Update (v2.4.2-stable):** `IngestionChunk.visual_description` is now a top-level computed field in the serialised JSON. `VisionCache` is model-aware and discards stale entries when the VLM model changes.
-**Policy Update (v2.4.1-stable):** Native-digital PDFs bypass the OCR cascade (Docling text layer + recovery only). Layout-aware OCR (Tesseract/Doctr) is reserved for scanned/unknown modalities. Gap-fill recovery on academic whitepapers uses a 60-character minimum block to fill low-coverage pages with strict deduplication and noise filters.
+**Status:** PRODUCTION — v2.7.0 is current
+**Policy Update (v2.7.0):** Image extraction uses Docling layout model for all document types (PyMuPDF `page.get_images()` tested and reverted). 4 multimodal validation layers added: CorruptionInterceptor, POS Boundary Logic, Vision-Gated Hierarchy, Content-Type Classification. Encoding corruption uses heal-over strategy (keep HybridChunker + force refiner). TOC-based heading hierarchy via PyMuPDF bookmarks + content-based magazine TOC fallback. See `docs/DECISIONS.md`.
+**Policy Update (v2.5.0):** PDF extraction pathway is determined by **structural integrity tests** on the byte-stream, not by semantic content type. Three pre-flight checks (line-break health, visual-digital delta, geometry error rate) drive pathway decisions independently of the semantic profile.
+**Policy Update (v2.4.2-stable):** `IngestionChunk.visual_description` is now a top-level computed field. `VisionCache` is model-aware.
+**Policy Update (v2.4.1-stable):** Native-digital PDFs bypass the OCR cascade. Layout-aware OCR reserved for scanned/unknown modalities.
 
 ---
 
@@ -15,7 +16,7 @@
 
 ## 1. Executive Summary
 
-This document describes the current MM-Converter-V2.4.1-stable architecture for robust multimodal ingestion across supported formats.
+This document describes the current MM-Converter V2.7.0 architecture for robust multimodal ingestion across supported formats.
 
 ### Problem Statement
 
@@ -38,18 +39,18 @@ A **Universal Intermediate Representation (UIR)** that decouples format-specific
 2. IMAGE regions → extraction strategy by document class → `modality: "image"`
 3. TABLE regions → Structure extraction → `modality: "table"`
 
-### Image Extraction Strategy (Classification-Driven)
+### Image Extraction Strategy (v2.7.0)
 
-The document classifier (`document_modality`) determines the image extraction approach:
+All document types use Docling layout model for image extraction. PyMuPDF `page.get_images()` was tested (I10) but reverted — it fails on magazines (composite page layouts) and academic papers (vector figures).
 
 | Document Class | Image Extraction | Rationale |
 |---|---|---|
-| `native_digital` | **PyMuPDF `page.get_images()`** — extract embedded image objects directly from the PDF stream | Digital PDFs store photos as discrete embedded objects with exact coordinates. No layout guessing needed. |
-| `image_heavy` (magazines) | **PyMuPDF embedded extraction** + size/position filtering | Magazines are digital PDFs with many embedded images. Layout model produces oversized bounding boxes that include text; direct extraction gives clean photos. |
-| `scanned_clean` | **Docling layout model** — detect image regions from rendered pages | Scanned pages ARE images; there are no embedded objects. Layout model segments the page into text/image regions. |
-| `scanned_degraded` | **Docling layout model** + VLM verification | Same as scanned_clean but with VLM gating for quality assurance on degraded pages. |
+| `native_digital` (books, papers) | **Docling layout model** + picture classification (`DocumentFigureClassifier-v2.5`) | Classification filters layout artifacts (`full_page_image`, `page_thumbnail`). Consistent with other digital types. |
+| `image_heavy` (magazines) | **Docling layout model** + picture classification | Same pipeline. Magazine image quality remains suboptimal for composite layouts — rendered-region-crop architecture is the planned fix. |
+| `scanned` | **Docling layout model** (no classification) | Classification disabled — classifier hangs on large scanned books with hundreds of image regions. Not needed since scanned images are illustrations, not layout artifacts. |
+| `scanned_degraded` | **Docling layout model** (no classification) + VLM verification | Same as `scanned` but with VLM gating for quality assurance on degraded pages. |
 
-This routing extends the existing classification-driven pipeline (which already routes OCR, chunking thresholds, and profile parameters) to image extraction.
+Picture classification requires Docling 2.86.0+.
 
 ---
 
@@ -269,6 +270,36 @@ This directly fixes the "Kimothi class" problem: born-digital PDFs from broken P
 - **Structural integrity tests** → drive extraction *pathway* (how to extract).
 - **Semantic profile** (`AcademicWhitepaperProfile`, `TechnicalManualProfile`, etc.) → drive VLM *behaviour* and sensitivity (what to describe, how aggressively to capture images).
 - These are **orthogonal** — a `technical_manual` profile can have any structural health category.
+
+---
+
+## 3c. TOC-Based Heading Hierarchy (v2.7.0)
+
+Before batch processing begins, the pipeline extracts a table of contents to build heading hierarchy:
+
+1. **PDF bookmarks** (`PyMuPDF doc.get_toc()`): Extracts the bookmark tree with levels and page numbers. Maps each page to its correct breadcrumb path (Book > Part > Chapter > Section).
+2. **Content-based magazine TOC** (`_extract_toc_from_content`): For PDFs without bookmarks (magazines), scans pages 1–15 for `NUMBER TITLE` patterns, finds the page with highest match density, and builds article page ranges.
+3. **HybridChunker headings** are validated against the TOC — stale headings from batch boundaries are detected and replaced with the correct TOC entry.
+
+Heading validation gates:
+- `is_valid_heading()`: Rejects headings > 80 chars, multi-sentence, captions ("Figure X.Y"), listings ("Listing X.Y"), markers ("This chapter covers"), and pagination artifacts ("(continued)").
+- `_sanitize_chunk_for_export()`: Final heading gate before JSONL write.
+
+---
+
+## 3d. Multimodal Validation Layers (v2.7.0)
+
+Four post-extraction validation layers that use OCR, VLM, and POS signals instead of heuristic string matching:
+
+1. **CorruptionInterceptor** (`validators/corruption_interceptor.py`): Detects encoding artifacts (`/C211`, `/uniFB01`, hex leaks) per chunk. Renders only the corrupted chunk's bbox at 300 DPI, runs Tesseract, replaces content if OCR is cleaner. Preserves HybridChunker structure.
+
+2. **POS Boundary Logic** (`batch_processor.py`): Merges trailing orphan prepositions (`BY`, `FOR`, `OF`, `WITH`, `von`, `für`, etc.) into the next chunk when it starts with a proper noun. Same-page guard prevents cross-page false merges. Preposition must be the only word on its line.
+
+3. **Vision-Gated Hierarchy** (`batch_processor.py`): When a page has cover/logo/illustration images (detected via VLM `visual_description`), demotes non-chapter headings to "Front Matter". Uses multimodal signals, not text patterns.
+
+4. **Content-Type Classification** (`batch_processor.py`): Chunks with 2+ boilerplate markers (ISBN, ©, "All rights reserved", "Printed in") get `search_priority` downgraded to `low`.
+
+These run after HybridChunker splitting and before JSONL export.
 
 ---
 
@@ -827,6 +858,7 @@ src/mmrag_v2/
 │
 └── validators/                     # QA checks
     ├── __init__.py
+    ├── corruption_interceptor.py   # Per-bbox encoding artifact repair (v2.7)
     ├── quality_filter_tracker.py
     └── token_validator.py
 ```

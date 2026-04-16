@@ -67,6 +67,54 @@
 
 ---
 
+## Image Extraction Routing (v2.7.0)
+
+**Decision:** All document types use Docling layout model for image extraction. PyMuPDF `page.get_images()` is not used in the active pipeline.
+
+**Rationale:**
+- PyMuPDF direct extraction was implemented and tested for `native_digital` PDFs (I10). It works for simple cases (technical books with discrete embedded images) but fails for:
+  - **Magazines:** Composite page layouts where text and photos are baked together as single rasterized images. PyMuPDF extracts these composites whole — it cannot separate photos from text backgrounds.
+  - **Academic papers:** Vector figures extracted as solid-color backgrounds.
+- Docling's layout model with picture classification (`DocumentFigureClassifier-v2.5`, Docling 2.86.0) correctly identifies image regions across all document types. A deny filter rejects `full_page_image` and `page_thumbnail` layout artifacts.
+- Picture classification is **disabled for scanned docs** (`scanned`, `scanned_degraded`) because the classifier model hangs on large scanned books with hundreds of image regions (tested: 292-page Firearms on 16GB M1).
+- The PyMuPDF `_extract_embedded_images` method is retained in the codebase for future use. The proper fix for magazine image quality is the rendered-region-crop architecture (tracked in `CONVERSION_PROFILES.md`).
+
+---
+
+## Heal-Over for Encoding Corruption (v2.7.0)
+
+**Decision:** When encoding corruption is detected (`has_encoding_corruption`), keep HybridChunker active and force the semantic refiner on all chunks at `threshold=0.0`, instead of disabling HybridChunker and falling back to full OCR.
+
+**Rationale:**
+- Disabling HybridChunker loses structural metadata: heading hierarchy, table structures, sentence-boundary-aware splitting.
+- The refiner (LLM-based) understands language context and can replace glyph placeholders (`/C211`, `/C1`, hex leaks) with correct characters while preserving the surrounding structure.
+- This "heal-over" approach preserves Docling's structural analysis as a skeleton and patches only the corrupted text content.
+
+**Operationalization:**
+- `CorruptionInterceptor` (`src/mmrag_v2/validators/corruption_interceptor.py`) performs per-bbox OCR patching at 300 DPI for chunks with detected encoding artifacts.
+- The refiner threshold override is set in `batch_processor.py` when `has_encoding_corruption` is true.
+
+---
+
+## Multimodal Validation Layers (v2.7.0)
+
+**Decision:** Replace heuristic string-matching loops with 4 signal-driven validation layers that use OCR confidence, VLM descriptions, and POS tagging.
+
+**The 4 layers:**
+
+1. **CorruptionInterceptor** — Per-bbox OCR patching for encoding artifacts. Renders only the corrupted chunk's bbox at 300 DPI, runs Tesseract, replaces content if OCR result is cleaner. Preserves HybridChunker structure.
+
+2. **POS Boundary Logic** — Merges trailing orphan prepositions (`BY`, `FOR`, `OF`, `WITH`, `von`, `für`, `van`, `voor`, `par`, `pour`) into the next chunk when it starts with a proper noun. Same-page guard prevents cross-page false merges. The preposition must be the ONLY word on its line (true orphan).
+
+3. **Vision-Gated Hierarchy** — When a page has cover/logo/illustration images (detected via VLM `visual_description`), demotes non-chapter headings to "Front Matter". Uses multimodal signals rather than text pattern matching.
+
+4. **Content-Type Classification** — Chunks with 2+ boilerplate markers (ISBN, ©, "All rights reserved", "Printed in") get `search_priority` downgraded to `low`. Global rule across all profiles.
+
+**Rationale:**
+- Heuristic string matching (v2.6 approach) required per-document tuning and broke on edge cases. These layers use structural signals (OCR confidence, VLM output, POS tags) that generalize across document types.
+
+---
+
 ## Chunk Size Governance
 **Decision:** Chunk length is governed per profile and verified with acceptance metrics; no universal hard min/max.
 

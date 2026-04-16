@@ -2,7 +2,7 @@
 
 **Version:** v2.5.0-dev
 **Schema Version:** 2.5.0-dev (single source: `src/mmrag_v2/version.py`)
-**Status:** ACTIVE DEVELOPMENT — v2.4.2-stable is current production baseline
+**Status:** STALE — This SRS reflects v2.5.0. The codebase is at **v2.7.0**. Features added in v2.6–v2.7 (HybridChunker, multimodal validation layers, TOC-based heading hierarchy, Docling 2.86.0 picture classification, encoding heal-over, output provenance) are **not documented here**. Refer to `CHANGELOG.md` and `docs/DECISIONS.md` for current behavior. A full SRS rewrite to v2.7 is pending.
 **Supersedes:** SRS v2.4.md
 **Design Philosophy:** Apply Specification Engineering primitives — self-contained problem statements, explicit acceptance criteria, constraint architecture, decomposed phases, and measurable evaluation design.
 
