@@ -544,38 +544,88 @@ def audit(jsonl_path: Path) -> AuditResult:
 # Profile-aware thresholds
 # ---------------------------------------------------------------------------
 
-def _get_thresholds(doc_class: str, profile_type: str) -> dict:
-    """Return pass/fail thresholds based on document class and profile."""
+def _classify_content_type(r: AuditResult) -> str:
+    """Classify document content type for gate selection.
+
+    Returns one of:
+        'code_heavy'   — programming book, code is structurally load-bearing
+        'mixed_prose'  — technical manual with incidental code
+        'non_code'     — magazine, academic paper, scanned form, etc.
+    """
+    if r.text_chunks == 0:
+        return "non_code"
+    code_ratio = r.code_chunks / r.text_chunks
+    if code_ratio >= 0.15:  # 15%+ of text chunks are code
+        return "code_heavy"
+    if r.code_chunks >= 3:
+        return "mixed_prose"
+    return "non_code"
+
+
+def _get_thresholds(doc_class: str, profile_type: str, content_type: str) -> dict:
+    """Return pass/fail thresholds based on document class, profile, and content type.
+
+    Gate levels:
+        value    — hard gate, AUDIT_FAIL if exceeded
+        None     — metric not gated (still reported)
+        'warn'   — reported as warning, does not cause AUDIT_FAIL
+    """
+    # --- Base thresholds by document class ---
     if doc_class == "scanned":
-        return {
+        th = {
             "micro_non_label_ratio": 0.22,
             "oversize_ratio": 0.02,
             "orphan_label_ratio": 0.30,
             "orphan_label_min_count": 5,
-            "code_frag_ratio": None,  # not gated for scanned
+            "code_frag_ratio": None,
             "code_flat_ratio": None,
             "code_indent_fidelity": None,
+            "code_indent_gate": None,  # hard / warn / None
             "image_placeholder_ratio": 0.20,
             "image_description_coverage": 0.80,
             "table_placeholder_ratio": 0.20,
             "table_markdown_ratio": 0.80,
         }
-    # digital
-    orphan_limit = 0.65 if profile_type == "academic_whitepaper" else 0.25
-    micro_limit = 0.22 if profile_type in ("digital_magazine", "academic_whitepaper") else 0.12
-    return {
-        "micro_non_label_ratio": micro_limit,
-        "oversize_ratio": 0.01,
-        "orphan_label_ratio": orphan_limit,
-        "orphan_label_min_count": 5,
-        "code_frag_ratio": 0.05,
-        "code_flat_ratio": 0.35,
-        "code_indent_fidelity": 0.90,
-        "image_placeholder_ratio": 0.20,
-        "image_description_coverage": 0.80,
-        "table_placeholder_ratio": 0.20,
-        "table_markdown_ratio": 0.80,
-    }
+    else:
+        # digital
+        orphan_limit = 0.65 if profile_type == "academic_whitepaper" else 0.25
+        micro_limit = 0.22 if profile_type in ("digital_magazine", "academic_whitepaper") else 0.12
+        th = {
+            "micro_non_label_ratio": micro_limit,
+            "oversize_ratio": 0.01,
+            "orphan_label_ratio": orphan_limit,
+            "orphan_label_min_count": 5,
+            "code_frag_ratio": 0.05,
+            "code_flat_ratio": 0.35,
+            "code_indent_fidelity": 0.90,
+            "code_indent_gate": "hard",
+            "image_placeholder_ratio": 0.20,
+            "image_description_coverage": 0.80,
+            "table_placeholder_ratio": 0.20,
+            "table_markdown_ratio": 0.80,
+        }
+
+    # --- Content-type overrides for code gates ---
+    if content_type == "code_heavy":
+        # Code is structurally load-bearing — strict gates
+        th["code_indent_fidelity"] = 0.90
+        th["code_indent_gate"] = "hard"
+        th["code_flat_ratio"] = 0.35
+        th["code_frag_ratio"] = 0.05
+    elif content_type == "mixed_prose":
+        # Incidental code — warn but don't block
+        th["code_indent_fidelity"] = 0.90
+        th["code_indent_gate"] = "warn"
+        th["code_flat_ratio"] = 0.35
+        th["code_frag_ratio"] = None  # too few code chunks to gate
+    else:
+        # Non-code — ignore code metrics entirely
+        th["code_indent_fidelity"] = None
+        th["code_indent_gate"] = None
+        th["code_flat_ratio"] = None
+        th["code_frag_ratio"] = None
+
+    return th
 
 
 # ---------------------------------------------------------------------------
@@ -584,12 +634,13 @@ def _get_thresholds(doc_class: str, profile_type: str) -> dict:
 
 def print_report(r: AuditResult, path: Path) -> bool:
     """Print audit report. Returns True if passed."""
-    th = _get_thresholds(r.doc_class, r.profile_type)
+    content_type = _classify_content_type(r)
+    th = _get_thresholds(r.doc_class, r.profile_type, content_type)
 
     print(f"{'='*65}")
     print(f"AUDIT: {r.source_file or path.parent.name}")
     print(f"{'='*65}")
-    print(f"  Profile: {r.profile_type}  Class: {r.doc_class}  Schema: {r.schema_version}")
+    print(f"  Profile: {r.profile_type}  Class: {r.doc_class}  Content: {content_type}  Schema: {r.schema_version}")
     print(f"  Chunks: {r.total_chunks} (text={r.text_chunks}, image={r.image_chunks}, table={r.table_chunks})")
     print(f"  Assets: {r.total_assets}")
     print()
@@ -701,21 +752,39 @@ def print_report(r: AuditResult, path: Path) -> bool:
     code_indent_fidelity = (r.code_with_indent / r.code_chunks) if r.code_chunks else 1.0
     code_frag_ratio = (r.code_fragment_micro / r.code_like_total) if r.code_like_total else 0.0
     code_ok = True
+    code_warnings: list = []
+    code_gate = th.get("code_indent_gate")  # "hard", "warn", or None
     # Only gate code metrics when there are enough code chunks to be meaningful
     if r.code_chunks >= 3:
         if th["code_flat_ratio"] is not None and code_flat_ratio > th["code_flat_ratio"]:
-            code_ok = False
+            if code_gate == "hard":
+                code_ok = False
+            else:
+                code_warnings.append(f"flat_ratio={code_flat_ratio:.2f} (>{th['code_flat_ratio']})")
         if th["code_indent_fidelity"] is not None and code_indent_fidelity < th["code_indent_fidelity"]:
-            code_ok = False
+            if code_gate == "hard":
+                code_ok = False
+            else:
+                code_warnings.append(f"indent_fidelity={code_indent_fidelity:.2f} (<{th['code_indent_fidelity']})")
     # Require at least 3 code-like occurrences before gating on fragmentation
     if r.code_like_total >= 3 and th["code_frag_ratio"] is not None and code_frag_ratio > th["code_frag_ratio"]:
-        code_ok = False
-    print(f"  CODE:        {'PASS' if code_ok else 'FAIL'}")
+        if code_gate == "hard":
+            code_ok = False
+        else:
+            code_warnings.append(f"frag_ratio={code_frag_ratio:.3f} (>{th['code_frag_ratio']})")
+    if code_warnings:
+        code_label = "WARN"
+    else:
+        code_label = "PASS" if code_ok else "FAIL"
+    print(f"  CODE:        {code_label} [{content_type}]")
     if r.code_chunks > 0:
         print(f"    code_chunks: {r.code_chunks}  flat: {r.code_flat}  flat_ratio: {code_flat_ratio:.2f}")
         print(f"    indentation_fidelity: {code_indent_fidelity:.2f}")
     if r.code_like_total > 0:
         print(f"    code_like_total: {r.code_like_total}  fragment_micro: {r.code_fragment_micro}  frag_ratio: {code_frag_ratio:.3f}")
+    if code_warnings:
+        for w in code_warnings:
+            print(f"    ⚠ {w}")
     if not code_ok:
         fails.append("CODE")
 
