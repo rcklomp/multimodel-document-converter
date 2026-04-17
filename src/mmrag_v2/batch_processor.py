@@ -6255,6 +6255,99 @@ class BatchProcessor:
 
         return [p for p in parts if p]
 
+    def _enhance_magazine_images(self, chunks: List[IngestionChunk]) -> int:
+        """
+        Re-render magazine image regions at high DPI from the original PDF.
+
+        Magazine PDFs store composite page layouts (text+photos baked together).
+        Docling's layout model detects image regions but the extracted images
+        often include text overlays and layout artifacts. Re-rendering from
+        PyMuPDF at the detected bbox gives cleaner crops.
+
+        Only applies to image chunks with asset_ref (saved PNG files).
+        Skips chunks where the existing image is already high quality.
+
+        Returns the number of enhanced images.
+        """
+        import fitz
+
+        if not self._current_pdf_path or not self._current_pdf_path.exists():
+            return 0
+
+        enhanced = 0
+        render_dpi = 200  # Good quality for magazine photos without excessive file sizes
+
+        try:
+            doc = fitz.open(str(self._current_pdf_path))
+        except Exception as e:
+            logger.debug(f"[MAGAZINE-IMAGE] Could not open PDF: {e}")
+            return 0
+
+        try:
+            for chunk in chunks:
+                if chunk.modality != Modality.IMAGE:
+                    continue
+                asset_ref = getattr(chunk, "asset_ref", None)
+                if not asset_ref or not asset_ref.file_path:
+                    continue
+                spatial = getattr(chunk.metadata, "spatial", None)
+                if not spatial or not spatial.bbox:
+                    continue
+                page_num = getattr(chunk.metadata, "page_number", None)
+                if not page_num or page_num > len(doc):
+                    continue
+
+                bbox = spatial.bbox
+                # Skip full-page images (layout artifacts, not photos)
+                area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                if area > 800000:  # > 80% of [0,1000]² area
+                    continue
+                # Skip tiny images (icons, decorative elements)
+                w = bbox[2] - bbox[0]
+                h = bbox[3] - bbox[1]
+                if w < 100 or h < 100:
+                    continue
+
+                try:
+                    page = doc[page_num - 1]
+                    pw, ph = page.rect.width, page.rect.height
+
+                    # Convert normalized [0,1000] bbox to PDF points
+                    x0 = bbox[0] / 1000.0 * pw
+                    y0 = bbox[1] / 1000.0 * ph
+                    x1 = bbox[2] / 1000.0 * pw
+                    y1 = bbox[3] / 1000.0 * ph
+                    clip = fitz.Rect(x0, y0, x1, y1)
+
+                    # Render at high DPI
+                    zoom = render_dpi / 72.0
+                    mat = fitz.Matrix(zoom, zoom)
+                    pix = page.get_pixmap(matrix=mat, clip=clip, alpha=False)
+
+                    if pix.width < 50 or pix.height < 50:
+                        continue
+
+                    # Save rendered crop, replacing the Docling-extracted image
+                    asset_path = self.output_dir / asset_ref.file_path
+                    pix.save(str(asset_path))
+
+                    # Update asset metadata
+                    asset_ref.width_px = pix.width
+                    asset_ref.height_px = pix.height
+                    asset_ref.file_size_bytes = asset_path.stat().st_size
+                    chunk.metadata.extraction_method = "rendered_region_crop"
+                    enhanced += 1
+
+                except Exception as e:
+                    logger.debug(
+                        f"[MAGAZINE-IMAGE] Failed to enhance pg{page_num} "
+                        f"bbox={bbox}: {e}"
+                    )
+        finally:
+            doc.close()
+
+        return enhanced
+
     def _filter_no_visual_images(
         self,
         chunks: List[IngestionChunk],
@@ -6746,9 +6839,17 @@ class BatchProcessor:
         # it in the actual content.
         valid_chunks = self._deduplicate_chunk_overlap(valid_chunks)
 
+        # Step 3a5: Magazine image enhancement — re-render image regions at high DPI
+        # for digital_magazine profile. Docling's layout model extracts oversized regions
+        # that include text. Re-rendering from PyMuPDF gives cleaner photo crops.
+        profile_type = str(self._intelligence_metadata.get("profile_type", "unknown"))
+        if profile_type == "digital_magazine" and self._current_pdf_path:
+            enhanced = self._enhance_magazine_images(valid_chunks)
+            if enhanced:
+                logger.info(f"[MAGAZINE-IMAGE] Enhanced {enhanced} image assets via rendered-region crop")
+
         # Step 3b: Profile-specific text hygiene (technical manuals are sensitive to
         # embedded page numbers, control chars, hyphenation, and broken chunk joins).
-        profile_type = str(self._intelligence_metadata.get("profile_type", "unknown"))
         if profile_type == "technical_manual":
             before = len(valid_chunks)
             valid_chunks = self._apply_technical_manual_hygiene(valid_chunks)
