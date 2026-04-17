@@ -2903,6 +2903,24 @@ class BatchProcessor:
                         if meta.get("refined_content") is None:
                             meta["refined_content"] = chunk_dict.get("content", "")
 
+                    # Set VLM enrichment status for image chunks
+                    if chunk_dict.get("modality") == "image":
+                        meta = chunk_dict.get("metadata", {})
+                        vd = meta.get("visual_description") or chunk_dict.get("content") or ""
+                        if not vd or vd.startswith("[Figure on page") or vd.startswith("[VLM_FAILED"):
+                            if self.vision_provider and self.vision_provider != "none":
+                                meta["vision_status"] = "failed"
+                                if vd.startswith("[VLM_FAILED"):
+                                    meta["vision_error"] = vd
+                            else:
+                                meta["vision_status"] = "pending"
+                        elif "extraction unavailable" in vd.lower():
+                            meta["vision_status"] = "pending"
+                        else:
+                            meta["vision_status"] = "done"
+                            meta["vision_provider_used"] = self.vision_provider
+                        chunk_dict["metadata"] = meta
+
                     json_line = json.dumps(chunk_dict, ensure_ascii=False)
                     write_buffer.append(json_line)
                     written_chunks += 1

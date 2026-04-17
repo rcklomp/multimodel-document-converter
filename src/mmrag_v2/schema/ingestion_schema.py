@@ -417,6 +417,24 @@ class ChunkMetadata(BaseModel):
         description="LLM model used for refinement (e.g., llama2, gpt-4o-mini) - audit trail",
     )
 
+    # V2.7 VLM ENRICHMENT METADATA
+    vision_status: Optional[str] = Field(
+        default=None,
+        description="VLM enrichment status: pending|done|failed|skipped"
+    )
+    vision_attempts: Optional[int] = Field(
+        default=None, ge=0,
+        description="Number of VLM enrichment attempts"
+    )
+    vision_provider_used: Optional[str] = Field(
+        default=None,
+        description="VLM provider that produced the description (openai|ollama|anthropic)"
+    )
+    vision_error: Optional[str] = Field(
+        default=None,
+        description="Last VLM error message if status=failed"
+    )
+
     # V2.7 CODE BLOCK METADATA
     is_code: Optional[bool] = Field(
         default=None, description="True if chunk was classified as code"
