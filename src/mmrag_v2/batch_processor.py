@@ -5330,8 +5330,10 @@ class BatchProcessor:
                 try:
                     code_lines = [ln for ln in (ch.content or "").splitlines() if ln.strip()]
                     has_indent = any(ln.startswith(("    ", "\t")) for ln in code_lines)
+                    # REPL code uses >>> markers instead of indentation — count as structured
+                    has_repl = any(ln.lstrip().startswith(">>> ") for ln in code_lines)
                     ch.metadata.is_code = True
-                    ch.metadata.indentation_fidelity = 1.0 if has_indent else 0.0
+                    ch.metadata.indentation_fidelity = 1.0 if (has_indent or has_repl) else 0.0
                     # Try parsing as Python — structural validity check
                     import ast as _ast
                     try:
@@ -5342,8 +5344,11 @@ class BatchProcessor:
                 except Exception:
                     pass
 
-        # PyMuPDF-based indentation recovery for flat code blocks
+        # Code indentation recovery — two strategies:
+        # 1. Pure code chunks: PyMuPDF x-coordinate recovery from bbox
+        # 2. Mixed prose+code chunks: reflow fenced code blocks (```...```)
         recovered = 0
+        fence_recovered = 0
         if self._current_pdf_path and self._current_pdf_path.exists():
             for ch in chunks:
                 if ch.modality != Modality.TEXT or not is_code_chunk(ch):
@@ -5352,17 +5357,24 @@ class BatchProcessor:
                     fidelity = getattr(ch.metadata, "indentation_fidelity", None)
                     if fidelity is not None and fidelity > 0:
                         continue  # Already has indentation
-                    repaired = self._recover_code_indentation_from_pdf(ch)
-                    if repaired:
+
+                    # Strategy 1: PyMuPDF recovery for pure code chunks
+                    if self._recover_code_indentation_from_pdf(ch):
                         recovered += 1
+                        continue
+
+                    # Strategy 2: Fence-aware reflow for mixed prose+code
+                    if self._recover_fenced_code_blocks(ch):
+                        fence_recovered += 1
                 except Exception as e:
                     logger.debug(f"[CODE-INDENT] Recovery failed for {ch.chunk_id}: {e}")
 
-        if reclassified or reflowed or recovered:
+        if reclassified or reflowed or recovered or fence_recovered:
             logger.info(
                 f"[CODE-HYGIENE] Reclassified {reclassified} chunks as code, "
                 f"reflowed {reflowed} flat code, "
-                f"recovered indentation for {recovered} chunks"
+                f"recovered indentation for {recovered} chunks (PyMuPDF), "
+                f"{fence_recovered} chunks (fence reflow)"
             )
 
         return chunks
@@ -5479,6 +5491,169 @@ class BatchProcessor:
 
         except Exception:
             return False
+
+    def _recover_fenced_code_blocks(self, chunk: IngestionChunk) -> bool:
+        """
+        Recover indentation inside markdown code fences (```...```) within mixed
+        prose+code chunks.
+
+        HybridChunker often merges code fences with surrounding prose into a single
+        chunk. The code inside the fences is flat (all on one line) because the PDF
+        text layer concatenated the REPL lines. This method:
+
+        1. Finds ``` fence boundaries in the content
+        2. Reflowes each fenced block using REPL markers (>>>, ...)
+        3. Uses PyMuPDF x-coordinate extraction if bbox is available
+        4. Reassembles the chunk with reflowed code
+
+        Returns True if any code block was improved.
+        """
+        import re
+
+        content = chunk.content or ""
+        if "```" not in content:
+            return False
+
+        # Split content into segments: prose and fenced code blocks
+        parts = re.split(r"(```[^\n]*\n?)", content)
+        if len(parts) < 3:
+            return False
+
+        improved = False
+        result_parts = []
+        in_fence = False
+
+        for part in parts:
+            if part.startswith("```"):
+                in_fence = not in_fence
+                result_parts.append(part)
+                continue
+
+            if in_fence and part.strip():
+                # This is code inside a fence — try to reflow
+                original = part
+                reflowed = self._reflow_fenced_code(part)
+                if reflowed != original:
+                    result_parts.append(reflowed)
+                    improved = True
+                else:
+                    result_parts.append(part)
+            else:
+                result_parts.append(part)
+
+        if improved:
+            chunk.content = "".join(result_parts)
+            chunk.metadata.code_repair_applied = True
+            # Re-check indentation fidelity
+            code_lines = [ln for ln in chunk.content.splitlines() if ln.strip()]
+            has_indent = any(ln.startswith(("    ", "\t")) for ln in code_lines)
+            chunk.metadata.indentation_fidelity = 1.0 if has_indent else 0.0
+            # Re-check parse status
+            import ast as _ast
+            try:
+                _ast.parse(chunk.content)
+                chunk.metadata.code_parse_ok = True
+            except (SyntaxError, ValueError):
+                chunk.metadata.code_parse_ok = False
+            return True
+        return False
+
+    def _reflow_fenced_code(self, code_text: str) -> str:
+        """
+        Reflow a flat code block that appears inside markdown fences.
+
+        Handles two common patterns:
+        1. REPL: ">>> stmt1 >>> stmt2 ... continuation" → split on >>> markers
+        2. Script: "def foo(): return bar" → split on Python keywords
+
+        Also separates command output that's concatenated on the same line as
+        the REPL prompt (e.g. ">>> v1 + v2 Vector(4, 5)" → separate lines).
+        """
+        import re
+
+        t = code_text.strip()
+        if not t:
+            return code_text
+
+        # If already multiline with indentation, preserve exactly
+        if "\n" in t:
+            lines = t.splitlines()
+            if any(ln.startswith(("    ", "\t")) for ln in lines):
+                return code_text
+
+        # REPL reflow: split on >>> and ... markers
+        if ">>>" in t:
+            # First: split inline >>> markers onto separate lines
+            t = re.sub(r"(?<!\n)\s*>>>\s*", "\n>>> ", t)
+            t = re.sub(r"(?<!\n)\s*\.\.\.\s*", "\n... ", t)
+
+            lines = [ln for ln in t.splitlines() if ln.strip()]
+            if not lines:
+                return code_text
+
+            # Second: separate command output from prompt lines.
+            # ">>> expr result_text" → ">>> expr\nresult_text"
+            # Heuristic: if a >>> line contains a complete expression followed
+            # by what looks like output (starts with [, (, {, digit, quote, or
+            # capitalized class name), split there.
+            expanded = []
+            for ln in lines:
+                stripped = ln.lstrip()
+                if stripped.startswith(">>> ") or stripped.startswith("... "):
+                    marker = stripped[:4]
+                    body = stripped[4:]
+                    # Try to find where the command ends and output begins
+                    # Look for balanced expression followed by output
+                    split_pos = self._find_repl_output_boundary(body)
+                    if split_pos and split_pos < len(body) - 1:
+                        cmd = body[:split_pos].rstrip()
+                        output = body[split_pos:].lstrip()
+                        expanded.append(f"{marker}{cmd}")
+                        expanded.append(output)
+                    else:
+                        expanded.append(stripped)
+                else:
+                    expanded.append(stripped)
+
+            return "\n".join(expanded) + "\n"
+
+        # Script reflow: use _reflow_flat_code for non-REPL code
+        if "\n" not in t:
+            return self._reflow_flat_code(t) + "\n"
+
+        return code_text
+
+    @staticmethod
+    def _find_repl_output_boundary(body: str) -> Optional[int]:
+        """
+        Find where a REPL command ends and its output begins on the same line.
+
+        E.g. "v1 + v2 Vector(4, 5)" → split at position of "Vector"
+             "deck[:3] [Card(..." → split at position of "["
+             "abs(v) 5.0" → split at position of "5.0"
+
+        Returns the split position, or None if no boundary found.
+        """
+        import re
+
+        if not body or len(body) < 5:
+            return None
+
+        # Pattern: after a closing bracket/paren or end-of-identifier,
+        # followed by space then output (starts with [, (, upper, digit, ', ")
+        m = re.search(
+            r"([\]\)'\"])\s+([\[(\d'\"A-Z])",
+            body,
+        )
+        if m:
+            return m.start(2)
+
+        # Pattern: simple expression result — "identifier number"
+        m = re.search(r"\)\s+(\d)", body)
+        if m:
+            return m.start(1)
+
+        return None
 
     def _apply_technical_manual_hygiene(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
         """
