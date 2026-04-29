@@ -60,7 +60,11 @@ _INFIX_RE = re.compile(
 )
 
 _ARTIFACT_PAT = re.compile(
-    r"/C\d{1,3}|/uni[A-F0-9]{4,}|\\x[0-9a-f]{2}|\ufffd"
+    # `/C211` and `/uniFFFF` are Docling/PDF glyph leaks; U+FFFD is an
+    # actual replacement character. Printable byte escapes such as `\xff`
+    # are legitimate content in programming books and Unicode chapters, so
+    # they are not counted as encoding corruption here.
+    r"/C\d{1,3}|/uni[A-F0-9]{4,}|\ufffd"
 )
 
 _SUSPICIOUS_HEADING = re.compile(

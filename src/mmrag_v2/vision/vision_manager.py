@@ -42,7 +42,13 @@ if TYPE_CHECKING:
     from ..orchestration.strategy_profiles import ProfileParameters
 
 # Import the new visual-only prompt system
-from .vision_prompts import build_visual_prompt, clean_vlm_response, validate_vlm_response
+from .vision_prompts import (
+    build_text_reading_retry_prompt,
+    build_visual_prompt,
+    clean_vlm_response,
+    sanitize_text_reading_response,
+    validate_vlm_response,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -268,8 +274,8 @@ class VisionCache:
     """
     Simple disk-based cache for VLM descriptions.
 
-    Uses image content hash as key to avoid redundant VLM calls
-    for identical or duplicate images.
+    Uses image content hash plus prompt hash as key to avoid redundant VLM
+    calls for identical prompts on identical or duplicate images.
 
     Model-aware: if the configured model differs from what was used to
     populate the cache, the stale cache is discarded and VLM is called fresh.
@@ -341,15 +347,21 @@ class VisionCache:
         content = buffer.getvalue()
         return hashlib.md5(content).hexdigest()
 
-    def get(self, image: Image.Image) -> Optional[str]:
-        """Get cached description for image."""
+    def _make_key(self, image: Image.Image, prompt: Optional[str]) -> str:
+        """Build cache key from image content and prompt text."""
         img_hash = self._compute_hash(image)
-        return self._cache.get(img_hash)
+        if prompt is None:
+            return img_hash
+        prompt_hash = hashlib.md5(prompt.encode("utf-8")).hexdigest()
+        return f"{img_hash}:{prompt_hash}"
 
-    def set(self, image: Image.Image, description: str) -> None:
-        """Cache description for image."""
-        img_hash = self._compute_hash(image)
-        self._cache[img_hash] = description
+    def get(self, image: Image.Image, prompt: Optional[str] = None) -> Optional[str]:
+        """Get cached description for image/prompt pair."""
+        return self._cache.get(self._make_key(image, prompt))
+
+    def set(self, image: Image.Image, description: str, prompt: Optional[str] = None) -> None:
+        """Cache description for image/prompt pair."""
+        self._cache[self._make_key(image, prompt)] = description
 
     def flush(self) -> None:
         """Flush cache to disk."""
@@ -1123,13 +1135,6 @@ class VisionManager:
         Returns:
             Generated description (max 400 chars) - CLEAN TEXT ONLY, visual descriptors
         """
-        # Check cache first
-        if self._cache:
-            cached = self._cache.get(image)
-            if cached:
-                logger.debug("Using cached description")
-                return cached
-
         # ================================================================
         # CONFIDENCE THRESHOLD: Skip VLM if high-quality OCR already exists
         # ================================================================
@@ -1148,9 +1153,12 @@ class VisionManager:
         #   because it encourages meta-language ("page", "document", "surrounding text")
         #   and speculative statements that degrade retrieval quality.
         is_diagram, is_photograph = _classify_image_type(image)
-        # Literature domain: book illustrations look like diagrams (few colors,
-        # white background) but should NOT get the technical diagram prompt.
-        if self.document_domain == "literature":
+        # Literature/editorial pages often contain low-color tables, ads, and
+        # typographic layouts that look diagram-like to the cheap pixel heuristic.
+        # Keep them on the generic visual prompt unless a caller provides a
+        # stronger content-type signal; otherwise the technical diagram prompt
+        # can bias VLMs toward invented mechanical subjects.
+        if self.document_domain in {"literature", "editorial"}:
             is_diagram = False
         prompt = build_visual_prompt(
             context_section=None,
@@ -1160,6 +1168,14 @@ class VisionManager:
             is_photograph=is_photograph,
             ocr_confidence=ocr_confidence,
         )
+
+        # Check cache after prompt construction so prompt changes invalidate
+        # stale descriptions for the same image/model.
+        if self._cache:
+            cached = self._cache.get(image, prompt)
+            if cached:
+                logger.debug("Using cached description")
+                return cached
 
         logger.debug(
             f"[VISUAL-ONLY-VLM] Using visual-only prompt, "
@@ -1177,7 +1193,12 @@ class VisionManager:
                     f"[VISUAL-ONLY-VLM] Rejected VLM response on page {page_number}: "
                     f"{', '.join(validation.issues) if validation.issues else 'invalid'}; retrying once"
                 )
-                raw_response = self._provider.describe_image(image, prompt)
+                retry_prompt = (
+                    build_text_reading_retry_prompt(prompt)
+                    if validation.text_reading_detected
+                    else prompt
+                )
+                raw_response = self._provider.describe_image(image, retry_prompt)
                 self._processed_count += 1
                 validation = validate_vlm_response(raw_response)
 
@@ -1189,12 +1210,17 @@ class VisionManager:
                 # If the model keeps trying to "read" or reference text, degrade gracefully:
                 # emit a stable layout descriptor instead of dropping to an unhelpful placeholder.
                 if validation.text_reading_detected:
-                    description = "Dense typographic layout; no distinct non-text visuals."
+                    sanitized = sanitize_text_reading_response(raw_response)
+                    sanitized_validation = validate_vlm_response(sanitized)
+                    if sanitized_validation.is_valid:
+                        description = sanitized_validation.cleaned_response
+                    else:
+                        description = "Dense typographic layout; no distinct non-text visuals."
                 else:
                     description = "[VLM_FAILED: response invalid]"
 
                 if self._cache:
-                    self._cache.set(image, description)
+                    self._cache.set(image, description, prompt)
                 return description
 
             description = validation.cleaned_response
@@ -1205,7 +1231,7 @@ class VisionManager:
 
             # Cache the CLEAN result
             if self._cache:
-                self._cache.set(image, description)
+                self._cache.set(image, description, prompt)
 
             logger.debug(f"[VISUAL-ONLY-VLM] Generated: {description[:60]}...")
             return description
@@ -1734,21 +1760,6 @@ class VisionManager:
             - is_low_confidence: True if confidence < 0.7 (hallucination risk)
             - raw_response: Original VLM response
         """
-        # Check cache first
-        if self._cache:
-            cached = self._cache.get(image)
-            if cached:
-                logger.debug("Using cached description")
-                # Return cached with default confidence
-                return {
-                    "description": cached,
-                    "object": "cached",
-                    "confidence": 1.0,  # Assume cached entries are valid
-                    "reasoning": "cached response",
-                    "is_low_confidence": False,
-                    "raw_response": cached,
-                }
-
         # ================================================================
         # GEMINI AUDIT FIX #2: Build dynamic prompt with diagnostic hints
         # ================================================================
@@ -1812,6 +1823,22 @@ class VisionManager:
                 diagnostic_hints=diagnostic_hints,
             )
 
+        # Check cache after prompt construction so diagnostic/context prompt
+        # changes cannot return stale descriptions for the same image/model.
+        if self._cache:
+            cached = self._cache.get(image, prompt)
+            if cached:
+                logger.debug("Using cached description")
+                # Return cached with default confidence
+                return {
+                    "description": cached,
+                    "object": "cached",
+                    "confidence": 1.0,  # Assume cached entries are valid
+                    "reasoning": "cached response",
+                    "is_low_confidence": False,
+                    "raw_response": cached,
+                }
+
         # Get VLM response
         try:
             raw_response = self._provider.describe_image(image, prompt)
@@ -1862,7 +1889,7 @@ class VisionManager:
 
             # Cache the formatted description
             if self._cache:
-                self._cache.set(image, result["description"])
+                self._cache.set(image, result["description"], prompt)
 
             logger.debug(
                 f"[DIAGNOSTIC-VLM] Generated: obj={result['object']}, "
@@ -1986,13 +2013,6 @@ class VisionManager:
             use_ocr_hints = True
             logger.info(f"[OCR-HINT-VLM] OCR hints ENABLED for page {page_number}")
 
-        # Check cache first
-        if self._cache:
-            cached = self._cache.get(image)
-            if cached:
-                logger.debug("Using cached description")
-                return cached
-
         # ================================================================
         # OCR-HINT BYPASS: visual-only prompts intentionally avoid OCR hint
         # injection to enforce modality boundaries (Source Sanctity).
@@ -2015,6 +2035,8 @@ class VisionManager:
         diagnostic_hints = SCAN_ARTIFACT_HINTS if is_scan else None
 
         _is_diagram, _is_photograph = _classify_image_type(image)
+        if self.document_domain in {"literature", "editorial"}:
+            _is_diagram = False
         prompt = build_visual_prompt(
             context_section=None,
             diagnostic_hints=diagnostic_hints,
@@ -2023,6 +2045,14 @@ class VisionManager:
             is_photograph=_is_photograph,
             ocr_confidence=None,
         )
+
+        # Check cache after prompt construction so prompt changes invalidate
+        # stale descriptions for the same image/model.
+        if self._cache:
+            cached = self._cache.get(image, prompt)
+            if cached:
+                logger.debug("Using cached description")
+                return cached
 
         # Log image dimensions for debugging large image issues
         img_width, img_height = image.size
@@ -2042,7 +2072,12 @@ class VisionManager:
                     f"[VISUAL-ONLY-VLM] Rejected VLM response on page {page_number}: "
                     f"{', '.join(validation.issues) if validation.issues else 'invalid'}; retrying once"
                 )
-                raw_response = self._provider.describe_image(image, prompt)
+                retry_prompt = (
+                    build_text_reading_retry_prompt(prompt)
+                    if validation.text_reading_detected
+                    else prompt
+                )
+                raw_response = self._provider.describe_image(image, retry_prompt)
                 self._processed_count += 1
                 validation = validate_vlm_response(raw_response)
 
@@ -2052,12 +2087,17 @@ class VisionManager:
                     f"{', '.join(validation.issues) if validation.issues else 'invalid'}"
                 )
                 if validation.text_reading_detected:
-                    description = "Dense typographic layout; no distinct non-text visuals."
+                    sanitized = sanitize_text_reading_response(raw_response)
+                    sanitized_validation = validate_vlm_response(sanitized)
+                    if sanitized_validation.is_valid:
+                        description = sanitized_validation.cleaned_response
+                    else:
+                        description = "Dense typographic layout; no distinct non-text visuals."
                 else:
                     description = "[VLM_FAILED: response invalid]"
 
                 if self._cache:
-                    self._cache.set(image, description)
+                    self._cache.set(image, description, prompt)
                 return description
 
             description = validation.cleaned_response
@@ -2066,7 +2106,7 @@ class VisionManager:
 
             # Cache the result
             if self._cache:
-                self._cache.set(image, description)
+                self._cache.set(image, description, prompt)
 
             logger.info(f"[VISUAL-ONLY-VLM] Page {page_number} SUCCESS: {description[:80]}...")
             return description

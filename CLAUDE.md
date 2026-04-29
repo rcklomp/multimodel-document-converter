@@ -3,12 +3,20 @@
 This file provides guidance to Claude Code when working with this repository.
 
 ## Read First
-1. `docs/DECISIONS.md`
-2. `docs/TESTING.md`
-3. `docs/QUALITY_GATES.md`
-4. `docs/ARCHITECTURE.md`
-5. `docs/SRS_Multimodal_Ingestion_V2.5.md`
-6. `AGENTS.md`
+1. `docs/PROJECT_STATUS.md`
+2. `docs/PROGRESS_CHECKLIST.md`
+3. `AGENTS.md`
+4. `docs/README.md`
+5. `docs/DECISIONS.md`
+6. `docs/TESTING.md`
+7. `docs/QUALITY_GATES.md`
+8. `docs/ARCHITECTURE.md`
+9. `docs/SRS_Multimodal_Ingestion_V2.5.md`
+
+Use the three-layer docs model:
+- Layer 0 contracts: invariants, decisions, architecture, quality gates.
+- Layer 1 current state: project status and quality snapshots.
+- Layer 2 execution: progress checklist, tests, plans, and archive.
 
 ## Engineering Principles
 

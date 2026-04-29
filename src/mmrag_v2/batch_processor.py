@@ -2974,6 +2974,25 @@ class BatchProcessor:
             f"final attempted {len(export_chunks)})"
         )
 
+        # IngestionMetadata is required to be the first JSONL record, but final
+        # image deduplication happens while chunk lines are being streamed. Patch
+        # the first record after export so chunk_count reflects emitted chunks,
+        # not pre-dedup candidates.
+        try:
+            with open(output_jsonl, "r", encoding="utf-8") as _rf:
+                _lines = _rf.readlines()
+            if _lines:
+                _first = json.loads(_lines[0])
+                if _first.get("object_type") == "ingestion_metadata":
+                    _first["chunk_count"] = written_chunks
+                    _tmp = output_jsonl.with_suffix(output_jsonl.suffix + ".tmp")
+                    with open(_tmp, "w", encoding="utf-8") as _wf:
+                        _wf.write(json.dumps(_first, ensure_ascii=False) + "\n")
+                        _wf.writelines(_lines[1:])
+                    _tmp.replace(output_jsonl)
+        except Exception as e:
+            logger.warning(f"[FINALIZE] Failed to reconcile metadata chunk_count: {e}")
+
         # Clean up orphan assets: files saved to disk during extraction but
         # not referenced in the final JSONL (e.g., Docling images skipped in
         # favor of PyMuPDF extraction for digital PDFs).

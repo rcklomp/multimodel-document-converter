@@ -17,6 +17,7 @@ Config file format:
       provider: openai
       model: qwen-plus
       base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: sk-...
 
     defaults:
       batch_size: 10
@@ -55,7 +56,7 @@ class RefinerConfig:
     provider: str = "openai"
     model: Optional[str] = None
     base_url: Optional[str] = None
-    # api_key inherited from VLM if not set separately
+    api_key: Optional[str] = None
 
 
 @dataclass
@@ -160,6 +161,7 @@ def _build_config(data: dict, source: str) -> AppConfig:
         provider=refiner_data.get("provider", "openai"),
         model=refiner_data.get("model"),
         base_url=refiner_data.get("base_url"),
+        api_key=refiner_data.get("api_key"),
     )
 
     defaults = DefaultsConfig(

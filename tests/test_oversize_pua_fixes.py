@@ -257,3 +257,23 @@ def test_whitespace_collapse_preserves_newlines():
 
     assert "\n\n" in result.content, "Paragraph break (double newline) was collapsed"
     assert "  " not in result.content, "Double-space survived"
+
+
+def test_text_chunk_strips_c0_controls_but_preserves_newline_tab():
+    """C0 separators from PDF text layers must not leak to JSONL content."""
+    from mmrag_v2.schema.ingestion_schema import FileType, create_text_chunk
+
+    chunk = create_text_chunk(
+        doc_id="abc123def456",
+        content="Keywords Hybrid\x01energy\nTable\tvalue\x7f",
+        source_file="test.pdf",
+        file_type=FileType.PDF,
+        page_number=1,
+        refined_content="Refined\x01text\nwith\ttab",
+    )
+
+    assert "\x01" not in chunk.content
+    assert "\x7f" not in chunk.content
+    assert "\n" in chunk.content
+    assert "\t" in chunk.content
+    assert chunk.metadata.refined_content == "Refinedtext\nwith\ttab"

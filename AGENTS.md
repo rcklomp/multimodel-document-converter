@@ -79,9 +79,16 @@ Companion docs:
 ---
 
 ## 💾 4. AGENT MEMORY & CONTEXT PROTOCOL
-1. Start sessions by skimming `docs/` for current SRS/architecture notes (no `active_context.md` in this branch).
-2. Cross-check nontrivial changes against `docs/ARCHITECTURE.md` for UIR compliance.
-3. When finishing a task, record deltas and next steps in commit messages or a short note for the next engineer.
+1. Start sessions with the indexed handoff path:
+   - `docs/PROJECT_STATUS.md`
+   - `docs/PROGRESS_CHECKLIST.md`
+   - `docs/README.md`
+2. Use the three-layer documentation model:
+   - Layer 0 contracts: this file, `CLAUDE.md`, `docs/DECISIONS.md`, `docs/QUALITY_GATES.md`, `docs/ARCHITECTURE.md`, SRS.
+   - Layer 1 current state: `docs/PROJECT_STATUS.md`, dated quality snapshots.
+   - Layer 2 execution: `docs/PROGRESS_CHECKLIST.md`, `docs/TESTING.md`, plans, run logs, archive.
+3. Cross-check nontrivial changes against `docs/ARCHITECTURE.md` for UIR compliance.
+4. When finishing a task, update `docs/PROGRESS_CHECKLIST.md`; update `docs/PROJECT_STATUS.md` if the next recommended step changed; create/update a dated quality snapshot if quality numbers changed.
 
 ---
 
@@ -101,9 +108,13 @@ Companion docs:
 **QA policy:** All profiles use the standard 10% token variance tolerance. See `docs/QUALITY_GATES.md`.
 
 ### Priority TODOs (Open)
-1. Convert remaining 14 documents and achieve full AUDIT_PASS across all 31.
-2. Re-ingest to Qdrant after all documents pass.
-3. Establish per-category blind-test baselines for all document categories in the smoke test matrix.
+1. Stabilize model-agnostic VLM Source Sanctity enforcement. See `docs/PROGRESS_CHECKLIST.md`.
+2. Fix code-block fidelity failures in code-heavy books without regressing Fluent Python.
+3. Resolve Combat Aircraft text corruption and reach full `AUDIT_PASS`.
+4. Improve classifier correctness without using `--profile-override` in acceptance runs.
+5. Convert remaining pending documents and achieve full `AUDIT_PASS` across the corpus.
+6. Re-ingest to Qdrant after all documents pass.
+7. Establish per-category blind-test baselines for all document categories in the smoke test matrix.
 
 ### Recently Completed (Do Not Reopen)
 1. `--force-ocr` override is implemented.

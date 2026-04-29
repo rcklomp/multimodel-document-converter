@@ -575,6 +575,12 @@ def process_document(
         "--refiner-base-url",
         help="Base URL for OpenAI-compatible refiner endpoints (e.g., http://localhost:1234)",
     ),
+    refiner_api_key: Optional[str] = typer.Option(
+        None,
+        "--refiner-api-key",
+        help="API key for the refiner provider; defaults to refiner.api_key, then --api-key",
+        envvar="MMRAG_REFINER_API_KEY",
+    ),
     refiner_threshold: float = typer.Option(
         0.15,
         "--refiner-threshold",
@@ -651,11 +657,14 @@ def process_document(
             refiner_model = cfg.refiner.model
         if refiner_base_url is None and cfg.refiner.base_url:
             refiner_base_url = cfg.refiner.base_url
+        if refiner_api_key is None and cfg.refiner.api_key:
+            refiner_api_key = cfg.refiner.api_key
 
     batch_size_pages = batch_size
 
     # Validate API key for cloud providers
     resolved_key = resolve_api_key(api_key, vision_provider)
+    resolved_refiner_key = refiner_api_key or api_key
 
     cloud_providers = (
         VisionProviderType.OPENAI,
@@ -1103,7 +1112,7 @@ def process_document(
                 processor.enable_refiner(
                     provider=refiner_provider,
                     model=refiner_model,
-                    api_key=api_key,
+                    api_key=resolved_refiner_key,
                     base_url=refiner_base_url,
                     threshold=refiner_threshold,
                     max_edit=refiner_max_edit,
@@ -1210,7 +1219,7 @@ def process_document(
                 proc.enable_refiner(
                     provider=refiner_provider,
                     model=refiner_model,
-                    api_key=api_key,
+                    api_key=resolved_refiner_key,
                     base_url=refiner_base_url,
                     threshold=refiner_threshold,
                     max_edit=refiner_max_edit,
@@ -1392,6 +1401,12 @@ def batch_process(
         "--refiner-base-url",
         help="Base URL for OpenAI-compatible refiner endpoints (e.g., http://localhost:1234)",
     ),
+    refiner_api_key: Optional[str] = typer.Option(
+        None,
+        "--refiner-api-key",
+        help="API key for the refiner provider; defaults to --api-key",
+        envvar="MMRAG_REFINER_API_KEY",
+    ),
     refiner_threshold: float = typer.Option(
         0.15,
         "--refiner-threshold",
@@ -1434,6 +1449,7 @@ def batch_process(
         raise typer.Exit(code=0)
 
     resolved_key = resolve_api_key(api_key, vision_provider)
+    resolved_refiner_key = refiner_api_key or api_key
 
     cloud_providers = (
         VisionProviderType.OPENAI,
@@ -1507,7 +1523,7 @@ def batch_process(
                     processor.enable_refiner(
                         provider=refiner_provider,
                         model=refiner_model,
-                        api_key=api_key,
+                        api_key=resolved_refiner_key,
                         base_url=refiner_base_url,
                         threshold=refiner_threshold,
                         max_edit=refiner_max_edit,
@@ -1690,7 +1706,7 @@ def batch_process(
                 processor.enable_refiner(
                     provider=refiner_provider,
                     model=refiner_model,
-                    api_key=api_key,
+                    api_key=resolved_refiner_key,
                     base_url=refiner_base_url,
                     threshold=refiner_threshold,
                     max_edit=refiner_max_edit,

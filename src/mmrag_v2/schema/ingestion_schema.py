@@ -47,6 +47,18 @@ SCHEMA_VERSION: str = __schema_version__  # V2.4: Intelligence Stack Observabili
 COORD_SCALE: int = 1000
 
 
+def _strip_c0_controls(value: Optional[str]) -> Optional[str]:
+    """Remove C0/DEL control characters while preserving newline and tab."""
+    if value is None:
+        return value
+    if not isinstance(value, str):
+        return value
+    return "".join(
+        ch for ch in value
+        if ch in ("\n", "\t") or (ord(ch) >= 32 and ord(ch) != 127)
+    )
+
+
 # ============================================================================
 # ENUMS
 # ============================================================================
@@ -481,6 +493,12 @@ class ChunkMetadata(BaseModel):
         description="Detected modality (native_digital, scanned_clean, scanned_degraded) - diagnostic result",
     )
 
+    @field_validator("refined_content", "visual_description", mode="before")
+    @classmethod
+    def strip_control_chars_from_optional_text(cls, v: Optional[str]) -> Optional[str]:
+        """Prevent extraction-layer control characters from leaking to JSONL."""
+        return _strip_c0_controls(v)
+
 
 # ============================================================================
 # INGESTION CHUNK (MAIN MODEL)
@@ -513,6 +531,13 @@ class IngestionChunk(BaseModel):
         default=None, description="REQ-MM-03: Contextual anchoring with surrounding text"
     )
     schema_version: str = Field(default=SCHEMA_VERSION)
+
+    @field_validator("content", mode="before")
+    @classmethod
+    def strip_control_chars_from_content(cls, v: str) -> str:
+        """Text chunks must not emit C0/DEL control characters."""
+        cleaned = _strip_c0_controls(v)
+        return cleaned if cleaned is not None else ""
 
     @computed_field
     @property
@@ -692,6 +717,8 @@ def create_text_chunk(
 
     TEXT chunks get HIGH search priority (OCR text is ground truth for RAG).
     """
+    content = _strip_c0_controls(content) or ""
+    refined_content = _strip_c0_controls(refined_content)
     chunk_id = _generate_chunk_id(doc_id, content, page_number, "text")
 
     # Ensure hierarchy has level calculated

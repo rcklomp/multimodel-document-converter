@@ -13,6 +13,7 @@ import pytest
 from mmrag_v2.vision.vision_prompts import (
     STRICTER_VISUAL_PROMPT,
     detect_text_reading,
+    sanitize_text_reading_response,
     validate_vlm_response,
     clean_vlm_response,
 )
@@ -147,6 +148,33 @@ class TestDetectTextReading:
         for response in invalid_responses:
             assert detect_text_reading(response), f"Should reject: {response}"
 
+    def test_invalid_magazine_caption_and_overlay_patterns(self):
+        """Magazine caption/overlay reading patterns should be detected."""
+        invalid_responses = [
+            "Editorial photograph of aircraft on a runway, with a caption identifying the squadron.",
+            "Editorial photograph of aircraft lined up on a runway, with text overlay describing CVW-5 assets.",
+            "Two-column layout with dense text; footer contains a website, date, and page number.",
+            "Dense typographic layout with a caption below the main image.",
+            "Advertisement collage featuring a magazine cover titled A400M Atlas.",
+            "A QR code is centered on a white background. Below it, a black rectangle contains the number 20.",
+            "Dense typographic layout with a stylized logo, company name, and copyright information.",
+            "Badge labeled with a squadron name and date.",
+            "QR code with a date and a partial URL at the bottom.",
+            "Advertisement collage with QR code and ordering information.",
+            'Red and black abstract background with white text "WAI THUN".',
+            "Google search results page with product images and article snippets.",
+            "Editorial photograph of a Lenovo ThinkPad laptop on a wooden surface.",
+            "Bar chart showing CPU performance scores for various devices.",
+            "Bar chart with longer bars indicating better performance.",
+            "Advertisement collage with a laptop displaying a wave painting and text about its features.",
+            "Editorial photograph of a tablet displaying a drawing app with a hand-drawn face and text.",
+            "FOUNDRY O",
+            "Person holding a gaming console with a touchscreen interface displaying game titles and a search bar.",
+            "Editorial photograph of a ROG gaming controller displaying the full-screen software interface.",
+        ]
+        for response in invalid_responses:
+            assert detect_text_reading(response), f"Should reject: {response}"
+
     # =========================================================================
     # Edge Cases
     # =========================================================================
@@ -167,10 +195,9 @@ class TestDetectTextReading:
             assert not detect_text_reading(response), f"Should pass: {response}"
 
     def test_borderline_quote_count(self):
-        """Four quotes (2 pairs) should be allowed."""
-        # Exactly 2 quote pairs should pass
+        """Quoted visible words should be rejected even when short."""
         response = 'Diagram showing "bolt" and "trigger" components'
-        assert not detect_text_reading(response)
+        assert detect_text_reading(response)
 
     def test_borderline_caps_count(self):
         """Two ALL CAPS words should be allowed."""
@@ -196,6 +223,36 @@ class TestValidateVLMResponse:
         assert not validation.is_valid
         assert validation.text_reading_detected
         assert "Text transcription detected" in validation.issues
+
+    def test_validation_rejects_raw_quotes_before_cleaning(self):
+        """Raw quoted headings must be rejected before the cleaner strips quotes."""
+        validation = validate_vlm_response(
+            'Dense typographic layout with "Headlines" and "Crushing Iran nuclear ambitions".'
+        )
+        assert not validation.is_valid
+        assert validation.text_reading_detected
+        assert "Text transcription detected" in validation.issues
+
+    def test_sanitize_preserves_visual_subject_without_read_text(self):
+        """Text-leaking responses can be reduced to visual-only descriptions."""
+        examples = [
+            (
+                "Editorial photograph of a Lenovo ThinkPad laptop on a wooden surface.",
+                "Editorial photograph of a laptop on a wooden surface.",
+            ),
+            (
+                "Bar chart showing CPU performance scores for various devices, with longer bars indicating better performance.",
+                "Bar chart with colored bars, axes, and category labels.",
+            ),
+            (
+                'Google search results page showing "best laptops" query with product images.',
+                "search results page query with product images.",
+            ),
+        ]
+        for raw, expected in examples:
+            sanitized = sanitize_text_reading_response(raw)
+            assert sanitized == expected
+            assert not detect_text_reading(sanitized)
 
     def test_empty_response(self):
         """Empty response should fail validation."""
