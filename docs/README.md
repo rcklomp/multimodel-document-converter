@@ -21,7 +21,10 @@ This folder uses a three-layer documentation structure so a new coding session c
    - architecture constraints
    - source-of-truth rules for agents
 
-4. `docs/DECISIONS.md` and `docs/QUALITY_GATES.md`
+4. `docs/AGENT_GOVERNANCE.md`
+   - evidence, completion, review, and documentation-budget rules
+
+5. `docs/DECISIONS.md` and `docs/QUALITY_GATES.md`
    - design decisions and acceptance thresholds
    - quality gates used to decide pass/fail
 
@@ -35,6 +38,7 @@ Stable rules. These should change rarely.
 
 - `AGENTS.md`
 - `CLAUDE.md`
+- `docs/AGENT_GOVERNANCE.md`
 - `docs/DECISIONS.md`
 - `docs/QUALITY_GATES.md`
 - `docs/ARCHITECTURE.md`
@@ -60,8 +64,9 @@ Operational checklists, commands, and historical notes.
 ## Update Rules
 
 - If a hard invariant changes, update `AGENTS.md` and record the rationale in `docs/DECISIONS.md`.
+- If a completion claim or evidence claim changes, apply `docs/AGENT_GOVERNANCE.md`.
+- If adding documentation, obey the documentation budget in `docs/AGENT_GOVERNANCE.md`.
 - If the quality baseline changes, create or update a dated `docs/QUALITY_SNAPSHOT_*.md`.
 - If task status changes, update `docs/PROGRESS_CHECKLIST.md`.
 - If the recommended next step changes, update `docs/PROJECT_STATUS.md`.
 - Do not bury current-state information in chat history only.
-

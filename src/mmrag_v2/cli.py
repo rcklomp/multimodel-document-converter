@@ -1118,6 +1118,10 @@ def process_document(
                     max_edit=refiner_max_edit,
                 )
 
+            # Workstream B: register code-enrichment config so the pre-pass
+            # respects the enabled flag from ~/.mmrag-v2.yml.
+            processor.enable_code_enrichment(cfg.code_enrichment)
+
             # REQ-OCR-01: Pass profile parameters for OCR hints (ScannedDegradedProfile)
             # This enables the hybrid OCR+VLM layer for scanned documents
             if profile_params is not None:
@@ -1198,6 +1202,20 @@ def process_document(
         else:
             # Use regular V2DocumentProcessor (lazy import)
             V2DocumentProcessor = _lazy_import_processor()
+            processor_intelligence_metadata = dict(intelligence_metadata)
+            if is_pdf:
+                from .batch_processor import decide_code_enrichment_for_pdf
+
+                needs_code_enrichment, code_reason, code_score = decide_code_enrichment_for_pdf(
+                    input_file,
+                    cfg.code_enrichment,
+                )
+                processor_intelligence_metadata["needs_code_enrichment"] = needs_code_enrichment
+                logger.info(
+                    f"[CODE-ENRICH-DECISION] direct path needs={needs_code_enrichment} | "
+                    f"{code_reason} | score={code_score:.3f}"
+                )
+
             proc = V2DocumentProcessor(
                 output_dir=str(output_dir),
                 enable_ocr=enable_ocr,
@@ -1209,7 +1227,7 @@ def process_document(
                 vision_cache_dir=cache_dir,
                 extraction_strategy=extraction_strategy,
                 # V2.4: Pass intelligence metadata for observability
-                intelligence_metadata=intelligence_metadata,
+                intelligence_metadata=processor_intelligence_metadata,
                 force_table_vlm=force_table_vlm,
             )
             processor_instance = proc
@@ -1711,6 +1729,9 @@ def batch_process(
                     threshold=refiner_threshold,
                     max_edit=refiner_max_edit,
                 )
+
+            # Workstream B: register code-enrichment config (batch command path).
+            processor.enable_code_enrichment(cfg.code_enrichment)
 
             # ================================================================
             # CODEX FIX: Profile params with OCR hints banner (matching process)

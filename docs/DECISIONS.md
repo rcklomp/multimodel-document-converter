@@ -96,6 +96,34 @@
 
 ---
 
+## Selective Code Enrichment Lane (Workstream B, 2026-04-29)
+
+**Decision:** Code-block fidelity must use a selective enrichment lane. Do not enable Docling `do_code_enrichment` broadly from `has_encoding_corruption` or profile alone.
+
+**Rationale:**
+- Docling 2.86.0 already emits code regions as `CodeItem`; `CodeItem.text` can still be flat when the source PDF text layer has stripped code newlines.
+- `do_code_enrichment=True` fixes this at the right layer by rendering code regions and running CodeFormulaV2, but local CPU execution is too slow for broad conversion.
+- `has_encoding_corruption` is a text-integrity signal, not a code-density signal. Using it as a trigger would pull magazine/text-corruption workstreams into expensive code-model inference.
+- The client machine should not be the primary CodeFormulaV2 inference target when stronger local-network or cloud machines are available.
+
+**Operationalization:**
+- First run a cheap code-evidence pass: Docling `CodeItem` count, code-chunk ratio, or sampled code-candidate regions.
+- Emit/use an explicit decision such as `needs_code_enrichment=True` with reason/counts; do not infer it solely from `has_encoding_corruption`.
+- Prefer remote-capable CodeFormulaV2 inference on a stronger local-network host; cloud is acceptable when data policy/cost allow; local client execution is diagnostic/fallback only.
+- If Docling only supports document-level `do_code_enrichment`, enable it only after the code-evidence pass indicates a code-heavy/code-candidate document.
+- If region-level remote inference is implemented, send only `CodeItem`/code-candidate crops, not whole documents.
+- Preserve `_has_fenced_flat_code` only as a provisional fallback marker when native/remote code enrichment is unavailable or still returns flat code.
+- Refactor duplicated PDF extraction policy behind a shared `PdfConversionPlan` and Docling PDF adapter. `batch_processor.py` and `processor.py` must not remain independent sources of Docling `PdfPipelineOptions` truth.
+
+**Anti-patterns now explicitly forbidden:**
+- Triggering CodeFormulaV2 from `has_encoding_corruption` alone.
+- Adding profile-specific `do_code_enrichment=True` rules in either processor path.
+- Installing client-side MLX/transformer acceleration as the main production strategy before evaluating remote inference.
+- Letting fallback regex/Tesseract repair mask whether Docling-native/remote enrichment actually fixed the code.
+- Weakening negative tests that prove non-code documents, incidental shell commands, sparse fenced snippets, or encoding corruption alone do not trigger CodeFormulaV2. These tests are Workstream B contracts.
+
+---
+
 ## Multimodal Validation Layers (v2.7.0)
 
 **Decision:** Replace heuristic string-matching loops with 4 signal-driven validation layers that use OCR confidence, VLM descriptions, and POS tagging.

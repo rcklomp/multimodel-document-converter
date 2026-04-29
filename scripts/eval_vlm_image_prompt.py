@@ -45,6 +45,43 @@ def _image_chunks(ingestion: Path) -> list[dict[str, Any]]:
     return chunks
 
 
+def _blind_set_chunks(manifest_path: Path, project_root: Path) -> list[dict[str, Any]]:
+    """Load image entries from a blind-test manifest JSON.
+
+    The manifest uses paths relative to the project root.  Each entry is
+    converted into a synthetic chunk dict compatible with the harness loop.
+    """
+    data = json.loads(manifest_path.read_text())
+    images = data.get("images", [])
+    chunks: list[dict[str, Any]] = []
+    for img in images:
+        rel_path = img["image_path"]
+        abs_path = project_root / rel_path
+        if not abs_path.exists():
+            print(f"[WARN] blind-set image missing: {abs_path}")
+            continue
+        # chunk_id includes asset stem to avoid collisions when a page has multiple images
+        asset_stem = abs_path.stem
+        chunks.append({
+            "chunk_id": f"blind_{img['source_document']}_{img['page_number']:03d}_{asset_stem}",
+            "modality": "image",
+            "content": "",
+            "asset_ref": {
+                "file_path": str(abs_path),
+                "width_px": img.get("width_px"),
+                "height_px": img.get("height_px"),
+            },
+            "metadata": {
+                "page_number": img["page_number"],
+                "extraction_method": "blind_set",
+                "profile_type": img.get("profile_type"),
+                "source_document": img.get("source_document"),
+                "category": img.get("category"),
+            },
+        })
+    return chunks
+
+
 def _call_vlm(
     *,
     base_url: str,
@@ -143,7 +180,9 @@ def _call_validated_vlm(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("ingestion_jsonl", type=Path)
+    parser.add_argument("ingestion_jsonl", type=Path, nargs="?", default=None)
+    parser.add_argument("--blind-set", type=Path, default=None,
+                        help="Path to blind-test manifest JSON (tracked at tests/fixtures/blind_set_manifest.json)")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--config", type=Path, default=Path.home() / ".mmrag-v2.yml")
     parser.add_argument("--config-section", choices=("vlm", "refiner"), default="vlm")
@@ -154,15 +193,25 @@ def main() -> int:
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
 
+    if not args.ingestion_jsonl and not args.blind_set:
+        parser.error("provide either ingestion_jsonl or --blind-set")
+
     cfg = _load_config(args.config)
     vlm_cfg = cfg.get(args.config_section, {})
     base_url = str(args.base_url or vlm_cfg["base_url"]).rstrip("/")
     api_key = str(vlm_cfg["api_key"])
     model = str(args.model or vlm_cfg["model"])
 
-    ingestion = args.ingestion_jsonl.resolve()
-    out_root = ingestion.parent
-    chunks = _image_chunks(ingestion)
+    # Load chunks from blind-set manifest or ingestion JSONL
+    use_blind_set = args.blind_set is not None
+    if use_blind_set:
+        project_root = Path(__file__).resolve().parent.parent
+        chunks = _blind_set_chunks(args.blind_set.resolve(), project_root)
+        out_root = None  # blind-set paths are absolute
+    else:
+        ingestion = args.ingestion_jsonl.resolve()
+        out_root = ingestion.parent
+        chunks = _image_chunks(ingestion)
     if args.limit:
         chunks = chunks[: args.limit]
 
@@ -184,7 +233,7 @@ def main() -> int:
             if chunk_id in done:
                 continue
             asset_ref = chunk["asset_ref"]["file_path"]
-            image_path = out_root / asset_ref
+            image_path = Path(asset_ref) if use_blind_set else out_root / asset_ref
             raw_description, description, validation_issues, elapsed, error = _call_validated_vlm(
                 base_url=base_url,
                 api_key=api_key,

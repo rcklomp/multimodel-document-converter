@@ -37,6 +37,10 @@ Companion docs:
 4. **Resource Ceiling:** Target **≤8GB RAM** during runs; keep batch sizes ≤10 pages and call `gc.collect()` between batches.
 5. **AGENT-VAL-01 (Blind Test Validation):** A code change is only valid if the multi-profile smoke test (`smoke_multiprofile.sh`) yields `GATE_PASS` + `UNIVERSAL_PASS` across all document categories. At least one document per category must be a "blind test" document not used during the fix dev-loop. The technical-manual blind test document is `Greenhouse Design and Control by Pedro Ponce.pdf`. Any pass based on hardcoded filenames or word-lists is a system failure.
 6. **AGENT-SPATIAL-20:** Refinement logic must rely on a single `20-unit` vertical threshold. No profile-specific or heading-specific branches allowed.
+7. **AGENT-EVIDENCE-01:** No task/workstream may be marked complete unless its evidence is reproducible from tracked files or a tracked snapshot. Ignored `data/` and `output/` artifacts cannot be the sole evidence for completion. See `docs/AGENT_GOVERNANCE.md`.
+8. **AGENT-STATUS-01:** Project status documents must use explicit status scope: `implemented`, `validated-cloud`, `validated-local`, `blocked`, or `complete`. Do not use "complete" when local validation, durable fixtures, or required comparisons are still pending. See `docs/AGENT_GOVERNANCE.md`.
+9. **AGENT-DOCS-01:** Keep documentation minimal and indexed. Do not add new governance docs when an existing contract can be extended; obey the documentation budget in `docs/AGENT_GOVERNANCE.md`.
+10. **AGENT-TEST-01 (Test Contract Integrity):** Negative tests, regression tests, and acceptance fixtures are executable requirements. Do not remove, loosen, rewrite, or reframe their core assertions to match the current implementation. If such a test fails, fix the implementation or stop and document why the requirement is wrong. Any expectation change requires explicit rationale and must make the contract clearer or stricter, not easier.
 
 **Numbering Note:** SRS IRON IDs remain canonical. Agent-local constraints use `AGENT-*` IDs to avoid collisions.
 
@@ -84,11 +88,12 @@ Companion docs:
    - `docs/PROGRESS_CHECKLIST.md`
    - `docs/README.md`
 2. Use the three-layer documentation model:
-   - Layer 0 contracts: this file, `CLAUDE.md`, `docs/DECISIONS.md`, `docs/QUALITY_GATES.md`, `docs/ARCHITECTURE.md`, SRS.
+   - Layer 0 contracts: this file, `CLAUDE.md`, `docs/AGENT_GOVERNANCE.md`, `docs/DECISIONS.md`, `docs/QUALITY_GATES.md`, `docs/ARCHITECTURE.md`, SRS.
    - Layer 1 current state: `docs/PROJECT_STATUS.md`, dated quality snapshots.
    - Layer 2 execution: `docs/PROGRESS_CHECKLIST.md`, `docs/TESTING.md`, plans, run logs, archive.
 3. Cross-check nontrivial changes against `docs/ARCHITECTURE.md` for UIR compliance.
-4. When finishing a task, update `docs/PROGRESS_CHECKLIST.md`; update `docs/PROJECT_STATUS.md` if the next recommended step changed; create/update a dated quality snapshot if quality numbers changed.
+4. Before marking a task complete or expanding docs, apply `docs/AGENT_GOVERNANCE.md`.
+5. When finishing a task, update `docs/PROGRESS_CHECKLIST.md`; update `docs/PROJECT_STATUS.md` if the next recommended step changed; create/update a dated quality snapshot if quality numbers changed.
 
 ---
 

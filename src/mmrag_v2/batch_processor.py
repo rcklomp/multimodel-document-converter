@@ -81,6 +81,7 @@ from .utils.image_hash_registry import (
 )
 from .utils.coordinate_normalization import ensure_normalized
 from .vision.vision_manager import VisionManager, create_vision_manager
+from .vision.vision_prompts import validate_vlm_response
 from .validators.token_validator import (
     TokenValidator,
     create_token_validator,
@@ -105,6 +106,226 @@ DEFAULT_VLM_TIMEOUT: int = (
 )
 DEFAULT_VISION_PROVIDER: str = "ollama"
 DEFAULT_EXPORT_WRITE_BATCH_SIZE: int = 25
+
+
+# ============================================================================
+# HELPERS
+# ============================================================================
+
+# Keywords that, when two or more appear on a single long line inside a fenced
+# code block, indicate the line is a squished (newline-stripped) code body.
+_FENCED_FLAT_KEYWORDS: tuple = (
+    "def ", "class ", "return ", "self.", "import ", "raise ", "if ", "for ",
+)
+
+
+_CODE_EVIDENCE_KEYWORDS: tuple = (
+    "def ", "class ", "import ", "from ", "return ", "yield ",
+)
+# Minimum fence markers in the page sample to qualify as code-heavy.
+_CODE_FENCE_THRESHOLD: int = 5
+# Minimum weighted code-line ratio in the page sample.
+_CODE_RATIO_THRESHOLD: float = 0.10
+
+
+def _select_code_evidence_sample_indices(total_pages: int) -> "List[int]":
+    """Return page indices for cheap code-evidence sampling.
+
+    Programming books often introduce dense code after front matter but before
+    evenly spaced samples would land on it.  Sample the early body more densely,
+    then add a light spread across the whole document for later-code controls.
+    """
+    if total_pages <= 0:
+        return []
+
+    indices: set = set()
+
+    early_window = min(total_pages, 120)
+    early_step = max(1, early_window // 30)
+    for idx in range(0, early_window, early_step):
+        indices.add(idx)
+
+    spread_size = min(15, total_pages)
+    spread_step = max(1, total_pages // spread_size)
+    for idx in range(0, total_pages, spread_step):
+        indices.add(idx)
+
+    return sorted(i for i in indices if 0 <= i < total_pages)
+
+
+def _score_code_evidence(
+    page_texts: "List[str]",
+) -> "Tuple[bool, str, float, int, int]":
+    """Score code evidence from sampled page-text strings.
+
+    Counts three lightweight signals without running any ML model:
+
+    * ``fence_count``    — lines starting with ``` or ~~~
+    * ``keyword_lines`` — lines containing Python/code keywords
+    * ``indented_lines`` — indented lines counted only after code context exists
+
+    A ratio is formed as ``(keyword_lines + contextual_indented_lines) / total_lines``.
+    Fence markers are a separate threshold, not ratio ballast; otherwise two short
+    shell-command blocks in a prose-heavy manual can look code-heavy.
+
+    Thresholds (module constants, overridable in tests):
+
+    * ``fence_count >= _CODE_FENCE_THRESHOLD`` — substantial fenced code
+    * ``code_ratio >= _CODE_RATIO_THRESHOLD`` with code context — code-dense text
+
+    Returns:
+        (needs_enrichment, reason, code_ratio, fence_count, keyword_line_count)
+    """
+    fence_count = 0
+    keyword_lines = 0
+    indented_lines = 0
+    total_lines = 0
+
+    for text in page_texts:
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            total_lines += 1
+            if stripped.startswith("```") or stripped.startswith("~~~"):
+                fence_count += 1
+            elif any(stripped.startswith(kw) for kw in _CODE_EVIDENCE_KEYWORDS):
+                # startswith avoids false positives from English prose, e.g.
+                # "range from 15°C" → "from" mid-sentence should not count.
+                keyword_lines += 1
+            elif line.startswith("    ") or line.startswith("\t"):
+                indented_lines += 1
+
+    if total_lines == 0:
+        return False, "no text content in sample", 0.0, 0, 0
+
+    has_code_context = fence_count > 0 or keyword_lines >= 2
+    contextual_indented = indented_lines if has_code_context else 0
+    code_ratio = (keyword_lines + contextual_indented) / total_lines
+
+    if fence_count >= _CODE_FENCE_THRESHOLD:
+        reason = (
+            f"fence_count={fence_count} (>= {_CODE_FENCE_THRESHOLD}); "
+            f"code_ratio={code_ratio:.3f}"
+        )
+        return True, reason, code_ratio, fence_count, keyword_lines
+
+    if has_code_context and code_ratio >= _CODE_RATIO_THRESHOLD:
+        reason = (
+            f"code_ratio={code_ratio:.3f} (>= {_CODE_RATIO_THRESHOLD}); "
+            f"fences={fence_count} keywords={keyword_lines} indented={contextual_indented}"
+        )
+        return True, reason, code_ratio, fence_count, keyword_lines
+
+    reason = (
+        f"below threshold: fence={fence_count}(<{_CODE_FENCE_THRESHOLD}) "
+        f"code_ratio={code_ratio:.3f}(<{_CODE_RATIO_THRESHOLD})"
+    )
+    return False, reason, code_ratio, fence_count, keyword_lines
+
+
+def _decide_code_evidence_from_pages(
+    page_texts: "List[str]",
+) -> "Tuple[bool, str, float, int, int]":
+    """Decide document-level code enrichment from sampled page texts.
+
+    A whole-document aggregate can dilute dense code pages with prose pages.
+    Count strong sampled pages first; fall back to the aggregate for documents
+    where code is distributed across many pages.
+    """
+    strong_pages = 0
+    max_score = 0.0
+    total_fences = 0
+    total_keywords = 0
+
+    for text in page_texts:
+        page_needs, _, page_score, page_fences, page_keywords = _score_code_evidence([text])
+        if page_needs:
+            strong_pages += 1
+        max_score = max(max_score, page_score)
+        total_fences += page_fences
+        total_keywords += page_keywords
+
+    if strong_pages >= 2:
+        return (
+            True,
+            f"strong_code_pages={strong_pages}; max_page_score={max_score:.3f}",
+            max_score,
+            total_fences,
+            total_keywords,
+        )
+
+    aggregate_needs, aggregate_reason, aggregate_score, aggregate_fences, aggregate_keywords = (
+        _score_code_evidence(page_texts)
+    )
+    return aggregate_needs, aggregate_reason, aggregate_score, aggregate_fences, aggregate_keywords
+
+
+def decide_code_enrichment_for_pdf(
+    pdf_path: "Path",
+    config: "Optional[Any]" = None,
+) -> "Tuple[bool, str, float]":
+    """Return the code-enrichment decision for a PDF without mutating a processor.
+
+    Used by both BatchProcessor and the direct V2DocumentProcessor CLI path so
+    the decision lane does not diverge by entry point.
+    """
+    if config is None:
+        return False, "disabled: code_enrichment config not registered", 0.0
+    if not getattr(config, "enabled", False):
+        return False, "disabled by code_enrichment.enabled=false in config", 0.0
+
+    import fitz  # type: ignore[import]
+
+    doc = fitz.open(str(pdf_path))
+    try:
+        total_pages = len(doc)
+        sample_indices = _select_code_evidence_sample_indices(total_pages)
+
+        page_texts: List[str] = []
+        for idx in sample_indices:
+            try:
+                page_texts.append(doc.load_page(idx).get_text("text"))
+            except Exception:
+                pass
+    finally:
+        doc.close()
+
+    needs, reason, score, _fence_count, _keyword_lines = _decide_code_evidence_from_pages(
+        page_texts
+    )
+    return needs, reason, score
+
+
+def _has_fenced_flat_code(txt: str) -> bool:
+    """Return True if *txt* contains a fenced code block with a flat body line.
+
+    PROVISIONAL FALLBACK — used only when Docling native code enrichment
+    (`do_code_enrichment=True`) is unavailable or still returns flat code.
+    Prefer Docling CodeItem/CodeFormulaV2 output when available.
+
+    Catches code chunks produced when a PDF generator strips internal newlines
+    from code blocks, leaving multiple statements on one line inside backtick
+    fences, e.g.::
+
+        ```python
+        class CreditCard(PaymentBase): def process_payment(self): print(msg)
+        ```
+
+    A body line qualifies when it is inside a fence, exceeds 120 characters,
+    and matches at least two Python-code keyword patterns.
+    """
+    in_fence = False
+    for line in txt.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            continue
+        if in_fence and len(stripped) > 120:
+            hits = sum(1 for kw in _FENCED_FLAT_KEYWORDS if kw in stripped)
+            if hits >= 2:
+                return True
+    return False
 
 
 # ============================================================================
@@ -265,6 +486,15 @@ class BatchProcessor:
         self.has_encoding_corruption: bool = False
         self.geometry_error_rate: float = 0.0
 
+        # Workstream B: code enrichment decision flag and telemetry.
+        # Set by _decide_code_enrichment() in process_pdf() from a cheap
+        # fitz pre-pass; NOT inferred from has_encoding_corruption alone.
+        self.needs_code_enrichment: bool = False
+        self._code_enrichment_reason: str = ""
+        self._code_enrichment_score: float = 0.0
+        # CodeEnrichmentConfig from app config; None = enrichment disabled.
+        self._code_enrichment_config: "Optional[Any]" = None
+
         # REQ-VLM-02: Track asset counts per page for low-recall trigger
         self._assets_per_page: Dict[int, int] = {}
         self._current_pdf_path: Optional[Path] = None
@@ -395,6 +625,12 @@ class BatchProcessor:
         self._doc_image_density: Optional[float] = intelligence_metadata.pop("image_density", None)
         self._doc_avg_text_per_page: Optional[float] = intelligence_metadata.pop("avg_text_per_page", None)
 
+        # Pop needs_code_enrichment if it was pre-set externally (e.g. test injection).
+        # Normally False here; the real value is set by _decide_code_enrichment().
+        _nce = intelligence_metadata.pop("needs_code_enrichment", None)
+        if _nce is not None:
+            self.needs_code_enrichment = bool(_nce)
+
         self._intelligence_metadata = intelligence_metadata
         # All profiles use the standard 10% tolerance now that IMAGE-bbox-aware
         # source text extraction correctly excludes chart/graph label text.
@@ -406,6 +642,51 @@ class BatchProcessor:
             f"flat_corrupt={self.has_flat_text_corruption}, "
             f"encoding_corrupt={self.has_encoding_corruption}"
         )
+
+    def enable_code_enrichment(self, config: "Any") -> None:
+        """Store CodeEnrichmentConfig; gates _decide_code_enrichment in process_pdf.
+
+        If config.enabled is False, code enrichment is skipped even when evidence
+        suggests a code-heavy document.  This is the primary production guard against
+        accidental CPU-bound CodeFormulaV2 inference.
+        """
+        self._code_enrichment_config = config
+        logger.info(
+            f"[CODE-ENRICH] Config registered: enabled={config.enabled} "
+            f"model={getattr(config, 'model', '?')}"
+        )
+
+    def _decide_code_enrichment(self, pdf_path: "Path") -> None:
+        """Run a cheap fitz pre-pass to decide if Docling code enrichment should fire.
+
+        Samples early-body pages plus a spread across the document, scores
+        code-evidence indicators, and sets ``self.needs_code_enrichment``.  The
+        decision is written to logs with counts so evidence stays separate from
+        the fallback Tesseract rescue path.
+
+        Guards:
+        - If ``_code_enrichment_config`` is missing or disabled, skips immediately.
+        - Never infers from ``has_encoding_corruption`` alone (see DECISIONS.md).
+        """
+        try:
+            needs, reason, score = decide_code_enrichment_for_pdf(
+                pdf_path, self._code_enrichment_config
+            )
+            self.needs_code_enrichment = needs
+            self._code_enrichment_reason = reason
+            self._code_enrichment_score = score
+
+            log_fn = logger.info if needs else logger.debug
+            log_fn(
+                f"[CODE-ENRICH-DECISION] needs={needs} | {reason}"
+            )
+
+        except Exception as exc:
+            logger.debug(
+                f"[CODE-ENRICH-DECISION] pre-pass failed (non-fatal): {exc}"
+            )
+            self.needs_code_enrichment = False
+            self._code_enrichment_reason = f"pre-pass error: {exc}"
 
     def _compute_doc_hash(self, file_path: Path) -> str:
         """Compute MD5 hash of document for unique identification."""
@@ -989,6 +1270,17 @@ class BatchProcessor:
                 )
             except ImportError:
                 pass
+
+            # Workstream B: enable Docling-native code enrichment only when the
+            # code-evidence pre-pass confirmed this is a code-heavy document.
+            # NOT triggered by has_encoding_corruption alone — see DECISIONS.md.
+            if self.needs_code_enrichment:
+                pipeline_options.do_code_enrichment = True
+                pipeline_options.do_formula_enrichment = False
+                logger.info(
+                    f"[CODE-ENRICH] Enabled Docling code enrichment "
+                    f"(reason: {self._code_enrichment_reason})"
+                )
 
             self._docling_converter = DocumentConverter(
                 format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
@@ -1807,7 +2099,7 @@ class BatchProcessor:
             if not is_code:
                 return False
             txt = ch.content or ""
-            return len(txt) > 120 and "\n" not in txt
+            return (len(txt) > 120 and "\n" not in txt) or _has_fenced_flat_code(txt)
 
         candidates = [ch for ch in page_chunks if _is_flat_code_candidate(ch)]
         if not candidates:
@@ -1859,7 +2151,9 @@ class BatchProcessor:
                     continue
 
                 chunk.content = ocr_text
-                chunk.metadata.extraction_method = "flat_code_ocr_rescue"
+                # Mark as fallback: "flat_code_ocr_rescue_fallback" distinguishes
+                # Tesseract-rescued chunks from Docling-native CodeItem output.
+                chunk.metadata.extraction_method = "flat_code_ocr_rescue_fallback"
                 rescued += 1
 
             except Exception as exc:
@@ -1867,11 +2161,13 @@ class BatchProcessor:
 
         if rescued > 0:
             logger.info(
-                f"[FLAT-CODE-RESCUE] Page {page_number}: rescued {rescued}/{len(candidates)} flat code chunks via Tesseract."
+                f"[FLAT-CODE-RESCUE-FALLBACK] Page {page_number}: rescued {rescued}/{len(candidates)} "
+                f"flat code chunks via Tesseract (fallback; Docling enrichment unavailable or insufficient)."
             )
         else:
             logger.debug(
-                f"[FLAT-CODE-RESCUE] Page {page_number}: {len(candidates)} flat candidates found but none improved by OCR."
+                f"[FLAT-CODE-RESCUE-FALLBACK] Page {page_number}: {len(candidates)} flat candidates "
+                f"found but none improved by Tesseract OCR."
             )
 
         return page_chunks
@@ -1918,7 +2214,7 @@ class BatchProcessor:
             if not is_code:
                 return False
             txt = ch.content or ""
-            return len(txt) > 120 and "\n" not in txt
+            return (len(txt) > 120 and "\n" not in txt) or _has_fenced_flat_code(txt)
 
         # Group chunks by page_number (1-based in original doc).
         pages_with_flat: set = set()
@@ -2051,6 +2347,15 @@ class BatchProcessor:
         # 3. Page offset for correct numbering
         # 4. Extraction strategy for dynamic thresholds
         # 5. Intelligence metadata for observability (BUG-009 FIX)
+        # Re-inject flags that set_intelligence_metadata() popped into instance
+        # vars.  V2DocumentProcessor reads these from the dict it receives, so
+        # every popped flag that the processor consumes must be re-added here.
+        processor_intelligence_metadata = {
+            **self._intelligence_metadata,
+            "needs_code_enrichment": self.needs_code_enrichment,
+            "has_encoding_corruption": self.has_encoding_corruption,
+        }
+
         processor = V2DocumentProcessor(
             output_dir=str(self.output_dir),
             enable_ocr=self.enable_ocr,
@@ -2062,7 +2367,7 @@ class BatchProcessor:
             doc_hash_override=self._doc_hash,
             source_file_override=source_file,
             extraction_strategy=self.extraction_strategy,
-            intelligence_metadata=self._intelligence_metadata,  # BUG-009 FIX: Propagate metadata
+            intelligence_metadata=processor_intelligence_metadata,
             force_table_vlm=self.force_table_vlm,
         )
 
@@ -2179,6 +2484,9 @@ class BatchProcessor:
         # Compute document hash BEFORE splitting
         self._doc_hash = self._compute_doc_hash(pdf_path)
         logger.info(f"Document hash: {self._doc_hash}")
+
+        # Workstream B: run cheap code-evidence pre-pass to decide enrichment.
+        self._decide_code_enrichment(pdf_path)
 
         # Extract TOC from PyMuPDF BEFORE splitting — gives us the correct
         # heading hierarchy for every page, independent of batch boundaries.
@@ -2919,6 +3227,10 @@ class BatchProcessor:
                         else:
                             meta["vision_status"] = "done"
                             meta["vision_provider_used"] = self.vision_provider
+                            # Source Sanctity: validate final description
+                            vr = validate_vlm_response(vd)
+                            if not vr.is_valid:
+                                meta["vision_validation_issues"] = vr.issues
                         chunk_dict["metadata"] = meta
 
                     json_line = json.dumps(chunk_dict, ensure_ascii=False)

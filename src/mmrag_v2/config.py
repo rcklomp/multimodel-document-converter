@@ -19,6 +19,14 @@ Config file format:
       base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
       api_key: sk-...
 
+    code_enrichment:
+      enabled: false
+      provider: openai_compatible
+      base_url: ...
+      api_key: sk-...          # separate key — never falls back to vlm.api_key
+      model: CodeFormulaV2
+      timeout: 180
+
     defaults:
       batch_size: 10
       output_dir: ./output
@@ -60,6 +68,24 @@ class RefinerConfig:
 
 
 @dataclass
+class CodeEnrichmentConfig:
+    """Configuration for the code-enrichment lane (Workstream B).
+
+    Kept strictly separate from VLMConfig and RefinerConfig — the api_key
+    MUST NOT fall back to vlm.api_key or refiner.api_key.  Remote inference
+    is opt-in (enabled=False by default) because local CPU execution is too
+    slow for production; a dedicated remote host or cloud endpoint is expected.
+    """
+
+    enabled: bool = False
+    provider: str = "openai_compatible"
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None   # explicit; never inherits from other sections
+    model: str = "CodeFormulaV2"
+    timeout: int = 180
+
+
+@dataclass
 class DefaultsConfig:
     batch_size: int = 10
     output_dir: str = "./output"
@@ -69,6 +95,7 @@ class DefaultsConfig:
 class AppConfig:
     vlm: VLMConfig = field(default_factory=VLMConfig)
     refiner: RefinerConfig = field(default_factory=RefinerConfig)
+    code_enrichment: CodeEnrichmentConfig = field(default_factory=CodeEnrichmentConfig)
     defaults: DefaultsConfig = field(default_factory=DefaultsConfig)
     _loaded_from: Optional[str] = None
 
@@ -146,6 +173,7 @@ def _build_config(data: dict, source: str) -> AppConfig:
     """Build AppConfig from parsed dict."""
     vlm_data = data.get("vlm", {})
     refiner_data = data.get("refiner", {})
+    ce_data = data.get("code_enrichment", {})
     defaults_data = data.get("defaults", {})
 
     vlm = VLMConfig(
@@ -164,11 +192,30 @@ def _build_config(data: dict, source: str) -> AppConfig:
         api_key=refiner_data.get("api_key"),
     )
 
+    # code_enrichment.api_key is read only from [code_enrichment] — never from vlm or refiner.
+    code_enrichment = CodeEnrichmentConfig(
+        enabled=bool(ce_data.get("enabled", False)),
+        provider=ce_data.get("provider", "openai_compatible"),
+        base_url=ce_data.get("base_url"),
+        api_key=ce_data.get("api_key"),   # None when not set; no fallback to other keys
+        model=ce_data.get("model", "CodeFormulaV2"),
+        timeout=int(ce_data.get("timeout", 180)),
+    )
+
     defaults = DefaultsConfig(
         batch_size=int(defaults_data.get("batch_size", 10)),
         output_dir=defaults_data.get("output_dir", "./output"),
     )
 
-    config = AppConfig(vlm=vlm, refiner=refiner, defaults=defaults, _loaded_from=source)
-    logger.info(f"[CONFIG] Loaded from {source}: VLM={vlm.provider}, refiner={refiner.enabled}")
+    config = AppConfig(
+        vlm=vlm,
+        refiner=refiner,
+        code_enrichment=code_enrichment,
+        defaults=defaults,
+        _loaded_from=source,
+    )
+    logger.info(
+        f"[CONFIG] Loaded from {source}: VLM={vlm.provider}, "
+        f"refiner={refiner.enabled}, code_enrichment={code_enrichment.enabled}"
+    )
     return config

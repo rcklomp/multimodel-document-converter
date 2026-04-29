@@ -7,14 +7,15 @@ This file provides guidance to Claude Code when working with this repository.
 2. `docs/PROGRESS_CHECKLIST.md`
 3. `AGENTS.md`
 4. `docs/README.md`
-5. `docs/DECISIONS.md`
-6. `docs/TESTING.md`
-7. `docs/QUALITY_GATES.md`
-8. `docs/ARCHITECTURE.md`
-9. `docs/SRS_Multimodal_Ingestion_V2.5.md`
+5. `docs/AGENT_GOVERNANCE.md`
+6. `docs/DECISIONS.md`
+7. `docs/TESTING.md`
+8. `docs/QUALITY_GATES.md`
+9. `docs/ARCHITECTURE.md`
+10. `docs/SRS_Multimodal_Ingestion_V2.5.md`
 
 Use the three-layer docs model:
-- Layer 0 contracts: invariants, decisions, architecture, quality gates.
+- Layer 0 contracts: invariants, governance, decisions, architecture, quality gates.
 - Layer 1 current state: project status and quality snapshots.
 - Layer 2 execution: progress checklist, tests, plans, and archive.
 
@@ -24,9 +25,27 @@ Use the three-layer docs model:
 - **Simplicity first.** Minimum code that solves the problem. No speculative features, abstractions for single-use code, or error handling for impossible scenarios. If 200 lines could be 50, rewrite it.
 - **Surgical changes.** Touch only what you must. Don't "improve" adjacent code, comments, or formatting. Match existing style. Remove only imports/variables/functions that YOUR changes made unused. Every changed line should trace directly to the request.
 - **Libraries first, custom code last.** Before writing filters, heuristics, or workarounds, check whether the library (Docling, ebooklib, etc.) already has a configuration option that solves the problem. The v2.4 script is a valid reference for what Docling can do natively.
-- **Keep configurations in sync.** `batch_processor.py` and `processor.py` each create their own `PdfPipelineOptions` independently. When changing Docling settings in one, check the other. There is no shared factory (known debt).
+- **Keep configurations in sync.** `batch_processor.py` and `processor.py` still contain duplicated PDF extraction policy and Docling `PdfPipelineOptions` construction. Treat this as active architecture debt, not a pattern to copy. Until the shared `PdfConversionPlan` / Docling adapter refactor is implemented, every PDF extraction change must update both paths and include a bridge test proving the decision crosses object boundaries.
 - **Verify before converting.** Run the test suite and a single-document smoke test before starting batch conversions. Confirm schema version, chunk counts, and gate results on a real output before burning VLM credits.
 - **Goal-driven execution.** Transform tasks into verifiable goals with success criteria. For multi-step tasks, state a brief plan with verification checks at each step.
+
+## Workstream B Code Enrichment Guardrail
+
+- Use Docling-native `CodeItem` / CodeFormulaV2 before custom code-repair heuristics.
+- Do not enable `do_code_enrichment` from `has_encoding_corruption` alone; encoding corruption is not code evidence and includes magazine/text-corruption workstreams.
+- Add/use an explicit `needs_code_enrichment` decision based on cheap code evidence: `CodeItem` count, code chunk ratio, or sampled code-candidate regions.
+- Prefer CodeFormulaV2 inference on stronger local-network hardware. Cloud is acceptable when data policy and cost allow. Client-local MLX/transformers is diagnostic/fallback only.
+- If Docling only supports document-level code enrichment, enable it only after the code-evidence pass. If region-level remote inference exists, send only `CodeItem`/code-candidate crops.
+- Keep fallback regex/Tesseract repairs clearly marked and do not let them mask whether Docling-native/remote enrichment worked.
+- Workstream B negative tests are contracts: incidental shell commands, sparse fenced snippets, non-code magazines, and encoding corruption alone must not trigger CodeFormulaV2. Do not loosen these assertions or rewrite fixtures to match a broad heuristic. If one fails, fix the heuristic or stop.
+- Next-phase design lives in `docs/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md` section 5: shared PDF extraction plan + Ports-and-Adapters/Pipes-and-Filters refactor. Do not add another parallel plan.
+
+## Test Contract Integrity
+
+- Negative tests, regression tests, and acceptance fixtures are executable requirements.
+- Do not remove, weaken, or reframe assertions to make the current implementation pass.
+- Do not rewrite fixtures to avoid the behavior under test.
+- If a test expectation appears wrong, stop and document the proposed requirement change before editing the test.
 
 ## Project Invariants
 - Python is locked to 3.10 (`pyproject.toml`: `>=3.10,<3.11`).

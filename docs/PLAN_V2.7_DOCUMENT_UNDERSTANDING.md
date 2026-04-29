@@ -84,19 +84,77 @@ QA-CHECK-04 / REQ-COORD-01.
 **Implementation:** Enhance `qa_universal_invariants.py` to report bbox
 distribution statistics per modality.
 
-### 5. Docling Pipeline Options Per Profile
+### 5. Shared PDF Extraction Plan and Adapter Refactor
 
-**Problem:** Docling treats all PDFs identically. Our profiles only affect
-post-processing, not extraction.
+**Status:** Next-phase architecture work; do not mark complete until bridge
+tests and multi-profile smoke evidence exist.
 
-**Approach:** Pass profile-specific Docling options:
-- `technical_manual`: `do_code_enrichment=True`, `TableFormerMode.ACCURATE`
-- `digital_magazine`: `do_picture_classification=True`
-- `scanned_degraded`: `force_full_page_ocr=True`
-- All profiles: `do_cell_matching=False` (already done)
+**Problem:** `batch_processor.py` and `processor.py` both construct Docling
+PDF converters / `PdfPipelineOptions`. This duplicates extraction policy,
+causes drift between batch and direct paths, and already produced Workstream B
+bugs where the producer and consumer were correct independently but the
+call-site bridge dropped the decision.
 
-**Implementation:** In `processor.py _get_converter()`, read profile from
-intelligence_metadata and configure pipeline_options accordingly.
+**Researched design pattern:** Use a small Ports-and-Adapters boundary around
+PDF extraction, with a Pipes-and-Filters pipeline inside it:
+- Application pipeline stages: diagnose -> plan -> extract -> map -> enrich ->
+  validate -> export.
+- Primary adapters: CLI, batch command, tests.
+- Secondary adapters: Docling PDF adapter, OCR adapter, VLM/refiner adapter,
+  optional code-recovery adapter.
+- `BatchProcessor` owns batching/orchestration/export only.
+- `V2DocumentProcessor` owns document-item-to-chunk mapping only.
+- One shared PDF extraction adapter owns Docling converter creation and
+  `PdfPipelineOptions`.
+
+**Docling contract:** Docling code enrichment is optional and defaults off.
+`PdfPipelineOptions.do_code_enrichment` enables specialized processing for
+`CodeItem`; Docling's enrichment docs state that code understanding processes
+`CodeItem` and sets `code_language`. Installed Docling 2.86.0 confirms
+`StandardPdfPipeline` inserts a `CodeFormulaVlmModel` enrichment stage that
+filters `CodeItem` / formula items, sends item images to a VLM engine, and
+overwrites `item.text`. Therefore CodeFormulaV2 is a code-recovery adapter,
+not a default extraction mode.
+
+**Approach:**
+- Introduce `PdfConversionPlan` as the only object produced from diagnostics,
+  profile, config, and cheap evidence. It contains structural flags, OCR
+  policy, image/table options, `needs_code_enrichment`, reasons, and config
+  hashes.
+- Introduce `PdfPipelineOptionsFactory` / `DoclingPdfAdapter` as the only code
+  allowed to instantiate Docling PDF converters.
+- `batch_processor.py` and `processor.py` must consume the same
+  `PdfConversionPlan`; neither may independently infer Docling options.
+- Preserve native `CodeItem.text` when the extracted code is already
+  structurally sound.
+- Decide code preservation/recovery before chunking, refinement, or fallback
+  text repair can flatten/merge code layout.
+- Run code recovery only for broken `CodeItem` / code-candidate regions after
+  cheap evidence proves code-heavy/code-candidate content.
+- Prefer region-level recovery when available. If Docling only exposes
+  document-level `do_code_enrichment`, enable it only after
+  `needs_code_enrichment=True`; never from profile or encoding corruption
+  alone.
+- Keep client-local CodeFormulaV2 as diagnostic/fallback. Preferred inference
+  target is a stronger local-network host; cloud is optional if policy allows.
+
+**Implementation phases:**
+1. Add `PdfConversionPlan` and tests proving Ayeva/Chaubal/Fluent/Combat
+   decisions without running full conversions.
+2. Move all Docling `PdfPipelineOptions` construction into one factory with
+   golden tests for batch and direct paths.
+3. Replace duplicated converter creation in `batch_processor.py` and
+   `processor.py` with calls to the shared adapter.
+4. Add bridge tests at each object boundary: CLI -> plan, batch -> processor,
+   processor -> adapter, adapter -> Docling options.
+5. Only then run targeted page/region probes and acceptance smoke tests.
+
+**Hard constraints:**
+- Do not add profile-specific `do_code_enrichment=True`.
+- Do not let `has_encoding_corruption` trigger CodeFormulaV2 by itself.
+- Do not weaken negative tests to fit the implementation.
+- Do not add new governance docs for this refactor; update this plan,
+  `DECISIONS.md`, and the checklist only when scope or evidence changes.
 
 ### 6. Contextual Retrieval (Anthropic approach)
 
@@ -131,6 +189,10 @@ in v2.6), ensure `ingest_to_qdrant.py` uses contextualized text.
 - Gemini Pro audit, April 7, 2026
 - [Anthropic Contextual Retrieval](https://www.anthropic.com/news/contextual-retrieval)
 - [Docling Pipeline Options](https://docling-project.github.io/docling/reference/pipeline_options/)
+- [Docling Enrichment Features](https://docling-project.github.io/docling/usage/enrichments/)
+- [Docling Code & Formula Example](https://docling-project.github.io/docling/examples/code_formula_granite_docling/)
+- [Microsoft Azure Architecture Center: Pipes and Filters](https://learn.microsoft.com/en-us/azure/architecture/patterns/pipes-and-filters)
+- [Alistair Cockburn: Hexagonal Architecture / Ports and Adapters](https://alistair.cockburn.us/hexagonal-architecture)
 - [Docling Issue #287: Heading Hierarchy](https://github.com/docling-project/docling/issues/287)
 
 ## Updated Architecture (from Gemini Pro, April 7 2026)

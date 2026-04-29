@@ -446,6 +446,10 @@ class ChunkMetadata(BaseModel):
         default=None,
         description="Last VLM error message if status=failed"
     )
+    vision_validation_issues: Optional[List[str]] = Field(
+        default=None,
+        description="Source Sanctity validation issues detected during VLM enrichment"
+    )
 
     # V2.7 CODE BLOCK METADATA
     is_code: Optional[bool] = Field(

@@ -264,13 +264,19 @@ class V2DocumentProcessor:
         # V3.0.0: Profile parameters for OCR configuration (shadow-first mode REMOVED)
         self._profile_params: Optional["ProfileParameters"] = None
 
-        # V2.4: Store intelligence metadata for JSONL observability
-        self._intelligence_metadata: Dict[str, Any] = intelligence_metadata or {}
+        # V2.4: Store intelligence metadata for JSONL observability.
+        # Pop keys that must NOT be unpacked into chunk-creation kwargs.
+        _raw_meta: Dict[str, Any] = dict(intelligence_metadata or {})
+        # Workstream B: pop needs_code_enrichment before storing — it is used
+        # only to configure the Docling converter, not as a chunk field.
+        self.needs_code_enrichment: bool = bool(_raw_meta.pop("needs_code_enrichment", False))
+        self._intelligence_metadata: Dict[str, Any] = _raw_meta
         if self._intelligence_metadata:
             logger.info(
                 f"[OBSERVABILITY] Intelligence metadata loaded: "
                 f"profile_type={self._intelligence_metadata.get('profile_type')}, "
-                f"min_dims={self._intelligence_metadata.get('min_image_dims')}"
+                f"min_dims={self._intelligence_metadata.get('min_image_dims')}, "
+                f"needs_code_enrichment={self.needs_code_enrichment}"
             )
 
         # Use strategy's min dimensions if provided, else defaults
@@ -409,6 +415,14 @@ class V2DocumentProcessor:
             # Explicitly disable OCR to prevent EasyOCR import warnings
             pipeline_options.do_ocr = False
             logger.info("OCR explicitly disabled via pipeline_options.do_ocr=False")
+
+        # Workstream B: enable Docling-native code enrichment when the batch processor's
+        # code-evidence pre-pass (or explicit injection via intelligence_metadata) set the
+        # flag.  NOT triggered from has_encoding_corruption alone — see DECISIONS.md.
+        if self.needs_code_enrichment:
+            pipeline_options.do_code_enrichment = True
+            pipeline_options.do_formula_enrichment = False
+            logger.info("[CODE-ENRICH] Enabled Docling code enrichment (needs_code_enrichment=True)")
 
         converter = DocumentConverter(
             format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
