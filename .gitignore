@@ -1,6 +1,7 @@
 # Ignore Python cache and environment
 __pycache__/
 *.pyc
+*.egg-info/
 venv/
 .env
 *.py[cod]
