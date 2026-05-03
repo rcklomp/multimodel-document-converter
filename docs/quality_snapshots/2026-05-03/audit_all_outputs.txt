@@ -1,0 +1,1173 @@
+=================================================================
+AUDIT: AIOS LLM Agent Operating System.pdf
+=================================================================
+  Profile: academic_whitepaper  Class: digital  Content: mixed_prose  Schema: 2.7.0
+  Chunks: 145 (text=128, image=10, table=7)  Pages: 35
+  Assets: 17
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+  TABLE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    markdown_ratio: 100.00% (limit 80%)
+  TEXT:        PASS
+    micro_non_label_ratio: 0.008 (limit 0.22)
+    oversize_ratio: 0.000 (limit 0.01)
+    micro_<30: 1 (advisory)
+  CODE:        WARN [mixed_prose]
+    code_chunks: 16  flat: 0  flat_ratio: 0.00
+    indentation_fidelity: 0.62
+    code_like_total: 23  fragment_micro: 0  frag_ratio: 0.000
+    ⚠ indent_fidelity=0.62 (<0.9)
+  LABEL:       PASS
+  HEADING:     PASS
+    coverage: 125/128 (98%) [PASS]
+    unique headings: 51 (fragmentation: 40%) [OK]
+    null_headings: 3
+    shallow_breadcrumbs: 3 (advisory)
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: ATZ.Elektronik.-.Effizientere.Software.Entwicklung.GERMAN.RETAiL.eBOOk-PDFWriters.pdf
+=================================================================
+  Profile: academic_whitepaper  Class: digital  Content: non_code  Schema: 2.7.0
+  Chunks: 59 (text=45, image=14, table=0)  Pages: 6
+  Assets: 14
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+  TABLE:       PASS
+  TEXT:        PASS
+    micro_non_label_ratio: 0.022 (limit 0.22)
+    oversize_ratio: 0.000 (limit 0.01)
+    micro_<30: 1 (advisory)
+  CODE:        PASS [non_code]
+  LABEL:       PASS
+  HEADING:     PASS
+    coverage: 44/45 (98%) [PASS]
+    unique headings: 36 (fragmentation: 80%) [HIGH]
+    null_headings: 1
+    shallow_breadcrumbs: 44 (advisory)
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: A_comprehensive_review_on_hybrid_electri.pdf
+=================================================================
+  Profile: academic_whitepaper  Class: digital  Content: non_code  Schema: 2.7.0
+  Chunks: 192 (text=169, image=12, table=11)  Pages: 31
+  Assets: 23
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+    tiny_images: 2 (advisory)
+  TABLE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    markdown_ratio: 100.00% (limit 80%)
+  TEXT:        FAIL
+    micro_non_label_ratio: 0.000 (limit 0.22)
+    oversize_ratio: 0.000 (limit 0.01)
+    ctrl_char_chunks: 1 (total: 4)
+  CODE:        PASS [non_code]
+  LABEL:       PASS
+  HEADING:     PASS
+    coverage: 169/169 (100%) [PASS]
+    unique headings: 16 (fragmentation: 9%) [OK]
+  SCHEMA:      PASS
+
+  Issues (1):
+    [CTRL] pg1: control chars in 1b6ba953d1f4_001_text_d888f053
+
+  AUDIT_FAIL (TEXT)
+
+=================================================================
+AUDIT: Adedeji A. GenAI on Google Cloud. Enterprise Generative AI Systems...Agents 2026.pdf
+=================================================================
+  Profile: technical_manual  Class: digital  Content: mixed_prose  Schema: 2.7.0
+  Chunks: 895 (text=748, image=128, table=19)  Pages: 320
+  Assets: 147
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+  TABLE:       PASS
+    placeholder_ratio: 5.26% (limit 20%)
+    markdown_ratio: 94.74% (limit 80%)
+  TEXT:        PASS
+    micro_non_label_ratio: 0.025 (limit 0.12)
+    oversize_ratio: 0.000 (limit 0.01)
+    micro_<30: 20 (advisory)
+  CODE:        WARN [mixed_prose]
+    code_chunks: 34  flat: 0  flat_ratio: 0.00
+    indentation_fidelity: 0.59
+    code_like_total: 103  fragment_micro: 0  frag_ratio: 0.000
+    ⚠ indent_fidelity=0.59 (<0.9)
+  LABEL:       PASS
+    labels: 1  orphans: 0  orphan_ratio: 0.000 (limit 0.25)
+    (skipped — fewer than 5 labels)
+  HEADING:     PASS
+    coverage: 748/748 (100%) [PASS]
+    unique headings: 167 (fragmentation: 22%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: Ayeva K. Mastering Python Design Patterns...essential Python patterns...3ed 2024.pdf
+=================================================================
+  Profile: digital_magazine  Class: digital  Content: code_heavy  Schema: 2.7.0
+  Chunks: 710 (text=688, image=21, table=1)  Pages: 296
+  Assets: 22
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+    tiny_images: 1 (advisory)
+  TABLE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    markdown_ratio: 100.00% (limit 80%)
+  TEXT:        FAIL
+    micro_non_label_ratio: 0.000 (limit 0.22)
+    oversize_ratio: 0.000 (limit 0.01)
+    page_num_artifacts: 1 (advisory)
+    infix_artifacts: 2
+  CODE:        FAIL [code_heavy]
+    code_chunks: 165  flat: 2  flat_ratio: 0.01
+    indentation_fidelity: 0.22
+    code_like_total: 299  fragment_micro: 0  frag_ratio: 0.000
+  LABEL:       PASS
+  HEADING:     PASS
+    coverage: 688/688 (100%) [PASS]
+    unique headings: 184 (fragmentation: 27%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_FAIL (TEXT, CODE)
+
+=================================================================
+AUDIT: Bourne K. Unlocking Data with Generative AI and RAG 2024.pdf
+=================================================================
+  Profile: technical_manual  Class: digital  Content: mixed_prose  Schema: 2.7.0
+  Chunks: 884 (text=842, image=34, table=8)  Pages: 346
+  Assets: 42
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+    tiny_images: 1 (advisory)
+  TABLE:       PASS
+    placeholder_ratio: 12.50% (limit 20%)
+    markdown_ratio: 87.50% (limit 80%)
+  TEXT:        PASS
+    micro_non_label_ratio: 0.002 (limit 0.12)
+    oversize_ratio: 0.000 (limit 0.01)
+    micro_<30: 2 (advisory)
+  CODE:        WARN [mixed_prose]
+    code_chunks: 72  flat: 1  flat_ratio: 0.01
+    indentation_fidelity: 0.19
+    code_like_total: 277  fragment_micro: 1  frag_ratio: 0.004
+    ⚠ indent_fidelity=0.19 (<0.9)
+  LABEL:       PASS
+  HEADING:     PASS
+    coverage: 842/842 (100%) [PASS]
+    unique headings: 229 (fragmentation: 27%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: Chaubal S. AI Projects in PyTorch. Hands-On Projects in Vision, Text,...2025.pdf
+=================================================================
+  Profile: technical_manual  Class: digital  Content: code_heavy  Schema: 2.7.0
+  Chunks: 723 (text=663, image=55, table=5)  Pages: 359
+  Assets: 60
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+  TABLE:       PASS
+    placeholder_ratio: 20.00% (limit 20%)
+    markdown_ratio: 80.00% (limit 80%)
+  TEXT:        WARN
+    micro_non_label_ratio: 0.005 (limit 0.12)
+    oversize_ratio: 0.000 (limit 0.01)
+    encoding_artifacts: 1
+    page_num_artifacts: 1 (advisory)
+    micro_<30: 4 (advisory)
+  CODE:        FAIL [code_heavy]
+    code_chunks: 182  flat: 0  flat_ratio: 0.00
+    indentation_fidelity: 0.54
+    code_like_total: 331  fragment_micro: 4  frag_ratio: 0.012
+  LABEL:       PASS
+    labels: 1  orphans: 0  orphan_ratio: 0.000 (limit 0.25)
+    (skipped — fewer than 5 labels)
+  HEADING:     PASS
+    coverage: 661/663 (100%) [PASS]
+    unique headings: 213 (fragmentation: 32%) [OK]
+    null_headings: 2
+  SCHEMA:      PASS
+
+  AUDIT_FAIL (CODE)
+
+=================================================================
+AUDIT: Combat Aircraft - August 2025 UK.pdf
+=================================================================
+  Profile: digital_magazine  Class: digital  Content: mixed_prose  Schema: 2.7.0
+  Chunks: 490 (text=289, image=188, table=13)  Pages: 100
+  Assets: 201
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+  TABLE:       PASS
+    placeholder_ratio: 7.69% (limit 20%)
+    markdown_ratio: 92.31% (limit 80%)
+  TEXT:        FAIL
+    micro_non_label_ratio: 0.014 (limit 0.22)
+    oversize_ratio: 0.000 (limit 0.01)
+    encoding_artifacts: 48
+    page_num_artifacts: 1 (advisory)
+    micro_<30: 7 (advisory)
+  CODE:        WARN [mixed_prose]
+    code_chunks: 6  flat: 2  flat_ratio: 0.33
+    indentation_fidelity: 0.83
+    code_like_total: 44  fragment_micro: 0  frag_ratio: 0.000
+    ⚠ indent_fidelity=0.83 (<0.9)
+  LABEL:       PASS
+    labels: 4  orphans: 0  orphan_ratio: 0.000 (limit 0.25)
+    (skipped — fewer than 5 labels)
+  HEADING:     PASS
+    coverage: 284/289 (98%) [PASS]
+    unique headings: 49 (fragmentation: 17%) [OK]
+    null_headings: 5
+    shallow_breadcrumbs: 4 (advisory)
+  SCHEMA:      PASS
+
+  AUDIT_FAIL (TEXT)
+
+=================================================================
+AUDIT: Combat Aircraft - August 2025 UK.pdf
+=================================================================
+  Profile: digital_magazine  Class: digital  Content: mixed_prose  Schema: 2.7.0
+  Chunks: 537 (text=327, image=197, table=13)  Pages: 100
+  Assets: 210
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    description_coverage: 100.00% (limit 80%)
+  TABLE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    markdown_ratio: 100.00% (limit 80%)
+  TEXT:        FAIL
+    micro_non_label_ratio: 0.009 (limit 0.22)
+    oversize_ratio: 0.000 (limit 0.01)
+    encoding_artifacts: 48
+    high_corruption: 79
+    page_num_artifacts: 7 (advisory)
+    micro_<30: 7 (advisory)
+  CODE:        WARN [mixed_prose]
+    code_chunks: 6  flat: 2  flat_ratio: 0.33
+    indentation_fidelity: 0.83
+    code_like_total: 45  fragment_micro: 0  frag_ratio: 0.000
+    ⚠ indent_fidelity=0.83 (<0.9)
+  LABEL:       PASS
+    labels: 5  orphans: 1  orphan_ratio: 0.200 (limit 0.25)
+  HEADING:     PASS
+    coverage: 327/327 (100%) [PASS]
+    unique headings: 63 (fragmentation: 19%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_FAIL (TEXT)
+
+=================================================================
+AUDIT: Combat Aircraft - August 2025 UK.pdf
+=================================================================
+  Profile: digital_magazine  Class: digital  Content: mixed_prose  Schema: 2.7.0
+  Chunks: 592 (text=327, image=252, table=13)  Pages: 100
+  Assets: 265
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    description_coverage: 100.00% (limit 80%)
+  TABLE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    markdown_ratio: 100.00% (limit 80%)
+  TEXT:        FAIL
+    micro_non_label_ratio: 0.009 (limit 0.22)
+    oversize_ratio: 0.000 (limit 0.01)
+    encoding_artifacts: 48
+    high_corruption: 81
+    page_num_artifacts: 7 (advisory)
+    micro_<30: 7 (advisory)
+  CODE:        WARN [mixed_prose]
+    code_chunks: 6  flat: 2  flat_ratio: 0.33
+    indentation_fidelity: 0.83
+    code_like_total: 45  fragment_micro: 0  frag_ratio: 0.000
+    ⚠ indent_fidelity=0.83 (<0.9)
+  LABEL:       PASS
+    labels: 5  orphans: 1  orphan_ratio: 0.200 (limit 0.25)
+  HEADING:     PASS
+    coverage: 327/327 (100%) [PASS]
+    unique headings: 63 (fragmentation: 19%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_FAIL (TEXT)
+
+=================================================================
+AUDIT: Combat Aircraft - August 2025 UK.pdf
+=================================================================
+  Profile: digital_magazine  Class: digital  Content: non_code  Schema: 2.7.0
+  Chunks: 61 (text=43, image=18, table=0)  Pages: 100
+  Assets: 18
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    description_coverage: 100.00% (limit 80%)
+  TABLE:       PASS
+  TEXT:        WARN
+    micro_non_label_ratio: 0.000 (limit 0.22)
+    oversize_ratio: 0.000 (limit 0.01)
+    encoding_artifacts: 4
+    high_corruption: 12
+    page_num_artifacts: 1 (advisory)
+    micro_<30: 4 (advisory)
+  CODE:        PASS [non_code]
+    code_like_total: 1  fragment_micro: 0  frag_ratio: 0.000
+  LABEL:       PASS
+    labels: 5  orphans: 1  orphan_ratio: 0.200 (limit 0.25)
+  HEADING:     PASS
+    coverage: 43/43 (100%) [PASS]
+    unique headings: 3 (fragmentation: 7%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: Cronin I. Building and Training Generative AI Models. A Practical Guide...2026.pdf
+=================================================================
+  Profile: technical_manual  Class: digital  Content: non_code  Schema: 2.7.0
+  Chunks: 1288 (text=1280, image=4, table=4)  Pages: 652
+  Assets: 8
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+  TABLE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    markdown_ratio: 100.00% (limit 80%)
+  TEXT:        PASS
+    micro_non_label_ratio: 0.000 (limit 0.12)
+    oversize_ratio: 0.000 (limit 0.01)
+  CODE:        PASS [non_code]
+    code_like_total: 26  fragment_micro: 0  frag_ratio: 0.000
+  LABEL:       PASS
+  HEADING:     PASS
+    coverage: 1278/1280 (100%) [PASS]
+    unique headings: 735 (fragmentation: 57%) [HIGH]
+    null_headings: 2
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: Devlin M. Building LLM Agents with RAG, Knowledge Graphs and Reflection...2025.pdf
+=================================================================
+  Profile: digital_magazine  Class: digital  Content: mixed_prose  Schema: 2.7.0
+  Chunks: 699 (text=632, image=67, table=0)  Pages: 365
+  Assets: 67
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+    tiny_images: 2 (advisory)
+  TABLE:       PASS
+  TEXT:        PASS
+    micro_non_label_ratio: 0.002 (limit 0.22)
+    oversize_ratio: 0.000 (limit 0.01)
+    micro_<30: 1 (advisory)
+  CODE:        WARN [mixed_prose]
+    code_chunks: 40  flat: 0  flat_ratio: 0.00
+    indentation_fidelity: 0.62
+    code_like_total: 100  fragment_micro: 0  frag_ratio: 0.000
+    ⚠ indent_fidelity=0.62 (<0.9)
+  LABEL:       PASS
+    labels: 1  orphans: 0  orphan_ratio: 0.000 (limit 0.25)
+    (skipped — fewer than 5 labels)
+  HEADING:     PASS
+    coverage: 604/632 (96%) [PASS]
+    unique headings: 270 (fragmentation: 43%) [HIGH]
+    null_headings: 28
+    shallow_breadcrumbs: 27 (advisory)
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: Earthship_Vol1_How to build your own.pdf
+=================================================================
+  Profile: technical_manual  Class: scanned  Content: non_code  Schema: 2.7.0
+  Chunks: 709 (text=450, image=259, table=0)  Pages: 236
+  Assets: 259
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    description_coverage: 100.00% (limit 80%)
+  TABLE:       PASS
+  TEXT:        PASS
+    micro_non_label_ratio: 0.002 (limit 0.22)
+    oversize_ratio: 0.000 (limit 0.02)
+    micro_<30: 4 (advisory)
+  CODE:        PASS [non_code]
+    code_like_total: 22  fragment_micro: 1  frag_ratio: 0.045
+  LABEL:       PASS
+    labels: 3  orphans: 1  orphan_ratio: 0.333 (limit 0.3)
+    (skipped — fewer than 5 labels)
+  HEADING:     PASS
+    coverage: 450/450 (100%) [PASS]
+    unique headings: 53 (fragmentation: 12%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: Firearms.pdf
+=================================================================
+  Profile: technical_manual  Class: scanned  Content: non_code  Schema: 2.7.0
+  Chunks: 1691 (text=816, image=875, table=0)  Pages: 292
+  Assets: 875
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    description_coverage: 100.00% (limit 80%)
+  TABLE:       PASS
+  TEXT:        PASS
+    micro_non_label_ratio: 0.002 (limit 0.22)
+    oversize_ratio: 0.000 (limit 0.02)
+    micro_<30: 6 (advisory)
+  CODE:        PASS [non_code]
+    code_like_total: 13  fragment_micro: 0  frag_ratio: 0.000
+  LABEL:       PASS
+    labels: 4  orphans: 0  orphan_ratio: 0.000 (limit 0.3)
+    (skipped — fewer than 5 labels)
+  HEADING:     PASS
+    coverage: 659/816 (81%) [WARN]
+    unique headings: 28 (fragmentation: 3%) [OK]
+    null_headings: 157
+    shallow_breadcrumbs: 156 (advisory)
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: Fluent Python Luciano Ramalho 2015.pdf
+=================================================================
+  Profile: academic_whitepaper  Class: digital  Content: code_heavy  Schema: 2.7.0
+  Chunks: 1633 (text=1516, image=82, table=35)  Pages: 766
+  Assets: 117
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+    tiny_images: 7 (advisory)
+  TABLE:       PASS
+    placeholder_ratio: 2.86% (limit 20%)
+    markdown_ratio: 97.14% (limit 80%)
+  TEXT:        WARN
+    micro_non_label_ratio: 0.003 (limit 0.22)
+    oversize_ratio: 0.000 (limit 0.01)
+    encoding_artifacts: 2
+    page_num_artifacts: 3 (advisory)
+    micro_<30: 5 (advisory)
+  CODE:        PASS [code_heavy]
+    code_chunks: 435  flat: 1  flat_ratio: 0.00
+    indentation_fidelity: 0.99
+    code_like_total: 925  fragment_micro: 7  frag_ratio: 0.008
+  LABEL:       PASS
+    labels: 2  orphans: 0  orphan_ratio: 0.000 (limit 0.65)
+    (skipped — fewer than 5 labels)
+  HEADING:     PASS
+    coverage: 1516/1516 (100%) [PASS]
+    unique headings: 311 (fragmentation: 21%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: Fluent Python Luciano Ramalho 2015.pdf
+=================================================================
+  Profile: academic_whitepaper  Class: digital  Content: code_heavy  Schema: 2.7.0
+  Chunks: 1634 (text=1516, image=83, table=35)  Pages: 766
+  Assets: 118
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    description_coverage: 100.00% (limit 80%)
+    tiny_images: 7 (advisory)
+  TABLE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    markdown_ratio: 100.00% (limit 80%)
+  TEXT:        WARN
+    micro_non_label_ratio: 0.003 (limit 0.22)
+    oversize_ratio: 0.000 (limit 0.01)
+    encoding_artifacts: 2
+    high_corruption: 470
+    page_num_artifacts: 3 (advisory)
+    micro_<30: 5 (advisory)
+  CODE:        PASS [code_heavy]
+    code_chunks: 435  flat: 1  flat_ratio: 0.00
+    indentation_fidelity: 0.99
+    code_like_total: 925  fragment_micro: 7  frag_ratio: 0.008
+  LABEL:       PASS
+    labels: 2  orphans: 0  orphan_ratio: 0.000 (limit 0.65)
+    (skipped — fewer than 5 labels)
+  HEADING:     PASS
+    coverage: 1516/1516 (100%) [PASS]
+    unique headings: 309 (fragmentation: 20%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: HarryPotter_and_the_Sorcerers_Stone.pdf
+=================================================================
+  Profile: digital_magazine  Class: digital  Content: non_code  Schema: 2.7.0
+  Chunks: 443 (text=414, image=29, table=0)  Pages: 327
+  Assets: 29
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+  TABLE:       PASS
+  TEXT:        PASS
+    micro_non_label_ratio: 0.007 (limit 0.22)
+    oversize_ratio: 0.000 (limit 0.01)
+    micro_<30: 4 (advisory)
+  CODE:        PASS [non_code]
+    code_like_total: 16  fragment_micro: 0  frag_ratio: 0.000
+  LABEL:       PASS
+    labels: 1  orphans: 1  orphan_ratio: 1.000 (limit 0.25)
+    (skipped — fewer than 5 labels)
+  HEADING:     PASS
+    coverage: 414/414 (100%) [PASS]
+    unique headings: 21 (fragmentation: 5%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: IRJET_Modeling_of_Solar_PV_system_under.pdf
+=================================================================
+  Profile: academic_whitepaper  Class: digital  Content: non_code  Schema: 2.7.0
+  Chunks: 40 (text=25, image=13, table=2)  Pages: 7
+  Assets: 15
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+  TABLE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    markdown_ratio: 100.00% (limit 80%)
+  TEXT:        PASS
+    micro_non_label_ratio: 0.000 (limit 0.22)
+    oversize_ratio: 0.000 (limit 0.01)
+  CODE:        PASS [non_code]
+    code_chunks: 1  flat: 1  flat_ratio: 1.00
+    indentation_fidelity: 0.00
+    code_like_total: 5  fragment_micro: 0  frag_ratio: 0.000
+  LABEL:       PASS
+  HEADING:     PASS
+    coverage: 24/25 (96%) [PASS]
+    unique headings: 10 (fragmentation: 40%) [OK]
+    null_headings: 1
+    shallow_breadcrumbs: 1 (advisory)
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf
+=================================================================
+  Profile: technical_manual  Class: digital  Content: mixed_prose  Schema: 2.7.0
+  Chunks: 689 (text=568, image=99, table=22)  Pages: 258
+  Assets: 121
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+    tiny_images: 1 (advisory)
+  TABLE:       PASS
+    placeholder_ratio: 4.55% (limit 20%)
+    markdown_ratio: 95.45% (limit 80%)
+  TEXT:        PASS
+    micro_non_label_ratio: 0.000 (limit 0.12)
+    oversize_ratio: 0.000 (limit 0.01)
+  CODE:        WARN [mixed_prose]
+    code_chunks: 11  flat: 0  flat_ratio: 0.00
+    indentation_fidelity: 0.64
+    code_like_total: 45  fragment_micro: 1  frag_ratio: 0.022
+    ⚠ indent_fidelity=0.64 (<0.9)
+  LABEL:       PASS
+  HEADING:     PASS
+    coverage: 568/568 (100%) [PASS]
+    unique headings: 192 (fragmentation: 34%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: PCWorld_July_2025_USA.pdf
+=================================================================
+  Profile: digital_magazine  Class: digital  Content: non_code  Schema: 2.7.0
+  Chunks: 345 (text=219, image=126, table=0)  Pages: 108
+  Assets: 126
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+    tiny_images: 1 (advisory)
+  TABLE:       PASS
+  TEXT:        PASS
+    micro_non_label_ratio: 0.000 (limit 0.22)
+    oversize_ratio: 0.000 (limit 0.01)
+    page_num_artifacts: 2 (advisory)
+    micro_<30: 3 (advisory)
+  CODE:        PASS [non_code]
+    code_like_total: 6  fragment_micro: 0  frag_ratio: 0.000
+  LABEL:       PASS
+    labels: 4  orphans: 0  orphan_ratio: 0.000 (limit 0.25)
+    (skipped — fewer than 5 labels)
+  HEADING:     PASS
+    coverage: 219/219 (100%) [PASS]
+    unique headings: 46 (fragmentation: 21%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: PCWorld_July_2025_USA.pdf
+=================================================================
+  Profile: digital_magazine  Class: digital  Content: non_code  Schema: 2.7.0
+  Chunks: 65 (text=42, image=23, table=0)  Pages: 108
+  Assets: 23
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    description_coverage: 100.00% (limit 80%)
+  TABLE:       PASS
+  TEXT:        PASS
+    micro_non_label_ratio: 0.000 (limit 0.22)
+    oversize_ratio: 0.000 (limit 0.01)
+    high_corruption: 20
+  CODE:        PASS [non_code]
+  LABEL:       PASS
+    labels: 1  orphans: 0  orphan_ratio: 0.000 (limit 0.25)
+    (skipped — fewer than 5 labels)
+  HEADING:     PASS
+    coverage: 42/42 (100%) [PASS]
+    unique headings: 30 (fragmentation: 71%) [HIGH]
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: Recent_Trends_in_Transportation_Technolo.pdf
+=================================================================
+  Profile: digital_magazine  Class: digital  Content: non_code  Schema: 2.7.0
+  Chunks: 20 (text=15, image=5, table=0)  Pages: 5
+  Assets: 5
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+  TABLE:       PASS
+  TEXT:        PASS
+    micro_non_label_ratio: 0.000 (limit 0.22)
+    oversize_ratio: 0.000 (limit 0.01)
+  CODE:        PASS [non_code]
+  LABEL:       PASS
+  HEADING:     PASS
+    coverage: 15/15 (100%) [PASS]
+    unique headings: 6 (fragmentation: 40%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: Ayeva K. Mastering Python Design Patterns...essential Python patterns...3ed 2024.pdf
+=================================================================
+  Profile: technical_manual  Class: digital  Content: code_heavy  Schema: 2.7.0
+  Chunks: 627 (text=603, image=23, table=1)  Pages: 296
+  Assets: 24
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+    tiny_images: 1 (advisory)
+  TABLE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    markdown_ratio: 100.00% (limit 80%)
+  TEXT:        PASS
+    micro_non_label_ratio: 0.000 (limit 0.12)
+    oversize_ratio: 0.000 (limit 0.01)
+    micro_<30: 2 (advisory)
+  CODE:        PASS [code_heavy]
+    code_chunks: 176  flat: 3  flat_ratio: 0.02
+    indentation_fidelity: 0.93
+    code_like_total: 310  fragment_micro: 0  frag_ratio: 0.000
+  LABEL:       PASS
+    labels: 1  orphans: 0  orphan_ratio: 0.000 (limit 0.25)
+    (skipped — fewer than 5 labels)
+  HEADING:     PASS
+    coverage: 603/603 (100%) [PASS]
+    unique headings: 183 (fragmentation: 30%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: CarOK voorraadtelling 2021-04.pdf
+=================================================================
+  Profile: technical_manual  Class: digital  Content: non_code  Schema: 2.7.0
+  Chunks: 76 (text=65, image=0, table=11)  Pages: 12
+  Assets: 11
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+  TABLE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    markdown_ratio: 100.00% (limit 80%)
+  TEXT:        PASS
+    micro_non_label_ratio: 0.000 (limit 0.12)
+    oversize_ratio: 0.000 (limit 0.01)
+  CODE:        PASS [non_code]
+  LABEL:       PASS
+  HEADING:     PASS
+    coverage: 62/65 (95%) [PASS]
+    unique headings: 1 (fragmentation: 2%) [OK]
+    null_headings: 3
+    shallow_breadcrumbs: 3 (advisory)
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: CarOK voorraadtelling 2021-04.pdf
+=================================================================
+  Profile: technical_manual  Class: digital  Content: non_code  Schema: 2.7.0
+  Chunks: 67 (text=57, image=0, table=10)  Pages: 12
+  Assets: 10
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+  TABLE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    markdown_ratio: 100.00% (limit 80%)
+  TEXT:        PASS
+    micro_non_label_ratio: 0.000 (limit 0.12)
+    oversize_ratio: 0.000 (limit 0.01)
+  CODE:        PASS [non_code]
+  LABEL:       PASS
+  HEADING:     PASS
+    coverage: 54/57 (95%) [PASS]
+    unique headings: 1 (fragmentation: 2%) [OK]
+    null_headings: 3
+    shallow_breadcrumbs: 3 (advisory)
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: HarryPotter_and_the_Sorcerers_Stone.pdf
+=================================================================
+  Profile: digital_magazine  Class: digital  Content: non_code  Schema: 2.7.0
+  Chunks: 12 (text=6, image=6, table=0)  Pages: 327
+  Assets: 6
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+  TABLE:       PASS
+  TEXT:        PASS
+    micro_non_label_ratio: 0.000 (limit 0.22)
+    oversize_ratio: 0.000 (limit 0.01)
+  CODE:        PASS [non_code]
+  LABEL:       PASS
+  HEADING:     PASS
+    coverage: 5/6 (83%) [WARN]
+    unique headings: 4 (fragmentation: 67%) [HIGH]
+    null_headings: 1
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: Ayeva K. Mastering Python Design Patterns...essential Python patterns...3ed 2024.pdf
+=================================================================
+  Profile: technical_manual  Class: digital  Content: non_code  Schema: 2.7.0
+  Chunks: 33 (text=27, image=5, table=1)  Pages: 296
+  Assets: 6
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+  TABLE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    markdown_ratio: 100.00% (limit 80%)
+  TEXT:        PASS
+    micro_non_label_ratio: 0.000 (limit 0.12)
+    oversize_ratio: 0.000 (limit 0.01)
+  CODE:        PASS [non_code]
+    code_like_total: 3  fragment_micro: 0  frag_ratio: 0.000
+  LABEL:       PASS
+    labels: 1  orphans: 0  orphan_ratio: 0.000 (limit 0.25)
+    (skipped — fewer than 5 labels)
+  HEADING:     PASS
+    coverage: 27/27 (100%) [PASS]
+    unique headings: 7 (fragmentation: 26%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf
+=================================================================
+  Profile: technical_manual  Class: digital  Content: mixed_prose  Schema: 2.7.0
+  Chunks: 680 (text=559, image=99, table=22)  Pages: 258
+  Assets: 121
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+    tiny_images: 1 (advisory)
+  TABLE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    markdown_ratio: 100.00% (limit 80%)
+  TEXT:        PASS
+    micro_non_label_ratio: 0.002 (limit 0.12)
+    oversize_ratio: 0.000 (limit 0.01)
+    micro_<30: 2 (advisory)
+  CODE:        PASS [mixed_prose]
+    code_chunks: 11  flat: 0  flat_ratio: 0.00
+    indentation_fidelity: 0.91
+    code_like_total: 44  fragment_micro: 1  frag_ratio: 0.023
+  LABEL:       PASS
+    labels: 2  orphans: 0  orphan_ratio: 0.000 (limit 0.25)
+    (skipped — fewer than 5 labels)
+  HEADING:     PASS
+    coverage: 559/559 (100%) [PASS]
+    unique headings: 191 (fragmentation: 34%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: probe_carok
+=================================================================
+  Profile:   Class: digital  Content: non_code  Type: short_document  Schema: 
+  Chunks: 0 (text=0, image=0, table=0)  Pages: 0
+  Assets: 11
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+  TABLE:       PASS
+  TEXT:        PASS
+    micro_non_label_ratio: 0.000 (limit 0.12)
+    oversize_ratio: 0.000 (limit 0.01)
+  CODE:        PASS [non_code]
+  LABEL:       PASS
+  HEADING:     FAIL
+    coverage: 0/0 (0%) [FAIL]
+    unique headings: 0 (fragmentation: 0%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_FAIL (HEADING)
+
+=================================================================
+AUDIT: CarOK voorraadtelling 2021-04.pdf
+=================================================================
+  Profile: technical_manual  Class: digital  Content: non_code  Schema: 2.7.0
+  Chunks: 76 (text=65, image=0, table=11)  Pages: 12
+  Assets: 11
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+  TABLE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    markdown_ratio: 100.00% (limit 80%)
+  TEXT:        PASS
+    micro_non_label_ratio: 0.000 (limit 0.12)
+    oversize_ratio: 0.000 (limit 0.01)
+  CODE:        PASS [non_code]
+  LABEL:       PASS
+  HEADING:     PASS
+    coverage: 62/65 (95%) [PASS]
+    unique headings: 1 (fragmentation: 2%) [OK]
+    null_headings: 3
+    shallow_breadcrumbs: 3 (advisory)
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: Combat Aircraft - August 2025 UK.pdf
+=================================================================
+  Profile: digital_magazine  Class: digital  Content: non_code  Schema: 2.7.0
+  Chunks: 584 (text=377, image=203, table=4)  Pages: 100
+  Assets: 207
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+  TABLE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    markdown_ratio: 100.00% (limit 80%)
+  TEXT:        PASS
+    micro_non_label_ratio: 0.000 (limit 0.22)
+    oversize_ratio: 0.000 (limit 0.01)
+    page_num_artifacts: 25 (advisory)
+    micro_<30: 5 (advisory)
+  CODE:        PASS [non_code]
+    code_like_total: 115  fragment_micro: 0  frag_ratio: 0.000
+  LABEL:       PASS
+    labels: 6  orphans: 0  orphan_ratio: 0.000 (limit 0.25)
+  HEADING:     PASS
+    coverage: 377/377 (100%) [PASS]
+    unique headings: 63 (fragmentation: 17%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf
+=================================================================
+  Profile: technical_manual  Class: digital  Content: mixed_prose  Schema: 2.7.0
+  Chunks: 680 (text=559, image=99, table=22)  Pages: 258
+  Assets: 121
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+    tiny_images: 1 (advisory)
+  TABLE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    markdown_ratio: 100.00% (limit 80%)
+  TEXT:        PASS
+    micro_non_label_ratio: 0.002 (limit 0.12)
+    oversize_ratio: 0.000 (limit 0.01)
+    micro_<30: 2 (advisory)
+  CODE:        PASS [mixed_prose]
+    code_chunks: 11  flat: 0  flat_ratio: 0.00
+    indentation_fidelity: 0.91
+    code_like_total: 44  fragment_micro: 1  frag_ratio: 0.023
+  LABEL:       PASS
+    labels: 2  orphans: 0  orphan_ratio: 0.000 (limit 0.25)
+    (skipped — fewer than 5 labels)
+  HEADING:     PASS
+    coverage: 559/559 (100%) [PASS]
+    unique headings: 191 (fragmentation: 34%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: HarryPotter_and_the_Sorcerers_Stone.pdf
+=================================================================
+  Profile: technical_manual  Class: digital  Content: non_code  Schema: 2.7.0
+  Chunks: 458 (text=417, image=41, table=0)  Pages: 327
+  Assets: 41
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+    tiny_images: 7 (advisory)
+  TABLE:       PASS
+  TEXT:        PASS
+    micro_non_label_ratio: 0.007 (limit 0.12)
+    oversize_ratio: 0.000 (limit 0.01)
+    micro_<30: 6 (advisory)
+  CODE:        PASS [non_code]
+    code_like_total: 16  fragment_micro: 0  frag_ratio: 0.000
+  LABEL:       PASS
+    labels: 3  orphans: 1  orphan_ratio: 0.333 (limit 0.25)
+    (skipped — fewer than 5 labels)
+  HEADING:     PASS
+    coverage: 417/417 (100%) [PASS]
+    unique headings: 20 (fragmentation: 5%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf
+=================================================================
+  Profile: technical_manual  Class: digital  Content: mixed_prose  Schema: 2.7.0
+  Chunks: 680 (text=559, image=99, table=22)  Pages: 258
+  Assets: 121
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+    tiny_images: 1 (advisory)
+  TABLE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    markdown_ratio: 100.00% (limit 80%)
+  TEXT:        PASS
+    micro_non_label_ratio: 0.002 (limit 0.12)
+    oversize_ratio: 0.000 (limit 0.01)
+    micro_<30: 2 (advisory)
+  CODE:        PASS [mixed_prose]
+    code_chunks: 11  flat: 0  flat_ratio: 0.00
+    indentation_fidelity: 0.91
+    code_like_total: 44  fragment_micro: 1  frag_ratio: 0.023
+  LABEL:       PASS
+    labels: 2  orphans: 0  orphan_ratio: 0.000 (limit 0.25)
+    (skipped — fewer than 5 labels)
+  HEADING:     PASS
+    coverage: 559/559 (100%) [PASS]
+    unique headings: 191 (fragmentation: 34%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf
+=================================================================
+  Profile: technical_manual  Class: digital  Content: mixed_prose  Schema: 2.7.0
+  Chunks: 663 (text=542, image=99, table=22)  Pages: 258
+  Assets: 121
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+    tiny_images: 1 (advisory)
+  TABLE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    markdown_ratio: 100.00% (limit 80%)
+  TEXT:        PASS
+    micro_non_label_ratio: 0.000 (limit 0.12)
+    oversize_ratio: 0.000 (limit 0.01)
+  CODE:        PASS [mixed_prose]
+    code_chunks: 11  flat: 0  flat_ratio: 0.00
+    indentation_fidelity: 0.91
+    code_like_total: 44  fragment_micro: 1  frag_ratio: 0.023
+  LABEL:       PASS
+  HEADING:     PASS
+    coverage: 542/542 (100%) [PASS]
+    unique headings: 185 (fragmentation: 34%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+AUDIT: A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf
+=================================================================
+  Profile: technical_manual  Class: digital  Content: mixed_prose  Schema: 2.7.0
+  Chunks: 680 (text=559, image=99, table=22)  Pages: 258
+  Assets: 121
+
+  STRUCTURAL:  PASS
+  IMAGE:       PASS (no VLM — advisory)
+    placeholder_ratio: 100.00% (limit 20%) (no VLM — advisory)
+    description_coverage: 100.00% (limit 80%)
+    tiny_images: 1 (advisory)
+  TABLE:       PASS
+    placeholder_ratio: 0.00% (limit 20%)
+    markdown_ratio: 100.00% (limit 80%)
+  TEXT:        PASS
+    micro_non_label_ratio: 0.002 (limit 0.12)
+    oversize_ratio: 0.000 (limit 0.01)
+    micro_<30: 2 (advisory)
+  CODE:        PASS [mixed_prose]
+    code_chunks: 11  flat: 0  flat_ratio: 0.00
+    indentation_fidelity: 0.91
+    code_like_total: 44  fragment_micro: 1  frag_ratio: 0.023
+  LABEL:       PASS
+    labels: 2  orphans: 0  orphan_ratio: 0.000 (limit 0.25)
+    (skipped — fewer than 5 labels)
+  HEADING:     PASS
+    coverage: 559/559 (100%) [PASS]
+    unique headings: 191 (fragmentation: 34%) [OK]
+  SCHEMA:      PASS
+
+  AUDIT_PASS
+
+=================================================================
+SUMMARY
+=================================================================
+  ✓ AIOS_LLM_Agent_Operating_System                 145 chunks  digital   PASS
+  ✓ ATZ_Elektronik_German                            59 chunks  digital   PASS
+  ✗ A_comprehensive_review_on_hybrid_electri        192 chunks  digital   FAIL
+  ✓ Adedeji_GenAI_Google_Cloud                      895 chunks  digital   PASS
+  ✗ Ayeva_Python_Patterns                           710 chunks  digital   FAIL
+  ✓ Bourne_RAG_2024                                 884 chunks  digital   PASS
+  ✗ Chaubal_PyTorch_Projects                        723 chunks  digital   FAIL
+  ✗ Combat_Aircraft_August_2025                     490 chunks  digital   FAIL
+  ✗ Combat_Aircraft_full_promptfix_v2               537 chunks  digital   FAIL
+  ✗ Combat_Aircraft_full_vlm_codex                  592 chunks  digital   FAIL
+  ✓ Combat_Aircraft_promptfix_pages91_100            61 chunks  digital   PASS
+  ✓ Cronin_GenAI_Models                            1288 chunks  digital   PASS
+  ✓ Devlin_LLM_Agents                               699 chunks  digital   PASS
+  ✓ Earthship_Vol1                                  709 chunks  scanned   PASS
+  ✓ Firearms                                       1691 chunks  scanned   PASS
+  ✓ Fluent_Python_full_codex                       1633 chunks  digital   PASS
+  ✓ Fluent_Python_full_vlm_codex                   1634 chunks  digital   PASS
+  ✓ HarryPotter_and_the_Sorcerers_Stone             443 chunks  digital   PASS
+  ✓ IRJET_Modeling_of_Solar_PV                       40 chunks  digital   PASS
+  ✓ Kimothi_RAG_Guide                               689 chunks  digital   PASS
+  ✓ PCWorld_July_2025                               345 chunks  digital   PASS
+  ✓ PCWorld_promptfix_pages1_20                      65 chunks  digital   PASS
+  ✓ Recent_Trends_in_Transportation                  20 chunks  digital   PASS
+  ✓ ayeva_qa_20260501                               627 chunks  digital   PASS
+  ✓ carok_fix                                        76 chunks  digital   PASS
+  ✓ carok_verify                                     67 chunks  digital   PASS
+  ✓ frontmatter_acceptance_harry_probe               12 chunks  digital   PASS
+  ✓ probe_ayeva_p1_20                                33 chunks  digital   PASS
+  ✓ probe_boundary_closeout_rag_guide               680 chunks  digital   PASS
+  ✗ probe_carok                                       0 chunks  digital   FAIL
+  ✓ probe_carok_codex_verify                         76 chunks  digital   PASS
+  ✓ probe_combat                                    584 chunks  digital   PASS
+  ✓ probe_contextual_retrieval_rag_guide            680 chunks  digital   PASS
+  ✓ probe_harry_potter                              458 chunks  digital   PASS
+  ✓ probe_milestone2_rag_guide                      680 chunks  digital   PASS
+  ✓ probe_rag_guide                                 663 chunks  digital   PASS
+  ✓ probe_rag_guide_guard                           680 chunks  digital   PASS
+
+  30/37 passed, 7 failed
+

@@ -145,17 +145,23 @@ def main() -> int:
     path = args.ingestion_jsonl
     doc_class = args.doc_class
 
-    # Read profile_type from ingestion_metadata (first JSONL line in v2.6+).
-    # Used to apply profile-appropriate gate thresholds below.
+    # Read profile_type + total_pages from ingestion_metadata (first JSONL
+    # line in v2.6+). profile_type drives threshold selection; total_pages
+    # is needed for form detection (short scanned docs without heading
+    # hierarchy are forms / invoices and must use a form-appropriate gate
+    # rather than the prose-calibrated micro_non_label gate).
     profile_type = "unknown"
+    total_pages = 0
     with path.open("r", encoding="utf-8") as _f:
         try:
             _first = json.loads(_f.readline())
             if _first.get("object_type") == "ingestion_metadata":
                 profile_type = _first.get("profile_type") or "unknown"
+                total_pages = int(_first.get("total_pages") or 0)
         except Exception:
             pass
     print(f"profile_type={profile_type}")
+    print(f"total_pages={total_pages}")
 
     if doc_class == "auto":
         doc_class, reason, modality_counts, extraction_counts = infer_doc_class(path)
@@ -175,6 +181,7 @@ def main() -> int:
     orphan = 0
     code_like_total = 0
     code_frag = 0
+    text_with_heading = 0
     rows = []
 
     with path.open("r", encoding="utf-8") as f:
@@ -189,6 +196,16 @@ def main() -> int:
             md = o.get("metadata") or {}
             s = (o.get("content") or "").strip()
             rows.append((int(md.get("page_number") or 0), s, md))
+
+            # Heading coverage feeds the form/short-document detection below.
+            # Count only chunks with a real `parent_heading` (Docling-extracted
+            # section heading). The auto-generated `[doc_id, "Page N"]`
+            # breadcrumb is NOT a real heading — counting it would mislabel
+            # every chunk in a 1-page form as "headed" and defeat detection.
+            # Matches the rule used by scripts/qa_conversion_audit.py.
+            hier = (md.get("hierarchy") or {}) if isinstance(md.get("hierarchy"), dict) else {}
+            if hier.get("parent_heading"):
+                text_with_heading += 1
 
             is_code_chunk = (
                 str(md.get("chunk_type") or "").lower() == "code"
@@ -242,6 +259,7 @@ def main() -> int:
     oversize_ratio = (oversize / text) if text else 0.0
     orphan_ratio = (orphan / labels) if labels else 0.0
     code_frag_ratio = (code_frag / code_like_total) if code_like_total else 0.0
+    heading_coverage = (text_with_heading / text) if text else 0.0
 
     print(f"infix_strict={strict}")
     print(f"refined_content_infix={ref_bad}")
@@ -250,6 +268,21 @@ def main() -> int:
     print(f"oversize_ratio={oversize_ratio:.4f}")
     print(f"orphan_label_ratio={orphan_ratio:.4f}")
     print(f"code_fragmentation_ratio={code_frag_ratio:.4f}")
+    print(f"heading_coverage={heading_coverage:.4f}")
+
+    # Form / invoice detection (parallels qa_conversion_audit.py).
+    # Short scanned documents without heading hierarchy are forms (invoices,
+    # claim forms, receipts). They consist by design of short field labels +
+    # short field values; the prose-calibrated `micro_non_label_ratio` gate
+    # is the wrong probe and would reject every well-extracted form. Forms
+    # are first-class RAG content and must have their own GATE_PASS lane.
+    is_form = (
+        total_pages > 0
+        and total_pages <= 5
+        and doc_class == "scanned"
+        and heading_coverage < 0.10
+    )
+    print(f"document_type={'form' if is_form else 'document'}")
 
     # Profile-aware threshold overrides.
     # Academic whitepapers legitimately contain abbreviation/nomenclature tables
@@ -274,7 +307,12 @@ def main() -> int:
     if strict > 0:
         fails.append(f"infix_strict={strict} (expected 0)")
 
-    if doc_class == "digital":
+    if is_form:
+        # Form acceptance class: skip prose-calibrated micro_non_label and
+        # heading-derived label-orphan checks. Oversize + infix still apply.
+        if oversize_ratio > 0.02:
+            fails.append(f"oversize_ratio={oversize_ratio:.3f} (>0.02)")
+    elif doc_class == "digital":
         if micro_ratio > micro_limit:
             fails.append(f"micro_non_label_ratio={micro_ratio:.3f} (>{micro_limit})")
         if oversize_ratio > 0.01:
@@ -294,7 +332,10 @@ def main() -> int:
     if fails:
         print("GATE_FAIL: " + "; ".join(fails))
     else:
-        print("GATE_PASS")
+        if is_form:
+            print("GATE_PASS [form: micro_non_label + label-orphan checks skipped]")
+        else:
+            print("GATE_PASS")
     return 0
 
 

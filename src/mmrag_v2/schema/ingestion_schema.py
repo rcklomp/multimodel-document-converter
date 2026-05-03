@@ -27,6 +27,7 @@ Updated: 2026-01-08 (SRS v2.3.0 Compliance)
 from __future__ import annotations
 
 import hashlib
+import re
 import warnings
 from datetime import datetime, timezone
 from enum import Enum
@@ -47,16 +48,39 @@ SCHEMA_VERSION: str = __schema_version__  # V2.4: Intelligence Stack Observabili
 COORD_SCALE: int = 1000
 
 
+# Per PLAN_V2.8 §1 (Workstream F): some PDFs use C0 codes (e.g. \x01) as
+# in-document keyword separators. Stripping them outright squashes distinct
+# tokens (e.g. "Hybrid electric vehicleHybrid energy storage system"). The
+# pattern below matches a run of C0/DEL controls plus any adjacent ASCII
+# spaces so a single substitution collapses both. Newline and tab are
+# excluded from the run AND from the boundary so legitimate line/cell
+# structure is never consumed.
+_CTRL_RUN_PATTERN = re.compile(r" *[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+ *")
+
+# When the surrounding text looks like code, replace with a single space so
+# tokens like `1\x012` become `1 2`. Otherwise replace with "; " so keyword
+# lists read naturally. The token list intentionally requires a trailing
+# space / character so it doesn't false-match prose like "ifs" or "fortunately".
+_CODE_CONTEXT_TOKENS = (
+    " = ", "def ", "class ", "import ", "if ", "for ", "while ",
+    "return ", "print(", "elif ", "else:", ":=", "->", "lambda ",
+)
+
+
 def _strip_c0_controls(value: Optional[str]) -> Optional[str]:
-    """Remove C0/DEL control characters while preserving newline and tab."""
-    if value is None:
+    """Replace runs of C0/DEL control characters with a structural separator.
+
+    Preserves newline and tab. Per PLAN_V2.8 §1 the replacement is "; " for
+    prose / keyword-list contexts and " " for code contexts; this restores
+    the structural intent of PDFs that use control codes as item separators
+    instead of dropping the separator entirely.
+    """
+    if value is None or not isinstance(value, str):
         return value
-    if not isinstance(value, str):
+    if not _CTRL_RUN_PATTERN.search(value):
         return value
-    return "".join(
-        ch for ch in value
-        if ch in ("\n", "\t") or (ord(ch) >= 32 and ord(ch) != 127)
-    )
+    sep = " " if any(tok in value for tok in _CODE_CONTEXT_TOKENS) else "; "
+    return _CTRL_RUN_PATTERN.sub(sep, value)
 
 
 # ============================================================================

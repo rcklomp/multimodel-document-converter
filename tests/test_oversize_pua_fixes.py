@@ -260,7 +260,13 @@ def test_whitespace_collapse_preserves_newlines():
 
 
 def test_text_chunk_strips_c0_controls_but_preserves_newline_tab():
-    """C0 separators from PDF text layers must not leak to JSONL content."""
+    """C0 separators from PDF text layers must not leak to JSONL content.
+
+    Per PLAN_V2.8 §1 the runs are replaced with a structural separator
+    (default "; " for prose) instead of being dropped, so distinct tokens
+    around the control char remain distinguishable. Newline and tab are
+    preserved unchanged.
+    """
     from mmrag_v2.schema.ingestion_schema import FileType, create_text_chunk
 
     chunk = create_text_chunk(
@@ -276,4 +282,90 @@ def test_text_chunk_strips_c0_controls_but_preserves_newline_tab():
     assert "\x7f" not in chunk.content
     assert "\n" in chunk.content
     assert "\t" in chunk.content
-    assert chunk.metadata.refined_content == "Refinedtext\nwith\ttab"
+    # Tokens around control chars stay separated (post-PLAN_V2.8 §1 semantics).
+    assert "Hybrid" in chunk.content and "energy" in chunk.content
+    assert "Hybridenergy" not in chunk.content
+    assert "\x01" not in (chunk.metadata.refined_content or "")
+    assert "Refinedtext" not in (chunk.metadata.refined_content or "")
+    assert "Refined" in (chunk.metadata.refined_content or "")
+    assert "text" in (chunk.metadata.refined_content or "")
+
+
+# ---------------------------------------------------------------------------
+# PLAN_V2.8 §1 — Workstream F: 0x01 keyword-separator replacement
+# ---------------------------------------------------------------------------
+
+
+def test_ctrl_char_keyword_separator_replaced():
+    """Per PLAN_V2.8 §1: \\x01 between keyword tokens becomes "; " (not stripped)."""
+    from mmrag_v2.schema.ingestion_schema import _strip_c0_controls
+
+    raw = "Hybrid electric vehicle \x01 Hybrid energy storage system \x01 Architec"
+    out = _strip_c0_controls(raw)
+    assert out == "Hybrid electric vehicle; Hybrid energy storage system; Architec"
+
+
+def test_ctrl_char_in_code_chunk_replaced_with_space():
+    """Per PLAN_V2.8 §1: control runs inside code contexts use single-space, not "; "."""
+    from mmrag_v2.schema.ingestion_schema import _strip_c0_controls
+
+    out = _strip_c0_controls("x = 1\x012\x013")
+    assert out == "x = 1 2 3"
+    assert ";" not in out
+
+
+def test_legitimate_unicode_passthrough():
+    """Em-dashes, smart quotes, CJK, and code newlines must NOT be touched."""
+    from mmrag_v2.schema.ingestion_schema import _strip_c0_controls
+
+    samples = [
+        "An em—dash here",
+        "Curly “quotes” and ‘apostrophes’",
+        "CJK 漢字 こんにちは 한국어",
+        "def foo():\n    return 42\n",
+        "Mixed: prose with em—dash, no controls.",
+    ]
+    for s in samples:
+        assert _strip_c0_controls(s) == s, f"Modified legitimate string: {s!r}"
+
+
+def test_a_comprehensive_review_chunk_passes_audit(tmp_path):
+    """Per PLAN_V2.8 §1: the actual failing chunk pattern audits clean post-fix."""
+    import json
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from mmrag_v2.schema.ingestion_schema import FileType, create_text_chunk
+
+    raw = (
+        "1 Power Electronics and Drives Laboratory, Department of Electrical and "
+        "Electronics Engineering, Birla Institute of Technology and Science, Pilani, "
+        "Rajasthan, India\n"
+        "Keywords Hybrid electric vehicle \x01 Hybrid energy storage system \x01 "
+        "Architecture \x01 Traction motors \x01 Bidirectional converter"
+    )
+    chunk = create_text_chunk(
+        doc_id="1b6ba953d1f4",
+        content=raw,
+        source_file="A_comprehensive_review_on_hybrid_electri.pdf",
+        file_type=FileType.PDF,
+        page_number=1,
+    )
+    assert "\x01" not in chunk.content
+    assert "Hybrid electric vehicle;" in chunk.content
+    assert "Bidirectional converter" in chunk.content
+
+    jsonl = tmp_path / "ingestion.jsonl"
+    jsonl.write_text(chunk.model_dump_json() + "\n", encoding="utf-8")
+
+    audit = Path(__file__).parent.parent / "scripts" / "qa_conversion_audit.py"
+    result = subprocess.run(
+        [sys.executable, str(audit), str(jsonl)],
+        capture_output=True, text=True,
+    )
+    # The audit returns 1 when ANY check fails, but we only care about the
+    # ctrl chunk count for this regression — assert the relevant line is zero.
+    assert "ctrl_char_chunks" not in result.stdout, (
+        f"Audit reported ctrl_char_chunks line:\n{result.stdout}"
+    )

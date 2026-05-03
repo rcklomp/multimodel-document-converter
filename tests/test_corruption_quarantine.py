@@ -74,3 +74,63 @@ class TestCorruptionNeverExported:
         assert has_encoding_artifacts(text), (
             f"Corruption not detected in: {text!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# PLAN_V2.8 §3 — Combat Aircraft ornament-glyph contract
+# Phase 3 step 1 verified empirically that a fresh Combat full conversion
+# under current code (CorruptionInterceptor + quarantine + post-Docling
+# sanity stages, all shipped 2026-05-03) leaves zero � chunks. These
+# tests pin the input contract: the page-66 ornament-glyph pattern is
+# detectable, so the interceptor + quarantine pipeline can act on it; and
+# legitimate non-ornament Unicode passes through unchanged.
+# ---------------------------------------------------------------------------
+
+
+class TestPlanV28OrnamentGlyphContract:
+    """PLAN_V2.8 §3: Combat Aircraft ornament-glyph corruption is recognized."""
+
+    # Real page-66 squadron-table noise pattern lifted from
+    # output/Combat_Aircraft_full_promptfix_v2/ingestion.jsonl (the BEFORE
+    # row in QUALITY_SNAPSHOT_2026-05-03.md).
+    _ORNAMENT_PATTERN = (
+        "Wing/Group Squadron Location = NineteenthAir Force\n"
+        "�[il : ltJ! nfr! Ill r!·!�l�l:.[lr!Jl 1 ]1 r!' Dl= r!'\n"
+        "Aircraft = F-35C, TailCode = NE-200"
+    )
+
+    def test_combat_page_66_ornament_glyphs_are_detected(self):
+        """Pattern triggers `has_encoding_artifacts` so the pipeline can act on it."""
+        assert has_encoding_artifacts(self._ORNAMENT_PATTERN)
+
+    def test_squadron_data_preserved_under_strip(self):
+        """The structural data field stays intact when the pipeline strips ornament noise.
+
+        The post-Docling pipeline either re-OCRs the chunk (replacing the whole
+        text) or quarantines it. This test pins the no-mid-strip contract:
+        substring-stripping the U+FFFD characters alone leaves the squadron data
+        readable. Documents that the data IS present in the source PDF; what
+        breaks is only the ornament rendering.
+        """
+        stripped = self._ORNAMENT_PATTERN.replace("�", "")
+        assert "Wing/Group Squadron Location = NineteenthAir Force" in stripped
+        assert "Aircraft = F-35C, TailCode = NE-200" in stripped
+
+    def test_no_false_positive_on_arabic_or_cjk(self):
+        """Legitimate non-ASCII text without U+FFFD must NOT be flagged.
+
+        Magazine layouts and CJK-localized PDFs use exotic Unicode that the
+        ornament-glyph detector must not mistake for corruption. The detector
+        keys off `\\ufffd`/`/C\\d+`/`/uni`/`\\xHH` patterns, none of which are
+        present in legitimate Arabic, CJK, or em-dash text.
+        """
+        clean_samples = [
+            "العربية: نص نظيف بدون أعطال",       # Arabic
+            "漢字 日本語 中文 한국어",                # CJK mix
+            "Em—dash and en–dash with curly “quotes”",
+            "Raptors are fifth-generation fighters.",
+        ]
+        for s in clean_samples:
+            assert not has_encoding_artifacts(s), (
+                f"False-positive ornament-glyph detection on legitimate text: {s!r}"
+            )

@@ -2073,10 +2073,10 @@ class V2DocumentProcessor:
         # y-sort, drop-cap promotion) run when the plan opts in. Calling the
         # raw self._converter would bypass them and re-create the page-13
         # swap and dislocated drop-cap fixed by PLAN_DOCLING_POSTPROCESSOR.md.
-        if self._adapter is not None:
-            result = self._adapter.convert(str(file_path))
-        else:
-            result = self._converter.convert(str(file_path))
+        # The adapter is unconditionally constructed in __init__ (see ~L367),
+        # so the previous fallback `else: self._converter.convert(...)` was
+        # dead code AND a static-guard violation per PLAN_V2.8 §2. Removed.
+        result = self._adapter.convert(str(file_path))
         _elapsed = _time.perf_counter() - _start
 
         print(f"✓ Docling conversion complete in {_elapsed:.1f}s", flush=True)

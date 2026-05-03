@@ -1,0 +1,528 @@
+smoke_multiprofile start=2026-05-03T19:15:10Z
+ROOT=/tmp/smoke_post_dl_v2_20260503  PAGES=10  BATCH_SIZE=3
+
+===== academic_journal / AIOS LLM Agent Operating System =====
+pdf=data/academic_journal/AIOS LLM Agent Operating System.pdf
+start=2026-05-03T19:15:11Z
+exit=0 end=2026-05-03T19:17:02Z
+file: /tmp/smoke_post_dl_v2_20260503/academic_journal__AIOS LLM Agent Operating System/ingestion.jsonl
+chunks_total: 63  text: 49  image: 10  table: 4
+text_mean_len: 890.5  text_max_len: 1500
+text_short_<30: 1  text_long_>1500: 0
+micro_non_label_chunks: 1  micro_non_label_ratio: 0.020
+oversize_chunks: 0  oversize_ratio: 0.000
+label_chunks: 0  orphan_label_chunks: 0  orphan_label_ratio: 0.000
+ctrl_chunks: 0  ctrl_total: 0
+page_num_artifact_chunks: 0
+code_chunks: 0  code_flat(no_newlines): 0  code_like_not_code: 1
+code_like_total: 1  code_fragment_micro: 0  code_fragmentation_ratio: 0.000
+chunk_type_top: paragraph=47, list_item=2
+
+profile_type=academic_whitepaper
+doc_class=digital (inferred)
+doc_class_inference=top_document_modality=native_digital
+document_modality_top=native_digital:63
+extraction_method_top=hybrid_chunker:49, docling:10, docling_table_markdown:4
+infix_strict=0
+refined_content_infix=0
+text_chunks=49
+micro_non_label_ratio=0.0204
+oversize_ratio=0.0000
+orphan_label_ratio=0.0000
+code_fragmentation_ratio=0.0000
+GATE_PASS
+
+file: /tmp/smoke_post_dl_v2_20260503/academic_journal__AIOS LLM Agent Operating System/ingestion.jsonl
+profile=academic_whitepaper  domain=academic  is_scan=False  total_pages=35  declared_chunks=63
+chunks_total=63  text=49  image=10  table=4
+null_chunk_type_on_text=0
+invalid_bbox=0
+bbox_missing_page_dims=0
+empty_text_chunks=0
+missing_modality=0
+bbox_stats[text]: total=49 with_bbox=49 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=88..887 y_range=94..913 area_min=10010 area_avg=73470.7 area_max=196474
+bbox_stats[image]: total=10 with_bbox=10 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=72..896 y_range=507..929 area_min=51156 area_avg=124710.1 area_max=261175
+bbox_stats[table]: total=4 with_bbox=4 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=76..885 y_range=399..857 area_min=26316 area_avg=45299.0 area_max=74802
+bbox_stats[other]: total=0 with_bbox=0 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=n/a..n/a y_range=n/a..n/a area_min=n/a area_avg=n/a area_max=n/a
+UNIVERSAL_PASS
+
+
+===== academic_journal / A_comprehensive_review_on_hybrid_electri =====
+pdf=data/academic_journal/A_comprehensive_review_on_hybrid_electri.pdf
+start=2026-05-03T19:17:05Z
+exit=0 end=2026-05-03T19:18:08Z
+file: /tmp/smoke_post_dl_v2_20260503/academic_journal__A_comprehensive_review_on_hybrid_electri/ingestion.jsonl
+chunks_total: 55  text: 37  image: 9  table: 9
+text_mean_len: 942.5  text_max_len: 1475
+text_short_<30: 0  text_long_>1500: 0
+micro_non_label_chunks: 0  micro_non_label_ratio: 0.000
+oversize_chunks: 0  oversize_ratio: 0.000
+label_chunks: 0  orphan_label_chunks: 0  orphan_label_ratio: 0.000
+ctrl_chunks: 0  ctrl_total: 0
+page_num_artifact_chunks: 0
+code_chunks: 0  code_flat(no_newlines): 0  code_like_not_code: 0
+code_like_total: 0  code_fragment_micro: 0  code_fragmentation_ratio: 0.000
+chunk_type_top: paragraph=36, list_item=1
+
+profile_type=academic_whitepaper
+doc_class=digital (inferred)
+doc_class_inference=top_document_modality=native_digital
+document_modality_top=native_digital:55
+extraction_method_top=hybrid_chunker:37, docling:9, docling_table_markdown:9
+infix_strict=0
+refined_content_infix=0
+text_chunks=37
+micro_non_label_ratio=0.0000
+oversize_ratio=0.0000
+orphan_label_ratio=0.0000
+code_fragmentation_ratio=0.0000
+GATE_PASS
+
+file: /tmp/smoke_post_dl_v2_20260503/academic_journal__A_comprehensive_review_on_hybrid_electri/ingestion.jsonl
+profile=academic_whitepaper  domain=academic  is_scan=False  total_pages=31  declared_chunks=55
+chunks_total=55  text=37  image=9  table=9
+null_chunk_type_on_text=0
+invalid_bbox=0
+bbox_missing_page_dims=0
+empty_text_chunks=0
+missing_modality=0
+bbox_stats[text]: total=37 with_bbox=37 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=80..889 y_range=94..925 area_min=341 area_avg=122700.4 area_max=447377
+bbox_stats[image]: total=9 with_bbox=9 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=71..906 y_range=42..972 area_min=4040 area_avg=138493.2 area_max=400350
+bbox_stats[table]: total=9 with_bbox=9 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=64..907 y_range=91..936 area_min=35350 area_avg=178993.7 area_max=486676
+bbox_stats[other]: total=0 with_bbox=0 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=n/a..n/a y_range=n/a..n/a area_min=n/a area_avg=n/a area_max=n/a
+UNIVERSAL_PASS
+
+
+===== business_form / betwistingsformulier_aankoop_niet_ontvangen =====
+pdf=data/business_form/betwistingsformulier_aankoop_niet_ontvangen.pdf
+start=2026-05-03T19:18:11Z
+exit=0 end=2026-05-03T19:18:36Z
+file: /tmp/smoke_post_dl_v2_20260503/business_form__betwistingsformulier_aankoop_niet_ontvangen/ingestion.jsonl
+chunks_total: 8  text: 4  image: 4  table: 0
+text_mean_len: 426.5  text_max_len: 769
+text_short_<30: 1  text_long_>1500: 0
+micro_non_label_chunks: 0  micro_non_label_ratio: 0.000
+oversize_chunks: 0  oversize_ratio: 0.000
+label_chunks: 0  orphan_label_chunks: 0  orphan_label_ratio: 0.000
+ctrl_chunks: 0  ctrl_total: 0
+page_num_artifact_chunks: 0
+code_chunks: 0  code_flat(no_newlines): 0  code_like_not_code: 0
+code_like_total: 0  code_fragment_micro: 0  code_fragmentation_ratio: 0.000
+chunk_type_top: paragraph=4
+
+profile_type=academic_whitepaper
+doc_class=digital (inferred)
+doc_class_inference=top_document_modality=native_digital
+document_modality_top=native_digital:8
+extraction_method_top=docling:4, hybrid_chunker:3, image_to_text_recovery:1
+infix_strict=0
+refined_content_infix=0
+text_chunks=4
+micro_non_label_ratio=0.0000
+oversize_ratio=0.0000
+orphan_label_ratio=0.0000
+code_fragmentation_ratio=0.0000
+GATE_PASS
+
+file: /tmp/smoke_post_dl_v2_20260503/business_form__betwistingsformulier_aankoop_niet_ontvangen/ingestion.jsonl
+profile=academic_whitepaper  domain=unknown  is_scan=False  total_pages=1  declared_chunks=8
+chunks_total=8  text=4  image=4  table=0
+null_chunk_type_on_text=0
+invalid_bbox=0
+bbox_missing_page_dims=0
+empty_text_chunks=0
+missing_modality=0
+bbox_stats[text]: total=4 with_bbox=4 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=65..360 y_range=371..1000 area_min=477 area_avg=3711.0 area_max=12390
+bbox_stats[image]: total=4 with_bbox=4 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=66..906 y_range=715..1000 area_min=4278 area_avg=4485.0 area_max=4653
+bbox_stats[table]: total=0 with_bbox=0 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=n/a..n/a y_range=n/a..n/a area_min=n/a area_avg=n/a area_max=n/a
+bbox_stats[other]: total=0 with_bbox=0 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=n/a..n/a y_range=n/a..n/a area_min=n/a area_avg=n/a area_max=n/a
+UNIVERSAL_PASS
+
+
+===== data_spreadsheet / CarOK voorraadtelling 2021-04 =====
+pdf=data/data_spreadsheet/CarOK voorraadtelling 2021-04.pdf
+start=2026-05-03T19:18:39Z
+exit=0 end=2026-05-03T19:19:52Z
+file: /tmp/smoke_post_dl_v2_20260503/data_spreadsheet__CarOK voorraadtelling 2021-04/ingestion.jsonl
+chunks_total: 67  text: 57  image: 0  table: 10
+text_mean_len: 797.0  text_max_len: 1497
+text_short_<30: 0  text_long_>1500: 0
+micro_non_label_chunks: 0  micro_non_label_ratio: 0.000
+oversize_chunks: 0  oversize_ratio: 0.000
+label_chunks: 0  orphan_label_chunks: 0  orphan_label_ratio: 0.000
+ctrl_chunks: 0  ctrl_total: 0
+page_num_artifact_chunks: 0
+code_chunks: 0  code_flat(no_newlines): 0  code_like_not_code: 0
+code_like_total: 0  code_fragment_micro: 0  code_fragmentation_ratio: 0.000
+chunk_type_top: paragraph=57
+
+profile_type=technical_manual
+doc_class=digital (inferred)
+doc_class_inference=top_document_modality=native_digital
+document_modality_top=native_digital:67
+extraction_method_top=hybrid_chunker:57, docling_table_markdown:10
+infix_strict=0
+refined_content_infix=0
+text_chunks=57
+micro_non_label_ratio=0.0000
+oversize_ratio=0.0000
+orphan_label_ratio=0.0000
+code_fragmentation_ratio=0.0000
+GATE_PASS
+
+file: /tmp/smoke_post_dl_v2_20260503/data_spreadsheet__CarOK voorraadtelling 2021-04/ingestion.jsonl
+profile=technical_manual  domain=unknown  is_scan=False  total_pages=12  declared_chunks=67
+chunks_total=67  text=57  image=0  table=10
+null_chunk_type_on_text=0
+invalid_bbox=0
+bbox_missing_page_dims=0
+empty_text_chunks=0
+missing_modality=0
+bbox_stats[text]: total=57 with_bbox=57 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=86..1000 y_range=100..661 area_min=8 area_avg=490268.4 area_max=512754
+bbox_stats[image]: total=0 with_bbox=0 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=n/a..n/a y_range=n/a..n/a area_min=n/a area_avg=n/a area_max=n/a
+bbox_stats[table]: total=10 with_bbox=10 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=70..1000 y_range=88..674 area_min=508163 area_avg=539727.5 area_max=544980
+bbox_stats[other]: total=0 with_bbox=0 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=n/a..n/a y_range=n/a..n/a area_min=n/a area_avg=n/a area_max=n/a
+UNIVERSAL_PASS
+
+
+===== digital_magazine / PCWorld_July_2025_USA =====
+pdf=data/digital_magazine/PCWorld_July_2025_USA.pdf
+start=2026-05-03T19:19:55Z
+exit=0 end=2026-05-03T19:20:30Z
+file: /tmp/smoke_post_dl_v2_20260503/digital_magazine__PCWorld_July_2025_USA/ingestion.jsonl
+chunks_total: 44  text: 26  image: 18  table: 0
+text_mean_len: 331.7  text_max_len: 1413
+text_short_<30: 2  text_long_>1500: 0
+micro_non_label_chunks: 0  micro_non_label_ratio: 0.000
+oversize_chunks: 0  oversize_ratio: 0.000
+label_chunks: 3  orphan_label_chunks: 0  orphan_label_ratio: 0.000
+ctrl_chunks: 0  ctrl_total: 0
+page_num_artifact_chunks: 0
+code_chunks: 0  code_flat(no_newlines): 0  code_like_not_code: 0
+code_like_total: 0  code_fragment_micro: 0  code_fragmentation_ratio: 0.000
+chunk_type_top: paragraph=26
+
+profile_type=digital_magazine
+doc_class=digital (inferred)
+doc_class_inference=top_document_modality=image_heavy
+document_modality_top=image_heavy:44
+extraction_method_top=hybrid_chunker:24, rendered_region_crop:14, docling:4, recovery_frontpage:1
+infix_strict=0
+refined_content_infix=0
+text_chunks=26
+micro_non_label_ratio=0.0000
+oversize_ratio=0.0000
+orphan_label_ratio=0.0000
+code_fragmentation_ratio=0.0000
+GATE_PASS
+
+file: /tmp/smoke_post_dl_v2_20260503/digital_magazine__PCWorld_July_2025_USA/ingestion.jsonl
+profile=digital_magazine  domain=editorial  is_scan=False  total_pages=108  declared_chunks=44
+chunks_total=44  text=26  image=18  table=0
+null_chunk_type_on_text=0
+invalid_bbox=0
+bbox_missing_page_dims=0
+empty_text_chunks=0
+missing_modality=0
+bbox_stats[text]: total=26 with_bbox=25 missing_bbox=1 invalid_bbox=0 missing_page_dims=0 x_range=0..1000 y_range=62..1000 area_min=142 area_avg=66134.8 area_max=509000
+bbox_stats[image]: total=18 with_bbox=18 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=0..1000 y_range=0..1000 area_min=4650 area_avg=196951.6 area_max=948000
+bbox_stats[table]: total=0 with_bbox=0 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=n/a..n/a y_range=n/a..n/a area_min=n/a area_avg=n/a area_max=n/a
+bbox_stats[other]: total=0 with_bbox=0 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=n/a..n/a y_range=n/a..n/a area_min=n/a area_avg=n/a area_max=n/a
+UNIVERSAL_PASS
+
+
+===== digital_literature / HarryPotter_and_the_Sorcerers_Stone =====
+pdf=data/digital_literature/HarryPotter_and_the_Sorcerers_Stone.pdf
+start=2026-05-03T19:20:32Z
+exit=0 end=2026-05-03T19:21:01Z
+file: /tmp/smoke_post_dl_v2_20260503/digital_literature__HarryPotter_and_the_Sorcerers_Stone/ingestion.jsonl
+chunks_total: 12  text: 6  image: 6  table: 0
+text_mean_len: 498.0  text_max_len: 1385
+text_short_<30: 0  text_long_>1500: 0
+micro_non_label_chunks: 0  micro_non_label_ratio: 0.000
+oversize_chunks: 0  oversize_ratio: 0.000
+label_chunks: 0  orphan_label_chunks: 0  orphan_label_ratio: 0.000
+ctrl_chunks: 0  ctrl_total: 0
+page_num_artifact_chunks: 0
+code_chunks: 0  code_flat(no_newlines): 0  code_like_not_code: 0
+code_like_total: 0  code_fragment_micro: 0  code_fragmentation_ratio: 0.000
+chunk_type_top: paragraph=6
+
+profile_type=digital_literature
+doc_class=digital (inferred)
+doc_class_inference=top_document_modality=native_digital
+document_modality_top=native_digital:12
+extraction_method_top=hybrid_chunker:5, shadow:3, docling:3, recovery_scan:1
+infix_strict=0
+refined_content_infix=0
+text_chunks=6
+micro_non_label_ratio=0.0000
+oversize_ratio=0.0000
+orphan_label_ratio=0.0000
+code_fragmentation_ratio=0.0000
+GATE_PASS
+
+file: /tmp/smoke_post_dl_v2_20260503/digital_literature__HarryPotter_and_the_Sorcerers_Stone/ingestion.jsonl
+profile=digital_literature  domain=literature  is_scan=False  total_pages=327  declared_chunks=12
+chunks_total=12  text=6  image=6  table=0
+null_chunk_type_on_text=0
+invalid_bbox=0
+bbox_missing_page_dims=0
+empty_text_chunks=0
+missing_modality=0
+bbox_stats[text]: total=6 with_bbox=5 missing_bbox=1 invalid_bbox=0 missing_page_dims=0 x_range=116..608 y_range=89..715 area_min=7000 area_avg=9434.4 area_max=10764
+bbox_stats[image]: total=6 with_bbox=6 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=0..1000 y_range=0..1000 area_min=14168 area_avg=307868.8 area_max=667000
+bbox_stats[table]: total=0 with_bbox=0 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=n/a..n/a y_range=n/a..n/a area_min=n/a area_avg=n/a area_max=n/a
+bbox_stats[other]: total=0 with_bbox=0 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=n/a..n/a y_range=n/a..n/a area_min=n/a area_avg=n/a area_max=n/a
+UNIVERSAL_PASS
+
+
+===== scanned / 0013_140302111325_001 =====
+pdf=data/business_form/0013_140302111325_001.pdf
+start=2026-05-03T19:21:04Z
+exit=0 end=2026-05-03T19:21:28Z
+file: /tmp/smoke_post_dl_v2_20260503/scanned__0013_140302111325_001/ingestion.jsonl
+chunks_total: 20  text: 17  image: 2  table: 1
+text_mean_len: 39.4  text_max_len: 134
+text_short_<30: 10  text_long_>1500: 0
+micro_non_label_chunks: 5  micro_non_label_ratio: 0.294
+oversize_chunks: 0  oversize_ratio: 0.000
+label_chunks: 5  orphan_label_chunks: 0  orphan_label_ratio: 0.000
+ctrl_chunks: 0  ctrl_total: 0
+page_num_artifact_chunks: 0
+code_chunks: 0  code_flat(no_newlines): 0  code_like_not_code: 0
+code_like_total: 0  code_fragment_micro: 0  code_fragmentation_ratio: 0.000
+chunk_type_top: paragraph=17
+
+profile_type=scanned
+doc_class=scanned (inferred)
+doc_class_inference=top_document_modality=scanned_degraded
+document_modality_top=scanned_degraded:20
+extraction_method_top=ocr:18, docling:2
+infix_strict=0
+refined_content_infix=0
+text_chunks=17
+micro_non_label_ratio=0.2941
+oversize_ratio=0.0000
+orphan_label_ratio=0.0000
+code_fragmentation_ratio=0.0000
+GATE_FAIL: micro_non_label_ratio=0.294 (>0.22)
+
+file: /tmp/smoke_post_dl_v2_20260503/scanned__0013_140302111325_001/ingestion.jsonl
+profile=scanned  domain=editorial  is_scan=True  total_pages=1  declared_chunks=20
+chunks_total=20  text=17  image=2  table=1
+null_chunk_type_on_text=0
+invalid_bbox=0
+bbox_missing_page_dims=0
+empty_text_chunks=0
+missing_modality=0
+bbox_stats[text]: total=17 with_bbox=17 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=79..905 y_range=110..846 area_min=1326 area_avg=5508.4 area_max=23040
+bbox_stats[image]: total=2 with_bbox=2 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=104..686 y_range=74..698 area_min=34662 area_avg=51669.0 area_max=68676
+bbox_stats[table]: total=1 with_bbox=1 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=80..883 y_range=435..521 area_min=69058 area_avg=69058.0 area_max=69058
+bbox_stats[other]: total=0 with_bbox=0 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=n/a..n/a y_range=n/a..n/a area_min=n/a area_avg=n/a area_max=n/a
+UNIVERSAL_PASS
+
+
+===== technical_manual / Firearms =====
+pdf=data/technical_manual/Firearms.pdf
+start=2026-05-03T19:21:31Z
+exit=0 end=2026-05-03T19:23:12Z
+file: /tmp/smoke_post_dl_v2_20260503/technical_manual__Firearms/ingestion.jsonl
+chunks_total: 40  text: 24  image: 16  table: 0
+text_mean_len: 500.1  text_max_len: 1489
+text_short_<30: 2  text_long_>1500: 0
+micro_non_label_chunks: 1  micro_non_label_ratio: 0.042
+oversize_chunks: 0  oversize_ratio: 0.000
+label_chunks: 1  orphan_label_chunks: 0  orphan_label_ratio: 0.000
+ctrl_chunks: 0  ctrl_total: 0
+page_num_artifact_chunks: 0
+code_chunks: 0  code_flat(no_newlines): 0  code_like_not_code: 2
+code_like_total: 2  code_fragment_micro: 0  code_fragmentation_ratio: 0.000
+chunk_type_top: paragraph=22, list_item=2
+
+profile_type=technical_manual
+doc_class=scanned (inferred)
+doc_class_inference=top_document_modality=scanned_degraded
+document_modality_top=scanned_degraded:40
+extraction_method_top=docling:24, ocr:16
+infix_strict=0
+refined_content_infix=0
+text_chunks=24
+micro_non_label_ratio=0.0417
+oversize_ratio=0.0000
+orphan_label_ratio=0.0000
+code_fragmentation_ratio=0.0000
+GATE_PASS
+
+file: /tmp/smoke_post_dl_v2_20260503/technical_manual__Firearms/ingestion.jsonl
+profile=technical_manual  domain=editorial  is_scan=True  total_pages=292  declared_chunks=40
+chunks_total=40  text=24  image=16  table=0
+null_chunk_type_on_text=0
+invalid_bbox=0
+bbox_missing_page_dims=0
+empty_text_chunks=0
+missing_modality=0
+bbox_stats[text]: total=24 with_bbox=24 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=0..1000 y_range=0..1000 area_min=9116 area_avg=367011.6 area_max=1000000
+bbox_stats[image]: total=16 with_bbox=16 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=14..985 y_range=71..890 area_min=10508 area_avg=101300.1 area_max=287382
+bbox_stats[table]: total=0 with_bbox=0 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=n/a..n/a y_range=n/a..n/a area_min=n/a area_avg=n/a area_max=n/a
+bbox_stats[other]: total=0 with_bbox=0 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=n/a..n/a y_range=n/a..n/a area_min=n/a area_avg=n/a area_max=n/a
+UNIVERSAL_PASS
+
+
+===== technical_manual / Greenhouse Design and Control by Pedro Ponce =====
+pdf=data/technical_manual/Greenhouse Design and Control by Pedro Ponce.pdf
+start=2026-05-03T19:23:15Z
+exit=0 end=2026-05-03T19:24:37Z
+file: /tmp/smoke_post_dl_v2_20260503/technical_manual__Greenhouse Design and Control by Pedro Ponce/ingestion.jsonl
+chunks_total: 19  text: 16  image: 3  table: 0
+text_mean_len: 216.4  text_max_len: 916
+text_short_<30: 0  text_long_>1500: 0
+micro_non_label_chunks: 0  micro_non_label_ratio: 0.000
+oversize_chunks: 0  oversize_ratio: 0.000
+label_chunks: 0  orphan_label_chunks: 0  orphan_label_ratio: 0.000
+ctrl_chunks: 0  ctrl_total: 0
+page_num_artifact_chunks: 0
+code_chunks: 0  code_flat(no_newlines): 0  code_like_not_code: 0
+code_like_total: 0  code_fragment_micro: 0  code_fragmentation_ratio: 0.000
+chunk_type_top: paragraph=15, list_item=1
+
+profile_type=technical_manual
+doc_class=digital (inferred)
+doc_class_inference=top_document_modality=image_heavy
+document_modality_top=image_heavy:19
+extraction_method_top=hybrid_chunker:10, recovery_scan:3, image_to_text_recovery:2, docling:2
+infix_strict=0
+refined_content_infix=0
+text_chunks=16
+micro_non_label_ratio=0.0000
+oversize_ratio=0.0000
+orphan_label_ratio=0.0000
+code_fragmentation_ratio=0.0000
+GATE_PASS
+
+file: /tmp/smoke_post_dl_v2_20260503/technical_manual__Greenhouse Design and Control by Pedro Ponce/ingestion.jsonl
+profile=technical_manual  domain=editorial  is_scan=False  total_pages=378  declared_chunks=19
+chunks_total=19  text=16  image=3  table=0
+null_chunk_type_on_text=0
+invalid_bbox=0
+bbox_missing_page_dims=0
+empty_text_chunks=0
+missing_modality=0
+bbox_stats[text]: total=16 with_bbox=13 missing_bbox=3 invalid_bbox=0 missing_page_dims=0 x_range=81..681 y_range=39..757 area_min=4635 area_avg=22776.0 area_max=81104
+bbox_stats[image]: total=3 with_bbox=3 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=0..1000 y_range=0..591 area_min=20748 area_avg=220844.0 area_max=591000
+bbox_stats[table]: total=0 with_bbox=0 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=n/a..n/a y_range=n/a..n/a area_min=n/a area_avg=n/a area_max=n/a
+bbox_stats[other]: total=0 with_bbox=0 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=n/a..n/a y_range=n/a..n/a area_min=n/a area_avg=n/a area_max=n/a
+UNIVERSAL_PASS
+
+
+===== technical_manual / Python Distilled David M. Beazley 2022 =====
+pdf=data/technical_manual/Python Distilled David M. Beazley 2022.pdf
+start=2026-05-03T19:24:40Z
+exit=0 end=2026-05-03T19:25:10Z
+file: /tmp/smoke_post_dl_v2_20260503/technical_manual__Python Distilled David M. Beazley 2022/ingestion.jsonl
+chunks_total: 12  text: 6  image: 6  table: 0
+text_mean_len: 875.3  text_max_len: 1313
+text_short_<30: 0  text_long_>1500: 0
+micro_non_label_chunks: 0  micro_non_label_ratio: 0.000
+oversize_chunks: 0  oversize_ratio: 0.000
+label_chunks: 0  orphan_label_chunks: 0  orphan_label_ratio: 0.000
+ctrl_chunks: 0  ctrl_total: 0
+page_num_artifact_chunks: 0
+code_chunks: 0  code_flat(no_newlines): 0  code_like_not_code: 1
+code_like_total: 1  code_fragment_micro: 0  code_fragmentation_ratio: 0.000
+chunk_type_top: paragraph=5, list_item=1
+
+profile_type=technical_manual
+doc_class=digital (inferred)
+doc_class_inference=top_document_modality=native_digital
+document_modality_top=native_digital:12
+extraction_method_top=hybrid_chunker:6, docling:4, shadow:2
+infix_strict=0
+refined_content_infix=0
+text_chunks=6
+micro_non_label_ratio=0.0000
+oversize_ratio=0.0000
+orphan_label_ratio=0.0000
+code_fragmentation_ratio=0.0000
+GATE_PASS
+
+file: /tmp/smoke_post_dl_v2_20260503/technical_manual__Python Distilled David M. Beazley 2022/ingestion.jsonl
+profile=technical_manual  domain=technical  is_scan=False  total_pages=1411  declared_chunks=12
+chunks_total=12  text=6  image=6  table=0
+null_chunk_type_on_text=0
+invalid_bbox=0
+bbox_missing_page_dims=0
+empty_text_chunks=0
+missing_modality=0
+bbox_stats[text]: total=6 with_bbox=6 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=93..869 y_range=62..905 area_min=1960 area_avg=97962.3 area_max=441840
+bbox_stats[image]: total=6 with_bbox=6 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=77..926 y_range=0..1000 area_min=6144 area_avg=275596.3 area_max=671232
+bbox_stats[table]: total=0 with_bbox=0 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=n/a..n/a y_range=n/a..n/a area_min=n/a area_avg=n/a area_max=n/a
+bbox_stats[other]: total=0 with_bbox=0 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=n/a..n/a y_range=n/a..n/a area_min=n/a area_avg=n/a area_max=n/a
+UNIVERSAL_PASS
+
+
+===== technical_report / ATZ.Elektronik.-.Effizientere.Software.Entwicklung.GERMAN.RETAiL.eBOOk-PDFWriters =====
+pdf=data/technical_report/ATZ.Elektronik.-.Effizientere.Software.Entwicklung.GERMAN.RETAiL.eBOOk-PDFWriters.pdf
+start=2026-05-03T19:25:13Z
+exit=0 end=2026-05-03T19:25:37Z
+file: /tmp/smoke_post_dl_v2_20260503/technical_report__ATZ.Elektronik.-.Effizientere.Software.Entwicklung.GERMAN.RETAiL.eBOOk-PDFWriters/ingestion.jsonl
+chunks_total: 60  text: 46  image: 14  table: 0
+text_mean_len: 394.8  text_max_len: 1208
+text_short_<30: 2  text_long_>1500: 0
+micro_non_label_chunks: 1  micro_non_label_ratio: 0.022
+oversize_chunks: 0  oversize_ratio: 0.000
+label_chunks: 1  orphan_label_chunks: 0  orphan_label_ratio: 0.000
+ctrl_chunks: 0  ctrl_total: 0
+page_num_artifact_chunks: 0
+code_chunks: 0  code_flat(no_newlines): 0  code_like_not_code: 0
+code_like_total: 0  code_fragment_micro: 0  code_fragmentation_ratio: 0.000
+chunk_type_top: paragraph=43, list_item=3
+
+profile_type=academic_whitepaper
+doc_class=digital (inferred)
+doc_class_inference=top_document_modality=image_heavy
+document_modality_top=image_heavy:60
+extraction_method_top=hybrid_chunker:46, docling:13, shadow:1
+infix_strict=0
+refined_content_infix=0
+text_chunks=46
+micro_non_label_ratio=0.0217
+oversize_ratio=0.0000
+orphan_label_ratio=0.0000
+code_fragmentation_ratio=0.0000
+GATE_PASS
+
+file: /tmp/smoke_post_dl_v2_20260503/technical_report__ATZ.Elektronik.-.Effizientere.Software.Entwicklung.GERMAN.RETAiL.eBOOk-PDFWriters/ingestion.jsonl
+profile=academic_whitepaper  domain=academic  is_scan=False  total_pages=6  declared_chunks=60
+chunks_total=60  text=46  image=14  table=0
+null_chunk_type_on_text=0
+invalid_bbox=0
+bbox_missing_page_dims=0
+empty_text_chunks=0
+missing_modality=0
+bbox_stats[text]: total=46 with_bbox=46 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=0..971 y_range=26..947 area_min=336 area_avg=29260.9 area_max=448602
+bbox_stats[image]: total=14 with_bbox=14 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=0..1000 y_range=41..960 area_min=8928 area_avg=151372.9 area_max=481156
+bbox_stats[table]: total=0 with_bbox=0 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=n/a..n/a y_range=n/a..n/a area_min=n/a area_avg=n/a area_max=n/a
+bbox_stats[other]: total=0 with_bbox=0 missing_bbox=0 invalid_bbox=0 missing_page_dims=0 x_range=n/a..n/a y_range=n/a..n/a area_min=n/a area_avg=n/a area_max=n/a
+UNIVERSAL_PASS
+
+
+
+======================================================
+CROSS-PROFILE SMOKE TEST SUMMARY
+======================================================
+CATEGORY               | DOCUMENT                                      | DETECTED_PROFILE          | GATE         | UNIVERSAL       
+-----------------------+-----------------------------------------------+---------------------------+--------------+-----------------
+academic_journal       | AIOS LLM Agent Operating System               | academic_whitepaper       | GATE_PASS    | UNIVERSAL_PASS  
+academic_journal       | A_comprehensive_review_on_hybrid_electri      | academic_whitepaper       | GATE_PASS    | UNIVERSAL_PASS  
+business_form          | betwistingsformulier_aankoop_niet_ontvangen   | academic_whitepaper       | GATE_PASS    | UNIVERSAL_PASS  
+data_spreadsheet       | CarOK voorraadtelling 2021-04                 | technical_manual          | GATE_PASS    | UNIVERSAL_PASS  
+digital_magazine       | PCWorld_July_2025_USA                         | digital_magazine          | GATE_PASS    | UNIVERSAL_PASS  
+digital_literature     | HarryPotter_and_the_Sorcerers_Stone           | digital_literature        | GATE_PASS    | UNIVERSAL_PASS  
+scanned                | 0013_140302111325_001                         | scanned                   | GATE_FAIL: micro_non_label_ratio=0.294 (>0.22) | UNIVERSAL_PASS  
+technical_manual       | Firearms                                      | technical_manual          | GATE_PASS    | UNIVERSAL_PASS  
+technical_manual       | Greenhouse Design and Control by Pedro Ponce  | technical_manual          | GATE_PASS    | UNIVERSAL_PASS  
+technical_manual       | Python Distilled David M. Beazley 2022        | technical_manual          | GATE_PASS    | UNIVERSAL_PASS  
+technical_report       | ATZ.Elektronik.-.Effizientere.Software.Entwic | academic_whitepaper       | GATE_PASS    | UNIVERSAL_PASS  
+
+done=2026-05-03T19:25:40Z

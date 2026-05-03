@@ -16,7 +16,14 @@ until the actual pipeline ran on HARRY:
    Re-routed through `self._adapter.convert(...)`. The static guard from
    v2.7 §5 only banned construction of `PdfPipelineOptions` /
    `DocumentConverter` outside the adapter; it did NOT catch raw
-   `convert(...)` invocation. A companion guard test should follow.
+   `convert(...)` invocation.
+   **Companion guard shipped 2026-05-04 (PLAN_V2.8 §2):**
+   `tests/test_pdf_conversion_plan.py::test_no_raw_converter_invocation_outside_adapter`
+   AST-walks every production `*.py` and rejects any
+   `self._converter.convert(...)` / `self._docling_converter.convert(...)`
+   outside the adapter. The same patch removed the dead else-branch in
+   `processor.py` and routed `pdf_engine.py:_convert_with_docling` through
+   the adapter (parallel-site fix per PLAN_V2.8 §2b).
 2. **`ProfileManager.select_profile`'s `type_mapping` had no entry for
    `DIGITAL_LITERATURE`.** It silently fell through to
    `DigitalMagazineProfile`. Three places needed updates:

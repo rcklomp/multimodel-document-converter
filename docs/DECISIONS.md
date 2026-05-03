@@ -171,6 +171,7 @@ inference setup for v2.9.
 - `BatchProcessor`, `V2DocumentProcessor`, and `PDFEngine` consume the plan through `DoclingPdfAdapter`; legacy metadata entry points remain as compatibility shims that build a plan before adapter use.
 - `PdfConversionPlan.to_intelligence_metadata()` returns full boundary metadata; `chunk_factory_metadata()` returns only chunk-safe keys.
 - Static guard tests fail if production code constructs Docling PDF options/converters outside `src/mmrag_v2/engines/docling_adapter.py`.
+- **Amendment 2026-05-04 (PLAN_V2.8 §2):** the construction guard is now joined by an invocation guard (`test_no_raw_converter_invocation_outside_adapter`). It AST-walks production code and rejects `self._converter.convert(...)` / `self._docling_converter.convert(...)` outside the adapter — the failure mode that put `processor.py:2072` and `pdf_engine.py:206` on the v2.8 plan. Cleanup-style calls (`._converter.cleanup()` / `.close()` / `.shutdown()`) are unaffected; only `.convert(...)` invocations are blocked.
 - `generate_table_images` is false by default and true only when `force_table_vlm=True`; non-VLM table extraction remains TableFormer markdown-based.
 - OCR engine mapping preserves status quo: OCR-enabled plans create `EasyOcrOptions()` regardless of the CLI engine string.
 

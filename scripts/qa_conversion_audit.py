@@ -661,7 +661,7 @@ def print_report(r: AuditResult, path: Path) -> bool:
     print(f"  Chunks: {r.total_chunks} (text={r.text_chunks}, image={r.image_chunks}, table={r.table_chunks})  Pages: {r.total_pages}")
     print(f"  Assets: {r.total_assets}")
     if r.document_type == "form":
-        print(f"  [UNSUPPORTED_HIERARCHICAL_RAG] Short scanned form — heading/label gates skipped")
+        print(f"  [FORM] Short scanned form / invoice — heading-derived gates skipped (forms are first-class RAG content)")
     print()
 
     fails: list = []
@@ -879,9 +879,10 @@ def print_report(r: AuditResult, path: Path) -> bool:
     # --- Overall ---
     passed = len(fails) == 0
     if is_form:
-        print(f"\n  UNSUPPORTED_HIERARCHICAL_RAG", end="")
-        if fails:
-            print(f" — structural issues: {', '.join(fails)}", end="")
+        if passed:
+            print(f"\n  FORM_AUDIT_PASS — content extracted; chunks usable for RAG", end="")
+        else:
+            print(f"\n  FORM_AUDIT_FAIL ({', '.join(fails)})", end="")
     elif passed:
         print(f"\n  AUDIT_PASS", end="")
     else:
@@ -929,8 +930,8 @@ def main(argv: list[str]) -> int:
         for path, r, passed in results:
             name = path.parent.name
             if r.document_type == "form":
-                icon = "◻"
-                status = "UNSUPPORTED"
+                icon = "✓" if passed else "✗"
+                status = "FORM_PASS" if passed else "FORM_FAIL"
             elif passed:
                 icon = "✓"
                 status = "PASS"
@@ -938,13 +939,19 @@ def main(argv: list[str]) -> int:
                 icon = "✗"
                 status = "FAIL"
             print(f"  {icon} {name:45s} {r.total_chunks:5d} chunks  {r.doc_class:8s}  {status}")
-        form_count = sum(1 for _, r, _ in results if r.document_type == "form")
-        auditable = len(results) - form_count
-        passed_count = sum(1 for _, r, p in results if p and r.document_type != "form")
-        failed_count = sum(1 for _, r, p in results if not p and r.document_type != "form")
-        summary_parts = [f"{passed_count}/{auditable} passed"]
-        if form_count:
-            summary_parts.append(f"{form_count} unsupported")
+        # Forms count as a first-class acceptance class (per CLAUDE.md
+        # AGENT-VAL-01 / AGENTS.md: no waivers, every doc must have an
+        # acceptance lane). FORM_PASS contributes to the pass tally;
+        # only FORM_FAIL contributes to failures.
+        form_pass = sum(1 for _, r, p in results if r.document_type == "form" and p)
+        form_fail = sum(1 for _, r, p in results if r.document_type == "form" and not p)
+        non_form_pass = sum(1 for _, r, p in results if r.document_type != "form" and p)
+        non_form_fail = sum(1 for _, r, p in results if r.document_type != "form" and not p)
+        passed_count = non_form_pass + form_pass
+        failed_count = non_form_fail + form_fail
+        summary_parts = [f"{passed_count}/{len(results)} passed"]
+        if form_pass:
+            summary_parts.append(f"{form_pass} form-pass")
         if failed_count:
             summary_parts.append(f"{failed_count} failed")
         print(f"\n  {', '.join(summary_parts)}")

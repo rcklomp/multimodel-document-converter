@@ -47,6 +47,45 @@ bringing both tested magazines (PCWorld, Combat Aircraft) from ~-20% to under -9
   - Keep short/long outliers bounded via chunking logic.
   - Suggested acceptance gates: `micro_non_label_ratio <= 0.12`, `oversize_ratio <= 0.01`, `orphan_label_ratio <= 0.20`, `code_fragmentation_ratio <= 0.05`.
 
+### Form / Invoice Acceptance Class (added 2026-05-04, PLAN_V2.8 §5)
+Forms (invoices, receipts, claim forms, single-page business documents) are
+first-class RAG content — production RAG corpora routinely include them. They
+have a fundamentally different shape than prose documents: each chunk is a
+short field key or value, there is no section-heading hierarchy, and the
+prose-calibrated `micro_non_label_ratio` gate would reject every well-extracted
+form.
+
+**Detection rule** (matches `scripts/qa_conversion_audit.py` and
+`scripts/evaluate_technical_manual_gates.py`):
+
+```
+total_pages > 0 AND total_pages <= 5
+  AND doc_class == "scanned"
+  AND heading_coverage < 0.10   # parent_heading set on <10% of text chunks
+```
+
+**Form gate** (the only checks that apply):
+- `infix_strict == 0` (mid-sentence list-number artifact count, must be zero)
+- `oversize_ratio <= 0.02` (no chunks exceed 1500 chars)
+
+The following checks are **skipped** for forms because they have no semantic
+meaning on this content shape:
+- `micro_non_label_ratio` — forms are intentionally short labels + values
+- `orphan_label_ratio` — forms have no body paragraphs to attach labels to
+- `heading_coverage` thresholds — forms have no section hierarchy
+
+**Why no waiver:** Per CLAUDE.md "Project Invariants" / AGENT-VAL-01, every
+document category must satisfy `GATE_PASS + UNIVERSAL_PASS`. The form lane is
+NOT a waiver — it is a separate, equally rigorous acceptance class with the
+threshold appropriate to the content shape. Universal invariants (clean
+control chars, integer `[0,1000]` bboxes, non-empty content, modality
+present) still apply.
+
+**Output naming:** the audit script reports `FORM_AUDIT_PASS` /
+`FORM_AUDIT_FAIL` for forms, distinguishing them from prose `AUDIT_PASS`.
+The smoke evaluator emits `GATE_PASS [form: micro_non_label + label-orphan
+checks skipped]` so the form lane is always visible in the smoke summary.
+
 ### Acceptance Workflow
 1. Run `scripts/smoke_multiprofile.sh` — this is the primary gate. Every row must show `GATE_PASS` + `UNIVERSAL_PASS`.
 2. Run `scripts/acceptance_technical_manual.sh` for deep validation of the technical-manual category (4 docs × 20 pages).

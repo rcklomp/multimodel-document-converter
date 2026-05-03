@@ -202,8 +202,11 @@ class PDFEngine(BaseBinaryEngine):
         """Convert using Docling engine."""
         logger.info(f"Using Docling for: {file_path.name}")
 
-        # Run Docling conversion
-        result = self._converter.convert(str(file_path))
+        # Route through the adapter so post-Docling sanity stages run.
+        # Per PLAN_V2.8 §2: raw `self._converter.convert(...)` bypasses the
+        # adapter's reading-order / drop-cap / label-leak post-processors and
+        # is now blocked by `test_no_raw_converter_invocation_outside_adapter`.
+        result = self._adapter.convert(str(file_path))
         doc = result.document
 
         # Get page information

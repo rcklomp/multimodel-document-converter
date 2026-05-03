@@ -16,12 +16,12 @@ Immediate goal: make conversion quality measurable and reproducible across docum
 
 The current quality reference point is:
 
-- **2026-05-03 work** (post-Docling sanity pass + `digital_literature` profile): see `CHANGELOG.md` entry "Post-Docling Sanity Pass (2026-05-03)" and `docs/PLAN_DOCLING_POSTPROCESSOR.md`. No quality snapshot file yet; `tests/test_docling_postprocessor_acceptance.py` (HARRY pages 13-30 reading-order fixture) is the new binding regression test.
-- `docs/QUALITY_SNAPSHOT_2026-05-01.md` (current — Milestone 1 closure, RAG Guide unblock, Ayeva re-conversion)
+- **`docs/QUALITY_SNAPSHOT_2026-05-03.md`** (current — v2.8 Phase 0 BEFORE state: 30/37 outputs PASS, smoke 10/11 GATE_PASS + 11/11 UNIVERSAL_PASS). This is the BEFORE column for measuring `docs/PLAN_V2.8_PRODUCTION_GAPS.md` deltas.
+- `docs/QUALITY_SNAPSHOT_2026-05-01.md` (Milestone 1 + 2 closure, RAG Guide unblock, Ayeva re-conversion, contextual retrieval)
 - `docs/QUALITY_SNAPSHOT_2026-04-30.md` (Vision-Aided Front Matter, Shared PDF Plan, Coordinate Audit, Domain-Specific Search Priority completion evidence)
 - `docs/QUALITY_SNAPSHOT_2026-04-29.md` (pre-Milestone-1 corpus baseline; rows for Ayeva and Harry Potter are now stale and superseded by the entries above)
 
-Use the latest snapshot as the before-state for future comparisons.
+Use the latest snapshot as the before-state for future comparisons. The 2026-05-03 post-Docling sanity pass + `digital_literature` profile (commits `3bdbe0f`, `2f51816`, `379a733`) is baked into the 2026-05-03 snapshot; `tests/test_docling_postprocessor_acceptance.py` (HARRY pages 13-30 reading-order fixture) is the binding regression test.
 
 ## Active Model/Endpoint State
 

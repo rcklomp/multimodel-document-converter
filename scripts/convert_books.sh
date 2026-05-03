@@ -39,8 +39,8 @@ convert() {
 echo "$(now) === BOOK CONVERSION v2.7.0 ===" | tee -a "$LOG"
 echo ""
 
-# === SCANNED ===
-convert "data/scanned/HarryPotter_and_the_Sorcerers_Stone.pdf" "HarryPotter_and_the_Sorcerers_Stone" 10
+# === DIGITAL LITERATURE ===
+convert "data/digital_literature/HarryPotter_and_the_Sorcerers_Stone.pdf" "HarryPotter_and_the_Sorcerers_Stone" 10
 
 # === ACADEMIC JOURNALS ===
 convert "data/academic_journal/AIOS LLM Agent Operating System.pdf" "AIOS_LLM_Agent_Operating_System" 10

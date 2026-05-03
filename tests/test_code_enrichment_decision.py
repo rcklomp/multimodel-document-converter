@@ -176,6 +176,88 @@ class TestScoreCodeEvidence:
 
 
 # ---------------------------------------------------------------------------
+# PLAN_V2.8 §4 — CodeFormulaV2 enable contract for the named documents
+# These named tests pin the cheap-evidence outcome for the v2.8 reference docs
+# (Chaubal positive, Fluent positive control, Combat negative). They reuse the
+# same `_score_code_evidence` lane the production trigger uses, so a future
+# regression in the heuristic surfaces here under a contract-named test.
+# ---------------------------------------------------------------------------
+
+
+class TestPlanV28EnrichmentContract:
+    """Per PLAN_V2.8 §4: pin enable/disable contract for the v2.8 reference docs."""
+
+    def test_chaubal_cheap_evidence_trigger_fires(self):
+        """Chaubal (PyTorch projects book): dense `import`/`def`/`class` → enable."""
+        chaubal_like = "\n".join([
+            "import torch",
+            "import torch.nn as nn",
+            "from torch.optim import Adam",
+            "class CNN(nn.Module):",
+            "    def __init__(self):",
+            "        super().__init__()",
+            "        self.conv1 = nn.Conv2d(3, 16, 3)",
+            "        self.fc1 = nn.Linear(16 * 26 * 26, 128)",
+            "    def forward(self, x):",
+            "        x = self.conv1(x)",
+            "        return self.fc1(x.view(x.size(0), -1))",
+            "def train(model, loader, optimizer):",
+            "    for batch in loader:",
+            "        loss = model(batch)",
+            "        loss.backward()",
+        ] * 5)
+        needs, reason, _, _, _ = _score_code_evidence(_lines(chaubal_like))
+        assert needs is True, f"Chaubal-shape sample should trigger; reason={reason}"
+
+    def test_fluent_python_cheap_evidence_trigger_fires(self):
+        """Fluent Python: fenced + keyword-dense Python → enable (non-regression control)."""
+        fluent_like = (
+            "Chapter 7. Functions as First-Class Objects\n\n"
+            "```python\n"
+            "def factorial(n):\n"
+            "    return 1 if n < 2 else n * factorial(n - 1)\n"
+            "```\n\n"
+            "```python\n"
+            "from collections import namedtuple\n"
+            "Card = namedtuple('Card', ['rank', 'suit'])\n"
+            "```\n\n"
+            "```python\n"
+            "class FrenchDeck:\n"
+            "    ranks = [str(n) for n in range(2, 11)] + list('JQKA')\n"
+            "    def __init__(self):\n"
+            "        self._cards = [Card(rank, suit) for suit in 'shdc' for rank in self.ranks]\n"
+            "```\n"
+        ) * 2
+        needs, reason, _, _, _ = _score_code_evidence(_lines(fluent_like))
+        assert needs is True, f"Fluent-shape sample should trigger; reason={reason}"
+
+    def test_combat_aircraft_cheap_evidence_does_not_fire(self):
+        """Combat Aircraft (magazine, no real code): must NOT enable enrichment.
+
+        Per PLAN_V2.8 §4 hard constraint: encoding corruption alone (or magazine
+        ornament-glyph noise) must not turn on `do_code_enrichment`.
+        """
+        combat_like = (
+            "Combat Aircraft\nAugust 2025\n\n"
+            "Wing/Group: 19th Air Force\n"
+            "Squadron: 22nd Tactical Fighter\n"
+            "Location: Iwo To, Japan\n"
+            "Aircraft: F-35C Lightning II\n"
+            "TailCode: NE-200\n\n"
+            "The aircraft were stationed aboard the USS George Washington for\n"
+            "Field training during the deployment.\n"
+            "Pilots reported nominal carrier qualification scores.\n"
+            "Avionics passed all pre-flight checks per squadron standards.\n"
+            "The deployment marked the first time F-35Cs operated at Iwo To.\n"
+        ) * 6
+        needs, _, ratio, fences, kws = _score_code_evidence(_lines(combat_like))
+        assert needs is False, "Magazine prose must not trigger CodeFormulaV2"
+        assert fences == 0
+        # No line starts with a code keyword like def/class/import.
+        assert kws == 0
+
+
+# ---------------------------------------------------------------------------
 # Config isolation: code_enrichment.api_key must not fall back to vlm.api_key
 # ---------------------------------------------------------------------------
 

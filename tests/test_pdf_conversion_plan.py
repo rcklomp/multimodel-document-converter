@@ -623,6 +623,99 @@ def test_no_production_docling_imports_outside_adapter():
 
 
 # ============================================================================
+# PLAN_V2.8 §2 — Adapter-invocation static guard
+# Promotes the v2.7 §5 rule (all Docling extraction goes through
+# DoclingPdfAdapter) from "construction guarded" to "invocation guarded".
+# ============================================================================
+
+# Cached converter attribute names that MUST NOT have `.convert(...)` called
+# on them outside the adapter. These are attributes that hold a reference to
+# a `DocumentConverter` returned by `DoclingPdfAdapter.get_converter()`;
+# calling `.convert()` directly bypasses the adapter's post-Docling sanity
+# stages (reading-order y-sort, drop-cap promotion, label-leak filter, etc.).
+_CACHED_CONVERTER_ATTRS = {"_converter", "_docling_converter"}
+
+
+def _find_raw_converter_invocations(source: str):
+    """Yield (lineno, attr) for each `self.<cached>.convert(...)` call."""
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        # Looking for: Call(func=Attribute(value=Attribute(value=Name('self'),
+        #                                                  attr=<cached>),
+        #                                  attr='convert'))
+        if not (isinstance(func, ast.Attribute) and func.attr == "convert"):
+            continue
+        receiver = func.value
+        if not isinstance(receiver, ast.Attribute):
+            continue
+        if receiver.attr not in _CACHED_CONVERTER_ATTRS:
+            continue
+        if not (isinstance(receiver.value, ast.Name) and receiver.value.id == "self"):
+            continue
+        yield (node.lineno, receiver.attr)
+
+
+def test_no_raw_converter_invocation_outside_adapter():
+    """No production file may call `.convert()` on a cached Docling converter.
+
+    Doing so bypasses the adapter's post-Docling sanity stages (the failure
+    mode that put `processor.py:2072` and `pdf_engine.py:206` on the v2.8
+    plan). Adapter routing (`self._adapter.convert(...)`) is the only
+    sanctioned invocation path.
+    """
+    root = Path(__file__).resolve().parents[1]
+    allowed = root / "src" / "mmrag_v2" / "engines" / "docling_adapter.py"
+    violations = []
+
+    for path in _production_python_files():
+        if path == allowed:
+            continue
+        source = path.read_text(encoding="utf-8")
+        for lineno, attr in _find_raw_converter_invocations(source):
+            violations.append(f"{path.relative_to(root)}:{lineno} (self.{attr}.convert)")
+
+    assert violations == [], (
+        "Found raw cached-converter invocations outside the adapter:\n  "
+        + "\n  ".join(violations)
+    )
+
+
+def test_guard_fires_on_synthetic_bypass():
+    """Positive-case: the AST walker must flag the bypass pattern."""
+    bad = "def f(self, p):\n    return self._converter.convert(p)\n"
+    findings = list(_find_raw_converter_invocations(bad))
+    assert findings == [(2, "_converter")]
+
+
+def test_guard_fires_on_synthetic_docling_converter_alias():
+    """Positive-case: also catches the BatchProcessor's `_docling_converter` alias."""
+    bad = "def f(self, p):\n    return self._docling_converter.convert(p)\n"
+    findings = list(_find_raw_converter_invocations(bad))
+    assert findings == [(2, "_docling_converter")]
+
+
+def test_guard_does_not_fire_on_adapter_routing():
+    """Negative-case: legitimate adapter calls must NOT trigger the guard."""
+    good = "def f(self, p):\n    return self._adapter.convert(p)\n"
+    findings = list(_find_raw_converter_invocations(good))
+    assert findings == []
+
+
+def test_guard_does_not_fire_on_unrelated_method_calls():
+    """Negative-case: cleanup-style calls (`._converter.cleanup()`) are fine."""
+    good = (
+        "def f(self):\n"
+        "    if self._converter is not None:\n"
+        "        self._converter.cleanup()\n"
+    )
+    findings = list(_find_raw_converter_invocations(good))
+    assert findings == []
+
+
+# ============================================================================
 # Milestone 1: Extraction route controls
 # ============================================================================
 

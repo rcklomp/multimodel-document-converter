@@ -5,7 +5,7 @@ the post-Docling sanity pass automatically: ProfileClassifier returns
 DIGITAL_LITERATURE when the diagnostic engine has set domain="literature"
 on a long-form, native-digital document with small decorative imagery.
 
-The HARRY Potter PDF (`data/scanned/HarryPotter_and_the_Sorcerers_Stone.pdf`)
+The HARRY Potter PDF (`data/digital_literature/HarryPotter_and_the_Sorcerers_Stone.pdf`)
 is the canonical fixture; its diagnostic signature is encoded in
 `test_harry_potter_routes_to_digital_literature` below.
 """
