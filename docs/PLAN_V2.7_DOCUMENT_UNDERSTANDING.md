@@ -1,6 +1,6 @@
 # Plan: v2.7 — Document Understanding Layer
 
-**Status (April 2026):** Features 1–3 and the 4 multimodal validation layers (bottom of doc) are **implemented and shipped** in v2.7.0. Features 4–6 are partially done or deferred. This plan is retained as architectural rationale — see `CHANGELOG.md` v2.7.0 and `docs/DECISIONS.md` for current state.
+**Status (May 2026):** Features 1–6 are all **shipped**. The shared `PdfConversionPlan` / `DoclingPdfAdapter` foundation from §5 is the seam that the post-Docling sanity pass (`docs/PLAN_DOCLING_POSTPROCESSOR.md`, shipped 2026-05-03) builds on. The 4 multimodal validation layers (bottom of doc) are realised through Features 1–4 plus `validators/corruption_interceptor.py`. This plan is retained as architectural rationale — see `CHANGELOG.md`, `docs/DECISIONS.md`, and `docs/PROGRESS_CHECKLIST.md` for current state.
 
 ## Context
 
@@ -15,6 +15,12 @@ Source: Gemini Pro audit recommendations, April 2026.
 ## Features
 
 ### 1. Cross-Chunk Semantic Stitching
+
+**Status:** Pre-existing implementation hardened and unit-validated. Batch
+finalization already called `BatchProcessor._merge_hungry_operators(...)`;
+2026-04-30 work fixed punctuation and empty-chunk edge cases, added the
+`_apply_final_boundary_repairs(...)` bridge, and added regression coverage in
+`tests/test_cross_chunk_semantic_stitching.py`.
 
 **Problem:** Orphan prepositions at chunk boundaries ("BY" at end of credits
 chunk, separated from "Mary GrandPré" in the next chunk).
@@ -33,6 +39,17 @@ chunk for capitalization (proper noun signal). Language-agnostic — preposition
 exist in all languages.
 
 ### 2. Vision-Aided Front Matter Detection
+
+**Status:** `complete`.
+2026-04-30 work moved the detector after all heading assignment paths, broadened
+the visual signal to Docling/shadow image extractions before the first
+chapter-like heading, preserved numbered/chapter headings, and added focused
+negative + bridge coverage in `tests/test_vision_aided_front_matter.py`.
+Completion evidence: focused tests `41 passed`, full unit suite
+`356 passed, 1 skipped`, and fresh smoke run
+`output/smoke_multiprofile_20260430_frontmatter_complete/` with all 10 rows
+non-empty (`min_chunks=8`), all rows `GATE_PASS` + `UNIVERSAL_PASS`, no
+conversion-error log matches, and the Greenhouse blind-test document included.
 
 **Problem:** Docling misidentifies author names and publisher names as headings
 on front matter pages ("J. K. Rowling" as parent_heading).
@@ -73,6 +90,21 @@ Qdrant payload based on page position, heading context, and domain.
 
 ### 4. Coordinate Normalization Audit
 
+**Status:** `complete`.
+2026-04-30 work hardened `qa_universal_invariants.py` into a final bbox audit:
+it now reads current `metadata.spatial` and legacy `metadata.spatial_metadata`,
+rejects malformed/zero-area bboxes, and reports bbox distribution statistics
+per modality. The audit exposed zero-extent producer output in smoke; the
+shared coordinate normalizer now repairs one-unit extents inside the 0-1000
+canvas before export.
+
+Completion evidence: `tests/test_coordinate_normalization_audit.py` covers
+negative malformed bbox cases, current-schema JSONL bridge flow, legacy key
+compatibility, CLI output, and zero-extent normalizer regressions. Full unit
+suite: `381 passed, 1 skipped`. Smoke run:
+`output/smoke_multiprofile_20260430_075420/` with all 10 rows
+`GATE_PASS` + `UNIVERSAL_PASS`, including the Greenhouse blind-test document.
+
 **Problem:** Potential inconsistency between text and image bounding boxes
 reported by Gemini (later confirmed to both use [0,1000] — may be a
 non-issue, but worth auditing).
@@ -86,14 +118,29 @@ distribution statistics per modality.
 
 ### 5. Shared PDF Extraction Plan and Adapter Refactor
 
-**Status:** Next-phase architecture work; do not mark complete until bridge
-tests and multi-profile smoke evidence exist.
+**Status:** `complete` (2026-04-30 foundation; 2026-05-03 bypass patch).
+Shared `PdfConversionPlan` and `DoclingPdfAdapter` are implemented;
+bridge/static guard tests and multi-profile smoke evidence exist. See
+`docs/DECISIONS.md` and `docs/QUALITY_SNAPSHOT_2026-04-30.md`.
 
-**Problem:** `batch_processor.py` and `processor.py` both construct Docling
-PDF converters / `PdfPipelineOptions`. This duplicates extraction policy,
-causes drift between batch and direct paths, and already produced Workstream B
-bugs where the producer and consumer were correct independently but the
-call-site bridge dropped the decision.
+**2026-05-03 followup — latent bypass patched.** While shipping the
+Post-Docling Sanity Pass (see `docs/PLAN_DOCLING_POSTPROCESSOR.md`), a
+gap was found in the success criterion *"Single Docling options
+authority"*: the static guard `test_no_pipeline_options_construction_outside_adapter`
+banned `PdfPipelineOptions(` and `DocumentConverter(` *construction*
+outside the adapter, but did not catch raw `self._converter.convert(...)`
+*invocation* on the cached converter. `processor.py:2072` was using the
+cached object directly, silently bypassing any post-Docling stage gated
+on the plan. Re-routed through `self._adapter.convert(...)` which
+delegates to the cached converter and runs `apply_postprocessors`. A
+companion guard test should follow.
+
+**Problem:** `batch_processor.py`, `processor.py`, and
+`engines/pdf_engine.py` all construct Docling PDF converters /
+`PdfPipelineOptions`. This duplicates extraction policy, causes drift between
+batch, direct, and UIR paths, and already produced Workstream B bugs where the
+producer and consumer were correct independently but the call-site bridge
+dropped the decision.
 
 **Researched design pattern:** Use a small Ports-and-Adapters boundary around
 PDF extraction, with a Pipes-and-Filters pipeline inside it:
@@ -102,8 +149,12 @@ PDF extraction, with a Pipes-and-Filters pipeline inside it:
 - Primary adapters: CLI, batch command, tests.
 - Secondary adapters: Docling PDF adapter, OCR adapter, VLM/refiner adapter,
   optional code-recovery adapter.
+- Canonical PDF flow: diagnostics/config -> `PdfConversionPlan` ->
+  `DoclingPdfAdapter` -> `UniversalDocument` -> `ElementProcessor` -> chunks.
 - `BatchProcessor` owns batching/orchestration/export only.
-- `V2DocumentProcessor` owns document-item-to-chunk mapping only.
+- `V2DocumentProcessor` is transitional legacy glue only. New PDF work must
+  not add Docling-item-to-chunk behavior there; it should move mapping behind
+  UIR/ElementProcessor or delete the legacy path when parity is proven.
 - One shared PDF extraction adapter owns Docling converter creation and
   `PdfPipelineOptions`.
 
@@ -117,14 +168,23 @@ overwrites `item.text`. Therefore CodeFormulaV2 is a code-recovery adapter,
 not a default extraction mode.
 
 **Approach:**
-- Introduce `PdfConversionPlan` as the only object produced from diagnostics,
-  profile, config, and cheap evidence. It contains structural flags, OCR
-  policy, image/table options, `needs_code_enrichment`, reasons, and config
-  hashes.
-- Introduce `PdfPipelineOptionsFactory` / `DoclingPdfAdapter` as the only code
-  allowed to instantiate Docling PDF converters.
-- `batch_processor.py` and `processor.py` must consume the same
-  `PdfConversionPlan`; neither may independently infer Docling options.
+- Add `src/mmrag_v2/engines/pdf_plan.py`.
+  - `PdfConversionPlan` is a dataclass and the single PDF extraction policy
+    object.
+  - `build_pdf_conversion_plan(...)` is the only function allowed to create a
+    plan from diagnostics, profile, config, and cheap code evidence.
+  - The plan contains structural flags, OCR policy, image/table options,
+    `needs_code_enrichment`, code-evidence reason/counts, remote-enrichment
+    settings, refiner threshold override, and config hashes.
+- Add `src/mmrag_v2/engines/docling_adapter.py`.
+  - `DoclingPdfAdapter` / `PdfPipelineOptionsFactory` is the only code allowed
+    to instantiate Docling PDF converters or `PdfPipelineOptions`.
+  - The adapter returns `UniversalDocument` and preserves Docling provenance,
+    `CodeItem` labels, bboxes, page dimensions, and item images needed by
+    downstream recovery.
+- `batch_processor.py`, `processor.py`, and `engines/pdf_engine.py` must
+  consume the same `PdfConversionPlan`; none may independently infer Docling
+  options.
 - Preserve native `CodeItem.text` when the extracted code is already
   structurally sound.
 - Decide code preservation/recovery before chunking, refinement, or fallback
@@ -135,28 +195,86 @@ not a default extraction mode.
   document-level `do_code_enrichment`, enable it only after
   `needs_code_enrichment=True`; never from profile or encoding corruption
   alone.
-- Keep client-local CodeFormulaV2 as diagnostic/fallback. Preferred inference
-  target is a stronger local-network host; cloud is optional if policy allows.
+- Remote code-recovery contract:
+  - Uses only `[code_enrichment]` config and `code_enrichment.api_key`.
+  - Never falls back to `vlm.api_key`, `refiner.api_key`, or CLI `--api-key`.
+  - Carries explicit `enabled`, `provider`, `base_url`, `model`, `timeout`,
+    and `concurrency`.
+  - If using Docling-native remote services, construct `ApiVlmOptions` /
+    `CodeFormulaVlmOptions` in the adapter with `enable_remote_services=True`.
+  - If using a repo-local region-crop client, send only `CodeItem` /
+    code-candidate crops and return text plus language; do not send whole
+    documents.
+  - Keep client-local CodeFormulaV2 as diagnostic/fallback. Preferred
+    inference target is a stronger local-network host; cloud is optional if
+    policy allows.
 
 **Implementation phases:**
 1. Add `PdfConversionPlan` and tests proving Ayeva/Chaubal/Fluent/Combat
    decisions without running full conversions.
-2. Move all Docling `PdfPipelineOptions` construction into one factory with
-   golden tests for batch and direct paths.
-3. Replace duplicated converter creation in `batch_processor.py` and
-   `processor.py` with calls to the shared adapter.
-4. Add bridge tests at each object boundary: CLI -> plan, batch -> processor,
-   processor -> adapter, adapter -> Docling options.
-5. Only then run targeted page/region probes and acceptance smoke tests.
+2. Move all Docling `PdfPipelineOptions` / `DocumentConverter` construction
+   into one factory/adapter with golden tests for batch, direct, and UIR paths.
+3. Replace duplicated converter creation in `batch_processor.py`,
+   `processor.py`, and `engines/pdf_engine.py` with calls to the shared
+   adapter.
+4. Add bridge tests at each object boundary: CLI process -> plan, CLI batch ->
+   plan, batch -> processor, processor -> adapter, PDFEngine -> adapter,
+   adapter -> Docling options.
+5. Add a static guard test that fails if `PdfPipelineOptions(` or
+   `DocumentConverter(` appear outside the adapter/factory and explicitly
+   allowed tests.
+6. Only then run targeted page/region probes and acceptance smoke tests.
 
 **Hard constraints:**
 - Do not add profile-specific `do_code_enrichment=True`.
 - Do not let `has_encoding_corruption` trigger CodeFormulaV2 by itself.
 - Do not weaken negative tests to fit the implementation.
+- Do not add any new Docling `PdfPipelineOptions` or `DocumentConverter`
+  construction site outside `docling_adapter.py`.
+- Do not leave PDF extraction bypassing UIR as the final architecture.
 - Do not add new governance docs for this refactor; update this plan,
   `DECISIONS.md`, and the checklist only when scope or evidence changes.
 
+### 5b. Post-Docling Sanity Pass (successor to §5)
+
+**Status:** `complete` (2026-05-03). Owned by
+`docs/PLAN_DOCLING_POSTPROCESSOR.md`; summarised here so the v2.7 arc is
+self-contained.
+
+Four Docling 2.86 failure modes that surfaced on born-digital novels
+(HARRY Potter as canonical fixture) are fixed at the
+`DoclingPdfAdapter.convert()` seam:
+
+1. **Reading-order y-sort** — items per page sorted by `(-bbox.t, bbox.l)`.
+2. **Drop-cap promotion** — both standalone-glyph merge AND inline
+   trailing-glyph heal. The latter is what Docling 2.86 actually emits:
+   the drop cap "M" is *glued to the END* of the same TextItem
+   (`"r. and Mrs. Dursley...nonsense. M"`), not as a separate item.
+   The original plan assumed a separate item; reality required the
+   complementary inline heal.
+3. **Label-leak filter** — both `meta.classification` (via
+   `blocked_meta_names`) and legacy `PictureClassificationData`
+   annotations (via custom picture serializer that strips them even
+   when a caption is present — the original "no caption" rule was
+   insufficient).
+4. **OCR gating** — `bitmap_area_threshold` raised from Docling's 0.05
+   default to 0.75, auto-bumped to 0.92 for `digital_literature` /
+   `digital_magazine` / `image_heavy_magazine`.
+
+**Routing (the trigger):** new `DIGITAL_LITERATURE` profile across
+`orchestration/profile_classifier.py`, `orchestration/strategy_profiles.py`
+(`DigitalLiteratureProfile` class + ProfileManager registry +
+classifier→strategy `type_mapping`), and
+`orchestration/strategy_orchestrator.py` (`PROFILE_TO_DOC_TYPE` mapping).
+The classifier auto-picks `digital_literature` for native-digital novels.
+
+**Hard constraint surfaced:** `processor.py:2072` was bypassing the
+adapter (see §5 followup above). A future static guard should ban raw
+`self._converter.convert(...)` calls outside the adapter.
+
 ### 6. Contextual Retrieval (Anthropic approach)
+
+**Status:** `complete` (2026-05-01). Builder `mmrag_v2.chunking.contextual_retrieval.build_contextualized_text` prepends breadcrumb + heading + truncated prev/next + non-text modality marker before canonical content; `IngestionChunk.contextualized_text` schema field added (optional, never read by QA); `scripts/ingest_to_qdrant.py` wires text+table modalities through the builder with a `--no-contextual` byte-stable rollback. AGENT-CONTEXTUAL-01..07 invariants in `docs/DECISIONS.md`. Drift guard `tests/test_contextual_retrieval.py::test_no_contextual_marker_strings_in_production_code` fails the day a marker leaks into production code outside the allowlist. See `docs/QUALITY_SNAPSHOT_2026-05-01.md` "Contextual Retrieval (Anthropic approach)".
 
 **Problem:** Chunks lose context when embedded in isolation.
 
@@ -168,21 +286,30 @@ gets embedded, not overwritten by the refiner.
 **Implementation:** Fix the refiner/contextualize ordering (partially done
 in v2.6), ensure `ingest_to_qdrant.py` uses contextualized text.
 
-## Success Criteria
+## Success Criteria For Next-Phase Refactor
 
-| Metric | v2.6 | v2.7 Target |
-|--------|------|-------------|
-| Front matter heading accuracy | ~60% (Docling misdetects) | 95%+ |
-| search_priority accuracy | 0% (all "high") | 80%+ |
-| Orphan prepositions | Present | 0 |
-| Smoke test | 10/10 | 10/10 |
+| Gate | Required Result |
+|------|-----------------|
+| Single Docling options authority | No `PdfPipelineOptions(` or `DocumentConverter(` construction outside `src/mmrag_v2/engines/docling_adapter.py` and explicit tests. |
+| UIR boundary | PDF extraction emits `UniversalDocument` before OCR/VLM/refiner processing; no new direct Docling-item-to-chunk path is added. |
+| Plan ownership | `PdfConversionPlan` is built only by `build_pdf_conversion_plan(...)`; CLI process, CLI batch, BatchProcessor, V2DocumentProcessor legacy glue, and PDFEngine all consume it. |
+| Structural flags | `has_encoding_corruption`, `has_flat_text_corruption`, and related diagnostics survive every boundary needed for OCR/refiner/code decisions. |
+| Code-enrichment guard | Ayeva/Chaubal/Fluent/Combat decision tests prove code-heavy docs can enable selective recovery and non-code/encoding-only docs do not. |
+| Remote key isolation | `code_enrichment.api_key` is independent; no fallback to VLM/refiner/API keys. |
+| Regression suite | Unit tests pass; static guard tests pass; targeted Ayeva/Chaubal/Fluent probes pass before broad conversions. |
+| Acceptance smoke | `scripts/smoke_multiprofile.sh` reports `GATE_PASS` + `UNIVERSAL_PASS` for all rows. |
 
-## Timeline
+## Execution Order
 
-- Features 1-3: 1-2 days
-- Features 4-5: 0.5 day
-- Feature 6: 0.5 day
-- Testing + regression: 1 day
+1. Add the plan dataclass/builder and pure decision tests.
+2. Add the adapter/factory and static guard test.
+3. Move `engines/pdf_engine.py` first so the UIR path becomes canonical.
+4. Move direct `processor.py` PDF converter use behind the adapter.
+5. Move `batch_processor.py` converter use behind the adapter without changing
+   batching/export behavior.
+6. Delete or quarantine dead duplicated policy after parity tests pass.
+7. Run targeted Workstream B probes, then the full unit suite, then
+   `smoke_multiprofile.sh`.
 
 ## References
 

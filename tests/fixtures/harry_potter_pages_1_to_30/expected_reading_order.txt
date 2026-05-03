@@ -1,0 +1,121 @@
+# Harry Potter Pages 1-30 - expected paragraph reading order.
+# Generated from PDF y-coordinates by build_fixture.py.
+# Format: <page>\t<anchor>
+# Scope: body text only (pages 13-30). Pages 1-12 are
+# display-typography front matter (covers, title spreads, ALSO BY,
+# copyright, TOC) where the post-Docling reading-order pass does
+# not apply.
+# Anchors are the first 60 ASCII-normalized chars of each paragraph
+# in PDF top-to-bottom reading order. Edit only by re-running the
+# builder against the source PDF.
+
+13	THE BOY WHO LIVED
+13	r. and Mrs. Dursley, of number four, Privet Drive, were prou
+13	Mr. Dursley was the director of a firm called Grunnings, whi
+13	The Dursleys had everything they wanted, but they also had a
+14	They didn't think they could bear it if anyone found out abo
+14	When Mr. and Mrs. Dursley woke up on the dull, gray Tuesday 
+14	None of them noticed a large, tawny owl flutter past the win
+14	At half past eight, Mr. Dursley picked up his briefcase, pec
+14	It was on the corner of the street that he noticed the first
+15	of Privet Drive, but there wasn't a map in sight. What could
+15	But on the edge of town, drills were driven out of his mind 
+15	Mr. Dursley always sat with his back to the window in his of
+16	ing past in broad daylight, though people down in the street
+16	He'd forgotten all about the people in cloaks until he passe
+16	"The Potters, that's right, that's what I heard -"
+16	"- yes, their son, Harry -"
+16	Mr. Dursley stopped dead. Fear flooded him. He looked back a
+16	He dashed back across the road, hurried up to his office, sn
+17	might have been Harvey. Or Harold. There was no point in wor
+17	He found it a lot harder to concentrate on drills that after
+17	"Sorry," he grunted, as the tiny old man stumbled and almost
+17	And the old man hugged Mr. Dursley around the middle and wal
+17	Mr. Dursley stood rooted to the spot. He had been hugged by 
+17	As he pulled into the driveway of number four, the first thi
+17	"Shoo!" said Mr. Dursley loudly.
+18	The cat didn't move. It just gave him a stern look. Was this
+18	Mrs. Dursley had had a nice, normal day. She told him over d
+18	"And finally, bird-watchers everywhere have reported that th
+18	"Well, Ted," said the weatherman, "I don't know about that, 
+18	Mr. Dursley sat frozen in his armchair. Shooting stars all o
+19	Mrs. Dursley came into the living room carrying two cups of 
+20	with the Potters? If it did . . . if it got out that they we
+20	The Dursleys got into bed. Mrs. Dursley fell asleep quickly 
+20	How very wrong he was.
+20	Mr. Dursley might have been drifting into an uneasy sleep, b
+20	A man appeared on the corner the cat had been watching, ap- 
+20	Nothing like this man had ever been seen on Privet Drive. He
+21	Albus Dumbledore didn't seem to realize that he had just arr
+21	He found what he was looking for in his inside pocket. It se
+21	"Fancy seeing you here, Professor McGonagall."
+21	He turned to smile at the tabby, but it had gone. Instead he
+21	"How did you know it was me?" she asked.
+21	"My dear Professor, I've never seen a cat sit so stiffly."
+22	"You'd be stiff if you'd been sitting on a brick wall all da
+22	"All day? When you could have been celebrating? I must have 
+22	Professor McGonagall sniffed angrily.
+22	"Oh yes, everyone's celebrating, all right," she said impati
+22	"You can't blame them," said Dumbledore gently. "We've had p
+22	"I know that," said Professor McGonagall irritably. "But tha
+22	She threw a sharp, sideways glance at Dumbledore here, as th
+22	"It certainly seems so," said Dumbledore. "We have much to b
+22	"A what?"
+22	"A lemon drop. They're a kind of Muggle sweet I'm rather fon
+23	"No, thank you," said Professor McGonagall coldly, as though
+23	"My dear Professor, surely a sensible person like yourself c
+23	"I know you haven't," said Professor McGonagall, sounding ha
+23	"You flatter me," said Dumbledore calmly. "Voldemort had pow
+23	"Only because you're too - well - noble to use them."
+23	"It's lucky its dark. I haven't blushed so much since Madam 
+23	Professor McGonagall shot a sharp look at Dumbledore and sai
+23	It seemed that Professor McGonagall had reached the point sh
+24	to believe it until Dumbledore told her it was true. Dumbled
+24	"What they're saying," she pressed on, "is that last night V
+24	Dumbledore bowed his head. Professor McGonagall gasped.
+24	"Lily and James . . . I can't believe it . . . I didn't want
+24	Dumbledore reached out and patted her on the shoulder. "I kn
+24	Professor McGonagall's voice trembled as she went on. "That'
+24	Dumbledore nodded glumly.
+24	"It's - it's true?" faltered Professor McGonagall. "After al
+24	"We can only guess," said Dumbledore. "We may never know."
+24	Professor McGonagall pulled out a lace handkerchief and dabb
+25	made sense to Dumbledore, though, because he put it back in 
+25	"Yes," said Professor McGonagall. "And I don't suppose you'r
+25	"I've come to bring Harry to his aunt and uncle. They're the
+25	"You don't mean - you can't mean the people who live here?" 
+25	"It's the best place for him," said Dumbledore firmly. "His 
+25	"A letter?" repeated Professor McGonagall faintly, sitting b
+25	"Exactly," said Dumbledore, looking very seriously over the 
+25	Professor McGonagall opened her mouth, changed her mind,
+26	swallowed, and then said, "Yes - yes, you're right, of cours
+26	"Hagrid's bringing him."
+26	"You think it - wise - to trust Hagrid with something as im-
+26	"I would trust Hagrid with my life," said Dumbledore.
+26	"I'm not saying his heart isn't in the right place," said Pr
+26	A low rumbling sound had broken the silence around them. It 
+26	If the motorcycle was huge, it was nothing to the man sittin
+26	"Hagrid," said Dumbledore, sounding relieved. "At last. And 
+26	"Borrowed it, Professor Dumbledore, sir," said the giant, cl
+27	"No problems, were there?"
+27	"No, sir - house was almost destroyed, but I got him out all
+27	Dumbledore and Professor McGonagall bent forward over the bu
+27	"Is that where - ?" whispered Professor McGonagall.
+27	"Yes," said Dumbledore. "He'll have that scar forever."
+27	"Couldn't you do something about it, Dumbledore?"
+27	"Even if I could, I wouldn't. Scars can come in handy. I hav
+27	Dumbledore took Harry in his arms and turned toward the Durs
+27	"Could I - could I say good-bye to him, sir?" asked Hagrid. 
+27	"Shhh!" hissed Professor McGonagall, "you'll wake the Mug- g
+27	"S-s-sorry," sobbed Hagrid, taking out a large, spotted hand
+27	"Yes, yes, its all very sad, but get a grip on yourself, Hag
+28	gingerly on the arm as Dumbledore stepped over the low garde
+28	"Well," said Dumbledore finally, "that's that. We've no busi
+28	"Yeah," said Hagrid in a very muffled voice, "I'd best get t
+28	Wiping his streaming eyes on his jacket sleeve, Hagrid swung
+28	"I shall see you soon, I expect, Professor McGonagall," said
+28	Dumbledore turned and walked back down the street. On the co
+28	"Good luck, Harry," he murmured. He turned on his heel and w
+29	A breeze ruffled the neat hedges of Privet Drive, which lay 
+30	THE VANISHING GLASS
+30	early ten years had passed since the Dursleys had woken up t

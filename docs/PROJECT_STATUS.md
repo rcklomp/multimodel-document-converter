@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-04-29
+Last updated: 2026-05-03
 
 Purpose: fast orientation for a new coding session. Read this before deeper project docs.
 
@@ -14,9 +14,12 @@ Immediate goal: make conversion quality measurable and reproducible across docum
 
 The current quality reference point is:
 
-- `docs/QUALITY_SNAPSHOT_2026-04-29.md`
+- **2026-05-03 work** (post-Docling sanity pass + `digital_literature` profile): see `CHANGELOG.md` entry "Post-Docling Sanity Pass (2026-05-03)" and `docs/PLAN_DOCLING_POSTPROCESSOR.md`. No quality snapshot file yet; `tests/test_docling_postprocessor_acceptance.py` (HARRY pages 13-30 reading-order fixture) is the new binding regression test.
+- `docs/QUALITY_SNAPSHOT_2026-05-01.md` (current — Milestone 1 closure, RAG Guide unblock, Ayeva re-conversion)
+- `docs/QUALITY_SNAPSHOT_2026-04-30.md` (Vision-Aided Front Matter, Shared PDF Plan, Coordinate Audit, Domain-Specific Search Priority completion evidence)
+- `docs/QUALITY_SNAPSHOT_2026-04-29.md` (pre-Milestone-1 corpus baseline; rows for Ayeva and Harry Potter are now stale and superseded by the entries above)
 
-Use that snapshot as the before-state for future comparisons.
+Use the latest snapshot as the before-state for future comparisons.
 
 ## Active Model/Endpoint State
 
@@ -48,8 +51,12 @@ Existing non-magazine outputs: 14 of 17 pass `scripts/qa_conversion_audit.py`.
 Known failures:
 
 - `A_comprehensive_review_on_hybrid_electri`: one control-character text artifact
-- `Ayeva_Python_Patterns`: code indentation fidelity and two infix artifacts
-- `Chaubal_PyTorch_Projects`: code indentation fidelity
+- `Chaubal_PyTorch_Projects`: code indentation fidelity (re-probe pending after Milestone 1 fixes)
+
+Recently resolved:
+
+- `Ayeva_Python_Patterns`: re-converted to `output/ayeva_qa_20260501/`; AUDIT_PASS + GATE_PASS + UNIVERSAL_PASS, `indentation_fidelity=0.93` (was 0.22).
+- `A Simple Guide to RAG (Kimothi)`: previously hung at 7200s on batch 25; now passes via SIGALRM 120s fallback. `output/probe_rag_guide_guard/`, AUDIT_PASS + GATE_PASS + UNIVERSAL_PASS, 680 chunks.
 
 Known caveat:
 
@@ -62,7 +69,8 @@ Workstream B direction:
 - Do **not** trigger CodeFormulaV2 from `has_encoding_corruption` alone. Encoding corruption also appears in Combat Aircraft and would pull Workstream C into expensive code inference.
 - Preferred architecture: cheap code-evidence pass first (`CodeItem` count/code density/sampled code candidates), then `needs_code_enrichment=True` with reason/counts, then remote-capable CodeFormulaV2 on a stronger local-network host or cloud endpoint.
 - Client-side MLX/transformers acceleration is diagnostic/fallback only, not the main production strategy.
-- Next-phase refactor: move duplicated PDF extraction policy out of `batch_processor.py` / `processor.py` into a shared `PdfConversionPlan` and Docling adapter before broadening conversion work.
+- Shared PDF extraction refactor: `complete` (2026-04-30). `batch_processor.py`, `processor.py`, and `engines/pdf_engine.py` consume a shared `PdfConversionPlan` and `DoclingPdfAdapter`; static guards reject new production `PdfPipelineOptions` / `DocumentConverter` construction outside the adapter.
+- Canonical target flow remains diagnostics/config -> `PdfConversionPlan` -> Docling adapter -> `UniversalDocument` -> `ElementProcessor` -> chunks; legacy direct Docling-item glue was not expanded.
 - The current fenced-flat detector work is provisional fallback evidence, not a completed Workstream B fix.
 
 ### Magazines
@@ -108,8 +116,14 @@ Next engineering focus: code-block fidelity (Workstream B) and Combat Aircraft t
 
 Latest validation:
 
-- Unit suite: `337 passed, 1 skipped` (2026-04-29).
-- Multi-profile smoke: `scripts/smoke_multiprofile.sh` reports `GATE_PASS` + `UNIVERSAL_PASS` for all 10 rows (2026-04-29, `output/smoke_multiprofile_20260429_232651/`).
+- Contextual Retrieval (Anthropic approach, Combined Plan #4 / Plan Feature 6): `complete` (2026-05-01). Embed-time `build_contextualized_text(...)` builder added under `src/mmrag_v2/chunking/contextual_retrieval.py` with AGENT-CONTEXTUAL-01..07 invariants and AST-level drift guard. Optional `IngestionChunk.contextualized_text` schema field added (never read by QA). `scripts/ingest_to_qdrant.py` wires text+table modalities through the builder with a `--no-contextual` byte-stable rollback flag. Static guards `2 passed`; focused contextual suite `32 passed`; focused boundary suite `93 passed`; full unit suite `512 passed, 1 skipped, 0 failed`; probe `output/probe_contextual_retrieval_rag_guide/` AUDIT_PASS + UNIVERSAL_PASS with byte-identical 680 chunks (text=559, image=99, table=22) `indentation_fidelity=0.91` matching the Boundary Closeout baseline; smoke `output/smoke_multiprofile_20260501_153101/` 10/10 GATE_PASS + UNIVERSAL_PASS including Greenhouse blind-test. See `docs/QUALITY_SNAPSHOT_2026-05-01.md` "Contextual Retrieval (Anthropic approach)".
+- Refactor Boundary Closeout (Plan Section 5, steps 6+7): `complete` (2026-05-01). Removed `BatchProcessor.set_intelligence_metadata` deprecated `[V2.8-COMPAT]` API + dead CLI fallback + 5 deprecated-path tests; added `tests/test_pdf_conversion_plan.py::test_all_typed_policy_fields_round_trip_full_chain` as drift insurance. Static guards `2 passed`; focused boundary suite `93 passed`; full unit suite `480 passed, 1 skipped, 0 failed`; probe `output/probe_boundary_closeout_rag_guide/` AUDIT_PASS + UNIVERSAL_PASS (`indentation_fidelity=0.91`, 680 chunks); smoke `output/smoke_multiprofile_20260501_134909/` 10/10 GATE_PASS + UNIVERSAL_PASS. See `docs/QUALITY_SNAPSHOT_2026-05-01.md` "Refactor Boundary Closeout".
+- Milestone 2 — Plan Control Plane: `complete` (2026-05-01). `PdfConversionPlan` promoted to typed policy object (`extraction_route` vocabulary, `hybrid_chunker_enabled`, `allow_page_level_visuals`, `asset_validation_policy`, `corruption_recovery_policy`); legacy bools preserved as derived `@property` bridges. Full unit suite `484 passed, 1 skipped, 0 failed`; focused suite `64 passed`; static guards `2 passed`; smoke `output/smoke_multiprofile_20260501_120514/` 10/10 GATE_PASS + UNIVERSAL_PASS; probe `output/probe_milestone2_rag_guide/` AUDIT_PASS + GATE_PASS + UNIVERSAL_PASS. See `docs/QUALITY_SNAPSHOT_2026-05-01.md`.
+- Milestone 1 — Stabilize Extraction: `complete` (2026-05-01). RAG Guide unblocked (was 7200s timeout); per-element chunker guard added; Ayeva re-converted to `output/ayeva_qa_20260501/` with `indentation_fidelity=0.93`. See `docs/QUALITY_SNAPSHOT_2026-05-01.md`.
+- Vision-Aided Front Matter Detection: `complete` (2026-04-30). See `docs/QUALITY_SNAPSHOT_2026-04-30.md`.
+- Domain-Specific Search Priority: `complete` (2026-04-30). See `docs/QUALITY_SNAPSHOT_2026-04-30.md`.
+- Coordinate Normalization Audit: `complete` (2026-04-30). See `docs/QUALITY_SNAPSHOT_2026-04-30.md`.
+- Dependency metadata: installed Docling is `2.86.0` (now exact-pinned in `pyproject.toml`); `pip check` is blocked by pre-existing `torch 2.10.0 is not supported on this platform`.
 
 ## Immediate Next Work
 
@@ -119,10 +133,9 @@ Recommended sequence:
 
 1. Fix Workstream A evidence durability and metric labeling.
 2. Run local VLM comparison when the local inference server is reachable.
-3. Replace broad Workstream B code-enrichment triggers with a selective `needs_code_enrichment` decision lane and remote-capable inference plan.
-4. Fix Combat Aircraft text corruption.
-5. Address classifier correctness.
-6. Re-run broad conversion and update the quality snapshot.
+3. Fix Combat Aircraft text corruption.
+4. Address classifier correctness.
+5. Re-run broad conversion and update the quality snapshot.
 
 ## Must-Respect Constraints
 
