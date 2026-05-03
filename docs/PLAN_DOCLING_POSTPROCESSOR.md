@@ -2,7 +2,7 @@
 
 **Status:** SHIPPED 2026-05-03 (Phases 0-5 complete; smoke re-run in flight)
 **Owner:** ingestion pipeline (PdfConversionPlan / DoclingPdfAdapter seam)
-**Successor to:** `docs/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md` §5 (PDF extraction refactor)
+**Successor to:** `docs/archive/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md` §5 (PDF extraction refactor; archived 2026-05-03)
 **Related:** `docs/ACCEPTANCE_ORDER_PROMPT.md`, `docs/CONVERSION_PROFILES.md`, `docs/PROGRESS_CHECKLIST.md` "Document Understanding Plan Items → Post-Docling Sanity Pass"
 
 ## As-shipped vs. as-planned (2026-05-03 close-out notes)

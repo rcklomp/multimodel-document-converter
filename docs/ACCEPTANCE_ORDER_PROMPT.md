@@ -3,7 +3,9 @@
 **Copy everything below this line as your Claude Code prompt.**
 
 This prompt drives **step 5 (Acceptance Order)** of the combined plan covering
-the open-issues plan-of-approach and `docs/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md`.
+the open-issues plan-of-approach, `docs/PLAN_V2.8_PRODUCTION_GAPS.md` (current
+execution plan), and `docs/archive/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md`
+(archived 2026-05-03; retained as architectural rationale).
 It is intentionally adversarial: the agent must prove — with reproducible
 artefacts — that every targeted failure has been addressed and that the
 upstream stabilization, plan-extension, refactor-boundary, and contextual
@@ -33,7 +35,7 @@ Read these files FIRST and treat them as binding:
 2.  `docs/AGENT_GOVERNANCE.md`                 — evidence/status rules
 3.  `docs/PROJECT_STATUS.md`                   — current engineering state
 4.  `docs/DECISIONS.md`                        — architectural decisions
-5.  `docs/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md` — the full refactor plan
+5.  `docs/PLAN_V2.8_PRODUCTION_GAPS.md` — current execution plan (production-gap closure before broad reconversion). For architectural rationale see `docs/archive/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md`.
 6.  `docs/PROGRESS_CHECKLIST.md`               — pending items
 7.  `docs/QUALITY_GATES.md`                    — pass/fail thresholds
 8.  `docs/CONTEXTUAL_RETRIEVAL_PROMPT.md`      — companion (step 4)
@@ -654,7 +656,7 @@ phase, fix the root cause, and regenerate the verdict.
 - `docs/AGENT_GOVERNANCE.md` — evidence/status rules
 - `docs/DECISIONS.md` — architectural decisions
 - `docs/QUALITY_GATES.md` — pass/fail thresholds
-- `docs/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md` — combined refactor plan
+- `docs/PLAN_V2.8_PRODUCTION_GAPS.md` — current execution plan (`docs/archive/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md` is the archived predecessor)
 - `docs/CONTEXTUAL_RETRIEVAL_PROMPT.md` — companion (combined plan §4)
 - `scripts/smoke_multiprofile.sh` — smoke runner
 - `scripts/qa_conversion_audit.py` — conversion audit

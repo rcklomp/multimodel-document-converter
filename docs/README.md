@@ -60,8 +60,9 @@ Operational checklists, commands, and historical notes.
 - `docs/PROGRESS_CHECKLIST.md`
 - `docs/TESTING.md`
 - `docs/CONVERSION_PROFILES.md`
-- `docs/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md`
-- `docs/archive/`
+- `docs/PLAN_V2.8_PRODUCTION_GAPS.md` — current execution plan
+- `docs/PLAN_DOCLING_POSTPROCESSOR.md` — shipped 2026-05-03 (post-Docling sanity pass + `digital_literature` profile)
+- `docs/archive/` — completed plans (`PLAN_V2.7_DOCUMENT_UNDERSTANDING.md`, `PLAN_HYBRID_CHUNKER_MIGRATION.md`) and historical notes
 
 ## Update Rules
 

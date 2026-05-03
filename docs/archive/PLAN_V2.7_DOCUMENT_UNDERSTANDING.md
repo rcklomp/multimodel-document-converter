@@ -1,5 +1,14 @@
 # Plan: v2.7 — Document Understanding Layer
 
+> **🗄️ ARCHIVED 2026-05-03.** All six features shipped (see status
+> note below). Successor plans are `docs/PLAN_DOCLING_POSTPROCESSOR.md`
+> (post-Docling sanity pass + `digital_literature` profile, shipped
+> 2026-05-03) and `docs/PLAN_V2.8_PRODUCTION_GAPS.md` (current
+> execution plan: close known production gaps before broad
+> reconversion). This document is retained as architectural rationale
+> only; do not execute against it. Per `docs/AGENT_GOVERNANCE.md`
+> doc-budget rule: "archive stale plans instead of duplicating them."
+
 **Status (May 2026):** Features 1–6 are all **shipped**. The shared `PdfConversionPlan` / `DoclingPdfAdapter` foundation from §5 is the seam that the post-Docling sanity pass (`docs/PLAN_DOCLING_POSTPROCESSOR.md`, shipped 2026-05-03) builds on. The 4 multimodal validation layers (bottom of doc) are realised through Features 1–4 plus `validators/corruption_interceptor.py`. This plan is retained as architectural rationale — see `CHANGELOG.md`, `docs/DECISIONS.md`, and `docs/PROGRESS_CHECKLIST.md` for current state.
 
 ## Context
