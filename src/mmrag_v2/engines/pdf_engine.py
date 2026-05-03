@@ -2,7 +2,7 @@
 PDF Engine - Convert PDFs to Universal Intermediate Representation
 ===================================================================
 
-This engine converts PDF documents to UIR using Docling v2.66.0 for
+This engine converts PDF documents to UIR using Docling v2.86.0 for
 layout analysis and element extraction. It handles both digital and
 scanned PDFs with proper quality classification.
 
@@ -39,6 +39,8 @@ from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
 from .base import BaseBinaryEngine
+from .docling_adapter import DoclingPdfAdapter
+from .pdf_plan import PdfConversionPlan, build_pdf_conversion_plan
 from ..universal.intermediate import (
     BoundingBox,
     DocumentMetadata,
@@ -92,7 +94,7 @@ MIN_IMAGE_HEIGHT = 50
 
 class PDFEngine(BaseBinaryEngine):
     """
-    PDF extraction engine using Docling v2.66.0.
+    PDF extraction engine using Docling v2.86.0.
 
     Converts PDF documents to Universal Intermediate Representation with:
     - Per-page quality classification (digital vs scanned)
@@ -120,6 +122,7 @@ class PDFEngine(BaseBinaryEngine):
         render_dpi: int = 300,
         extract_images: bool = True,
         enable_ocr: bool = True,
+        conversion_plan: Optional[PdfConversionPlan] = None,
     ) -> None:
         """
         Initialize PDF engine.
@@ -128,6 +131,7 @@ class PDFEngine(BaseBinaryEngine):
             render_dpi: DPI for rendering pages (higher = better OCR)
             extract_images: Whether to extract element images for OCR
             enable_ocr: Whether to enable OCR in Docling
+            conversion_plan: Shared PDF conversion policy
         """
         super().__init__(
             name="PDFEngine",
@@ -137,8 +141,10 @@ class PDFEngine(BaseBinaryEngine):
         self.render_dpi = render_dpi
         self.extract_images = extract_images
         self.enable_ocr = enable_ocr
+        self.conversion_plan = conversion_plan
 
         self._converter = None
+        self._adapter: Optional[DoclingPdfAdapter] = None
         self._docling_available = False
 
     @property
@@ -158,32 +164,14 @@ class PDFEngine(BaseBinaryEngine):
     def _do_initialize(self) -> None:
         """Initialize Docling converter."""
         try:
-            from docling.datamodel.base_models import InputFormat
-            from docling.datamodel.pipeline_options import (
-                EasyOcrOptions,
-                PdfPipelineOptions,
+            plan = self.conversion_plan or build_pdf_conversion_plan(
+                enable_ocr=self.enable_ocr,
             )
-            from docling.document_converter import DocumentConverter, PdfFormatOption
-
-            # Configure pipeline options (REQ-PDF-04)
-            pipeline_options = PdfPipelineOptions()
-            pipeline_options.images_scale = 2.0  # High-fidelity rendering
-            pipeline_options.generate_page_images = True  # For classification
-            pipeline_options.generate_picture_images = True  # Extract figures
-            pipeline_options.generate_table_images = True  # Extract tables
-
-            if self.enable_ocr:
-                pipeline_options.do_ocr = True
-                pipeline_options.ocr_options = EasyOcrOptions()
-            else:
-                pipeline_options.do_ocr = False
-
-            self._converter = DocumentConverter(
-                format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
-            )
+            self._adapter = DoclingPdfAdapter(plan)
+            self._converter = self._adapter.get_converter()
 
             self._docling_available = True
-            logger.info("ENGINE_USE: Docling v2.66.0 initialized for PDF processing")
+            logger.info("ENGINE_USE: Docling v2.86.0 initialized for PDF processing")
 
         except ImportError as e:
             logger.warning(f"Docling not available: {e}. Using PyMuPDF fallback.")

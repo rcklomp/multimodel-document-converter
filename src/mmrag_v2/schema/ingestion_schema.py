@@ -528,13 +528,22 @@ class IngestionChunk(BaseModel):
     chunk_id: str = Field(..., description="UUID_v4 or composite hash")
     doc_id: str = Field(..., description="12-char hex from file MD5")
     modality: Modality = Field(..., description="text|image|table")
-    content: str = Field(..., description="Text content or VLM description")
+    content: str = Field(..., description="Text content or VLM description (canonical, unmutated)")
     metadata: ChunkMetadata = Field(...)
     asset_ref: Optional[AssetReference] = Field(default=None)
     semantic_context: Optional[SemanticContext] = Field(
         default=None, description="REQ-MM-03: Contextual anchoring with surrounding text"
     )
     schema_version: str = Field(default=SCHEMA_VERSION)
+
+    # V2.7.1: Contextual Retrieval field (Anthropic approach).
+    # This field is built at ingest time for embedding. It MUST NOT be used
+    # for QA/source-text validation — use `content` or `metadata.refined_content` instead.
+    contextualized_text: Optional[str] = Field(
+        default=None,
+        description="Contextualized text for embedding (breadcrumb + neighbor context prepended). "
+        "Canonical `content` is NOT mutated. QA validation uses `content`."
+    )
 
     @field_validator("content", mode="before")
     @classmethod
@@ -684,6 +693,29 @@ def _generate_chunk_id(doc_id: str, content: str, page: int, modality: str = "te
     hash_input = f"{doc_id}:{page}:{modality}:{content}"
     content_hash = hashlib.sha256(hash_input.encode()).hexdigest()[:8]
     return f"{doc_id}_{page:03d}_{modality}_{content_hash}"
+
+
+CHUNK_FACTORY_METADATA_KEYS = frozenset(
+    {
+        "profile_type",
+        "profile_sensitivity",
+        "min_image_dims",
+        "confidence_threshold",
+        "document_domain",
+        "document_modality",
+    }
+)
+
+
+def filter_chunk_factory_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Return only intelligence metadata keys accepted by chunk factories."""
+    if not metadata:
+        return {}
+    return {
+        key: value
+        for key, value in metadata.items()
+        if key in CHUNK_FACTORY_METADATA_KEYS and value is not None
+    }
 
 
 def create_text_chunk(

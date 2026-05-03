@@ -122,6 +122,34 @@ def _is_float_normalized(bbox: Sequence[Union[int, float]]) -> bool:
     return all(isinstance(c, (int, float)) and 0.0 <= float(c) <= 1.0 for c in bbox)
 
 
+def _ensure_minimum_extent(l: int, t: int, r: int, b: int) -> List[int]:
+    """Return an in-range bbox with at least one normalized unit of width/height."""
+    if r < l:
+        l, r = r, l
+    if b < t:
+        t, b = b, t
+
+    l = max(MIN_COORD, min(MAX_COORD, l))
+    t = max(MIN_COORD, min(MAX_COORD, t))
+    r = max(MIN_COORD, min(MAX_COORD, r))
+    b = max(MIN_COORD, min(MAX_COORD, b))
+
+    if r <= l:
+        if l >= MAX_COORD:
+            l = MAX_COORD - 1
+            r = MAX_COORD
+        else:
+            r = min(MAX_COORD, l + 1)
+    if b <= t:
+        if t >= MAX_COORD:
+            t = MAX_COORD - 1
+            b = MAX_COORD
+        else:
+            b = min(MAX_COORD, t + 1)
+
+    return [l, t, r, b]
+
+
 # ============================================================================
 # NORMALIZATION FUNCTIONS
 # ============================================================================
@@ -179,23 +207,8 @@ def normalize_bbox(
     r = max(MIN_COORD, min(MAX_COORD, r))
     b = max(MIN_COORD, min(MAX_COORD, b))
 
-    # Ensure proper ordering
-    if r < l:
-        l, r = r, l
-    if b < t:
-        t, b = b, t
-
-    # Ensure minimum dimensions (at least 1 unit)
-    if r <= l:
-        r = l + 1
-    if b <= t:
-        b = t + 1
-
-    # Final clamp after adjustments
-    r = min(MAX_COORD, r)
-    b = min(MAX_COORD, b)
-
-    normalized = [l, t, r, b]
+    normalized = _ensure_minimum_extent(l, t, r, b)
+    l, t, r, b = normalized
 
     logger.debug(
         f"[{context}] Normalized bbox: "
@@ -244,13 +257,7 @@ def ensure_normalized(
     # Check if all values are integers and in range
     if all(isinstance(c, int) and MIN_COORD <= c <= MAX_COORD for c in bbox):
         l, t, r, b = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
-        # Validate ordering
-        if r <= l or b <= t:
-            if r < l:
-                l, r = r, l
-            if b < t:
-                t, b = b, t
-        result: List[int] = [l, t, r, b]
+        result = _ensure_minimum_extent(l, t, r, b)
         logger.debug(f"[{context}] bbox already normalized (int): {result}")
         return result
 
@@ -261,19 +268,7 @@ def ensure_normalized(
         r = int(round(bbox[2] * SCALE_FACTOR))
         b = int(round(bbox[3] * SCALE_FACTOR))
 
-        # Ensure proper ordering
-        if r < l:
-            l, r = r, l
-        if b < t:
-            t, b = b, t
-
-        # Ensure minimum dimensions
-        if r <= l:
-            r = l + 1
-        if b <= t:
-            b = t + 1
-
-        normalized = [l, t, r, b]
+        normalized = _ensure_minimum_extent(l, t, r, b)
         logger.debug(f"[{context}] Converted float→int: {bbox} → {normalized}")
         return normalized
 

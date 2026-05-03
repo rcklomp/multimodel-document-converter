@@ -2,10 +2,8 @@
 
 Covers:
 - _score_code_evidence() thresholds
-- encoding-corrupt magazine does NOT enable code enrichment
 - Ayeva-like code-heavy evidence DOES enable it
 - Technical-manual incidental-code does NOT automatically enable enrichment
-- Structural flags propagate correctly through set_intelligence_metadata
 - CodeEnrichmentConfig.api_key never falls back to vlm.api_key
 """
 
@@ -253,19 +251,6 @@ class TestBatchProcessorCodeEnrichmentDecision:
         from mmrag_v2.batch_processor import BatchProcessor
         return BatchProcessor(output_dir=str(tmp_path))
 
-    def test_encoding_corrupt_magazine_does_not_enable(self, tmp_path):
-        """has_encoding_corruption alone must NOT set needs_code_enrichment."""
-        proc = self._make_processor(tmp_path)
-        proc.set_intelligence_metadata({
-            "profile_type": "digital_magazine",
-            "has_encoding_corruption": True,
-            "has_flat_text_corruption": False,
-            "document_modality": "native_digital",
-        })
-        # needs_code_enrichment is only set by _decide_code_enrichment,
-        # which runs in process_pdf — not by set_intelligence_metadata alone.
-        assert proc.needs_code_enrichment is False
-
     def test_config_enabled_false_blocks_enrichment(self, tmp_path):
         """Code enrichment is skipped when config.enabled=False."""
         from mmrag_v2.config import CodeEnrichmentConfig
@@ -322,138 +307,52 @@ class TestBatchProcessorCodeEnrichmentDecision:
         assert proc.needs_code_enrichment is True
         assert "needs_code_enrichment" not in proc._intelligence_metadata
 
-    def test_structural_flags_propagate(self, tmp_path):
-        """has_encoding_corruption and has_flat_text_corruption survive set_intelligence_metadata."""
-        proc = self._make_processor(tmp_path)
-        proc.set_intelligence_metadata({
-            "profile_type": "technical_manual",
-            "has_encoding_corruption": True,
-            "has_flat_text_corruption": True,
-            "geometry_error_rate": 0.05,
-            "total_pages": 200,
-        })
+
+    def test_processor_preserves_structural_flags_but_filters_chunk_kwargs(self, tmp_path):
+        """V2DocumentProcessor must keep decision flags off chunk factory metadata."""
+        from mmrag_v2.processor import V2DocumentProcessor
+
+        proc = V2DocumentProcessor(
+            output_dir=str(tmp_path / "out"),
+            intelligence_metadata={
+                "profile_type": "digital_magazine",
+                "document_domain": "literature",
+                "has_encoding_corruption": True,
+                "has_flat_text_corruption": True,
+                "geometry_error_rate": 0.12,
+                "total_pages": 327,
+                "needs_code_enrichment": True,
+            },
+            vision_provider="none",
+            enable_ocr=False,
+        )
+
         assert proc.has_encoding_corruption is True
         assert proc.has_flat_text_corruption is True
-        assert proc.geometry_error_rate == 0.05
-        # These keys must NOT be in the metadata dict (would pollute chunk kwargs)
-        assert "has_encoding_corruption" not in proc._intelligence_metadata
-        assert "has_flat_text_corruption" not in proc._intelligence_metadata
-        assert "needs_code_enrichment" not in proc._intelligence_metadata
-
-    def test_batch_legacy_path_passes_needs_code_enrichment_to_processor(
-        self, tmp_path, monkeypatch
-    ):
-        """Legacy batch path must propagate the code-enrichment decision."""
-        import mmrag_v2.processor as processor_module
-        from mmrag_v2.batch_processor import BatchProcessor
-        from mmrag_v2.utils.pdf_splitter import BatchInfo, SplitResult
-
-        captured = {}
-
-        class FakeProcessor:
-            def __init__(self, *args, **kwargs):
-                captured["intelligence_metadata"] = kwargs.get("intelligence_metadata")
-
-            def process_document(self, _path):
-                return iter(())
-
-            def get_final_state(self):
-                return None
-
-            def cleanup(self):
-                return None
-
-        monkeypatch.setattr(processor_module, "V2DocumentProcessor", FakeProcessor)
-
-        batch_pdf = tmp_path / "batch.pdf"
-        batch_pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
-
-        proc = BatchProcessor(output_dir=str(tmp_path / "out"))
-        proc.set_intelligence_metadata({"profile_type": "digital_magazine"})
-        proc.needs_code_enrichment = True
-        proc._code_enrichment_reason = "test code evidence"
-
-        batch_info = BatchInfo(
-            batch_index=0,
-            batch_path=batch_pdf,
-            start_page=1,
-            end_page=1,
-            page_count=1,
-            page_offset=0,
-        )
-        split_result = SplitResult(
-            original_path=batch_pdf,
-            original_hash="abc",
-            total_pages=1,
-            batch_count=1,
-            batches=[batch_info],
-            temp_dir=tmp_path,
-        )
-
-        proc._process_single_batch(batch_info, split_result, "source.pdf")
-
-        assert captured["intelligence_metadata"]["needs_code_enrichment"] is True
-
-    def test_batch_legacy_path_passes_has_encoding_corruption_to_processor(
-        self, tmp_path, monkeypatch
-    ):
-        """has_encoding_corruption must arrive at V2DocumentProcessor for heal-over.
-
-        BatchProcessor.set_intelligence_metadata() pops has_encoding_corruption
-        into an instance var.  The legacy batch path must re-inject it into the
-        dict passed to V2DocumentProcessor, otherwise the processor's refiner
-        threshold=0.0 override (heal-over) never fires.
-        """
-        import mmrag_v2.processor as processor_module
-        from mmrag_v2.batch_processor import BatchProcessor
-        from mmrag_v2.utils.pdf_splitter import BatchInfo, SplitResult
-
-        captured = {}
-
-        class FakeProcessor:
-            def __init__(self, *args, **kwargs):
-                captured["intelligence_metadata"] = kwargs.get("intelligence_metadata")
-
-            def process_document(self, _path):
-                return iter(())
-
-            def get_final_state(self):
-                return None
-
-            def cleanup(self):
-                return None
-
-        monkeypatch.setattr(processor_module, "V2DocumentProcessor", FakeProcessor)
-
-        batch_pdf = tmp_path / "batch.pdf"
-        batch_pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
-
-        proc = BatchProcessor(output_dir=str(tmp_path / "out"))
-        proc.set_intelligence_metadata({
+        assert proc.geometry_error_rate == 0.12
+        assert proc.needs_code_enrichment is True
+        assert proc._intelligence_metadata == {
             "profile_type": "digital_magazine",
-            "has_encoding_corruption": True,
-        })
-        # Confirm it was popped from the dict but stored on instance
-        assert "has_encoding_corruption" not in proc._intelligence_metadata
-        assert proc.has_encoding_corruption is True
+            "document_domain": "literature",
+        }
 
-        batch_info = BatchInfo(
-            batch_index=0,
-            batch_path=batch_pdf,
-            start_page=1,
-            end_page=1,
-            page_count=1,
-            page_offset=0,
+    def test_mapper_filters_non_chunk_intelligence_metadata(self, tmp_path):
+        """UIR/mapper path must not pass document-level flags to chunk factories."""
+        from mmrag_v2.mapper import DoclingToV2Mapper
+        from mmrag_v2.schema.ingestion_schema import FileType
+
+        mapper = DoclingToV2Mapper(
+            doc_hash="abc123",
+            source_file="sample.pdf",
+            output_dir=tmp_path / "out",
+            file_type=FileType.PDF,
+            intelligence_metadata={
+                "profile_type": "technical_manual",
+                "has_encoding_corruption": True,
+                "has_flat_text_corruption": True,
+                "needs_code_enrichment": True,
+                "total_pages": 10,
+            },
         )
-        split_result = SplitResult(
-            original_path=batch_pdf,
-            original_hash="abc",
-            total_pages=1,
-            batch_count=1,
-            batches=[batch_info],
-            temp_dir=tmp_path,
-        )
 
-        proc._process_single_batch(batch_info, split_result, "source.pdf")
-
-        assert captured["intelligence_metadata"]["has_encoding_corruption"] is True
+        assert mapper.intelligence_metadata == {"profile_type": "technical_manual"}

@@ -42,6 +42,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from .version import __engine_version__, __schema_version__  # Single source of version truth
 from .utils.image_quality import sample_blur_variance
 from .config import load_config, AppConfig
+from .engines.pdf_plan import PdfConversionPlan, build_pdf_conversion_plan
 
 # Get logger for V2.4 metadata logging
 logger = logging.getLogger(__name__)
@@ -74,6 +75,39 @@ def _lazy_import_batch_processor():
     from .batch_processor import BatchProcessor
 
     return BatchProcessor
+
+
+def _build_conversion_plan_from_metadata(
+    *,
+    intelligence_metadata: dict,
+    enable_ocr: bool,
+    ocr_engine: str,
+    force_table_vlm: bool,
+    needs_code_enrichment: bool,
+    code_enrichment_reason: str,
+    code_enrichment_score: float,
+) -> PdfConversionPlan:
+    """Build the shared PDF conversion plan from CLI-resolved state."""
+    return build_pdf_conversion_plan(
+        enable_ocr=enable_ocr,
+        ocr_engine=ocr_engine,
+        force_table_vlm=force_table_vlm,
+        needs_code_enrichment=needs_code_enrichment,
+        code_enrichment_reason=code_enrichment_reason,
+        code_enrichment_score=code_enrichment_score,
+        profile_type=intelligence_metadata.get("profile_type", "unknown"),
+        profile_sensitivity=intelligence_metadata.get("profile_sensitivity", 0.5),
+        min_image_dims=intelligence_metadata.get("min_image_dims", ""),
+        confidence_threshold=intelligence_metadata.get("confidence_threshold", 0.5),
+        document_domain=intelligence_metadata.get("document_domain", ""),
+        document_modality=intelligence_metadata.get("document_modality", ""),
+        has_flat_text_corruption=intelligence_metadata.get("has_flat_text_corruption", False),
+        has_encoding_corruption=intelligence_metadata.get("has_encoding_corruption", False),
+        geometry_error_rate=intelligence_metadata.get("geometry_error_rate", 0.0),
+        total_pages=intelligence_metadata.get("total_pages", 0),
+        image_density=intelligence_metadata.get("image_density", 0.0),
+        avg_text_per_page=intelligence_metadata.get("avg_text_per_page", 0.0),
+    )
 
 
 # Create Typer app
@@ -1071,6 +1105,28 @@ def process_document(
                     "(encoding corruption heal-over requires refiner)"
                 )
 
+        conversion_plan = None
+        if is_pdf:
+            from .batch_processor import decide_code_enrichment_for_pdf
+
+            needs_code_enrichment, code_reason, code_score = decide_code_enrichment_for_pdf(
+                input_file,
+                cfg.code_enrichment,
+            )
+            conversion_plan = _build_conversion_plan_from_metadata(
+                intelligence_metadata=intelligence_metadata,
+                enable_ocr=enable_ocr,
+                ocr_engine=ocr_engine.value,
+                force_table_vlm=force_table_vlm,
+                needs_code_enrichment=needs_code_enrichment,
+                code_enrichment_reason=code_reason,
+                code_enrichment_score=code_score,
+            )
+            logger.info(
+                f"[CODE-ENRICH-DECISION] process path needs={needs_code_enrichment} | "
+                f"{code_reason} | score={code_score:.3f}"
+            )
+
         if use_batching:
             # Use BatchProcessor for large PDFs (lazy import)
             # BUG-008 FIX: Pass vision_cache_dir based on enable_cache flag
@@ -1118,16 +1174,13 @@ def process_document(
                     max_edit=refiner_max_edit,
                 )
 
-            # Workstream B: register code-enrichment config so the pre-pass
-            # respects the enabled flag from ~/.mmrag-v2.yml.
-            processor.enable_code_enrichment(cfg.code_enrichment)
+            if conversion_plan is not None:
+                processor.set_conversion_plan(conversion_plan)
 
             # REQ-OCR-01: Pass profile parameters for OCR hints (ScannedDegradedProfile)
             # This enables the hybrid OCR+VLM layer for scanned documents
             if profile_params is not None:
                 processor.set_profile_params(profile_params)
-                # V2.4: Pass intelligence metadata for observability
-                processor.set_intelligence_metadata(intelligence_metadata)
                 if profile_params.enable_ocr_hints:
                     console.print()
                     console.print("[bold yellow]━━━━━ OCR-HYBRID LAYER ━━━━━[/bold yellow]")
@@ -1202,19 +1255,11 @@ def process_document(
         else:
             # Use regular V2DocumentProcessor (lazy import)
             V2DocumentProcessor = _lazy_import_processor()
-            processor_intelligence_metadata = dict(intelligence_metadata)
-            if is_pdf:
-                from .batch_processor import decide_code_enrichment_for_pdf
-
-                needs_code_enrichment, code_reason, code_score = decide_code_enrichment_for_pdf(
-                    input_file,
-                    cfg.code_enrichment,
-                )
-                processor_intelligence_metadata["needs_code_enrichment"] = needs_code_enrichment
-                logger.info(
-                    f"[CODE-ENRICH-DECISION] direct path needs={needs_code_enrichment} | "
-                    f"{code_reason} | score={code_score:.3f}"
-                )
+            processor_intelligence_metadata = (
+                conversion_plan.to_intelligence_metadata()
+                if conversion_plan is not None
+                else dict(intelligence_metadata)
+            )
 
             proc = V2DocumentProcessor(
                 output_dir=str(output_dir),
@@ -1228,6 +1273,7 @@ def process_document(
                 extraction_strategy=extraction_strategy,
                 # V2.4: Pass intelligence metadata for observability
                 intelligence_metadata=processor_intelligence_metadata,
+                conversion_plan=conversion_plan,
                 force_table_vlm=force_table_vlm,
             )
             processor_instance = proc
@@ -1690,6 +1736,26 @@ def batch_process(
                         "(encoding corruption heal-over)"
                     )
 
+            from .batch_processor import decide_code_enrichment_for_pdf
+
+            needs_code_enrichment, code_reason, code_score = decide_code_enrichment_for_pdf(
+                file_path,
+                cfg.code_enrichment,
+            )
+            conversion_plan = _build_conversion_plan_from_metadata(
+                intelligence_metadata=intelligence_metadata,
+                enable_ocr=_file_enable_ocr,
+                ocr_engine=ocr_engine.value,
+                force_table_vlm=False,
+                needs_code_enrichment=needs_code_enrichment,
+                code_enrichment_reason=code_reason,
+                code_enrichment_score=code_score,
+            )
+            logger.info(
+                f"[CODE-ENRICH-DECISION] batch command needs={needs_code_enrichment} | "
+                f"{code_reason} | score={code_score:.3f}"
+            )
+
             # ================================================================
             # BUG-002 FIX: Use BatchProcessor for PDFs to enable all flags
             # BUG-007 FIX: Pass vision_cache_dir based on enable_cache
@@ -1730,16 +1796,13 @@ def batch_process(
                     max_edit=refiner_max_edit,
                 )
 
-            # Workstream B: register code-enrichment config (batch command path).
-            processor.enable_code_enrichment(cfg.code_enrichment)
+            processor.set_conversion_plan(conversion_plan)
 
             # ================================================================
             # CODEX FIX: Profile params with OCR hints banner (matching process)
             # ================================================================
             if profile_params and hasattr(processor, "set_profile_params"):
                 processor.set_profile_params(profile_params)
-                # V2.4: Pass intelligence metadata for observability
-                processor.set_intelligence_metadata(intelligence_metadata)
 
                 # Print OCR hints banner if enabled (observability parity)
                 if profile_params.enable_ocr_hints:

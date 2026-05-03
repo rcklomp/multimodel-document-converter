@@ -48,6 +48,7 @@ from .schema.ingestion_schema import (
     create_image_chunk,
     create_table_chunk,
     create_text_chunk,
+    filter_chunk_factory_metadata,
 )
 from .state.context_state import ContextStateV2, create_context_state, is_valid_heading
 from .utils.coordinate_normalization import ensure_normalized, normalize_bbox
@@ -182,8 +183,8 @@ class DoclingToV2Mapper:
         self.min_image_width = min_image_width
         self.min_image_height = min_image_height
 
-        # BUG-006 FIX: Store intelligence metadata for chunk creation
-        self.intelligence_metadata = intelligence_metadata or {}
+        # BUG-006 FIX: Store only metadata keys accepted by chunk factories.
+        self.intelligence_metadata = filter_chunk_factory_metadata(intelligence_metadata)
 
         # Create assets directory
         self.assets_dir = self.output_dir / "assets"

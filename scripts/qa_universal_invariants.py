@@ -18,7 +18,56 @@ import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
+
+
+MODALITIES = ("text", "image", "table", "other")
+
+
+@dataclass
+class BBoxStats:
+    total: int = 0
+    with_bbox: int = 0
+    missing_bbox: int = 0
+    invalid_bbox: int = 0
+    bbox_missing_dims: int = 0
+    min_x: Optional[int] = None
+    max_x: Optional[int] = None
+    min_y: Optional[int] = None
+    max_y: Optional[int] = None
+    min_area: Optional[int] = None
+    max_area: Optional[int] = None
+    total_area: int = 0
+
+    def record_missing(self) -> None:
+        self.total += 1
+        self.missing_bbox += 1
+
+    def record_invalid(self) -> None:
+        self.total += 1
+        self.invalid_bbox += 1
+
+    def record_valid(self, bbox: List[int], has_page_dims: bool) -> None:
+        self.total += 1
+        self.with_bbox += 1
+        if not has_page_dims:
+            self.bbox_missing_dims += 1
+
+        x0, y0, x1, y1 = bbox
+        area = (x1 - x0) * (y1 - y0)
+        self.total_area += area
+        self.min_x = x0 if self.min_x is None else min(self.min_x, x0)
+        self.max_x = x1 if self.max_x is None else max(self.max_x, x1)
+        self.min_y = y0 if self.min_y is None else min(self.min_y, y0)
+        self.max_y = y1 if self.max_y is None else max(self.max_y, y1)
+        self.min_area = area if self.min_area is None else min(self.min_area, area)
+        self.max_area = area if self.max_area is None else max(self.max_area, area)
+
+    @property
+    def avg_area(self) -> Optional[float]:
+        if self.with_bbox == 0:
+            return None
+        return self.total_area / self.with_bbox
 
 
 @dataclass
@@ -46,6 +95,9 @@ class UniversalResult:
 
     # Examples for debugging
     examples: List[str] = field(default_factory=list)
+    bbox_stats: Dict[str, BBoxStats] = field(
+        default_factory=lambda: {modality: BBoxStats() for modality in MODALITIES}
+    )
 
     def add_example(self, msg: str) -> None:
         if len(self.examples) < 5:
@@ -112,20 +164,29 @@ def check(path: Path) -> UniversalResult:
                     r.add_example(f"chunk_id={chunk_id}: empty text chunk content")
 
             # ── Invariant 3: bbox values must be integers in [0, 1000] ───
-            spatial = meta.get("spatial_metadata") or {}
+            spatial = _extract_spatial_metadata(meta)
             bbox = spatial.get("bbox")
-            if bbox and isinstance(bbox, list):
-                for val in bbox:
-                    if not isinstance(val, int) or val < 0 or val > 1000:
-                        r.invalid_bbox += 1
-                        r.add_example(
-                            f"chunk_id={chunk_id}: invalid bbox value {val!r} "
-                            f"(expected int in [0,1000])"
-                        )
-                        break
+            bbox_modality = modality if modality in r.bbox_stats else "other"
+            bbox_valid = _is_valid_bbox(bbox)
+            bbox_present = bbox is not None
+
+            if bbox_present and not bbox_valid:
+                r.invalid_bbox += 1
+                r.bbox_stats[bbox_modality].record_invalid()
+                r.add_example(
+                    f"chunk_id={chunk_id}: invalid bbox {bbox!r} "
+                    f"(expected 4 ints in [0,1000] with x1>x0 and y1>y0)"
+                )
+            elif bbox_valid:
+                pw = spatial.get("page_width")
+                ph = spatial.get("page_height")
+                has_page_dims = pw is not None and ph is not None
+                r.bbox_stats[bbox_modality].record_valid(bbox, has_page_dims)
+            else:
+                r.bbox_stats[bbox_modality].record_missing()
 
             # ── Invariant 4: spatial_metadata with bbox needs page dims ──
-            if bbox:
+            if bbox_valid:
                 pw = spatial.get("page_width")
                 ph = spatial.get("page_height")
                 if pw is None or ph is None:
@@ -136,6 +197,50 @@ def check(path: Path) -> UniversalResult:
                     )
 
     return r
+
+
+def _extract_spatial_metadata(meta: dict) -> dict:
+    """Read current and legacy spatial metadata keys from emitted JSONL."""
+    spatial = meta.get("spatial")
+    if isinstance(spatial, dict):
+        return spatial
+    spatial_metadata = meta.get("spatial_metadata")
+    if isinstance(spatial_metadata, dict):
+        return spatial_metadata
+    return {}
+
+
+def _is_valid_bbox(bbox: object) -> bool:
+    """Validate REQ-COORD-01/02 shape, type, range, and geometry."""
+    if not isinstance(bbox, list):
+        return False
+    if len(bbox) != 4:
+        return False
+    if not all(type(val) is int and 0 <= val <= 1000 for val in bbox):
+        return False
+    x0, y0, x1, y1 = bbox
+    return x1 > x0 and y1 > y0
+
+
+def _format_optional_int(value: Optional[int]) -> str:
+    return "n/a" if value is None else str(value)
+
+
+def _format_optional_float(value: Optional[float]) -> str:
+    return "n/a" if value is None else f"{value:.1f}"
+
+
+def _format_bbox_stats(modality: str, stats: BBoxStats) -> str:
+    return (
+        f"bbox_stats[{modality}]: total={stats.total} "
+        f"with_bbox={stats.with_bbox} missing_bbox={stats.missing_bbox} "
+        f"invalid_bbox={stats.invalid_bbox} missing_page_dims={stats.bbox_missing_dims} "
+        f"x_range={_format_optional_int(stats.min_x)}..{_format_optional_int(stats.max_x)} "
+        f"y_range={_format_optional_int(stats.min_y)}..{_format_optional_int(stats.max_y)} "
+        f"area_min={_format_optional_int(stats.min_area)} "
+        f"area_avg={_format_optional_float(stats.avg_area)} "
+        f"area_max={_format_optional_int(stats.max_area)}"
+    )
 
 
 def main(argv: list[str]) -> int:
@@ -166,6 +271,8 @@ def main(argv: list[str]) -> int:
     print(f"bbox_missing_page_dims={r.bbox_missing_dims}")
     print(f"empty_text_chunks={r.empty_content_text}")
     print(f"missing_modality={r.missing_modality}")
+    for modality in MODALITIES:
+        print(_format_bbox_stats(modality, r.bbox_stats[modality]))
 
     fails = []
     if r.null_chunk_type_text > 0:

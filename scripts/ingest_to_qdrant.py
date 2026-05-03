@@ -2,6 +2,10 @@
 """
 Ingest ingestion.jsonl + assets into Qdrant with llava multimodal embeddings.
 
+V2.7.1: Uses contextualized text for embedding (Anthropic Contextual Retrieval).
+The canonical ``content`` field is NOT mutated. A separate ``contextualized_text``
+is built for embedding, and QA/source-text validation uses the raw content.
+
 Usage:
     python scripts/ingest_to_qdrant.py output/HarryPotter_and_the_Sorcerers_Stone/ingestion.jsonl
 
@@ -12,6 +16,7 @@ Options:
     --model         Embedding model (default: llava)
     --batch-size    Chunks per embedding batch (default: 10)
     --recreate      Drop and recreate collection if it exists
+    --no-contextual  Disable contextual retrieval (fallback to breadcrumb-only)
 """
 
 from __future__ import annotations
@@ -19,10 +24,15 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import re
 import sys
 import time
 import urllib.request
 from pathlib import Path
+from typing import Any
+
+# Contextual Retrieval — builds embedding text from hierarchical + neighbor context.
+from mmrag_v2.chunking.contextual_retrieval import build_contextualized_text
 
 
 # ── Ollama embedding ────────────────────────────────────────────────────────
@@ -113,6 +123,196 @@ def upsert_batch(collection: str, points: list[dict], qdrant_url: str):
     }, qdrant_url)
 
 
+# ── Domain-specific retrieval priority ─────────────────────────────────────
+
+_PRIORITY_RANK = {"low": 0, "medium": 1, "high": 2}
+_DEFAULT_PRIORITY_BY_MODALITY = {"text": "high", "table": "medium", "image": "low"}
+_TOC_RE = re.compile(r"^\s*(table\s+of\s+contents|contents)\s*$", re.IGNORECASE)
+_REFERENCES_RE = re.compile(r"^\s*(references|bibliography|works\s+cited)\s*$", re.IGNORECASE)
+_TECHNICAL_BACK_MATTER_RE = re.compile(
+    r"^\s*(index|appendix(?:\s+[a-z0-9]+)?|appendices)\b",
+    re.IGNORECASE,
+)
+
+
+def read_ingestion_jsonl(jsonl_path: Path) -> tuple[dict | None, list[dict]]:
+    """Read an ingestion JSONL and separate the document metadata record."""
+    chunks = []
+    metadata_record = None
+    with open(jsonl_path, "r", encoding="utf-8") as f:
+        for line in f:
+            obj = json.loads(line)
+            if obj.get("object_type") == "ingestion_metadata":
+                metadata_record = obj
+                continue
+            chunks.append(obj)
+    return metadata_record, chunks
+
+
+def infer_document_domain(metadata_record: dict | None, chunks: list[dict]) -> str:
+    """Prefer document-level domain, then fall back to chunk-level metadata."""
+    if metadata_record:
+        domain = metadata_record.get("domain") or metadata_record.get("document_domain")
+        if domain:
+            return str(domain).lower()
+
+    for chunk in chunks:
+        metadata = chunk.get("metadata") or {}
+        domain = metadata.get("document_domain") or metadata.get("domain")
+        if domain:
+            return str(domain).lower()
+    return "unknown"
+
+
+def _normalized_priority(value: Any, modality: str) -> str:
+    priority = str(value or "").lower()
+    if priority in _PRIORITY_RANK:
+        return priority
+    return _DEFAULT_PRIORITY_BY_MODALITY.get(modality, "medium")
+
+
+def _demote_at_most(current: str, candidate: str) -> str:
+    """Return the lower of two priorities so strict converter signals survive."""
+    if _PRIORITY_RANK[candidate] < _PRIORITY_RANK[current]:
+        return candidate
+    return current
+
+
+def _page_number(chunk: dict) -> int:
+    try:
+        return int((chunk.get("metadata") or {}).get("page_number") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _hierarchy_strings(chunk: dict) -> list[str]:
+    metadata = chunk.get("metadata") or {}
+    hierarchy = metadata.get("hierarchy") or {}
+    values: list[str] = []
+    parent_heading = hierarchy.get("parent_heading")
+    if parent_heading:
+        values.append(str(parent_heading))
+    breadcrumb = hierarchy.get("breadcrumb_path") or []
+    if isinstance(breadcrumb, list):
+        values.extend(str(item) for item in breadcrumb if item)
+    return values
+
+
+def _is_heading_chunk(chunk: dict) -> bool:
+    chunk_type = chunk.get("chunk_type") or (chunk.get("metadata") or {}).get("chunk_type")
+    return str(chunk_type or "").lower() == "heading"
+
+
+def _heading_context(chunk: dict) -> list[str]:
+    values = _hierarchy_strings(chunk)
+    if _is_heading_chunk(chunk):
+        content = chunk.get("content")
+        if content:
+            values.append(str(content))
+    return values
+
+
+def _is_toc_chunk(chunk: dict) -> bool:
+    for value in _heading_context(chunk):
+        if _TOC_RE.match(value.strip()):
+            return True
+    if _is_heading_chunk(chunk):
+        first_line = str(chunk.get("content") or "").strip().splitlines()[0:1]
+        return bool(first_line and _TOC_RE.match(first_line[0].strip()))
+    return False
+
+
+def find_literature_toc_page(chunks: list[dict]) -> int | None:
+    """Return the first TOC page for literature front-matter priority rules."""
+    pages = [_page_number(chunk) for chunk in chunks if _is_toc_chunk(chunk)]
+    pages = [page for page in pages if page > 0]
+    return min(pages) if pages else None
+
+
+def _has_references_heading_context(chunk: dict) -> bool:
+    return any(_REFERENCES_RE.match(value.strip()) for value in _heading_context(chunk))
+
+
+def _has_technical_back_matter_context(chunk: dict) -> bool:
+    return any(_TECHNICAL_BACK_MATTER_RE.match(value.strip()) for value in _heading_context(chunk))
+
+
+def resolve_search_priority(
+    chunk: dict,
+    document_domain: str,
+    literature_toc_page: int | None = None,
+) -> str:
+    """
+    Resolve retrieval priority at ingestion time from domain and structure.
+
+    Domain rules only demote existing priority:
+    - literature pages before the first TOC are low priority
+    - academic references/bibliography sections are medium priority
+    - technical index/appendix sections are medium priority
+    """
+    modality = str(chunk.get("modality") or "text").lower()
+    metadata = chunk.get("metadata") or {}
+    priority = _normalized_priority(metadata.get("search_priority"), modality)
+    domain = (document_domain or "unknown").lower()
+
+    if domain == "literature" and literature_toc_page is not None:
+        page = _page_number(chunk)
+        if 0 < page < literature_toc_page:
+            priority = _demote_at_most(priority, "low")
+    elif domain == "academic" and _has_references_heading_context(chunk):
+        priority = _demote_at_most(priority, "medium")
+    elif domain == "technical" and _has_technical_back_matter_context(chunk):
+        priority = _demote_at_most(priority, "medium")
+
+    return priority
+
+
+def build_qdrant_payload(
+    chunk: dict,
+    *,
+    source_file: str,
+    document_domain: str,
+    literature_toc_page: int | None = None,
+) -> dict:
+    """Build Qdrant payload fields, including ingestor-owned search priority."""
+    chunk_id = chunk.get("chunk_id", "")
+    modality = chunk.get("modality", "text")
+    metadata = chunk.get("metadata") or {}
+    content = metadata.get("refined_content") or chunk.get("content", "")
+    page = metadata.get("page_number", 0)
+    hierarchy = metadata.get("hierarchy") or {}
+
+    payload = {
+        "chunk_id": chunk_id,
+        "doc_id": chunk.get("doc_id", ""),
+        "modality": modality,
+        "content": content[:10000],  # Cap payload size
+        "page_number": page,
+        "source_file": metadata.get("source_file", source_file),
+        "search_priority": resolve_search_priority(
+            chunk,
+            document_domain,
+            literature_toc_page=literature_toc_page,
+        ),
+    }
+    if document_domain and document_domain != "unknown":
+        payload["document_domain"] = document_domain
+
+    if modality == "text":
+        payload["chunk_type"] = metadata.get("chunk_type", "")
+        payload["parent_heading"] = hierarchy.get("parent_heading", "")
+        payload["breadcrumb"] = " > ".join(hierarchy.get("breadcrumb_path", []))
+    elif modality == "image":
+        payload["visual_description"] = (
+            metadata.get("visual_description")
+            or chunk.get("visual_description", "")
+        )
+        asset_ref = chunk.get("asset_ref", {})
+        payload["asset_path"] = asset_ref.get("file_path", "")
+
+    return payload
+
+
 # ── Main ingestion ─────────────────────────────────────────────────────────
 
 def main():
@@ -124,6 +324,8 @@ def main():
     parser.add_argument("--model", type=str, default="llava")
     parser.add_argument("--batch-size", type=int, default=10)
     parser.add_argument("--recreate", action="store_true")
+    parser.add_argument("--no-contextual", action="store_true",
+                        help="Disable contextual retrieval (fallback to breadcrumb-only)")
     args = parser.parse_args()
 
     jsonl_path = args.jsonl_path
@@ -134,17 +336,11 @@ def main():
     assets_dir = jsonl_path.parent / "assets"
 
     # Read all chunks
-    chunks = []
-    metadata_record = None
-    with open(jsonl_path, "r", encoding="utf-8") as f:
-        for line in f:
-            obj = json.loads(line)
-            if obj.get("object_type") == "ingestion_metadata":
-                metadata_record = obj
-                continue
-            chunks.append(obj)
+    metadata_record, chunks = read_ingestion_jsonl(jsonl_path)
 
     source_file = metadata_record.get("source_file", jsonl_path.stem) if metadata_record else jsonl_path.stem
+    document_domain = infer_document_domain(metadata_record, chunks)
+    literature_toc_page = find_literature_toc_page(chunks) if document_domain == "literature" else None
     collection_name = args.collection or source_file.replace(" ", "_").replace(".", "_").lower()
     # Clean collection name (Qdrant allows alphanumeric + underscore + hyphen)
     collection_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in collection_name)
@@ -155,6 +351,7 @@ def main():
     print(f"  Chunks: {len(chunks)} ({sum(1 for c in chunks if c.get('modality')=='text')} text, "
           f"{sum(1 for c in chunks if c.get('modality')=='image')} image, "
           f"{sum(1 for c in chunks if c.get('modality')=='table')} table)")
+    print(f"  Domain: {document_domain}")
     print(f"  Model: {args.model}")
     print()
 
@@ -178,9 +375,10 @@ def main():
     for i, chunk in enumerate(chunks):
         chunk_id = chunk.get("chunk_id", f"chunk_{i}")
         modality = chunk.get("modality", "text")
+        metadata = chunk.get("metadata") or {}
         # Prefer refined_content (has hyphenation fixes, OCR cleanup) over raw content
-        content = chunk.get("metadata", {}).get("refined_content") or chunk.get("content", "")
-        page = chunk.get("metadata", {}).get("page_number", 0)
+        content = metadata.get("refined_content") or chunk.get("content", "")
+        page = metadata.get("page_number", 0)
 
         # Build embedding
         try:
@@ -188,7 +386,7 @@ def main():
                 # Try image embedding first, fall back to description text
                 asset_ref = chunk.get("asset_ref", {})
                 asset_path = assets_dir / Path(asset_ref.get("file_path", "")).name if asset_ref else None
-                description = (chunk.get("metadata", {}).get("visual_description")
+                description = (metadata.get("visual_description")
                              or chunk.get("visual_description", "")
                              or content)
                 if asset_path and asset_path.exists():
@@ -196,13 +394,33 @@ def main():
                 else:
                     vector = embed_text(description, args.model, args.ollama_url)
             else:
-                # Text and table chunks: embed content directly
-                text_to_embed = content
-                # For richer embedding, prepend breadcrumb context
-                hierarchy = chunk.get("metadata", {}).get("hierarchy", {})
-                breadcrumb = " > ".join(hierarchy.get("breadcrumb_path", []))
-                if breadcrumb:
-                    text_to_embed = f"{breadcrumb}\n{content}"
+                # Text and table chunks: use contextualized text for embedding.
+                # Contextual retrieval prepends hierarchical + neighbor context.
+                # Canonical `content` is NOT mutated — QA validation uses raw text.
+                hierarchy = metadata.get("hierarchy") or {}
+                semantic_ctx = chunk.get("semantic_context") or {}
+
+                if args.no_contextual:
+                    # Fallback: breadcrumb-only (pre-v2.7.1 behavior)
+                    breadcrumb = " > ".join(hierarchy.get("breadcrumb_path", []))
+                    text_to_embed = f"{breadcrumb}\n{content}" if breadcrumb else content
+                else:
+                    # Build contextualized text using the Anthropic approach.
+                    # Uses breadcrumb, heading, and neighbor snippets for context.
+                    breadcrumb = hierarchy.get("breadcrumb_path") or []
+                    parent_heading = hierarchy.get("parent_heading")
+                    prev_snippet = semantic_ctx.get("prev_text_snippet")
+                    next_snippet = semantic_ctx.get("next_text_snippet")
+
+                    text_to_embed = build_contextualized_text(
+                        content,
+                        breadcrumb_path=breadcrumb,
+                        parent_heading=parent_heading,
+                        prev_text_snippet=prev_snippet,
+                        next_text_snippet=next_snippet,
+                        modality=modality,
+                    )
+
                 vector = embed_text(text_to_embed, args.model, args.ollama_url)
         except Exception as e:
             print(f"  ERROR embedding chunk {i}/{total} ({chunk_id}): {e}", file=sys.stderr)
@@ -210,29 +428,12 @@ def main():
             continue
 
         # Build payload (metadata stored in Qdrant for retrieval)
-        payload = {
-            "chunk_id": chunk_id,
-            "doc_id": chunk.get("doc_id", ""),
-            "modality": modality,
-            "content": content[:10000],  # Cap payload size
-            "page_number": page,
-            "source_file": chunk.get("metadata", {}).get("source_file", source_file),
-        }
-
-        # Add modality-specific fields
-        if modality == "text":
-            payload["chunk_type"] = chunk.get("metadata", {}).get("chunk_type", "")
-            payload["parent_heading"] = chunk.get("metadata", {}).get("hierarchy", {}).get("parent_heading", "")
-            payload["breadcrumb"] = " > ".join(
-                chunk.get("metadata", {}).get("hierarchy", {}).get("breadcrumb_path", [])
-            )
-        elif modality == "image":
-            payload["visual_description"] = (
-                chunk.get("metadata", {}).get("visual_description")
-                or chunk.get("visual_description", "")
-            )
-            asset_ref = chunk.get("asset_ref", {})
-            payload["asset_path"] = asset_ref.get("file_path", "")
+        payload = build_qdrant_payload(
+            chunk,
+            source_file=source_file,
+            document_domain=document_domain,
+            literature_toc_page=literature_toc_page,
+        )
 
         # Use a stable integer ID (Qdrant needs int or UUID)
         point_id = i + 1
