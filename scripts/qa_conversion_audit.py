@@ -764,7 +764,14 @@ def print_report(r: AuditResult, path: Path) -> bool:
         fails.append("TEXT")
     elif r.infix_artifacts > 0 or r.ctrl_chunks > 0:
         fails.append("TEXT")
-    elif micro_ratio > th["micro_non_label_ratio"] or oversize_ratio > th["oversize_ratio"]:
+    elif (not is_form) and (
+        micro_ratio > th["micro_non_label_ratio"] or oversize_ratio > th["oversize_ratio"]
+    ):
+        # Forms legitimately have many short label/value chunks; the
+        # micro_non_label gate is intentionally bypassed for them per the
+        # form acceptance class (QUALITY_GATES.md). Without this guard the
+        # TEXT verdict could print PASS but still be appended to fails,
+        # producing a contradictory "TEXT: PASS / FORM_AUDIT_FAIL (TEXT)".
         fails.append("TEXT")
 
     # --- CODE ---
