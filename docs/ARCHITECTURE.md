@@ -1,7 +1,7 @@
 # 🏗️ Universal Multi-Format RAG Pipeline Architecture
 
 **Version:** v2.7.0 (schema version 2.7.0)
-**Date:** April 2026
+**Date:** May 2026
 **Status:** PRODUCTION — v2.7.0 is current
 **Policy Update (v2.7.0):** Image extraction uses Docling layout model for all document types (PyMuPDF `page.get_images()` tested and reverted). 4 multimodal validation layers added: CorruptionInterceptor, POS Boundary Logic, Vision-Gated Hierarchy, Content-Type Classification. Encoding corruption uses heal-over strategy (keep HybridChunker + force refiner). TOC-based heading hierarchy via PyMuPDF bookmarks + content-based magazine TOC fallback. See `docs/DECISIONS.md`.
 **Policy Update (v2.5.0):** PDF extraction pathway is determined by **structural integrity tests** on the byte-stream, not by semantic content type. Three pre-flight checks (line-break health, visual-digital delta, geometry error rate) drive pathway decisions independently of the semantic profile.
@@ -295,7 +295,7 @@ Four post-extraction validation layers that use OCR, VLM, and POS signals instea
 
 2. **POS Boundary Logic** (`batch_processor.py`): Merges trailing orphan prepositions (`BY`, `FOR`, `OF`, `WITH`, `von`, `für`, etc.) into the next chunk when it starts with a proper noun. Same-page guard prevents cross-page false merges. Preposition must be the only word on its line.
 
-3. **Vision-Gated Hierarchy** (`batch_processor.py`): When a page has cover/logo/illustration images (detected via VLM `visual_description`), demotes non-chapter headings to "Front Matter". Uses multimodal signals, not text patterns.
+3. **Vision-Gated Hierarchy** (`batch_processor.py`): Runs after text heading inference and TOC/forward propagation. Pre-chapter pages with Docling/shadow image extractions have non-chapter, non-numbered headings demoted to "Front Matter"; pages without a detected chapter boundary require an explicit front-matter visual cue.
 
 4. **Content-Type Classification** (`batch_processor.py`): Chunks with 2+ boilerplate markers (ISBN, ©, "All rights reserved", "Printed in") get `search_priority` downgraded to `low`.
 
@@ -552,7 +552,7 @@ class HTMLEngine(FormatEngine):
 
 | Module | Change |
 |--------|--------|
-| `src/mmrag_v2/batch_processor.py` | Route through FormatRouter → UIR → ElementProcessor |
+| `src/mmrag_v2/batch_processor.py` | Route through `PdfConversionPlan` → Docling adapter → UIR → ElementProcessor; legacy direct Docling paths must shrink, not expand |
 | `src/mmrag_v2/ocr/layout_aware_processor.py` | Proper layout detection (not full-page fallback) |
 | `src/mmrag_v2/vision/vision_prompts.py` | Defines VISUAL_ONLY_PROMPT policy and response validation helpers |
 | `src/mmrag_v2/refiner.py` | Optional post-OCR text repair layer with edit-budget guardrails |
@@ -566,10 +566,10 @@ class HTMLEngine(FormatEngine):
 | `src/mmrag_v2/universal/quality_classifier.py` | Quality classifiers and `ConfidenceNormalizer` for cross-format confidence normalization |
 | `src/mmrag_v2/universal/element_processor.py` | Quality-based element processing |
 | `src/mmrag_v2/engines/base.py` | FormatEngine ABC |
-| `src/mmrag_v2/engines/pdf_engine.py` | PDF → UIR conversion |
+| `src/mmrag_v2/engines/pdf_engine.py` | PDF → UIR conversion; must consume the shared PDF plan/Docling adapter rather than constructing Docling options independently |
 | `src/mmrag_v2/engines/epub_engine.py` | Optional ePub engine plugin (not present in this branch) |
 | `src/mmrag_v2/engines/html_engine.py` | Optional HTML engine plugin (not present in this branch) |
-| `src/mmrag_v2/processor.py` | Current non-PDF extraction path (epub/html/docx/pptx/xlsx) |
+| `src/mmrag_v2/processor.py` | Current non-PDF extraction path plus legacy PDF glue; new PDF extraction behavior belongs in the shared PDF plan/adapter and UIR path |
 
 ### 6.4 Orchestration & Profile Intelligence
 

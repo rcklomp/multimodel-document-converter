@@ -97,10 +97,10 @@ Companion docs:
 
 ---
 
-## 📍 5. CURRENT STATE & DIRECTIVES (April 2026)
+## 📍 5. CURRENT STATE & DIRECTIVES (May 2026)
 
 **Version:** `v2.7.0` (schema version 2.7.0)  
-**Phase:** Production acceptance — 17 of 31 documents AUDIT_PASS, 14 pending reconversion.
+**Phase:** Production acceptance — see `docs/PROJECT_STATUS.md` for current counts.
 
 **Active architecture decisions:**
 - PDF extraction pathway is determined by structural integrity pre-flight tests, not semantic profile. See `docs/DECISIONS.md` — "Structural Pathology over Semantic Profiling".
@@ -114,12 +114,11 @@ Companion docs:
 
 ### Priority TODOs (Open)
 1. Stabilize model-agnostic VLM Source Sanctity enforcement. See `docs/PROGRESS_CHECKLIST.md`.
-2. Fix code-block fidelity failures in code-heavy books without regressing Fluent Python.
-3. Resolve Combat Aircraft text corruption and reach full `AUDIT_PASS`.
-4. Improve classifier correctness without using `--profile-override` in acceptance runs.
-5. Convert remaining pending documents and achieve full `AUDIT_PASS` across the corpus.
-6. Re-ingest to Qdrant after all documents pass.
-7. Establish per-category blind-test baselines for all document categories in the smoke test matrix.
+2. Confirm Chaubal CODE gate after Milestone 1 fixes (Ayeva and RAG Guide now pass).
+3. Improve classifier correctness without using `--profile-override` in acceptance runs.
+4. Convert remaining pending documents and achieve full `AUDIT_PASS` across the corpus.
+5. Re-ingest to Qdrant after all documents pass.
+6. Establish per-category blind-test baselines for all document categories in the smoke test matrix.
 
 ### Recently Completed (Do Not Reopen)
 1. `--force-ocr` override is implemented.
@@ -128,7 +127,7 @@ Companion docs:
 4. `IngestionMetadata` record implemented (v2.6).
 5. Multi-profile smoke test + universal invariant checker implemented (`scripts/smoke_multiprofile.sh`, `scripts/qa_universal_invariants.py`).
 6. `digital_magazine` 18% token variance waiver retired — IMAGE-bbox-aware source text extraction brings all magazines under 10%.
-7. Docling upgrade 2.66.0 → 2.86.0 with picture classification.
+7. Docling upgrade 2.66.0 → 2.86.0 with picture classification and code/formula enrichment options.
 8. TOC-based heading hierarchy (PDF bookmarks + content-based magazine TOC).
 9. Output provenance (`pipeline_version`, `source_file_hash`, `config_hash`).
 10. 4 multimodal validation layers replacing heuristic-loop patching.

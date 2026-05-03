@@ -1,7 +1,7 @@
 # ============================================================================
-# MULTIMODAL RAG INGESTION ENGINE V2.0 - PINNED DEPENDENCIES
+# MULTIMODAL RAG INGESTION ENGINE V2.7 - PINNED DEPENDENCIES
 # ============================================================================
-# ENGINE_USE: Docling v2.66.0 (Native Layout Analysis)
+# ENGINE_USE: Docling v2.86.0 (Native Layout Analysis + picture/code enrichment options)
 # CONSTRAINT: NumPy <2.0.0 to avoid ABI incompatibility with torch/transformers
 # ============================================================================
 
@@ -10,7 +10,7 @@ numpy>=1.24.4,<2.0.0                  # PINNED: Avoids NumPy 2.0 ABI conflict
 transformers>=4.45.0                   # PINNED: Compatible with docling native engines
 
 # === DOCUMENT PROCESSING - DOCLING NATIVE STACK ===
-docling==2.66.0                        # PINNED per .clinerules - Primary structure engine
+docling==2.86.0                        # PINNED per AGENTS.md - Primary structure engine
 docling-core>=2.0.0                    # Core docling utilities
 docling-ibm-models>=3.0.0              # IBM layout models (integrated with docling)
 # NOTE: Standalone surya-ocr REMOVED - using docling's integrated layout analysis

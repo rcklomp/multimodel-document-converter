@@ -87,7 +87,7 @@ The document classifier (`document_modality` + `profile_type`) determines the co
 | OCR routing | Done | Structural integrity pre-flight tests drive pathway. Digital guard skips OCR cascade. |
 | Heading detection | Done | TOC bookmarks (PyMuPDF `get_toc()`), content-based magazine TOC fallback, `is_valid_heading()` filters, `_sanitize_chunk_for_export()` final gate. |
 | HybridChunker | Done | Docling HybridChunker active for all profiles (350 max_tokens). Replaced custom 30-pass chunking. |
-| VLM | Available | Timeout fix applied to all 3 providers. Currently disabled for batch runs (`--vision-provider none`) due to Alibaba API instability. |
+| VLM | Validated (cloud) | Cloud Qwen3-VL-Plus validated (2026-04-29): PCWorld text-reading 36.5%→22.2%, hard fallback 37.3%→21.4%. Local NuMarkdown comparison pending until local inference server is reachable. |
 | Post-processing | Done | 4 multimodal validation layers: CorruptionInterceptor, POS Boundary Logic, Vision-Gated Hierarchy, Content-Type Classification. |
 | Encoding corruption | Done | Heal-over strategy: keep HybridChunker, force refiner at threshold=0.0. |
 
@@ -95,4 +95,4 @@ The document classifier (`document_modality` + `profile_type`) determines the co
 
 1. **Magazine image quality** — composite page layouts (text+photo baked together) need rendered-region-crop architecture. Docling layout model is best-available but not ideal for separating editorial photos from page backgrounds.
 2. **Class-specific chunking** — HybridChunker uses same `max_tokens=350` for all profiles. May benefit from per-profile tuning.
-3. **`docling-hierarchical-pdf`** — installed, compatible with Docling 2.86.0, not yet integrated (font-based heading classification).
+3. **`docling-hierarchical-pdf`** — integrated. Font-based heading reclassification runs after Docling conversion.

@@ -113,14 +113,69 @@
 - If Docling only supports document-level `do_code_enrichment`, enable it only after the code-evidence pass indicates a code-heavy/code-candidate document.
 - If region-level remote inference is implemented, send only `CodeItem`/code-candidate crops, not whole documents.
 - Preserve `_has_fenced_flat_code` only as a provisional fallback marker when native/remote code enrichment is unavailable or still returns flat code.
-- Refactor duplicated PDF extraction policy behind a shared `PdfConversionPlan` and Docling PDF adapter. `batch_processor.py` and `processor.py` must not remain independent sources of Docling `PdfPipelineOptions` truth.
+- Refactor duplicated PDF extraction policy behind a shared `PdfConversionPlan` and Docling PDF adapter. `batch_processor.py`, `processor.py`, and `engines/pdf_engine.py` must not remain independent sources of Docling `PdfPipelineOptions` / `DocumentConverter` truth.
+- The canonical PDF architecture is diagnostics/config -> `PdfConversionPlan` -> Docling adapter -> `UniversalDocument` -> `ElementProcessor` -> chunks. Direct Docling-item-to-chunk paths are legacy only and must not be expanded.
 
 **Anti-patterns now explicitly forbidden:**
 - Triggering CodeFormulaV2 from `has_encoding_corruption` alone.
 - Adding profile-specific `do_code_enrichment=True` rules in either processor path.
+- Adding new Docling `PdfPipelineOptions` or `DocumentConverter` construction outside the shared adapter/factory.
 - Installing client-side MLX/transformer acceleration as the main production strategy before evaluating remote inference.
 - Letting fallback regex/Tesseract repair mask whether Docling-native/remote enrichment actually fixed the code.
 - Weakening negative tests that prove non-code documents, incidental shell commands, sparse fenced snippets, or encoding corruption alone do not trigger CodeFormulaV2. These tests are Workstream B contracts.
+
+---
+
+## Shared PDF Extraction Plan (Workstream B, 2026-04-30)
+
+**Decision:** PDF extraction policy is centralized in `PdfConversionPlan`, and `DoclingPdfAdapter` is the only production code allowed to instantiate Docling `PdfPipelineOptions` or `DocumentConverter`.
+
+**Rationale:**
+- Batch, direct processor, and UIR engine paths previously set overlapping Docling options independently, creating drift and bridge bugs.
+- Code enrichment, OCR, table-image generation, table structure, reading order, picture classification, and structural corruption flags must cross CLI, batch, processor, engine, and adapter boundaries as one explicit plan.
+- Chunk factory metadata must remain separate from structural/document-level flags so chunk creation is not polluted by control fields.
+
+**Operationalization:**
+- CLI process/direct, CLI process/batch, and CLI batch command build a `PdfConversionPlan` after diagnostics, OCR auto-overrides, profile selection, and cheap code-evidence scoring.
+- `BatchProcessor`, `V2DocumentProcessor`, and `PDFEngine` consume the plan through `DoclingPdfAdapter`; legacy metadata entry points remain as compatibility shims that build a plan before adapter use.
+- `PdfConversionPlan.to_intelligence_metadata()` returns full boundary metadata; `chunk_factory_metadata()` returns only chunk-safe keys.
+- Static guard tests fail if production code constructs Docling PDF options/converters outside `src/mmrag_v2/engines/docling_adapter.py`.
+- `generate_table_images` is false by default and true only when `force_table_vlm=True`; non-VLM table extraction remains TableFormer markdown-based.
+- OCR engine mapping preserves status quo: OCR-enabled plans create `EasyOcrOptions()` regardless of the CLI engine string.
+
+**Evidence:** Focused plan/bridge/UIR tests `73 passed`; full unit suite `412 passed, 1 skipped`; smoke run `output/smoke_multiprofile_20260430_083922/` has all 10 rows `GATE_PASS` + `UNIVERSAL_PASS`, including Greenhouse blind-test.
+
+---
+
+## Contextual Retrieval (Anthropic approach) (v2.7.1, 2026-05-01)
+
+**Decision:** Embedding text for `text` and `table` modality chunks is built at ingest time by `mmrag_v2.chunking.contextual_retrieval.build_contextualized_text(...)`, prepending hierarchical breadcrumb + parent heading + truncated prev/next neighbor snippets + non-text modality marker before the canonical content. The `IngestionChunk.content` and `metadata.refined_content` fields are never mutated. Image chunks remain on the existing `embed_image()` path; the contextualization function is not used for them by the production ingestor.
+
+**Reference:** https://www.anthropic.com/news/contextual-retrieval (Anthropic, September 2024).
+
+**Scope:** Embed-time only. No new typed `PdfConversionPlan` field, no UIR rewrite, no element-mapping refactor, no new CLI flag on `mmrag-v2 process` / `mmrag-v2 batch`. The only new ingest-side flag is `scripts/ingest_to_qdrant.py --no-contextual`, which restores the v2.7.0 byte-stable embedding string `f"{breadcrumb}\n{content}"` (or `content` when breadcrumb is empty).
+
+**Invariants (mirrored verbatim in the module docstring):**
+
+- **AGENT-CONTEXTUAL-01 — Content immutability.** The canonical `IngestionChunk.content` is never mutated. The prefixes live in a separate, optional embedding-time field (`contextualized_text`) that is never read by QA, source-text validation, refiner threshold logic, or any chunk creator.
+- **AGENT-CONTEXTUAL-02 — Single embed-time builder.** The only function allowed to assemble contextualized text is `build_contextualized_text`. Importers are: the embedding lane in `scripts/ingest_to_qdrant.py`, `tests/test_contextual_retrieval.py`, and (optionally) a future RAG adapter — nothing else.
+- **AGENT-CONTEXTUAL-03 — QA isolation.** Markers `[Context: ]`, `[Heading: ]`, `[Previous: ]`, `[Next: ]`, `[Modality: ]` MUST NOT appear in `IngestionChunk.content`, `metadata.refined_content`, the Qdrant payload `text`/`content` field, or anything fed back into `qa_conversion_audit.py`, `qa_universal_invariants.py`, or `token_validator.py`.
+- **AGENT-CONTEXTUAL-04 — Length budget.** Per Anthropic, target ~50–100 tokens (~200–400 chars). Cap each `prev_text_snippet` and `next_text_snippet` to `MAX_CONTEXT_CHARS = 300`. Truncate; do not reflow. Truncation is on a Unicode code-point boundary (Python `str` slicing).
+- **AGENT-CONTEXTUAL-05 — Image lane untouched.** Image chunks already embed via `embed_image()` with the visual description as fallback. Contextualization is for `modality in {"text", "table"}` only in the production ingestor.
+- **AGENT-CONTEXTUAL-06 — Refiner ordering.** The refiner runs *before* contextualization. The ingestor reads `metadata.refined_content` first, falls back to `chunk["content"]`. The contextualized string is never re-fed into the refiner.
+- **AGENT-CONTEXTUAL-07 — Cache key safety.** If/when an embedding cache is added, it MUST key on the contextualized string actually sent to the embedder, not on raw `content`. Otherwise toggling `--no-contextual` returns stale vectors. (No embedding cache exists in this repo today; only `vision_manager` caches VLM responses.)
+
+**File locations:**
+- Builder: `src/mmrag_v2/chunking/contextual_retrieval.py` (allowlist for marker-string literals).
+- Ingestor wiring: `scripts/ingest_to_qdrant.py` (allowlisted call site).
+- Schema field: `IngestionChunk.contextualized_text: Optional[str]` in `src/mmrag_v2/schema/ingestion_schema.py`.
+- Tests + drift guard: `tests/test_contextual_retrieval.py`.
+
+**Rollback flag:** `scripts/ingest_to_qdrant.py --no-contextual` restores v2.7.0 byte-stable embedding text. Required for A/B comparison of retrieval quality and as a safety lever during rollout.
+
+**Drift insurance:** `tests/test_contextual_retrieval.py::test_no_contextual_marker_strings_in_production_code` walks every `*.py` under `src/mmrag_v2/` and `scripts/` and fails the moment a non-allowlisted file contains a marker literal or calls `build_contextualized_text(...)`. Rejection criterion: any write of those strings into a chunk-creation helper, refiner output, or payload field is a P0 defect.
+
+**Evidence:** Focused contextual suite `32 passed`; static guards `2 passed`; focused boundary suite `93 passed`; full unit suite `512 passed, 1 skipped, 0 failed`; probe `output/probe_contextual_retrieval_rag_guide/` AUDIT_PASS + UNIVERSAL_PASS with byte-identical structural shape (680 chunks: text=559 / image=99 / table=22; `indentation_fidelity=0.91`) to the Boundary Closeout baseline `output/probe_boundary_closeout_rag_guide/`; smoke `output/smoke_multiprofile_20260501_153101/` 10/10 GATE_PASS + UNIVERSAL_PASS, including the Greenhouse blind-test document. See `docs/QUALITY_SNAPSHOT_2026-05-01.md` "Contextual Retrieval (Anthropic approach)".
 
 ---
 
@@ -134,7 +189,7 @@
 
 2. **POS Boundary Logic** — Merges trailing orphan prepositions (`BY`, `FOR`, `OF`, `WITH`, `von`, `für`, `van`, `voor`, `par`, `pour`) into the next chunk when it starts with a proper noun. Same-page guard prevents cross-page false merges. The preposition must be the ONLY word on its line (true orphan).
 
-3. **Vision-Gated Hierarchy** — When a page has cover/logo/illustration images (detected via VLM `visual_description`), demotes non-chapter headings to "Front Matter". Uses multimodal signals rather than text pattern matching.
+3. **Vision-Gated Hierarchy** — After heading inference and TOC/forward propagation, pages before the first chapter-like heading that have Docling/shadow image extractions are treated as front matter. Non-chapter, non-numbered headings on those pages are demoted to "Front Matter". If no chapter boundary is found, an explicit front-matter visual cue is required.
 
 4. **Content-Type Classification** — Chunks with 2+ boilerplate markers (ISBN, ©, "All rights reserved", "Printed in") get `search_priority` downgraded to `low`. Global rule across all profiles.
 

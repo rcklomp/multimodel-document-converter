@@ -64,19 +64,3 @@ Hard fails:
 
 These must be zero. No profile-specific waivers.
 
-## Known Warnings (Observed)
-
-### Layout-aware OCR: `ocrmac` NoneType iterable
-- Symptom: Docling OCR stage fails intermittently with `NoneType` from `ocrmac`.
-- Behavior: Pipeline falls back to layout-aware OCR and completes.
-- Status: Not blocking metadata propagation; track separately if OCR quality is a concern.
-
-### Token variance warnings (QA-CHECK-01)
-- Symptom: token variance around -15% seen in some runs.
-- Behavior: Logs critical warning but continues (unless strict mode enabled).
-- Action: Apply pass/fail using the tolerance policy above. For `digital_magazine` values between 10% and 18%, treat as temporary tolerated debt and track remediation toward 10%.
-
-### imagehash missing
-- Symptom: `imagehash not installed, using fallback hash`.
-- Behavior: Deduplication still runs with fallback hashing.
-- Action: Optional dependency for stronger dedupe; not required for correctness.

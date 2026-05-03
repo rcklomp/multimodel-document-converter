@@ -2,7 +2,7 @@
 
 **Version:** v2.5.0-dev
 **Schema Version:** 2.5.0-dev (single source: `src/mmrag_v2/version.py`)
-**Status:** STALE — This SRS reflects v2.5.0. The codebase is at **v2.7.0**. Features added in v2.6–v2.7 (HybridChunker, multimodal validation layers, TOC-based heading hierarchy, Docling 2.86.0 picture classification, encoding heal-over, output provenance) are **not documented here**. Refer to `CHANGELOG.md` and `docs/DECISIONS.md` for current behavior. A full SRS rewrite to v2.7 is pending.
+**Status:** STALE — This SRS reflects v2.5.0. The codebase is at **v2.7.0**. Features added in v2.6–v2.7 (HybridChunker, multimodal validation layers, TOC-based heading hierarchy, Docling 2.86.0 picture/code-enrichment options, encoding heal-over, output provenance) are **not fully documented here**. If this SRS conflicts with `AGENTS.md`, `docs/DECISIONS.md`, or `docs/ARCHITECTURE.md`, the current docs win. A full SRS rewrite to v2.7 is pending.
 **Supersedes:** SRS v2.4.md
 **Design Philosophy:** Apply Specification Engineering primitives — self-contained problem statements, explicit acceptance criteria, constraint architecture, decomposed phases, and measurable evaluation design.
 
@@ -58,7 +58,7 @@ Every text region must become a `text` chunk with extracted content (not a VLM d
 | Platform | Apple Silicon (ARM64 macOS) |
 | Python | 3.10 exactly (`>=3.10,<3.11` in `pyproject.toml`) |
 | Conda env | Prefix env `./env` is used in testing docs (`conda run -p ./env`); named env `mmrag-v2` from `environment.yml` is also valid |
-| Docling pin | `==2.66.0` (exact pin in `pyproject.toml`, this is the single source of truth) |
+| Docling pin | Stale v2.5 value was `==2.66.0`; current v2.7 pin is recorded in `pyproject.toml` and current behavior is governed by `AGENTS.md` / `docs/DECISIONS.md`. |
 | PyTorch backend | Prefer MPS on Apple Silicon when available (`torch.backends.mps.is_available()`) |
 | Memory budget | Peak < 8 GB (system has 16 GB) |
 | PDF batch size | Default `10`; operational recommendation is `<= 10` pages per batch for memory stability |
@@ -174,7 +174,7 @@ The pipeline executes in **six sequential, independently verifiable phases**. Ea
 
 **Tasks:**
 1. Run `mmrag-v2 check` (provider/API-key readiness).
-2. Confirm startup banners include the Docling engine marker (`ENGINE_USE: Docling v2.66.0`).
+2. Confirm startup banners include the current Docling engine marker.
 3. (Recommended) verify runtime Docling version manually against `pyproject.toml` pin using `python -c "import docling; print(docling.__version__)"`.
 
 **Pass Criterion:** `mmrag-v2 check` completes successfully and no provider/configuration blockers exist for the selected run mode.

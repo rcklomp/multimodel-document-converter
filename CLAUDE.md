@@ -25,7 +25,7 @@ Use the three-layer docs model:
 - **Simplicity first.** Minimum code that solves the problem. No speculative features, abstractions for single-use code, or error handling for impossible scenarios. If 200 lines could be 50, rewrite it.
 - **Surgical changes.** Touch only what you must. Don't "improve" adjacent code, comments, or formatting. Match existing style. Remove only imports/variables/functions that YOUR changes made unused. Every changed line should trace directly to the request.
 - **Libraries first, custom code last.** Before writing filters, heuristics, or workarounds, check whether the library (Docling, ebooklib, etc.) already has a configuration option that solves the problem. The v2.4 script is a valid reference for what Docling can do natively.
-- **Keep configurations in sync.** `batch_processor.py` and `processor.py` still contain duplicated PDF extraction policy and Docling `PdfPipelineOptions` construction. Treat this as active architecture debt, not a pattern to copy. Until the shared `PdfConversionPlan` / Docling adapter refactor is implemented, every PDF extraction change must update both paths and include a bridge test proving the decision crosses object boundaries.
+- **Keep configurations in sync.** Shared `PdfConversionPlan` + `DoclingPdfAdapter` is the single source of Docling option/converter construction (`src/mmrag_v2/engines/pdf_plan.py`, `engines/docling_adapter.py`; complete 2026-04-30). Static guard tests (`tests/test_pdf_conversion_plan.py::test_no_pipeline_options_construction_outside_adapter`, `::test_no_production_docling_imports_outside_adapter`) reject any new `PdfPipelineOptions(` / `DocumentConverter(` construction outside the adapter — treat any duplication as a regression. Every PDF extraction change must flow through the plan and include bridge tests proving the decision crosses object boundaries.
 - **Verify before converting.** Run the test suite and a single-document smoke test before starting batch conversions. Confirm schema version, chunk counts, and gate results on a real output before burning VLM credits.
 - **Goal-driven execution.** Transform tasks into verifiable goals with success criteria. For multi-step tasks, state a brief plan with verification checks at each step.
 
@@ -39,6 +39,7 @@ Use the three-layer docs model:
 - Keep fallback regex/Tesseract repairs clearly marked and do not let them mask whether Docling-native/remote enrichment worked.
 - Workstream B negative tests are contracts: incidental shell commands, sparse fenced snippets, non-code magazines, and encoding corruption alone must not trigger CodeFormulaV2. Do not loosen these assertions or rewrite fixtures to match a broad heuristic. If one fails, fix the heuristic or stop.
 - Next-phase design lives in `docs/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md` section 5: shared PDF extraction plan + Ports-and-Adapters/Pipes-and-Filters refactor. Do not add another parallel plan.
+- Canonical target flow is diagnostics/config -> `PdfConversionPlan` -> Docling adapter -> `UniversalDocument` -> `ElementProcessor` -> chunks. Do not expand direct Docling-item-to-chunk mapping.
 
 ## Test Contract Integrity
 
@@ -50,7 +51,7 @@ Use the three-layer docs model:
 ## Project Invariants
 - Python is locked to 3.10 (`pyproject.toml`: `>=3.10,<3.11`).
 - Runtime target is Apple Silicon; prefer Torch MPS when available.
-- `docling` minimum is `2.86.0` (upgraded from 2.66.0 — enables font metadata for heading classification).
+- `docling` is exact-pinned to `2.86.0` (upgraded from 2.66.0 — enables picture/code enrichment features used by current plans).
 - Keep PDF batch size at `<=10` pages.
 - Use the `ProfileClassifier` in `orchestration/profile_classifier.py` for automatic routing; do not replace it with the V2.4.2 `DocumentClassifier` approach. Profile overrides (`--profile-override`) are for debugging only, never for production acceptance runs.
 - Spatial metadata `bbox` must be emitted as integer `[0,1000]` coordinates.
@@ -108,7 +109,7 @@ Look for explicit `GATE_PASS` / `GATE_FAIL` and `UNIVERSAL_PASS` / `UNIVERSAL_FA
 - Non-batch or non-PDF uses `V2DocumentProcessor.process_to_jsonl_atomic(...)`.
 - `batch` command loops files; for PDF files it runs the same intelligence stack for parity, then uses `BatchProcessor`.
 - `src/mmrag_v2/batch_processor.py` is the primary PDF orchestrator (splitting, OCR governance, filtering, token validation/recovery, dedupe, JSONL export).
-- `src/mmrag_v2/processor.py` maps Docling elements to text/image/table chunks and runs shadow extraction.
+- `src/mmrag_v2/processor.py` currently maps Docling elements to text/image/table chunks and runs shadow extraction; this is legacy behavior to shrink behind the UIR path during the PDF extraction refactor.
 - Profile intelligence modules: `orchestration/document_diagnostic.py`, `orchestration/profile_classifier.py`, `orchestration/strategy_profiles.py`, `orchestration/strategy_orchestrator.py`.
 - Canonical chunk schema: `src/mmrag_v2/schema/ingestion_schema.py`.
 - Schema/version stamping uses `src/mmrag_v2/version.py`.

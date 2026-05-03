@@ -1,7 +1,10 @@
 # Agent Brief
 
 Use this file to orient LLM agents quickly. Read in the order below.
-This is a reading/orientation order, not a trust hierarchy; the SRS remains the authoritative source of truth.
+This is a reading/orientation order, not a trust hierarchy. Current authority is:
+`AGENTS.md` for invariants, `docs/DECISIONS.md` for accepted architecture decisions,
+and `docs/ARCHITECTURE.md` for target data flow. The SRS is stale v2.5 reference
+material only until it is rewritten.
 
 1) `docs/PROJECT_STATUS.md`
 - Current state, model setup, quality baseline, and immediate next work.
@@ -32,5 +35,5 @@ This is a reading/orientation order, not a trust hierarchy; the SRS remains the 
 - System design and data flow (reference when changing logic).
 
 10) `docs/SRS_Multimodal_Ingestion_V2.5.md`
-- Authoritative contract (rarely needed, but final source of truth).
-- **Note:** The SRS is at v2.5 while the codebase is at v2.7.0. Features added in v2.6–v2.7 (multimodal validation layers, TOC-based heading hierarchy, Docling picture classification, encoding heal-over) are not yet reflected in the SRS. Use `CHANGELOG.md` and `docs/DECISIONS.md` for v2.7 context.
+- Historical contract reference only.
+- **Note:** The SRS is at v2.5 while the codebase is at v2.7.0. Features added in v2.6–v2.7 (multimodal validation layers, TOC-based heading hierarchy, Docling 2.86.0 picture/code-enrichment options, encoding heal-over, output provenance) are not fully reflected in the SRS. Use `AGENTS.md`, `docs/DECISIONS.md`, and `docs/ARCHITECTURE.md` for current v2.7 behavior.

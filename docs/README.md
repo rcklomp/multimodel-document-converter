@@ -28,7 +28,7 @@ This folder uses a three-layer documentation structure so a new coding session c
    - design decisions and acceptance thresholds
    - quality gates used to decide pass/fail
 
-Read `docs/ARCHITECTURE.md` only when changing core pipeline behavior. Read the SRS only when a contract is ambiguous.
+Read `docs/ARCHITECTURE.md` when changing core pipeline behavior. Read the SRS only as historical v2.5 context; if it conflicts with `AGENTS.md`, `docs/DECISIONS.md`, or `docs/ARCHITECTURE.md`, the current docs win.
 
 ## Layer Model
 
@@ -43,6 +43,7 @@ Stable rules. These should change rarely.
 - `docs/QUALITY_GATES.md`
 - `docs/ARCHITECTURE.md`
 - `docs/SRS_Multimodal_Ingestion_V2.5.md`
+  - Stale v2.5 reference; not the current source of truth for v2.7 behavior.
 
 ### Layer 1: Current State
 
@@ -50,6 +51,7 @@ Compact project status. These files should be updated whenever a session changes
 
 - `docs/PROJECT_STATUS.md`
 - `docs/QUALITY_SNAPSHOT_2026-04-29.md`
+- `docs/QUALITY_SNAPSHOT_2026-04-30.md`
 
 ### Layer 2: Work Logs And Execution
 

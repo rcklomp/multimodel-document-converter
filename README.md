@@ -62,11 +62,11 @@ Before extraction begins, the converter analyzes the document to determine the b
 The extraction engine (Docling) processes each page to identify text paragraphs, images, tables, headings, code blocks, and list items. For scanned documents, a 3-layer OCR cascade runs:
 
 ```
-Layer 1: OcrMac/EasyOCR  →  confidence > threshold → accept
-                          ↓
-Layer 2: Tesseract 5      →  confidence > threshold → accept
-                          ↓
-Layer 3: DocTR            →  final pass (accept all)
+Layer 1: Docling layout-aware OCR  →  already extracted during layout analysis
+                                    ↓
+Layer 2: Tesseract 5 + preprocessing →  confidence > threshold → accept
+                                    ↓
+Layer 3: DocTR                       →  final pass (accept all)
 ```
 
 A Vision Language Model (VLM) generates descriptions for extracted images, enabling image search through text queries.
