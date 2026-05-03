@@ -18,7 +18,7 @@ Status vocabulary and evidence classes are defined in `docs/AGENT_GOVERNANCE.md`
 - [ ] Read `docs/PROJECT_STATUS.md`.
 - [ ] Read this checklist.
 - [ ] Read `AGENTS.md` for hard invariants.
-- [ ] Skim active plan docs: `docs/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md` (overall arc) and `docs/PLAN_DOCLING_POSTPROCESSOR.md` (Docling 2.86 sanity stages, successor to v2.7 §5).
+- [ ] Skim active plan docs: `docs/PLAN_V2.8_PRODUCTION_GAPS.md` (current execution plan), `docs/PLAN_DOCLING_POSTPROCESSOR.md` (Docling 2.86 sanity stages, shipped 2026-05-03), `docs/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md` (overall arc, all features shipped).
 - [ ] Run `git status --short` and identify pre-existing dirty files.
 - [ ] Check whether the task touches VLM, code blocks, classifier, conversion QA, or the post-Docling pipeline.
 - [ ] Do not start broad conversion until targeted tests for the touched area pass.

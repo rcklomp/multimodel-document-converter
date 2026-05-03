@@ -38,7 +38,7 @@ Use the three-layer docs model:
 - If Docling only supports document-level code enrichment, enable it only after the code-evidence pass. If region-level remote inference exists, send only `CodeItem`/code-candidate crops.
 - Keep fallback regex/Tesseract repairs clearly marked and do not let them mask whether Docling-native/remote enrichment worked.
 - Workstream B negative tests are contracts: incidental shell commands, sparse fenced snippets, non-code magazines, and encoding corruption alone must not trigger CodeFormulaV2. Do not loosen these assertions or rewrite fixtures to match a broad heuristic. If one fails, fix the heuristic or stop.
-- Next-phase design lives in `docs/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md` section 5: shared PDF extraction plan + Ports-and-Adapters/Pipes-and-Filters refactor. Do not add another parallel plan.
+- v2.7 §5 (shared PDF extraction plan + adapter refactor) and `docs/PLAN_DOCLING_POSTPROCESSOR.md` (post-Docling sanity pass — y-sort, drop-cap heal, label-leak filter, OCR gating; new `digital_literature` profile) are both **shipped** as of 2026-05-03. If a new design plan is needed for next-phase work, draft it as `docs/PLAN_V2.8_*.md` rather than adding parallel sections to either existing plan.
 - Canonical target flow is diagnostics/config -> `PdfConversionPlan` -> Docling adapter -> `UniversalDocument` -> `ElementProcessor` -> chunks. Do not expand direct Docling-item-to-chunk mapping.
 
 ## Test Contract Integrity

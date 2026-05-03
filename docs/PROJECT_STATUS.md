@@ -10,6 +10,8 @@ The project is in a quality-stabilization phase before broad reconversion and Qd
 
 Immediate goal: make conversion quality measurable and reproducible across document categories, then fix the highest-risk quality issues without overfitting to one document or one VLM.
 
+**Current execution plan: `docs/PLAN_V2.8_PRODUCTION_GAPS.md`** (ratified 2026-05-03). Closes the three known production gaps (Workstreams B, C, F) and the v2.7 §5 adapter-invocation static-guard followup, then runs broad reconversion + Qdrant re-ingestion. Estimated 3-9 days engineering + reconversion runtime; Phase 4 (Chaubal CodeFormulaV2 remote lane) carries external-dependency risk.
+
 ## Active Baseline
 
 The current quality reference point is:

@@ -8,8 +8,9 @@ The document classifier (`document_modality` + `profile_type`) determines the co
 |---|---|---|
 | `native_digital` + `technical_manual` | Sekar MCP, Raieli AI Agents, Fluent Python | Clean text layer, embedded images, PDF bookmarks, structured TOC |
 | `native_digital` + `academic_whitepaper` | AIOS, IRJET Solar PV | Two-column layout, figures, tables, references section |
+| `native_digital` + `digital_literature` | **Harry Potter and the Sorcerer's Stone** | Born-digital novels: clean text layer, narrative prose with dialogue, display-font drop caps, photographic cover artwork, dingbat scene-breaks. **Routed via the post-Docling sanity pass** — see §6 below. |
 | `image_heavy` + `digital_magazine` | Combat Aircraft, PCWorld | Complex multi-column layout, many embedded photos, ads, stylized text |
-| `scanned` | Harry Potter | Scanned pages, OCR needed, chapter headings detectable |
+| `scanned` | (no current corpus PDF; SCAN0013 is a small business form used as test probe) | Scanned pages, OCR needed, chapter headings detectable |
 | `scanned_degraded` | Firearms | Poor scan quality, OCR unreliable, VLM transcription needed |
 
 ---
@@ -76,6 +77,32 @@ The document classifier (`document_modality` + `profile_type`) determines the co
 | Spaced heading collapse | No | No | No | Yes | Yes |
 | Boilerplate detection | Yes | Yes | Yes | No | No |
 | TOC heading propagation | Yes | Yes | Yes | If bookmarks | Forward-propagation |
+
+---
+
+## 6b. Digital Literature (born-digital novels)
+
+`digital_literature` is a `native_digital`-modality profile added 2026-05-03 to
+catch born-digital novels (typesetting like AGaramondPro / Acrobat Distiller
+output, e.g. Harry Potter and the Sorcerer's Stone). It inherits the
+`technical_manual` defaults for image extraction, OCR (off), heading
+detection, and chunking, with these differences:
+
+| Setting | digital_literature | Source |
+|---|---|---|
+| `reading_order_strategy` | `y_sort_with_dropcap` (default for the profile) | `engines/pdf_plan.py` field added; `engines/docling_postprocess.py` runs the y-sort + drop-cap stages |
+| `suppress_layout_label_text` | `True` | Custom `MmragChunkingSerializerProvider` strips `Other`/`Icon`/`Table` classification labels via `meta.classification` (`blocked_meta_names`) AND the legacy `PictureClassificationData` annotation path |
+| `bitmap_area_threshold` | `0.92` | Plan field threaded into `EasyOcrOptions.bitmap_area_threshold` so cover artwork doesn't trigger OCR garbage |
+| Min image size | 40x40 | Catches drop caps and small dingbats (smaller than the magazine 100x100) |
+| `extract_backgrounds` | False | Novels have no editorial-photo backgrounds |
+| Routing trigger | `domain == "literature" AND not is_scan AND page_count >= 50 AND median_dim small` | `_score_digital_literature` in `orchestration/profile_classifier.py` |
+
+**Plan reference:** `docs/PLAN_DOCLING_POSTPROCESSOR.md` documents the four
+post-Docling stages (reading-order y-sort, drop-cap promotion, label-leak
+filter, OCR gating) and the routing/wiring across `profile_classifier.py`,
+`strategy_profiles.py`, `strategy_orchestrator.py`. Acceptance fixture:
+`tests/test_docling_postprocessor_acceptance.py` (HARRY pages 13-30; passes
+against live full-HARRY conversion).
 
 ---
 

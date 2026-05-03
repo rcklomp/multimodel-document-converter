@@ -198,6 +198,94 @@
 
 ---
 
+## Post-Docling Sanity Pass + `digital_literature` Profile (2026-05-03)
+
+**Decision:** Born-digital novels are routed through a new `digital_literature`
+profile that opts into four post-Docling sanity stages applied at the
+`DoclingPdfAdapter.convert()` seam. Successor to v2.7 §5; full plan at
+`docs/PLAN_DOCLING_POSTPROCESSOR.md`.
+
+**Rationale:**
+- Docling 2.86 produces four reproducible failure modes on born-digital
+  novels (verified on Harry Potter and the Sorcerer's Stone, AGaramondPro
+  / Acrobat Distiller PDF):
+  1. Reading-order swaps within a page (e.g. page 13 emits paragraphs
+     `[para1, para3, para2]`).
+  2. Drop-cap "M" appended INLINE at the end of the same TextItem
+     (`"r. and Mrs. Dursley...nonsense. M"`) instead of leading the
+     paragraph.
+  3. Picture classification labels (`Other`, `Icon`, `Table`) emitted as
+     body text via both `meta.classification` and the legacy
+     `PictureClassificationData` annotation path, even when a caption
+     exists.
+  4. Photographic cover pages OCR'd into garbage like
+     `"= 23555 AND Potter SIONE"` because the default
+     `bitmap_area_threshold` is 0.05.
+- Web research (Discussions #2791, #2755; Issues #1203, #2245, #2538;
+  docling-serve #448) confirms none of these are scheduled for upstream
+  fixes in the foreseeable future.
+- The fixes belong at the adapter seam, not in chunker post-processing,
+  because the chunker reads `body.children` order and HybridChunker's
+  serializer reads `meta`/`annotations`.
+
+**Operationalization:**
+- New module `engines/docling_postprocess.py` exposes
+  `apply_reading_order_sort` and `apply_dropcap_promotion`. The dropcap
+  pass runs both a standalone-glyph merge (separate `TextItem("M")`
+  adjacent to a lowercase paragraph) and an `_heal_inline_trailing_dropcap`
+  inline heal — the latter is the actually-emitted Docling 2.86 pattern.
+- New module `engines/docling_serializers.py` exposes
+  `MmragChunkingSerializerProvider`. The picture serializer strips
+  `PictureClassificationData` annotations across all pictures (not only
+  no-caption cases) before delegating; original annotations are
+  restored after serialization. The chunker's params ship with
+  `blocked_meta_names={"classification"}` so the new meta path is
+  blocked too.
+- New `PdfConversionPlan` fields: `reading_order_strategy`
+  (`docling_native` | `y_sort` | `y_sort_with_dropcap`),
+  `suppress_layout_label_text` (bool), `bitmap_area_threshold` (float,
+  default 0.75 — raised from Docling's 0.05 to keep OCR off cover
+  artwork on born-digital docs).
+- New `DIGITAL_LITERATURE` ProfileType across
+  `orchestration/profile_classifier.py` (enum + `_score_digital_literature`
+  scorer + score loop + modality fallback),
+  `orchestration/strategy_profiles.py` (`DigitalLiteratureProfile`
+  strategy class + ProfileManager registry + classifier→strategy
+  `type_mapping`), and `orchestration/strategy_orchestrator.py`
+  (`PROFILE_TO_DOC_TYPE` → `DocumentType.LITERATURE`).
+- `build_pdf_conversion_plan` auto-enables the post-processor stack
+  when `profile_type == "digital_literature"`:
+  `reading_order_strategy="y_sort_with_dropcap"`,
+  `suppress_layout_label_text=True`, `bitmap_area_threshold=0.92`.
+- Diagnostic Rule 0c added to `document_diagnostic.py` so moderate-length
+  dialogue-rich documents (e.g. the 30-page HARRY test slice) reach
+  `domain=literature` despite the small `DIAGNOSTIC_SAMPLE_PAGES=5`
+  cap. Trigger: `_dialogue_pages >= 1 AND total_pages > 20 AND not
+  has_tables AND 500 < avg_text_per_page < 2500 → literature += 0.4`.
+
+**v2.7 §5 followup — bypass patched:** the static guard from §5 banned
+`PdfPipelineOptions(` / `DocumentConverter(` *construction* outside the
+adapter but did NOT catch raw `self._converter.convert(...)` *invocation*.
+`processor.py:2072` was using the cached converter directly, sidestepping
+the post-Docling stages. Re-routed through `self._adapter.convert(...)`.
+A companion guard test should follow.
+
+**Evidence:**
+- 50 new unit tests (`tests/test_docling_postprocess_*.py`,
+  `tests/test_classifier_digital_literature.py`).
+- HARRY pages 13-30 acceptance fixture
+  (`tests/test_docling_postprocessor_acceptance.py` +
+  `tests/fixtures/harry_potter_pages_1_to_30/`); xfail removed; PASSES
+  against live full-HARRY conversion.
+- Full unit suite: 570 passed, 2 skipped, 1 deselected (pre-existing
+  unrelated `test_semantic_overlap` failure).
+- Smoke matrix `/tmp/smoke_post_dl_v2_20260503/`: 10/11 GATE_PASS +
+  UNIVERSAL_PASS. The 1 fail is on the new `scanned/0013_*` business-form
+  row (gate calibrated for prose); HARRY auto-routes to
+  `digital_literature` and passes both gates.
+
+---
+
 ## Chunk Size Governance
 **Decision:** Chunk length is governed per profile and verified with acceptance metrics; no universal hard min/max.
 

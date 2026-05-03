@@ -67,7 +67,7 @@ Companion docs:
 
 **G. Chunking by Profile, Validated by Evidence**
 - Do not enforce one global "optimal" chunk size.
-- Tune chunk-size behavior per profile (`technical_manual`, `scanned_degraded`, `scanned`, `digital_magazine`, `academic_whitepaper`).
+- Tune chunk-size behavior per profile (`technical_manual`, `scanned_degraded`, `scanned`, `digital_magazine`, `digital_literature`, `academic_whitepaper`).
 - Treat chunk size as an empirical quality lever: changes require before/after acceptance metrics, not intuition.
 
 ---
