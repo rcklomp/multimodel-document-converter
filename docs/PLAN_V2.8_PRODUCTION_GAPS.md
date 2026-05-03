@@ -1,10 +1,22 @@
 # Plan: v2.8 — Close Known Production Gaps Before Broad Reconversion
 
-**Status:** Draft v2, ratified for execution 2026-05-03
+**Status:** Draft v3, ratified for execution 2026-05-03
 **Owner:** ingestion pipeline
 **Successor to:** `docs/PLAN_DOCLING_POSTPROCESSOR.md` (shipped 2026-05-03) and the v2.7 closure
 **Related:** `docs/PROJECT_STATUS.md`, `docs/PROGRESS_CHECKLIST.md`,
 `docs/QUALITY_GATES.md`, `docs/DECISIONS.md`
+
+> **v2 → v3 (2026-05-03):** Per the CLAUDE.md "Libraries first, custom
+> code last" principle, every phase was re-audited against Docling 2.86
+> features. **Phase 4 was completely reframed**: Docling's
+> `do_code_enrichment` + CodeFormulaV2 takes the rendered IMAGE of a
+> code region and reconstructs proper indentation, overwriting
+> `item.text`. Empirically verified on Chaubal pages 250-260 (14 code
+> items go from 0 newlines flat to 6/22/39 newlines properly indented;
+> ~27 sec/page CPU). The custom regex/AST reconstructor proposed in v2
+> is dropped — it duplicates a feature Docling already ships. Phase 3
+> investigation step expanded with empirical Docling OCR-fallback
+> findings.
 
 ---
 
@@ -211,6 +223,22 @@ can't decode. Inspection shows:
   has `�` in its `CORRUPTION_PATTERNS` regex but is **not
   healing these chunks**. Why is the first investigation step.
 
+**Docling-first findings (verified 2026-05-03):**
+
+| Approach | Result on Combat p66 | Verdict |
+|---|---|---|
+| Baseline (`do_ocr=False`, current digital_magazine plan) | Docling extracts 2 text items via the broken text layer; replacement chars present | Current failure mode |
+| `do_ocr=True` + `OcrMacOptions(force_full_page_ocr=True)` | 0 replacement chars BUT only 2 text items (a section header + page footer) | **Loses data:** the layout model under full-OCR is more conservative; roster table not re-extracted |
+| Existing `CorruptionInterceptor` (per-bbox OCR) | Not running on these chunks (verified — full Combat output still has 50 `�` chunks) | **Right architecture, wrong gating** |
+
+The Docling OCR options (`force_full_page_ocr`, `bitmap_area_threshold`)
+trade fidelity for cleanliness — running OCR on the full magazine
+page loses table/figure structure the layout model would otherwise
+preserve. The existing `CorruptionInterceptor` (per-bbox OCR
+patching) is the correct granularity. The bug is that it isn't
+firing on the Combat chunks; investigation step is unchanged from
+v2.
+
 **Steps:**
 1. **Investigate why CorruptionInterceptor isn't catching them.**
    Possibilities:
@@ -224,18 +252,25 @@ can't decode. Inspection shows:
      ornament glyphs and data.
    - Threshold: the interceptor may consider 13 `�` chars in a
      500-char chunk below its threshold.
+   - OCR engine: the current interceptor uses `pytesseract`
+     (per its imports). Docling 2.86 ships `OcrMacOptions` which
+     is faster on Apple Silicon and works without `tesserocr`. If
+     OCR engine availability is the gating issue, switch to OcrMac.
 2. **Decide intervention layer based on step 1.** Options:
-   - **A. Strip-and-keep (cheapest):** Add a regex that strips
-     ornament-glyph runs (long sequences of `�` mixed with
-     `[il`, `ltJ!`, `nfr!`, etc.) at chunk-export time, leaving the
+   - **A. Fix CorruptionInterceptor gating + switch to OcrMac
+     engine (preferred — Docling-native, fixes existing
+     architecture):** Per-bbox OCR is the right granularity; the
+     interceptor exists; just needs to actually fire.
+   - **B. Strip-and-keep (fallback):** If OCR re-extraction also
+     produces garbage on the ornament-glyph regions, add a regex
+     that strips `�` runs adjacent to ornament-glyph noise
+     (`[il`, `ltJ!`, `nfr!`) at chunk-export time, leaving the
      surrounding data field intact.
-   - **B. Re-OCR per-bbox (current architecture):** Fix the gating
-     so CorruptionInterceptor runs on these chunks; verify
-     re-extraction returns clean output.
-   - **C. Promote to table chunk:** The data is structurally
-     tabular (`Wing/Group Squadron Location = ..., Aircraft = ...,
-     TailCode = ...`); re-emit as a `table` modality chunk with
-     parsed rows.
+   - **C. Promote to table chunk (deferred to v2.9):** The data is
+     structurally tabular (`Wing/Group Squadron Location = ...,
+     Aircraft = ..., TailCode = ...`); re-emit as a `table`
+     modality chunk with parsed rows. Out of v2.8 scope (would
+     need new table-promotion logic).
 3. **Add regression tests for the ornament-glyph pattern** before
    changing production code (per CLAUDE.md test-contract rule).
    Fixture: a chunk containing the actual page-66 corruption
@@ -276,89 +311,106 @@ critical-path unknown.
 
 ---
 
-### Phase 4 — Workstream B: Chaubal `>>>` flat-code reconstruction
+### Phase 4 — Workstream B: enable Docling's CodeFormulaV2 for code-heavy documents
 
 **What:** Chaubal_PyTorch_Projects has 279 code-flavored chunks;
-many show the `>>>` REPL-prompt flat-code pattern: `">>> # Num
+many show the `>>>` REPL-prompt flat-code pattern (`">>> # Num
 epochs ... patience_counter = 0 # How many ... for epoch in
-range(num_epochs):"`. Code lines were concatenated, line breaks
-stripped, indentation lost. The existing
-`_has_fenced_flat_code` detector at `batch_processor.py:302` covers
-this pattern; the existing handling does not reconstruct
-indentation.
+range(num_epochs):"`) — code lines concatenated, line breaks
+stripped, indentation lost.
 
-**Reframed scope (vs. v1 of this plan):** The original Phase 4
-called for deciding a remote CodeFormulaV2 inference target. After
-inspecting the actual Chaubal output, the failure pattern is
-**reconstructible without remote inference** — Python's tokenizer
-can identify statement boundaries and indentation depth from the
-flattened text. Remote CodeFormulaV2 remains a v2.9+ option for
-documents where reconstruction is insufficient (e.g., obfuscated /
-minified code, or non-Python languages).
+**Docling-first finding (verified 2026-05-03):** Docling 2.86
+already solves this. `PdfPipelineOptions.do_code_enrichment=True`
+activates `CodeFormulaModel`, which takes the rendered IMAGE of each
+`CodeItem` region (at 120 DPI) and runs the CodeFormulaV2
+vision-language model on it. The model returns reconstructed code
+text and the model overwrites `item.text` (per
+`docling/models/code_formula_model.py:CodeFormulaModel.__call__`).
+The architecture decision in CLAUDE.md / DECISIONS.md
+"Selective Code Enrichment Lane" already accounts for this.
 
-**Approach:**
-1. **Build a `>>>`-flat-code reconstructor.** Input: a chunk text
-   containing `>>>` prompts and Python tokens. Output: properly
-   newlined and indented code.
-   - Strategy A: regex-based — split on `>>>` markers + `\n`-insert
-     at known statement-terminator tokens (`:`, `\n# `, etc.).
-     Limitations: doesn't handle multi-line strings, lambdas.
-   - Strategy B: AST-based — repeatedly try `ast.parse` on
-     candidate splits; backtrack if invalid.
-     Higher-fidelity but expensive on multi-KB chunks.
-   - Recommendation: Strategy A first, with Strategy B fallback when
-     A produces output that fails `ast.parse`.
-2. **Wire into the chunk export path** behind a plan field
-   `code_reconstruction: "off" | "regex" | "ast_fallback"`. Default
-   `"off"`; `technical_manual` profile with code evidence opts into
-   `"ast_fallback"`.
-3. **Run targeted Chaubal pages** through the reconstructor. Verify
-   `indentation_fidelity` improves without breaking existing chunks.
-4. **Run Fluent Python as non-regression control** (already passes
-   CODE gate; must continue to pass).
-5. **Re-run Chaubal full conversion** only after page evidence
-   improves.
+**Empirical verification (Chaubal pages 250-260):**
 
-**Hard constraints (from CLAUDE.md / DECISIONS.md):**
+| Run | `do_code_enrichment` | First code item text head | Newlines |
+|---|---|---|---|
+| Baseline | `False` | `"x = self.max_pool3(x) x = self.flatten(x) x = self.fc1(x) x = self.relu_fc1(x) ..."` | **0** |
+| With CodeFormulaV2 | `True` | `"x = self.max_pool3(x)\n            x = self.flatten(x)\n            x = self.fc1(x)\n            x = self.relu_fc1(x)\n            ..."` | **6** |
+
+All 14 code items in the slice were reconstructed (newlines went
+from 0 → 6/22/39, indentation preserved, comments preserved,
+function signatures intact). This is exactly the behavior the
+custom reconstructor proposed in v2 was meant to deliver — Docling
+already does it.
+
+**Cost (verified):** ~295 seconds for 11 pages on CPU = ~27 sec/page.
+Docling 2.86 explicitly removes MPS from supported devices for
+`CodeFormulaModel`
+(`Removing MPS from available devices because it is not in
+supported_devices=[CPU, CUDA]`). For Chaubal's 359 pages that is
+~150 minutes of CPU per full conversion.
+
+**Approach (Docling-native, no new code module):**
+1. **Confirm `needs_code_enrichment` cheap-evidence trigger fires
+   on Chaubal.** The trigger lives in CLI / batch plan-builder code;
+   verify it sets `needs_code_enrichment=True` for Chaubal based on
+   `CodeItem` count, code chunk ratio, or sampled regions. If it
+   does not fire, fix the trigger.
+2. **Run Chaubal full conversion with `needs_code_enrichment=True`.**
+   Accept the ~150 min CPU cost as a one-off for v2.8's broad
+   reconversion. Confirm `indentation_fidelity >= 0.85`.
+3. **Run Fluent Python as non-regression control.** Fluent already
+   passes CODE gate; CodeFormulaV2 enrichment must not regress it.
+4. **Document the architectural decision in DECISIONS.md.** Specifically:
+   "client-local CPU is acceptable for Chaubal-class documents at
+   v2.8 because (a) CodeFormulaV2 fixes the failure cleanly, (b) MPS
+   is unsupported by the model, (c) ~27 sec/page on CPU is tolerable
+   for one-off broad reconversion. Remote CodeFormulaV2 inference
+   remains v2.9+ scope when broader code-heavy corpus growth makes
+   the runtime cost prohibitive."
+
+**Hard constraints (from CLAUDE.md / DECISIONS.md, unchanged):**
 - Do not enable `do_code_enrichment` from `has_encoding_corruption`
   alone.
 - Do not loosen Workstream B negative tests (incidental shell
   commands, sparse fenced snippets, non-code magazines).
-- Keep `_has_fenced_flat_code` clearly marked as detector;
-  reconstruction is the new layer behind it. Do not let
-  reconstruction mask whether native enrichment fixed the code (i.e.
-  log when reconstruction was applied).
+- Keep `_has_fenced_flat_code` clearly marked as fallback; do not
+  let it mask whether native enrichment fixed the code (i.e. log
+  when both fired so the diagnostic is preserved).
 
 **Tests (red→green):**
-- `test_reconstructor_handles_for_loop_pattern` — input
-  `">>> for epoch in range(num_epochs): print(...) model.train()"`;
-  expect 3 lines with proper indentation under `for`.
-- `test_reconstructor_handles_comment_inline` —
-  `">>> x = 1 # comment y = 2"`; expect two statements.
-- `test_reconstructor_preserves_multiline_string` — multi-line
-  triple-quoted string must not be split.
-- `test_reconstructor_falls_back_to_input_on_unparseable` — when
-  AST fallback fails, return original text (do not corrupt).
-- `test_chaubal_page_252_code_chunk_reconstructed` — load actual
-  failing chunk fixture; assert reconstructed output passes
-  `ast.parse` (or returns original on failure).
-- `test_fluent_python_code_chunks_unchanged` — non-regression
-  control; reconstructed output is byte-identical to input on
-  already-clean code.
+- `test_chaubal_cheap_evidence_trigger_fires` — synthetic Chaubal-style
+  diagnostic input must produce `needs_code_enrichment=True`.
+- `test_fluent_python_cheap_evidence_trigger_fires` — non-regression
+  control; Fluent already triggers (per
+  `tests/test_code_enrichment_decision.py` patterns).
+- `test_combat_aircraft_cheap_evidence_does_not_fire` — magazine with
+  encoding corruption must NOT trigger code enrichment (per
+  Workstream B negative-test contract).
+- `test_chaubal_page_252_code_item_reconstructed` — fixture: load the
+  Docling document state from a saved Chaubal slice with
+  `do_code_enrichment=True`; assert at least one CodeItem.text
+  contains `\n` (proves CodeFormulaV2 ran). Pure-test fixture; no
+  live model invocation in the unit suite.
 
 **Done when:**
-- Chaubal_PyTorch_Projects passes CODE gate
-  (`indentation_fidelity >= 0.85`).
-- Fluent Python remains AUDIT_PASS (non-regression control).
-- Code chunk count does not collapse artificially (chunks may merge
-  if reconstruction reveals shared blocks, but no >20% drop).
-- New reconstructor module + tests exist.
+- `tests/test_code_enrichment_decision.py` passes (existing) plus
+  the four new tests above.
+- Chaubal full conversion (one-off, run as part of Phase 5 broad
+  reconversion) reports `indentation_fidelity >= 0.85`.
+- Fluent Python non-regression control still passes CODE gate.
+- DECISIONS.md updated with the Docling-native + client-local-CPU
+  acceptance note.
 
-**Risk:** AST-based fallback on long flattened code can be slow
-(seconds per chunk on KB-scale text). Mitigation: cap input length
-and timeout to fall back to regex-only, marked in chunk metadata.
+**Risk:** CodeFormulaV2 inference is CPU-bound and slow at corpus
+scale. Mitigation: gate on `needs_code_enrichment` so it only runs
+on documents where the cheap-evidence trigger fires (Chaubal,
+Ayeva, Fluent — not Combat or HARRY). For v2.8 broad reconversion
+this is acceptable; v2.9 should investigate remote inference (no
+upstream `RemoteCodeFormulaOptions` exists in Docling 2.86 today).
 
-**Estimated effort:** 1-2 days. No external dependency.
+**Estimated effort:** 0.5-1 day engineering (mostly verifying the
+cheap-evidence trigger fires correctly on Chaubal) + ~150 min CPU
+runtime per Chaubal conversion in Phase 5.
 
 ---
 
@@ -454,7 +506,8 @@ Plus the human-readable check that:
 | `scripts/qa_delta_report.py` automated delta reporter | Useful but not blocking | PROGRESS_CHECKLIST Baseline And Tracking |
 | Broader UIR refactor (PdfConversionPlan → UniversalDocument → ElementProcessor) | Canonical target but not required for broad reconversion; legacy direct-to-chunk path acceptable if it doesn't expand | CLAUDE.md "Workstream B Code Enrichment Guardrail" |
 | HybridChunker per-item token guard | Requires upstream Docling work | PROGRESS_CHECKLIST Milestone 1 known limitation |
-| Remote CodeFormulaV2 inference target | Reframed: Phase 4's `>>>`-flat-code reconstructor handles the observed Chaubal pattern without remote inference. Remote remains a v2.9+ option for failure modes reconstruction can't cover (obfuscated / non-Python). | DECISIONS.md "Selective Code Enrichment Lane" |
+| Remote CodeFormulaV2 inference target | Docling 2.86 does not expose `RemoteCodeFormulaOptions` / `ApiCodeFormulaOptions`; only the inline (client-local) `CodeFormulaModel` ships. Phase 4 accepts client-local CPU runtime (~27 sec/page) for v2.8 broad reconversion. v2.9 should investigate either (a) a custom adapter that intercepts CodeItems and pushes to a remote endpoint, or (b) waiting for upstream Docling to add remote options. | DECISIONS.md "Selective Code Enrichment Lane" |
+| Custom `>>>`-flat-code reconstructor (was v2 Phase 4) | Dropped — Docling's CodeFormulaV2 reconstructs the indentation natively. Empirical verification on Chaubal pages 250-260 in v3. | This file, decision log v2→v3 |
 | New profile types | None identified after `digital_literature` | — |
 | New post-Docling stages | Reading-order, drop-cap, label-leak, OCR gating cover the observed Docling 2.86 failure modes | PLAN_DOCLING_POSTPROCESSOR.md |
 | Form-aware audit gate (`micro_non_label_ratio`) | Surfaced by SCAN0013; document as exception for v2.8 acceptance, fix in v2.9 if forms become a routine target | docs/QUALITY_GATES.md |
@@ -493,10 +546,10 @@ matching commit):
 | Phase 0 — snapshot baseline | 1 h | No |
 | Phase 1 — 0x01 keyword separator | 1-2 h | No |
 | Phase 2 — adapter-invocation static guard | 1-2 h | No |
-| Phase 3 — magazine ornament-glyph cleanup | 0.5-2 days | No |
-| Phase 4 — Chaubal `>>>` flat-code reconstructor | 1-2 days | No |
-| Phase 5 — broad reconversion + re-ingestion | 1-2 days | Conversion runtime |
-| **Total** | **~3-7 days engineering + reconversion runtime** | None — dropped Phase 4 remote inference dependency |
+| Phase 3 — magazine ornament-glyph: fix CorruptionInterceptor gating + OcrMac engine | 0.5-1 day | No |
+| Phase 4 — enable Docling CodeFormulaV2 for code-heavy docs | 0.5-1 day engineering + ~150 min CPU per Chaubal run in Phase 5 | No (v2.9 may revisit remote inference) |
+| Phase 5 — broad reconversion + re-ingestion | 1-2 days runtime; CodeFormulaV2 adds ~2.5 hrs per code-heavy doc | Conversion runtime + CPU cost |
+| **Total** | **~2-4 days engineering + reconversion runtime** | No external blockers; CPU runtime cost is the new dominant factor |
 
 ## 8. Decision log
 
@@ -514,13 +567,39 @@ matching commit):
     `CorruptionInterceptor` doesn't already heal them; intervention
     layer (strip vs re-OCR vs table-promote) decided by step 1.
   - Phase 4 reframed: Chaubal pattern is **`>>>` REPL-prompt
-    flat-code**, reconstructible from Python tokenization without
-    remote inference. Remote CodeFormulaV2 dropped from v2.8 scope;
-    deferred to v2.9. Removes the only external dependency from the
-    plan.
+    flat-code**, prescribed a custom regex/AST reconstructor.
   - Phase 0 added: snapshot the baseline before changing code so
     deltas are measurable.
   - Phase 5 acceptance pre-flight now explicitly addresses the
     SCAN0013 calibration issue and Qdrant migration strategy.
   - Total estimate revised from 3-9 days → 3-7 days; external
     dependency removed.
+
+- **2026-05-03 v3** — Per CLAUDE.md "Libraries first, custom code
+  last", every phase re-audited against Docling 2.86 features:
+  - **Phase 4 completely reframed.** Empirical test on Chaubal
+    pages 250-260 confirmed Docling's `do_code_enrichment=True` +
+    CodeFormulaV2 reconstructs `>>>` flat-code natively (14 code
+    items go from 0 → 6/22/39 newlines, indentation preserved). The
+    custom regex/AST reconstructor proposed in v2 is **dropped** —
+    it duplicates a Docling-native feature. Phase 4 is now: ensure
+    the existing `needs_code_enrichment` cheap-evidence trigger
+    fires on Chaubal, accept the ~27 sec/page CPU cost (Docling
+    forces CPU; MPS unsupported by CodeFormulaV2), document the
+    architectural decision in DECISIONS.md.
+  - **Phase 3 expanded with empirical Docling OCR-fallback
+    results.** Tested `do_ocr=True` + `OcrMacOptions(force_full_page_ocr=True)`
+    on Combat p66: produces 0 replacement chars but only 2 text
+    items (data loss; layout model conservative under full-OCR).
+    Confirms the existing `CorruptionInterceptor` (per-bbox OCR) is
+    the right granularity. Added the Docling-native option of
+    switching the interceptor's OCR engine to `OcrMacOptions` (the
+    current implementation uses `pytesseract`).
+  - Total estimate revised from 3-7 days → 2-4 days engineering
+    (Phase 4 eng work shrinks because there's no new module to
+    build) + CPU runtime in Phase 5.
+  - Decision log addition: Docling 2.86 does NOT expose
+    `RemoteCodeFormulaOptions` / `ApiCodeFormulaOptions`; only the
+    inline `CodeFormulaModel` ships. Remote inference for code
+    enrichment requires a custom adapter (deferred to v2.9) or
+    upstream Docling work.
