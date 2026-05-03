@@ -40,6 +40,9 @@ env/
 *.swp
 *.swo
 
+# Claude Code session state (scheduled tasks, local settings)
+.claude/
+
 # Cache files
 .vision_cache.json
 
