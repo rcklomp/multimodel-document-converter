@@ -23,7 +23,7 @@ For every test command in this file, validation is mandatory:
 
 Representative test set (all present in `data/`):
 - `data/academic_journal/AIOS LLM Agent Operating System.pdf` — digital, high text density
-- `data/scanned/HarryPotter_and_the_Sorcerers_Stone.pdf` — scanned long-form
+- `data/digital_literature/HarryPotter_and_the_Sorcerers_Stone.pdf` — born-digital novel; routes to `digital_literature` profile and exercises the post-Docling sanity pass (y-sort, drop-cap heal, label-leak filter, OCR gating). See `docs/PLAN_DOCLING_POSTPROCESSOR.md`.
 - `data/technical_manual/Firearms.pdf` — scanned technical manual
 - `data/digital_magazine/PCWorld_July_2025_USA.pdf` — high image density, digital
 

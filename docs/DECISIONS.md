@@ -120,9 +120,40 @@
 - Triggering CodeFormulaV2 from `has_encoding_corruption` alone.
 - Adding profile-specific `do_code_enrichment=True` rules in either processor path.
 - Adding new Docling `PdfPipelineOptions` or `DocumentConverter` construction outside the shared adapter/factory.
-- Installing client-side MLX/transformer acceleration as the main production strategy before evaluating remote inference.
+- Installing **custom client-side MLX/transformer** acceleration as the main production strategy before evaluating remote inference. (See Amendment 2026-05-03 for Docling-native CPU runtime.)
 - Letting fallback regex/Tesseract repair mask whether Docling-native/remote enrichment actually fixed the code.
 - Weakening negative tests that prove non-code documents, incidental shell commands, sparse fenced snippets, or encoding corruption alone do not trigger CodeFormulaV2. These tests are Workstream B contracts.
+
+**Amendment 2026-05-03 — Docling-native CPU acceptable for batch reconversion:**
+
+Empirical evidence collected 2026-05-03 (test on Chaubal pages
+250-260) updates the cost model:
+
+- Docling 2.86's bundled `CodeFormulaModel` (CodeFormulaV2 weights,
+  no custom MLX/transformer setup) runs at **~27 sec/page on CPU**
+  on the project's Apple Silicon target. Docling explicitly forces
+  CPU for this model (`Removing MPS from available devices because
+  it is not in supported_devices=[CPU, CUDA]`).
+- For a one-off batch reconversion, this is acceptable: Chaubal's
+  359 pages = ~150 min CPU, run overnight or alongside other work.
+- The original "client-local diagnostic/fallback only" anti-pattern
+  was authored with custom MLX / transformer setups in mind (slow
+  to set up, GPU/MPS-bound, often required offline model conversion).
+  Docling-native CodeFormulaV2 has none of those properties.
+- Remote inference (local-network or cloud) remains **preferred**
+  for latency-sensitive use and for corpora where reconversion
+  runtime would exceed acceptable bounds (e.g. Chaubal-class docs at
+  larger scale, or multi-Chaubal nightly runs).
+- The anti-pattern is amended to clarify: it forbids **custom
+  MLX/transformer** client-local setups as the main production
+  strategy; it does **not** forbid one-off batch use of
+  Docling-bundled CodeFormulaV2 on CPU.
+
+**Operational rule of thumb:** If a code-heavy document needs
+reconversion and remote inference isn't available, run
+Docling-native CodeFormulaV2 on CPU. If reconversion of code-heavy
+docs becomes routine (more than once per week), invest in remote
+inference setup for v2.9.
 
 ---
 

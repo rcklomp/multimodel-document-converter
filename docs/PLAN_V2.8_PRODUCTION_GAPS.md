@@ -1,6 +1,6 @@
 # Plan: v2.8 — Close Known Production Gaps Before Broad Reconversion
 
-**Status:** Draft v3, ratified for execution 2026-05-03
+**Status:** Draft v3.2, ratified for execution 2026-05-03
 **Owner:** ingestion pipeline
 **Successor to:** `docs/PLAN_DOCLING_POSTPROCESSOR.md` (shipped 2026-05-03) and the v2.7 closure
 **Related:** `docs/PROJECT_STATUS.md`, `docs/PROGRESS_CHECKLIST.md`,
@@ -538,14 +538,27 @@ Qdrant.
 **Pre-flight checklist:**
 - [ ] Full unit suite green (target: 600+ tests; today is 570).
 - [ ] `bash scripts/smoke_multiprofile.sh` reports GATE_PASS +
-      UNIVERSAL_PASS for every row. The 2026-05-03 SCAN0013 row
-      currently fails micro_non_label_ratio because a small business
-      form is the wrong probe; **before Phase 5 acceptance**, either:
-  - (a) replace SCAN0013 with a real scanned book PDF (preferred),
-  - (b) document the form-class exception in `docs/QUALITY_GATES.md`,
-        OR
-  - (c) make the gate form-aware (likely v2.9 work; document as
-        accepted exception for v2.8).
+      UNIVERSAL_PASS for **every** row. **No waivers** (per
+      AGENTS.md AGENT-VAL-01, CLAUDE.md "Acceptance is not complete
+      unless GATE_PASS + UNIVERSAL_PASS are reported across all
+      document categories", QUALITY_GATES.md "Every row must show
+      GATE_PASS + UNIVERSAL_PASS"). The 2026-05-03 SCAN0013 row
+      currently fails `micro_non_label_ratio=0.294 > 0.22` because a
+      small business form is the wrong probe for a prose-calibrated
+      gate. **Before Phase 5 acceptance, the smoke matrix MUST
+      cleanly pass.** Two acceptable paths (in priority order):
+  - (a) **Preferred:** replace `0013_140302111325_001.pdf` in the
+        `scanned` slot with a representative scanned book/manual
+        PDF that the existing gate accepts. The smoke matrix loses
+        no coverage and no doc/code change is needed.
+  - (b) **Fallback if (a) is not feasible:** make the gate
+        form-aware in v2.8 scope (the §5 "out of scope" row for
+        this is removed; see decision log v3.1 → v3.2). Requires a
+        new acceptance class (`form` → relaxed `micro_non_label_ratio`)
+        in `scripts/qa_conversion_audit.py` and a corresponding
+        QUALITY_GATES.md entry. Triples Phase 5 effort.
+  - **Documenting an exception is NOT an option.** Both AGENT-VAL-01
+    and CLAUDE.md "Project Invariants" forbid waivers.
 - [ ] `tests/test_docling_postprocessor_acceptance.py` passes
       against a live HARRY conversion.
 
@@ -568,7 +581,14 @@ Qdrant.
 4. **Snapshot the new baseline.** Create
    `docs/QUALITY_SNAPSHOT_<post-reconversion-date>.md` with
    per-document deltas vs `QUALITY_SNAPSHOT_2026-05-03.md`.
-5. **Tag v2.8.0** if all Phase 5 steps pass.
+5. **Tag v2.8.0** when all Phase 5 steps pass AND every requirement
+   in `docs/AGENT_GOVERNANCE.md` "Completion Rules" is satisfied:
+   (1) every acceptance signal met; (2) evidence is `tracked` or
+   `snapshot`; (3) known limitations documented; (4) required
+   local/cloud comparisons completed or removed from scope;
+   (5) `PROJECT_STATUS.md`, `PROGRESS_CHECKLIST.md`, and snapshots
+   agree; (6) a fresh coding session can reproduce the claim
+   without chat history.
 
 **Done when:**
 - `docs/PROJECT_STATUS.md` "Active Baseline" pointer updated to the
@@ -586,8 +606,9 @@ The plan is "done" when:
 
 ```bash
 bash scripts/smoke_multiprofile.sh
-# expected: every row GATE_PASS + UNIVERSAL_PASS, OR documented
-# exception with rationale in docs/QUALITY_GATES.md.
+# expected: EVERY row GATE_PASS + UNIVERSAL_PASS. No waivers per
+# AGENTS.md AGENT-VAL-01 and CLAUDE.md "Project Invariants". If a
+# row fails, fix the probe or the gate; do NOT add an exception.
 
 pytest tests/ -v
 # expected: 0 failed, 0 errored. The HARRY acceptance fixture
@@ -624,7 +645,7 @@ Plus the human-readable check that:
 | Custom `>>>`-flat-code reconstructor (was v2 Phase 4) | Dropped — Docling's CodeFormulaV2 reconstructs the indentation natively. Empirical verification on Chaubal pages 250-260 in v3. | This file, decision log v2→v3 |
 | New profile types | None identified after `digital_literature` | — |
 | New post-Docling stages | Reading-order, drop-cap, label-leak, OCR gating cover the observed Docling 2.86 failure modes | PLAN_DOCLING_POSTPROCESSOR.md |
-| Form-aware audit gate (`micro_non_label_ratio`) | Surfaced by SCAN0013; document as exception for v2.8 acceptance, fix in v2.9 if forms become a routine target | docs/QUALITY_GATES.md |
+| ~~Form-aware audit gate (`micro_non_label_ratio`)~~ | **REMOVED from out-of-scope.** Per CLAUDE.md "no waivers" and AGENTS.md AGENT-VAL-01, accepting an exception is not an option. Phase 5 pre-flight option (a) — replace SCAN0013 with a passing scanned PDF — is the preferred path. If (a) is infeasible, making the gate form-aware moves into v2.8 scope. | docs/QUALITY_GATES.md |
 
 ## 6. Cross-phase concerns
 
@@ -688,6 +709,40 @@ matching commit):
     SCAN0013 calibration issue and Qdrant migration strategy.
   - Total estimate revised from 3-9 days → 3-7 days; external
     dependency removed.
+
+- **2026-05-03 v3.2** — Coherence sweep against Layer 0 control docs
+  (CLAUDE.md / AGENTS.md / DECISIONS.md / QUALITY_GATES.md /
+  AGENT_GOVERNANCE.md / TESTING.md) surfaced three contradictions:
+  1. **SCAN0013 "documented exception" framing dropped.** Plan v3.1
+     §4 + §5 allowed waivers under "OR documented exception with
+     rationale in QUALITY_GATES.md". This contradicted AGENT-VAL-01
+     ("GATE_PASS + UNIVERSAL_PASS across all document categories"),
+     CLAUDE.md "QA-CHECK-01 tolerance target is 0.10 for all
+     profiles (no waivers)", and QUALITY_GATES.md ("These must be
+     zero. No profile-specific waivers."). Phase 5 pre-flight now
+     forces a binary choice: replace SCAN0013 with a passing scanned
+     PDF (preferred) OR pull the form-aware audit gate into v2.8
+     scope. Documenting an exception is forbidden.
+  2. **Phase 4 client-local CPU framing kept; control docs amended.**
+     Plan v3.1 Phase 4 prescribed client-local CPU CodeFormulaV2
+     for v2.8 broad reconversion. This contradicted DECISIONS.md
+     "Selective Code Enrichment Lane" ("client-local diagnostic /
+     fallback only") and CLAUDE.md "Workstream B Code Enrichment
+     Guardrail". Resolution: **DECISIONS.md got an "Amendment
+     2026-05-03"** clarifying the original anti-pattern targeted
+     custom MLX / transformer setups, not Docling 2.86's bundled
+     CodeFormulaV2 (which runs at ~27 sec/page on CPU — fine for
+     one-off batch). CLAUDE.md amended to match. Plan stays as-is
+     and now references the amended DECISIONS entry.
+  3. **Phase 5 tag criteria now reference AGENT_GOVERNANCE Completion
+     Rules.** Plan v3.1 said "Tag v2.8.0 if all Phase 5 steps pass"
+     without explicitly invoking the 6 binding requirements in
+     `docs/AGENT_GOVERNANCE.md`. Phase 5 step 5 now lists them
+     verbatim so v2.8.0 isn't tagged before evidence/snapshot/agreement
+     are all in place.
+  4. (Bonus) **TESTING.md HARRY path** updated independently — line
+     26 still pointed at `data/scanned/...` after today's earlier
+     `digital_literature` move.
 
 - **2026-05-03 v3.1** — Added §2b "Parallel-Site Audit" cross-cutting
   principle and per-phase parallel-site audit tables. Triggered by

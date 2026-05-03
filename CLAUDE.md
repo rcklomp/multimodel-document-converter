@@ -34,7 +34,7 @@ Use the three-layer docs model:
 - Use Docling-native `CodeItem` / CodeFormulaV2 before custom code-repair heuristics.
 - Do not enable `do_code_enrichment` from `has_encoding_corruption` alone; encoding corruption is not code evidence and includes magazine/text-corruption workstreams.
 - Add/use an explicit `needs_code_enrichment` decision based on cheap code evidence: `CodeItem` count, code chunk ratio, or sampled code-candidate regions.
-- Prefer CodeFormulaV2 inference on stronger local-network hardware. Cloud is acceptable when data policy and cost allow. Client-local MLX/transformers is diagnostic/fallback only.
+- Prefer CodeFormulaV2 inference on stronger local-network hardware. Cloud is acceptable when data policy and cost allow. **Custom client-local MLX/transformers** setups are diagnostic/fallback only. **Docling-native CodeFormulaV2 on CPU** (the model bundled with `docling==2.86.0`) is acceptable for one-off batch reconversion (~27 sec/page on Apple Silicon target, forced to CPU by Docling because MPS is unsupported by this model). See `docs/DECISIONS.md` "Selective Code Enrichment Lane → Amendment 2026-05-03".
 - If Docling only supports document-level code enrichment, enable it only after the code-evidence pass. If region-level remote inference exists, send only `CodeItem`/code-candidate crops.
 - Keep fallback regex/Tesseract repairs clearly marked and do not let them mask whether Docling-native/remote enrichment worked.
 - Workstream B negative tests are contracts: incidental shell commands, sparse fenced snippets, non-code magazines, and encoding corruption alone must not trigger CodeFormulaV2. Do not loosen these assertions or rewrite fixtures to match a broad heuristic. If one fails, fix the heuristic or stop.
