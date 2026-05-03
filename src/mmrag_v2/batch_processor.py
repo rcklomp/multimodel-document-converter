@@ -33,7 +33,7 @@ import io
 import json
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar, Dict, List, Optional, Tuple, TYPE_CHECKING
@@ -80,6 +80,8 @@ from .utils.image_hash_registry import (
     create_page1_validator,
 )
 from .utils.coordinate_normalization import ensure_normalized
+from .engines.docling_adapter import DoclingPdfAdapter
+from .engines.pdf_plan import PdfConversionPlan, build_pdf_conversion_plan
 from .vision.vision_manager import VisionManager, create_vision_manager
 from .vision.vision_prompts import validate_vlm_response
 from .validators.token_validator import (
@@ -478,6 +480,8 @@ class BatchProcessor:
 
         # V2.4: Intelligence Stack Metadata (for observability)
         self._intelligence_metadata: Dict[str, Any] = {}
+        self._conversion_plan: Optional[PdfConversionPlan] = None
+        self._adapter: Optional[DoclingPdfAdapter] = None
 
         # v2.5.0: Structural pathology flags (REQ-STRUCT-01/02/03)
         # Stored as dedicated instance vars so they are NOT unpacked into
@@ -485,6 +489,9 @@ class BatchProcessor:
         self.has_flat_text_corruption: bool = False
         self.has_encoding_corruption: bool = False
         self.geometry_error_rate: float = 0.0
+        self._doc_total_pages: Optional[int] = None
+        self._doc_image_density: Optional[float] = None
+        self._doc_avg_text_per_page: Optional[float] = None
 
         # Workstream B: code enrichment decision flag and telemetry.
         # Set by _decide_code_enrichment() in process_pdf() from a cheap
@@ -595,53 +602,65 @@ class BatchProcessor:
         else:
             logger.info("[OCR-HYBRID] BatchProcessor: OCR hints DISABLED")
 
-    def set_intelligence_metadata(self, intelligence_metadata: Dict[str, Any]) -> None:
-        """
-        V2.4: Set intelligence stack metadata for observability.
+    def set_conversion_plan(self, plan: PdfConversionPlan) -> None:
+        """Set the shared PDF conversion plan for this batch run."""
+        self._conversion_plan = plan
+        self._adapter = DoclingPdfAdapter(plan)
+        self._docling_converter = None
 
-        This metadata proves intelligent classification ran and documents
-        the exact thresholds/parameters used during extraction.
+        self.has_flat_text_corruption = plan.has_flat_text_corruption
+        self.has_encoding_corruption = plan.has_encoding_corruption
+        self.geometry_error_rate = plan.geometry_error_rate
+        self._doc_total_pages = plan.total_pages
+        self._doc_image_density = plan.image_density
+        self._doc_avg_text_per_page = plan.avg_text_per_page
+        self.needs_code_enrichment = plan.needs_code_enrichment
+        self._code_enrichment_reason = plan.code_enrichment_reason
+        self._code_enrichment_score = plan.code_enrichment_score
+        self._extraction_route = plan.extraction_route
+        self._hybrid_chunker_enabled = plan.hybrid_chunker_enabled
+        self._max_chunker_input_chars = plan.max_chunker_input_chars
+        self._max_chunker_per_element_chars = plan.max_chunker_per_element_chars
+        self._allow_page_level_visuals = plan.allow_page_level_visuals
+        self._drop_blank_assets = plan.drop_blank_assets
+        self._quarantine_corrupted_chunks = plan.quarantine_corrupted_chunks
+        self._suppress_layout_label_text = plan.suppress_layout_label_text
+        self._intelligence_metadata = plan.chunk_factory_metadata()
 
-        Args:
-            intelligence_metadata: Dict containing profile_type, min_image_dims,
-                                 document_domain, document_modality, etc.
-        """
-        # v2.5.0: Extract structural pathology flags into dedicated instance vars BEFORE
-        # storing the dict. The dict is later unpacked with **self._intelligence_metadata
-        # into create_text_chunk() / create_image_chunk() etc., which do NOT accept these
-        # keys — leaving them in the dict would cause TypeError: unexpected keyword argument.
-        self.has_flat_text_corruption = bool(
-            intelligence_metadata.pop("has_flat_text_corruption", False)
-        )
-        self.has_encoding_corruption = bool(
-            intelligence_metadata.pop("has_encoding_corruption", False)
-        )
-        self.geometry_error_rate = float(
-            intelligence_metadata.pop("geometry_error_rate", 0.0)
-        )
-        # v2.6: Document profile stats — also not valid chunk-creation kwargs; pop into
-        # dedicated instance vars so the JSONL write block can use them from self.
-        self._doc_total_pages: Optional[int] = intelligence_metadata.pop("total_pages", None)
-        self._doc_image_density: Optional[float] = intelligence_metadata.pop("image_density", None)
-        self._doc_avg_text_per_page: Optional[float] = intelligence_metadata.pop("avg_text_per_page", None)
-
-        # Pop needs_code_enrichment if it was pre-set externally (e.g. test injection).
-        # Normally False here; the real value is set by _decide_code_enrichment().
-        _nce = intelligence_metadata.pop("needs_code_enrichment", None)
-        if _nce is not None:
-            self.needs_code_enrichment = bool(_nce)
-
-        self._intelligence_metadata = intelligence_metadata
-        # All profiles use the standard 10% tolerance now that IMAGE-bbox-aware
-        # source text extraction correctly excludes chart/graph label text.
         logger.info(
-            f"[V2.4-OBSERVABILITY] Intelligence metadata set: "
-            f"profile={intelligence_metadata.get('profile_type')}, "
-            f"dims={intelligence_metadata.get('min_image_dims')}, "
-            f"domain={intelligence_metadata.get('document_domain')}, "
-            f"flat_corrupt={self.has_flat_text_corruption}, "
-            f"encoding_corrupt={self.has_encoding_corruption}"
+            f"[PDF-PLAN] Conversion plan set: profile={plan.profile_type}, "
+            f"modality={plan.document_modality}, ocr={plan.do_ocr}, "
+            f"code_enrich={plan.needs_code_enrichment}, "
+            f"encoding_corrupt={plan.has_encoding_corruption}, "
+            f"route={plan.extraction_route}, "
+            f"reading_order={plan.reading_order_strategy}"
         )
+
+    def _build_legacy_conversion_plan(self) -> PdfConversionPlan:
+        """Build a plan from legacy BatchProcessor state for compatibility."""
+        return build_pdf_conversion_plan(
+            enable_ocr=self.enable_ocr,
+            ocr_engine=self.ocr_engine,
+            force_table_vlm=self.force_table_vlm,
+            needs_code_enrichment=self.needs_code_enrichment,
+            code_enrichment_reason=self._code_enrichment_reason,
+            code_enrichment_score=self._code_enrichment_score,
+            has_encoding_corruption=self.has_encoding_corruption,
+            has_flat_text_corruption=self.has_flat_text_corruption,
+            geometry_error_rate=self.geometry_error_rate,
+            total_pages=self._doc_total_pages or 0,
+            image_density=self._doc_image_density or 0.0,
+            avg_text_per_page=self._doc_avg_text_per_page or 0.0,
+            **self._intelligence_metadata,
+        )
+
+    def _ensure_conversion_plan(self) -> PdfConversionPlan:
+        """Ensure legacy callers still route through the shared adapter."""
+        if self._conversion_plan is None:
+            self.set_conversion_plan(self._build_legacy_conversion_plan())
+        if self._adapter is None:
+            self._adapter = DoclingPdfAdapter(self._conversion_plan)
+        return self._conversion_plan
 
     def enable_code_enrichment(self, config: "Any") -> None:
         """Store CodeEnrichmentConfig; gates _decide_code_enrichment in process_pdf.
@@ -769,6 +788,113 @@ class BatchProcessor:
             chunk_dict["metadata"]["spatial"] = spatial
 
         return chunk_dict
+
+    @staticmethod
+    def _is_blank_asset(path: Path) -> bool:
+        """Check if an image asset is blank (all white/all black/empty).
+
+        Returns True if the image has near-zero variance (std < 5) and
+        mean is near 0 or 255, indicating a blank/empty rendered asset.
+        """
+        try:
+            from PIL import Image
+            import numpy as np
+
+            with Image.open(path) as img:
+                arr = np.array(img.convert("L"))  # Grayscale
+                std = float(arr.std())
+                mean = float(arr.mean())
+                if std < 5.0 and (mean > 250.0 or mean < 5.0):
+                    logger.debug(
+                        f"[BLANK-ASSET] {path.name}: mean={mean:.1f}, std={std:.1f} → blank"
+                    )
+                    return True
+        except Exception as e:
+            logger.debug(f"[BLANK-ASSET] Could not check {path}: {e}")
+        return False
+
+    def _quarantine_corrupted_text_chunks(
+        self, chunks: List[IngestionChunk]
+    ) -> List[IngestionChunk]:
+        """Remove text chunks that still contain encoding artifacts.
+
+        Called after patch_corrupted_chunks(); any remaining corrupted text
+        must not reach final JSONL.  Non-TEXT chunks are never quarantined.
+        """
+        if not getattr(self, "_quarantine_corrupted_chunks", True):
+            return chunks
+        from .validators.corruption_interceptor import has_encoding_artifacts
+
+        clean = []
+        quarantined = 0
+        for c in chunks:
+            if (
+                c.modality == Modality.TEXT
+                and c.content
+                and has_encoding_artifacts(c.content)
+            ):
+                quarantined += 1
+            else:
+                clean.append(c)
+        if quarantined:
+            logger.warning(
+                f"[CORRUPTION-QUARANTINE] Dropped {quarantined} text chunks "
+                f"with unrepairable encoding artifacts"
+            )
+        return clean
+
+    def _filter_blank_assets(
+        self, chunks: List[IngestionChunk]
+    ) -> List[IngestionChunk]:
+        """Drop/promote chunks whose image asset is blank.
+
+        IMAGE chunks with blank assets are dropped entirely.
+        TABLE chunks with usable markdown content are promoted to TEXT
+        modality (IMAGE/TABLE require asset_ref per schema contract).
+        """
+        if not getattr(self, "_drop_blank_assets", True):
+            return chunks
+        surviving: List[IngestionChunk] = []
+        dropped = 0
+        promoted = 0
+        for c in chunks:
+            asset_ref = getattr(c, "asset_ref", None)
+            asset_path = getattr(asset_ref, "file_path", None) if asset_ref else None
+            if asset_path and c.modality in (Modality.IMAGE, Modality.TABLE):
+                full_path = self.output_dir / asset_path
+                if full_path.exists() and self._is_blank_asset(full_path):
+                    dropped += 1
+                    logger.warning(f"[BLANK-ASSET] Dropping blank asset: {asset_path}")
+                    try:
+                        full_path.unlink()
+                    except Exception:
+                        pass
+                    # Promote TABLE with markdown to TEXT so content survives.
+                    if (
+                        c.modality == Modality.TABLE
+                        and c.content
+                        and len(c.content.strip()) > 20
+                    ):
+                        c.modality = Modality.TEXT
+                        c.asset_ref = None
+                        if c.metadata:
+                            c.metadata.chunk_type = ChunkType.PARAGRAPH
+                        surviving.append(c)
+                        promoted += 1
+                        logger.info(
+                            "[BLANK-ASSET] Table promoted to TEXT "
+                            "(markdown content preserved)"
+                        )
+                    # IMAGE or tiny TABLE — drop entirely.
+                    continue
+            surviving.append(c)
+        if dropped:
+            logger.info(
+                f"[FINALIZE] Dropped {dropped} blank assets "
+                f"({promoted} tables promoted to TEXT, "
+                f"{dropped - promoted} chunks removed)"
+            )
+        return surviving
 
     def _enrich_asset_ref_from_disk(self, chunk: IngestionChunk) -> None:
         """Populate missing asset metadata (width/height/file size) from saved file."""
@@ -1226,70 +1352,16 @@ class BatchProcessor:
         Returns:
             Dict mapping actual page numbers to list of Docling elements
         """
-        from docling.datamodel.base_models import InputFormat
-        from docling.datamodel.pipeline_options import PdfPipelineOptions
-        from docling.document_converter import DocumentConverter, PdfFormatOption
-
         logger.info("[DOCLING-LAYOUT] Running Docling layout analysis on batch...")
 
         # MEMORY FIX: Reuse cached DocumentConverter across batches.
         # Creating a new converter per batch loads ~500MB+ of ML models
         # (LayoutPredictor, TableFormer, OCR) into MPS memory each time.
-        if self._docling_converter is None:
-            pipeline_options = PdfPipelineOptions()
-            pipeline_options.images_scale = 2.0
-            pipeline_options.generate_page_images = True
-            # Use Docling's native image extraction — clean assets without
-            # white-space ghosts from page-render cropping.
-            # Image extraction strategy depends on document class.
-            # For digital PDFs, PyMuPDF extracts clean embedded images directly.
-            # For scanned docs, Docling's layout model detects image regions.
-            _doc_mod = self._intelligence_metadata.get("document_modality", "")
-            _is_scanned = _doc_mod in ("scanned_clean", "scanned_degraded")
-            pipeline_options.generate_picture_images = True
-            # Picture classification: useful for digital/magazine PDFs to reject
-            # full-page backgrounds. Disabled for scanned docs — loads a transformer
-            # model that hangs on 292-page scanned books with hundreds of image regions.
-            if not _is_scanned:
-                pipeline_options.do_picture_classification = True
-                pipeline_options.picture_description_options.classification_deny = [
-                    "full_page_image", "page_thumbnail",
-                ]
-            # Tables are extracted as markdown text, not images.
-            pipeline_options.generate_table_images = False
-            pipeline_options.do_ocr = True
-            # Prevent ", 1 =" cell-matching artifacts in table text.
-            # Must match processor.py setting (no shared factory yet).
-            if hasattr(pipeline_options, "do_cell_matching"):
-                pipeline_options.do_cell_matching = False
-            try:
-                from docling.datamodel.pipeline_options import TableStructureOptions, TableFormerMode
-                pipeline_options.table_structure_options = TableStructureOptions(
-                    do_cell_matching=False,
-                    mode=TableFormerMode.ACCURATE,
-                )
-            except ImportError:
-                pass
-
-            # Workstream B: enable Docling-native code enrichment only when the
-            # code-evidence pre-pass confirmed this is a code-heavy document.
-            # NOT triggered by has_encoding_corruption alone — see DECISIONS.md.
-            if self.needs_code_enrichment:
-                pipeline_options.do_code_enrichment = True
-                pipeline_options.do_formula_enrichment = False
-                logger.info(
-                    f"[CODE-ENRICH] Enabled Docling code enrichment "
-                    f"(reason: {self._code_enrichment_reason})"
-                )
-
-            self._docling_converter = DocumentConverter(
-                format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
-            )
-            logger.info("[DOCLING-LAYOUT] Created and cached DocumentConverter (models loaded once)")
-        else:
-            logger.info("[DOCLING-LAYOUT] Reusing cached DocumentConverter")
-
-        result = self._docling_converter.convert(str(batch_path))
+        self._ensure_conversion_plan()
+        if self._adapter is None:
+            raise RuntimeError("Docling adapter was not initialized")
+        self._docling_converter = self._adapter.get_converter()
+        result = self._adapter.convert(batch_path)
 
         # Font-based heading hierarchy: use docling-hierarchical-pdf to reclassify
         # headings by font size/weight clustering. This corrects Docling's layout-only
@@ -1577,6 +1649,7 @@ class BatchProcessor:
             # MEMORY FIX: Reuse cached V2DocumentProcessor for shadow extraction.
             # Creating a new processor per batch re-initializes Docling internals.
             if self._shadow_processor is None:
+                shadow_plan = replace(self._ensure_conversion_plan(), do_ocr=False)
                 self._shadow_processor = V2DocumentProcessor(
                     output_dir=str(self.output_dir),
                     enable_ocr=False,
@@ -1585,7 +1658,8 @@ class BatchProcessor:
                     doc_hash_override=self._doc_hash,
                     source_file_override=source_file,
                     extraction_strategy=self.extraction_strategy,
-                    intelligence_metadata=self._intelligence_metadata,
+                    intelligence_metadata=shadow_plan.to_intelligence_metadata(),
+                    conversion_plan=shadow_plan,
                     force_table_vlm=self.force_table_vlm,
                 )
                 logger.info("[SHADOW-EXTRACTION] Created and cached shadow processor")
@@ -2347,14 +2421,16 @@ class BatchProcessor:
         # 3. Page offset for correct numbering
         # 4. Extraction strategy for dynamic thresholds
         # 5. Intelligence metadata for observability (BUG-009 FIX)
-        # Re-inject flags that set_intelligence_metadata() popped into instance
-        # vars.  V2DocumentProcessor reads these from the dict it receives, so
-        # every popped flag that the processor consumes must be re-added here.
-        processor_intelligence_metadata = {
-            **self._intelligence_metadata,
-            "needs_code_enrichment": self.needs_code_enrichment,
-            "has_encoding_corruption": self.has_encoding_corruption,
-        }
+        # Pass the full plan metadata across the batch -> processor boundary.
+        # Chunk-factory-safe metadata stays in self._intelligence_metadata only.
+        plan = self._ensure_conversion_plan()
+        processor_intelligence_metadata = plan.to_intelligence_metadata()
+
+        # Reuse the BatchProcessor's cached converter to avoid reloading
+        # the Docling picture classification model on every batch.
+        _shared_converter = None
+        if self._adapter is not None:
+            _shared_converter = self._adapter.get_converter()
 
         processor = V2DocumentProcessor(
             output_dir=str(self.output_dir),
@@ -2368,7 +2444,9 @@ class BatchProcessor:
             source_file_override=source_file,
             extraction_strategy=self.extraction_strategy,
             intelligence_metadata=processor_intelligence_metadata,
+            conversion_plan=replace(plan, do_ocr=self.enable_ocr),
             force_table_vlm=self.force_table_vlm,
+            external_converter=_shared_converter,
         )
 
         if self._refiner_config:
@@ -2485,8 +2563,11 @@ class BatchProcessor:
         self._doc_hash = self._compute_doc_hash(pdf_path)
         logger.info(f"Document hash: {self._doc_hash}")
 
-        # Workstream B: run cheap code-evidence pre-pass to decide enrichment.
-        self._decide_code_enrichment(pdf_path)
+        # Workstream B: legacy callers still get the cheap pre-pass here.
+        # Canonical CLI paths pass a PdfConversionPlan with this decision already made.
+        if self._conversion_plan is None:
+            self._decide_code_enrichment(pdf_path)
+            self._ensure_conversion_plan()
 
         # Extract TOC from PyMuPDF BEFORE splitting — gives us the correct
         # heading hierarchy for every page, independent of batch boundaries.
@@ -2950,24 +3031,7 @@ class BatchProcessor:
         all_chunks = self._filter_repetition_garbage(all_chunks)
         all_chunks = self._apply_table_recovery_highlander_dedup(all_chunks)
 
-        # Strip trailing section headings that Docling appended to paragraphs.
-        # Digital PDFs often have "...end of paragraph. preface" where "preface"
-        # is the next section heading concatenated by the layout parser.
-        all_chunks = self._strip_trailing_headings(all_chunks)
-
-        # POS Boundary Logic: merge orphan prepositions into next chunk.
-        # "BY" at end of chunk + "Mary GrandPré" at start of next → merge.
-        # "END" stays (it's a noun, not a hungry preposition).
-        all_chunks = self._merge_hungry_operators(all_chunks)
-
-        # Final cross-batch mid-sentence merge + dedup.
-        # Per-batch processing can't merge sentences split across batch boundaries.
-        all_chunks = self._merge_mid_sentence_chunks(all_chunks)
-        all_chunks = self._deduplicate_chunk_overlap(all_chunks)
-
-        # Vision-Gated Hierarchy: demote headings to "Front Matter" when
-        # the page has cover/logo images (multimodal validation).
-        all_chunks = self._vision_gate_headings(all_chunks)
+        all_chunks = self._apply_final_boundary_repairs(all_chunks)
 
         # Detect section headings from VLM-transcribed text for scanned documents.
         # Scanned docs have flat hierarchy because Docling can't detect headings.
@@ -2976,14 +3040,22 @@ class BatchProcessor:
         all_chunks = self._infer_headings_from_text(all_chunks)
         all_chunks = self._propagate_headings(all_chunks)
 
+        # Vision-aided front-matter detection must run after every heading
+        # assignment path so later inference/propagation cannot reintroduce
+        # author or publisher names as structural parents.
+        all_chunks = self._apply_vision_aided_front_matter_detection(all_chunks)
+
         # Selective OCR patching for encoding-corrupted chunks.
         # Keeps HybridChunker structure, replaces only the corrupted text spans.
-        if self._intelligence_metadata.get("has_encoding_corruption"):
+        if self.has_encoding_corruption:
             try:
                 from .validators.corruption_interceptor import patch_corrupted_chunks
                 all_chunks = patch_corrupted_chunks(all_chunks, self._current_pdf_path)
             except Exception as _ci_err:
                 logger.warning(f"[CORRUPTION-INTERCEPTOR] Failed: {_ci_err}")
+
+        # Quarantine unrepairable corrupted chunks.
+        all_chunks = self._quarantine_corrupted_text_chunks(all_chunks)
 
         # Remove empty chunks and garbled TOC/table chunks.
         # Docling leaks internal cell markers (", 1 =", ", 2 =") into TOC text.
@@ -3029,7 +3101,46 @@ class BatchProcessor:
             output_jsonl.unlink()
 
         with open(output_jsonl, "a", encoding="utf-8") as f:
-            # Write document-level metadata record as the FIRST line.
+            # ============================================================
+            # PRE-METADATA FILTERS: run all chunk-level filters BEFORE
+            # writing IngestionMetadata so chunk_count is accurate.
+            # ============================================================
+
+            # Filter redundant FULL-PAGE EDITORIAL images on pages that already have text.
+            # Scanned documents produce both OCR text chunks AND a full-page image with
+            # VLM description for the same page. The image description is redundant.
+            pages_with_text = {
+                c.metadata.page_number for c in export_chunks
+                if c.modality == Modality.TEXT and c.metadata and c.metadata.page_number
+            }
+            _pre_filter = len(export_chunks)
+            export_chunks = [
+                c for c in export_chunks
+                if not (
+                    c.modality == Modality.IMAGE
+                    and c.content
+                    and "[FULL-PAGE EDITORIAL" in c.content
+                    and c.metadata
+                    and c.metadata.page_number in pages_with_text
+                )
+            ]
+            _editorial_filtered = _pre_filter - len(export_chunks)
+            if _editorial_filtered:
+                logger.info(
+                    f"[FINALIZE] Filtered {_editorial_filtered} redundant FULL-PAGE EDITORIAL images"
+                )
+
+            # Drop/promote blank image/table assets.
+            export_chunks = self._filter_blank_assets(export_chunks)
+
+            # Re-apply oversize breaker: TABLE→TEXT promotion may create
+            # text chunks exceeding the 1500-char gate.
+            export_chunks = self._apply_oversize_breaker(export_chunks, max_chars=1500)
+
+            # ============================================================
+            # METADATA RECORD: write AFTER all filtering so chunk_count
+            # reflects the actual exported chunk set.
+            # ============================================================
             intel = self._intelligence_metadata or {}
             # Derive is_scan from document_modality (key set by cli.py intelligence stack).
             _modality = intel.get("document_modality") or ""
@@ -3063,30 +3174,6 @@ class BatchProcessor:
                 source_file_hash=_src_hash,
             )
             f.write(json.dumps(meta_record.model_dump(mode="json"), ensure_ascii=False) + "\n")
-
-            # Filter redundant FULL-PAGE EDITORIAL images on pages that already have text.
-            # Scanned documents produce both OCR text chunks AND a full-page image with
-            # VLM description for the same page. The image description is redundant.
-            pages_with_text = {
-                c.metadata.page_number for c in export_chunks
-                if c.modality == Modality.TEXT and c.metadata and c.metadata.page_number
-            }
-            _pre_filter = len(export_chunks)
-            export_chunks = [
-                c for c in export_chunks
-                if not (
-                    c.modality == Modality.IMAGE
-                    and c.content
-                    and "[FULL-PAGE EDITORIAL" in c.content
-                    and c.metadata
-                    and c.metadata.page_number in pages_with_text
-                )
-            ]
-            _editorial_filtered = _pre_filter - len(export_chunks)
-            if _editorial_filtered:
-                logger.info(
-                    f"[FINALIZE] Filtered {_editorial_filtered} redundant FULL-PAGE EDITORIAL images"
-                )
 
             write_buffer: List[str] = []
 
@@ -5122,68 +5209,146 @@ class BatchProcessor:
             return self._doc_avg_text_per_page or 0.0
         return sum(page_chars.values()) / len(page_chars)
 
-    def _vision_gate_headings(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
-        """Demote headings to 'Front Matter' on pages with cover/logo images.
+    def _apply_final_boundary_repairs(
+        self, chunks: List[IngestionChunk]
+    ) -> List[IngestionChunk]:
+        """Apply final cross-chunk boundary repairs before hierarchy inference.
 
-        Uses multimodal signals: if a page has IMAGE chunks whose VLM
-        description mentions cover, logo, illustration, or portrait,
-        any heading on that page that isn't a chapter pattern gets
-        demoted to 'Front Matter'.
+        This is the batch-finalization bridge for semantic stitching. Keep this
+        order explicit: heading stripping can expose orphan operators, operator
+        stitching must happen before mid-sentence merging, and deduplication
+        should see the final stitched text.
+        """
+        # Strip trailing section headings that Docling appended to paragraphs.
+        # Digital PDFs often have "...end of paragraph. preface" where "preface"
+        # is the next section heading concatenated by the layout parser.
+        chunks = self._strip_trailing_headings(chunks)
+
+        # POS Boundary Logic: merge orphan prepositions into next chunk.
+        # "BY" at end of chunk + "Mary GrandPré" at start of next → merge.
+        # "END" stays (it's a noun, not a hungry preposition).
+        chunks = self._merge_hungry_operators(chunks)
+
+        # Final cross-batch mid-sentence merge + dedup.
+        # Per-batch processing can't merge sentences split across batch boundaries.
+        chunks = self._merge_mid_sentence_chunks(chunks)
+        chunks = self._deduplicate_chunk_overlap(chunks)
+        return chunks
+
+    def _vision_gate_headings(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
+        """Compatibility wrapper for the v2.7 front-matter detector."""
+        return self._apply_vision_aided_front_matter_detection(chunks)
+
+    def _apply_vision_aided_front_matter_detection(
+        self, chunks: List[IngestionChunk]
+    ) -> List[IngestionChunk]:
+        """Demote non-structural front-matter headings to ``Front Matter``.
+
+        Front matter is detected by combining layout/vision evidence with a
+        structural boundary: pages before the first chapter-like heading that
+        contain Docling/shadow image extractions are treated as front matter.
+        Numbered/chapter headings are preserved so real body sections are not
+        flattened.
         """
         import re as _re
 
-        # Build per-page image description index
-        page_has_cover: set[int] = set()
-        _COVER_SIGNALS = _re.compile(
-            r"cover|logo|portrait|illustration|sketch|ornament|decoration",
+        chapter_re = _re.compile(
+            r"(^|\b)(chapter|chapitre|hoofdstuk|teil)\s+[A-Za-z0-9ivxlcdm]+"
+            r"|^\s*\d+(?:\.\d+)*\s+\S",
             _re.IGNORECASE,
         )
-        for ch in chunks:
-            if ch.modality != Modality.IMAGE:
-                continue
-            vd = ""
-            if ch.metadata and ch.metadata.visual_description:
-                vd = ch.metadata.visual_description
-            elif ch.content:
-                vd = ch.content
-            if _COVER_SIGNALS.search(vd):
-                pg = ch.metadata.page_number if ch.metadata else 0
-                if pg:
-                    page_has_cover.add(pg)
+        numbered_section_re = _re.compile(r"^\s*\d+(?:\.\d+)+\s+\S")
+        front_visual_re = _re.compile(
+            r"cover|logo|publisher|portrait|illustration|sketch|ornament|decoration|title page",
+            _re.IGNORECASE,
+        )
 
-        if not page_has_cover:
+        def _heading_text(ch: IngestionChunk) -> str:
+            try:
+                ph = ch.metadata.hierarchy.parent_heading
+                if ph:
+                    return ph.strip()
+            except Exception:
+                pass
+            if ch.content:
+                return ch.content.strip().splitlines()[0].strip()
+            return ""
+
+        def _is_chapter_like(text: str) -> bool:
+            return bool(text and chapter_re.search(text))
+
+        def _is_numbered_section(text: str) -> bool:
+            return bool(text and numbered_section_re.search(text))
+
+        visual_pages: set[int] = set()
+        strong_visual_pages: set[int] = set()
+        for ch in chunks:
+            if ch.modality != Modality.IMAGE or not ch.metadata:
+                continue
+            page_no = ch.metadata.page_number or 0
+            if page_no <= 0:
+                continue
+            method = str(getattr(ch.metadata, "extraction_method", "") or "").lower()
+            if method not in {"docling", "shadow"}:
+                continue
+            visual_pages.add(page_no)
+            vd = ch.metadata.visual_description or ch.content or ""
+            if front_visual_re.search(vd):
+                strong_visual_pages.add(page_no)
+
+        if not visual_pages:
             return chunks
 
-        # Find the first chapter-like heading to identify front matter boundary
-        _CHAPTER_RE = _re.compile(r"chapter|teil|hoofdstuk|chapitre|\d+\.\d+\s", _re.IGNORECASE)
-        first_chapter_page = 9999
+        first_chapter_page: Optional[int] = None
         for ch in chunks:
             if ch.modality != Modality.TEXT or not ch.metadata:
                 continue
-            ph = ch.metadata.hierarchy.parent_heading if ch.metadata.hierarchy else ""
-            if ph and _CHAPTER_RE.search(ph):
-                pg = ch.metadata.page_number or 9999
-                first_chapter_page = min(first_chapter_page, pg)
+            heading = _heading_text(ch)
+            if not _is_chapter_like(heading):
+                continue
+            page_no = ch.metadata.page_number or 0
+            if page_no <= 0:
+                continue
+            first_chapter_page = (
+                page_no if first_chapter_page is None else min(first_chapter_page, page_no)
+            )
 
-        # Demote headings on cover pages before first chapter
         demoted = 0
         for ch in chunks:
             if ch.modality != Modality.TEXT or not ch.metadata or not ch.metadata.hierarchy:
                 continue
-            pg = ch.metadata.page_number or 0
-            if pg not in page_has_cover or pg >= first_chapter_page:
+            page_no = ch.metadata.page_number or 0
+            if page_no not in visual_pages:
                 continue
-            ph = ch.metadata.hierarchy.parent_heading
-            if ph and not _CHAPTER_RE.search(ph):
-                ch.metadata.hierarchy.parent_heading = "Front Matter"
-                # Update breadcrumb
-                bp = ch.metadata.hierarchy.breadcrumb_path
-                if bp and len(bp) >= 2:
-                    ch.metadata.hierarchy.breadcrumb_path = [bp[0], "Front Matter", bp[-1]]
-                demoted += 1
+            if first_chapter_page is not None and page_no >= first_chapter_page:
+                continue
+
+            heading = _heading_text(ch)
+            if not heading or _is_chapter_like(heading) or _is_numbered_section(heading):
+                continue
+
+            # A plain image extraction is sufficient on true pre-chapter pages.
+            # If no chapter boundary was detected, require an explicit visual
+            # front-matter cue to avoid demoting arbitrary illustrated documents.
+            if first_chapter_page is None and page_no not in strong_visual_pages:
+                continue
+
+            ch.metadata.hierarchy.parent_heading = "Front Matter"
+            bp = ch.metadata.hierarchy.breadcrumb_path
+            if bp:
+                doc_name = bp[0]
+                leaf = bp[-1] if bp[-1] != "Front Matter" else f"Page {page_no}"
+                ch.metadata.hierarchy.breadcrumb_path = [doc_name, "Front Matter", leaf]
+                ch.metadata.hierarchy.level = min(len(ch.metadata.hierarchy.breadcrumb_path), 5)
+            else:
+                ch.metadata.hierarchy.breadcrumb_path = ["Document", "Front Matter", f"Page {page_no}"]
+                ch.metadata.hierarchy.level = 3
+            demoted += 1
 
         if demoted:
-            logger.info(f"[VISION-GATE] Demoted {demoted} headings to 'Front Matter' on cover pages")
+            logger.info(
+                f"[VISION-FRONT-MATTER] Demoted {demoted} pre-chapter headings to 'Front Matter'"
+            )
 
         return chunks
 
@@ -5209,9 +5374,16 @@ class BatchProcessor:
             "par", "pour", "de", "avec",
         }
 
+        def _strip_boundary_punct(value: str) -> str:
+            return value.strip().strip(".,;:!?").lower()
+
+        def _display_without_boundary_punct(value: str) -> str:
+            return value.strip().strip(".,;:!?")
+
         merged = 0
         text_indices = [i for i, ch in enumerate(chunks)
                         if ch.modality == Modality.TEXT and ch.content]
+        emptied_indices: set[int] = set()
 
         for ti in range(len(text_indices) - 1):
             cur_idx = text_indices[ti]
@@ -5221,9 +5393,9 @@ class BatchProcessor:
 
             # Get last word of current chunk
             last_line = cur.content.rstrip().split("\n")[-1].strip()
-            last_word = last_line.split()[-1].rstrip(".,;:!?") if last_line.split() else ""
+            last_word = _strip_boundary_punct(last_line.split()[-1]) if last_line.split() else ""
 
-            if last_word.lower() not in _HUNGRY:
+            if last_word not in _HUNGRY:
                 continue
 
             # Only merge on same or adjacent pages — cross-page merges create garbage
@@ -5243,21 +5415,27 @@ class BatchProcessor:
 
             # Pull the preposition line from current chunk to next chunk
             lines = cur.content.rstrip().split("\n")
-            if lines and lines[-1].strip().lower() in _HUNGRY:
+            if lines and _strip_boundary_punct(lines[-1]) in _HUNGRY:
                 prep = lines.pop()
                 cur.content = "\n".join(lines).rstrip()
-                nxt.content = prep.strip() + " " + nxt.content.lstrip()
+                prep_text = _display_without_boundary_punct(prep)
+                nxt.content = prep_text + " " + nxt.content.lstrip()
                 if cur.metadata and cur.metadata.refined_content:
                     rc_lines = cur.metadata.refined_content.rstrip().split("\n")
-                    if rc_lines and rc_lines[-1].strip().lower() in _HUNGRY:
+                    if rc_lines and _strip_boundary_punct(rc_lines[-1]) in _HUNGRY:
                         rc_lines.pop()
                         cur.metadata.refined_content = "\n".join(rc_lines).rstrip()
                 if nxt.metadata and nxt.metadata.refined_content:
-                    nxt.metadata.refined_content = prep.strip() + " " + nxt.metadata.refined_content.lstrip()
+                    nxt.metadata.refined_content = prep_text + " " + nxt.metadata.refined_content.lstrip()
+                if not cur.content.strip():
+                    emptied_indices.add(cur_idx)
                 merged += 1
 
         if merged:
             logger.info(f"[POS-MERGE] Merged {merged} orphan prepositions into next chunk")
+
+        if emptied_indices:
+            return [ch for idx, ch in enumerate(chunks) if idx not in emptied_indices]
 
         return chunks
 

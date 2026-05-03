@@ -130,6 +130,7 @@ class StrategyOrchestrator:
     # - ACADEMIC: Multi-column scientific papers, citations
     # - REPORT: General scanned/digital documents
     PROFILE_TO_DOC_TYPE = {
+        "digital_literature": DocumentType.LITERATURE,
         "digital_magazine": DocumentType.MAGAZINE,
         "academic_whitepaper": DocumentType.ACADEMIC,
         "scanned": DocumentType.REPORT,

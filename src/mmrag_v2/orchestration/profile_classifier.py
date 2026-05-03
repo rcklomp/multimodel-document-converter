@@ -58,6 +58,7 @@ class ProfileType(str, Enum):
     """Profile type identifiers."""
 
     ACADEMIC_WHITEPAPER = "academic_whitepaper"
+    DIGITAL_LITERATURE = "digital_literature"  # Born-digital novels & narrative fiction
     DIGITAL_MAGAZINE = "digital_magazine"
     SCANNED = "scanned"  # Standard-quality scans (replaces scanned_clean/literature/magazine)
     SCANNED_DEGRADED = "scanned_degraded"
@@ -216,6 +217,7 @@ class ProfileClassifier:
         # Score all profiles
         scores = [
             self._score_academic_whitepaper(features),
+            self._score_digital_literature(features),
             self._score_digital_magazine(features),
             self._score_scanned(features),
             self._score_scanned_degraded(features),
@@ -318,6 +320,7 @@ class ProfileClassifier:
         }
         digital_profiles = {
             ProfileType.ACADEMIC_WHITEPAPER,
+            ProfileType.DIGITAL_LITERATURE,
             ProfileType.DIGITAL_MAGAZINE,
             ProfileType.TECHNICAL_MANUAL,  # Valid for both
         }
@@ -330,7 +333,7 @@ class ProfileClassifier:
         else:
             logger.info("[CLASSIFIER] Modality: DIGITAL → filtering to digital profiles only")
             modality_valid = [s for s in valid_scores if s.profile_type in digital_profiles]
-            default_fallback = ProfileType.DIGITAL_MAGAZINE
+            default_fallback = ProfileType.TECHNICAL_MANUAL
 
         # V16.1: Confidence-weighted selection
         def weighted_score(s: ProfileScore) -> float:
@@ -379,8 +382,8 @@ class ProfileClassifier:
             logger.warning("[CLASSIFIER] EMERGENCY: All rejected, defaulting to SCANNED")
             return ProfileType.SCANNED
         else:
-            logger.warning("[CLASSIFIER] EMERGENCY: All rejected, defaulting to DIGITAL_MAGAZINE")
-            return ProfileType.DIGITAL_MAGAZINE
+            logger.warning("[CLASSIFIER] EMERGENCY: All rejected, defaulting to TECHNICAL_MANUAL")
+            return ProfileType.TECHNICAL_MANUAL
 
     def _extract_features(
         self,
@@ -507,6 +510,110 @@ class ProfileClassifier:
             confidence=confidence,
         )
 
+    def _score_digital_literature(self, f: ClassificationFeatures) -> ProfileScore:
+        """
+        Score for Digital Literature profile (born-digital novels & narrative fiction).
+
+        MODALITY RULE: This is a DIGITAL profile - HARD REJECT if scan detected.
+
+        SIGNATURE (HARRY Potter, born-digital book PDFs):
+        - domain == "literature" (set by diagnostic engine when dialogue density
+          is high and there are no tables, see document_diagnostic.py:1434+)
+        - is_scan == False (HARD REQUIREMENT - born-digital typesetting)
+        - page_count >= PAGE_COUNT_BOOK (50+; novels are long)
+        - text_density: any (drop-cap-heavy front matter pulls the average down)
+        - median_dim: small (drop caps and dingbats, not editorial photos);
+          a large median_dim signals magazine-style content, not a novel
+
+        Why this profile owns the post-Docling sanity pass:
+        Born-digital novels routinely use display-font drop caps and full-bleed
+        cover artwork that breaks Docling's reading order, sprays
+        classification labels into chunk text, and turns OCR loose on cover
+        photographs. The plan in docs/PLAN_DOCLING_POSTPROCESSOR.md fixes all
+        four; build_pdf_conversion_plan auto-enables every fix when this
+        profile is selected.
+        """
+        score = 0.0
+        reasoning = []
+        confidence = 1.0
+
+        # MODALITY: HARD REQUIREMENT - born-digital only.
+        if f.is_scan:
+            reasoning.append("REJECTED: Scanned document - use scanned profile instead")
+            return ProfileScore(
+                profile_type=ProfileType.DIGITAL_LITERATURE,
+                score=0.0,
+                reasoning=reasoning,
+                confidence=0.0,
+            )
+        reasoning.append("✓ Digital document (modality check passed)")
+
+        # DOMAIN: Literature is the dominant signal (weight: 0.50).
+        # The diagnostic engine sets domain="literature" only when narrative
+        # signals (dialogue density, no tables, long doc) are strong.
+        if f.domain == "literature":
+            score += 0.50
+            reasoning.append("Literature domain - narrative fiction signature")
+        else:
+            reasoning.append(f"Non-literature domain ({f.domain})")
+            confidence *= 0.4
+
+        # PAGE COUNT: Novels are long (weight: 0.20). Short literary works
+        # (poetry chapbooks, short stories) still benefit from the post-pass
+        # but get less weight since the signal is weaker.
+        if f.page_count >= self.PAGE_COUNT_BOOK:
+            score += 0.20
+            reasoning.append(f"Book-length document ({f.page_count} pages)")
+        elif f.page_count >= self.PAGE_COUNT_ARTICLE:
+            score += 0.05
+            reasoning.append(
+                f"Short literary work ({f.page_count} pages) - weak signal"
+            )
+            confidence *= 0.7
+        else:
+            reasoning.append(f"Short document ({f.page_count} pages) - not book-length")
+            confidence *= 0.5
+
+        # MEDIAN DIM: Anti-magazine guard (weight: 0.15). Novels have small
+        # decorative imagery (drop caps, scene-break dingbats); magazines
+        # have large editorial photos. A large median_dim shifts probability
+        # toward digital_magazine.
+        if f.median_dim < self.MEDIAN_DIM_MEDIUM:
+            score += 0.15
+            reasoning.append(
+                f"Small decorative imagery ({f.median_dim}px) - "
+                f"drop caps / dingbats, not editorial photos"
+            )
+        elif f.median_dim < self.MEDIAN_DIM_LARGE:
+            score += 0.05
+            reasoning.append(f"Medium imagery ({f.median_dim}px)")
+        else:
+            reasoning.append(
+                f"Large median_dim ({f.median_dim}px) unusual for novels"
+            )
+            confidence *= 0.6
+
+        # TEXT DENSITY: Bonus for the typical novel range (weight: 0.15).
+        # Novels run ~1000-2500 chars/page; below 500 suggests a sparsely
+        # typeset work (poetry) or front-matter-only sample.
+        if self.TEXT_DENSITY_LOW <= f.text_density <= self.TEXT_DENSITY_HIGH:
+            score += 0.15
+            reasoning.append(
+                f"Novel-range text density ({f.text_density:.0f} chars/page)"
+            )
+        elif f.text_density < self.TEXT_DENSITY_LOW:
+            reasoning.append(
+                f"Low text density ({f.text_density:.0f}) - sparse layout"
+            )
+            confidence *= 0.7
+
+        return ProfileScore(
+            profile_type=ProfileType.DIGITAL_LITERATURE,
+            score=score,
+            reasoning=reasoning,
+            confidence=confidence,
+        )
+
     def _score_digital_magazine(self, f: ClassificationFeatures) -> ProfileScore:
         """
         Score for Digital Magazine profile.
@@ -542,18 +649,23 @@ class ProfileClassifier:
         # IMAGE DENSITY SANITY: > 5.0 images/page indicates decorative inline elements
         # (bullets, ornaments, drop caps, inline icons) rather than real editorial photos.
         # Real magazines have 0.5 – 3.0 large photos per page, not 10-15 tiny objects.
-        # Cap the effective density used for scoring so decorative-heavy books don't get
-        # the same bonus as genuine photo-heavy magazines.
+        # Extreme density gets ZERO image score — these are not editorial photos.
         effective_image_density = min(f.image_density, 3.0)
-        if f.image_density > 5.0:
+        _extreme_density = f.image_density > 5.0
+        if _extreme_density:
             confidence *= 0.15
             reasoning.append(
                 f"Extreme image density ({f.image_density:.1f}/page) → decorative inline "
-                f"elements, not editorial photos; capped at 3.0 for scoring"
+                f"elements, not editorial photos — zero image score"
             )
 
         # IMAGE DENSITY: Primary signal for magazines (weight: 0.30)
-        if effective_image_density >= self.IMAGE_DENSITY_HIGH:
+        if _extreme_density:
+            score += 0.0
+            reasoning.append(
+                f"Image density score=0: {f.image_density:.1f}/page is decorative, not editorial"
+            )
+        elif effective_image_density >= self.IMAGE_DENSITY_HIGH:
             score += 0.30
             reasoning.append(f"High image density ({f.image_density:.2f} >= 0.5)")
         elif effective_image_density >= self.IMAGE_DENSITY_MEDIUM:
@@ -591,11 +703,12 @@ class ProfileClassifier:
             score += 0.20
             reasoning.append("Editorial domain")
         elif f.domain == "literature":
-            # Literature domain (novels, fiction) — digital_magazine is the safe default
-            # profile for narrative content. Score it reasonably so it wins over
-            # technical_manual for books with decorative images.
-            score += 0.15
-            reasoning.append("Literature domain — safe default for narrative content")
+            # Literature (novels, fiction) is NOT magazine content. Books have
+            # decorative inline elements that inflate image_density, but they
+            # are long-form narrative text — not visual editorial spreads.
+            score += 0.05
+            reasoning.append("Literature domain — not editorial magazine content")
+            confidence *= 0.5
         else:
             score += 0.05
             reasoning.append(f"Non-editorial domain ({f.domain})")
@@ -603,8 +716,7 @@ class ProfileClassifier:
 
         # PAGE COUNT: No magazine issue exceeds ~250 pages. Long documents with high
         # image density are illustrated books or photo collections, not magazines.
-        # Literature-domain docs are exempt — novels CAN be 300+ pages.
-        if f.page_count > 250 and f.domain != "literature":
+        if f.page_count > 250:
             confidence *= 0.15
             reasoning.append(
                 f"Very long document ({f.page_count} pages) → not a magazine issue"
@@ -878,6 +990,16 @@ class ProfileClassifier:
             reasoning.append(
                 f"Editorial domain accepted: scanned + long_doc confirms technical manual"
             )
+        elif f.domain == "literature" and f.page_count > 100 and f.is_scan:
+            # Long-form scanned literature (e.g., scanned reference books)
+            # without other profile signals. Digital born-literature is now
+            # owned by digital_literature; only scanned long-form falls here.
+            score += 0.15
+            reasoning.append(
+                f"Long-form scanned literature ({f.page_count} pages) — "
+                f"technical_manual catch-all for OCR'd reference content"
+            )
+            confidence *= 0.7
         else:
             score += 0.0
             reasoning.append(f"Non-technical domain ({f.domain})")

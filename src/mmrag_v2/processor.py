@@ -1,7 +1,7 @@
 """
 V2DocumentProcessor - Docling-Native Document Processing Engine
 ================================================================
-ENGINE_USE: Docling v2.66.0 (Native Layout Analysis)
+ENGINE_USE: Docling v2.86.0 (Native Layout Analysis)
 
 This module implements the V2.0 compliant document processor using Docling's
 native layout analysis engine. It processes PDF, EPUB, HTML, DOCX documents
@@ -39,12 +39,6 @@ from typing import Any, Dict, Generator, List, Optional, Tuple
 
 import fitz  # PyMuPDF for page rendering (OCR cascade)
 import numpy as np
-from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import (
-    EasyOcrOptions,
-    PdfPipelineOptions,
-)
-from docling.document_converter import DocumentConverter, PdfFormatOption
 from PIL import Image
 
 # V3.0.0: Import OCR cascade for scanned text regions
@@ -67,10 +61,13 @@ from .schema.ingestion_schema import (
     create_image_chunk,
     create_table_chunk,
     create_text_chunk,
+    filter_chunk_factory_metadata,
     get_ocr_confidence_level,
     calculate_hierarchy_level,
     COORD_SCALE,
 )
+from .engines.docling_adapter import DoclingPdfAdapter
+from .engines.pdf_plan import PdfConversionPlan, build_pdf_conversion_plan
 from .version import __schema_version__ as SCHEMA_VERSION
 from .state.context_state import ContextStateV2, create_context_state, is_valid_heading
 from .state.magazine_section_detector import (
@@ -235,8 +232,11 @@ class V2DocumentProcessor:
         extraction_strategy: Optional["ExtractionStrategy"] = None,
         # V2.4 Intelligence Stack Metadata (Observability)
         intelligence_metadata: Optional[Dict[str, Any]] = None,
+        conversion_plan: Optional[PdfConversionPlan] = None,
         # Force table serialization through VLM route (when available)
         force_table_vlm: bool = False,
+        # Shared Docling converter for batch processing (avoids model reload)
+        external_converter: Optional[Any] = None,
     ) -> None:
         """
         Initialize V2DocumentProcessor.
@@ -256,6 +256,7 @@ class V2DocumentProcessor:
             doc_hash_override: Override document hash (for batch processing)
             source_file_override: Override source filename (for batch processing)
             extraction_strategy: Dynamic extraction strategy from StrategyOrchestrator
+            conversion_plan: Shared PDF conversion policy
             force_table_vlm: Force table image -> VLM markdown path (fallback to OCR/docling if needed)
         """
         # Store extraction strategy for dynamic thresholds
@@ -264,19 +265,56 @@ class V2DocumentProcessor:
         # V3.0.0: Profile parameters for OCR configuration (shadow-first mode REMOVED)
         self._profile_params: Optional["ProfileParameters"] = None
 
-        # V2.4: Store intelligence metadata for JSONL observability.
-        # Pop keys that must NOT be unpacked into chunk-creation kwargs.
-        _raw_meta: Dict[str, Any] = dict(intelligence_metadata or {})
-        # Workstream B: pop needs_code_enrichment before storing — it is used
-        # only to configure the Docling converter, not as a chunk field.
-        self.needs_code_enrichment: bool = bool(_raw_meta.pop("needs_code_enrichment", False))
-        self._intelligence_metadata: Dict[str, Any] = _raw_meta
+        # V2.4: Store factory-safe intelligence metadata for chunk observability.
+        # Structural/document-level flags are kept on the processor, but must
+        # never be unpacked into create_*_chunk() kwargs.
+        self._conversion_plan = conversion_plan
+        if conversion_plan is not None:
+            self.has_flat_text_corruption = conversion_plan.has_flat_text_corruption
+            self.has_encoding_corruption = conversion_plan.has_encoding_corruption
+            self.geometry_error_rate = conversion_plan.geometry_error_rate
+            self._doc_total_pages = conversion_plan.total_pages
+            self._doc_image_density = conversion_plan.image_density
+            self._doc_avg_text_per_page = conversion_plan.avg_text_per_page
+            self.needs_code_enrichment = conversion_plan.needs_code_enrichment
+            self._extraction_route = conversion_plan.extraction_route
+            self._hybrid_chunker_enabled = conversion_plan.hybrid_chunker_enabled
+            self._max_chunker_input_chars = conversion_plan.max_chunker_input_chars
+            self._max_chunker_per_element_chars = conversion_plan.max_chunker_per_element_chars
+            self._allow_page_level_visuals = conversion_plan.allow_page_level_visuals
+            self._drop_blank_assets = conversion_plan.drop_blank_assets
+            self._quarantine_corrupted_chunks = conversion_plan.quarantine_corrupted_chunks
+            self._suppress_layout_label_text = conversion_plan.suppress_layout_label_text
+            self._intelligence_metadata = conversion_plan.chunk_factory_metadata()
+        else:
+            _raw_meta: Dict[str, Any] = dict(intelligence_metadata or {})
+            self.has_flat_text_corruption = bool(
+                _raw_meta.pop("has_flat_text_corruption", False)
+            )
+            self.has_encoding_corruption = bool(
+                _raw_meta.pop("has_encoding_corruption", False)
+            )
+            self.geometry_error_rate = float(_raw_meta.pop("geometry_error_rate", 0.0))
+            self._doc_total_pages = _raw_meta.pop("total_pages", None)
+            self._doc_image_density = _raw_meta.pop("image_density", None)
+            self._doc_avg_text_per_page = _raw_meta.pop("avg_text_per_page", None)
+            # Workstream B: pop needs_code_enrichment before storing — it is used
+            # only to configure the Docling converter, not as a chunk field.
+            self.needs_code_enrichment = bool(_raw_meta.pop("needs_code_enrichment", False))
+            self._extraction_route = "native_digital"
+            self._max_chunker_input_chars = 500_000
+            self._max_chunker_per_element_chars = 100_000
+            self._drop_blank_assets = True
+            self._quarantine_corrupted_chunks = True
+            self._intelligence_metadata = filter_chunk_factory_metadata(_raw_meta)
         if self._intelligence_metadata:
             logger.info(
                 f"[OBSERVABILITY] Intelligence metadata loaded: "
                 f"profile_type={self._intelligence_metadata.get('profile_type')}, "
                 f"min_dims={self._intelligence_metadata.get('min_image_dims')}, "
-                f"needs_code_enrichment={self.needs_code_enrichment}"
+                f"needs_code_enrichment={self.needs_code_enrichment}, "
+                f"flat_corrupt={self.has_flat_text_corruption}, "
+                f"encoding_corrupt={self.has_encoding_corruption}"
             )
 
         # Use strategy's min dimensions if provided, else defaults
@@ -311,8 +349,27 @@ class V2DocumentProcessor:
         self.ocr_engine = ocr_engine
         self.max_pages = max_pages
 
-        # Initialize Docling converter
-        self._converter = self._create_converter()
+        # Initialize Docling converter — reuse external converter if provided
+        # to avoid reloading the picture classification model per batch.
+        adapter_plan = conversion_plan or build_pdf_conversion_plan(
+            enable_ocr=enable_ocr,
+            ocr_engine=ocr_engine,
+            force_table_vlm=force_table_vlm,
+            needs_code_enrichment=self.needs_code_enrichment,
+            has_encoding_corruption=self.has_encoding_corruption,
+            has_flat_text_corruption=self.has_flat_text_corruption,
+            geometry_error_rate=self.geometry_error_rate,
+            total_pages=self._doc_total_pages or 0,
+            image_density=self._doc_image_density or 0.0,
+            avg_text_per_page=self._doc_avg_text_per_page or 0.0,
+            **self._intelligence_metadata,
+        )
+        self._adapter = DoclingPdfAdapter(adapter_plan)
+        if external_converter is not None:
+            self._converter = external_converter
+            logger.info("[PROCESSOR] Reusing shared Docling converter (batch mode)")
+        else:
+            self._converter = self._adapter.get_converter()
 
         # Initialize Vision Manager (use external if provided for batch processing)
         if external_vision_manager is not None:
@@ -353,83 +410,12 @@ class V2DocumentProcessor:
         self._section_detector = create_section_detector()
 
         logger.info(
-            f"ENGINE_USE: Docling v2.66.0 | V2DocumentProcessor initialized | "
+            f"ENGINE_USE: Docling v2.86.0 | V2DocumentProcessor initialized | "
             f"OCR: {ocr_engine if enable_ocr else 'disabled'} | "
             f"Vision: {vision_provider} | "
             f"Max pages: {max_pages if max_pages else 'ALL'} | "
             f"Enhancements: SpatialPropagator, MagazineSectionDetector"
         )
-
-    def _create_converter(self) -> DocumentConverter:
-        """
-        Create Docling DocumentConverter with V2.0 compliant options.
-
-        SRS REQ-PDF-04: High-fidelity rendering (min scale 2.0)
-
-        OCR is explicitly disabled via do_ocr=False when enable_ocr is False
-        to prevent EasyOCR import warnings.
-
-        Increased figure detection: generate_background_images=True to catch
-        editorial photos that may be labeled as background elements.
-        """
-        pipeline_options = PdfPipelineOptions()
-        pipeline_options.images_scale = 2.0  # High-Fidelity Rendering
-        pipeline_options.generate_page_images = (
-            True  # ✅ REQ-PDF-04: Enable page rendering for padding
-        )
-        pipeline_options.generate_picture_images = True  # Extract figures
-        pipeline_options.generate_table_images = True  # Extract tables
-        if hasattr(pipeline_options, "sort_by_reading_order"):
-            pipeline_options.sort_by_reading_order = True
-            logger.info("Docling reading-order sort enabled: sort_by_reading_order=True")
-        # Prefer structured table extraction so table content is emitted as text/markdown,
-        # not as image-only placeholders.
-        if hasattr(pipeline_options, "do_table_structure"):
-            pipeline_options.do_table_structure = True
-        if hasattr(pipeline_options, "do_cell_matching"):
-            # False: use structure model's own text cells instead of PDF backend cells.
-            # Prevents ", 1 =" cell marker artifacts leaking into TOC/table text.
-            pipeline_options.do_cell_matching = False
-
-        # REQ: ZERO-LATENCY PARAMETER ENFORCEMENT
-        # Note: Page limiting is enforced at the batch splitting stage,
-        # not at the Docling converter level
-        if self.max_pages is not None and self.max_pages > 0:
-            logger.info(
-                f"[CORE] Page limit set to: {self.max_pages}. Will process only first {self.max_pages} pages."
-            )
-
-        # Explicitly disable OCR at the pipeline level to prevent EasyOCR warnings
-        if self.enable_ocr:
-            pipeline_options.do_ocr = True
-            try:
-                if self.ocr_engine == "easyocr":
-                    pipeline_options.ocr_options = EasyOcrOptions()
-                else:
-                    pipeline_options.ocr_options = EasyOcrOptions()
-            except ImportError:
-                logger.warning("OCR library not installed, disabling OCR")
-                pipeline_options.do_ocr = False
-                self.enable_ocr = False
-        else:
-            # Explicitly disable OCR to prevent EasyOCR import warnings
-            pipeline_options.do_ocr = False
-            logger.info("OCR explicitly disabled via pipeline_options.do_ocr=False")
-
-        # Workstream B: enable Docling-native code enrichment when the batch processor's
-        # code-evidence pre-pass (or explicit injection via intelligence_metadata) set the
-        # flag.  NOT triggered from has_encoding_corruption alone — see DECISIONS.md.
-        if self.needs_code_enrichment:
-            pipeline_options.do_code_enrichment = True
-            pipeline_options.do_formula_enrichment = False
-            logger.info("[CODE-ENRICH] Enabled Docling code enrichment (needs_code_enrichment=True)")
-
-        converter = DocumentConverter(
-            format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
-        )
-
-        logger.info("ENGINE_USE: Using Docling v2.66.0 with REQ-PDF-04 compliance")
-        return converter
 
     def _extract_page_no_from_element(self, element: Any) -> int:
         """Best-effort page number extraction from element provenance."""
@@ -2045,7 +2031,7 @@ class V2DocumentProcessor:
         if not file_path.exists():
             raise FileNotFoundError(f"Document not found: {file_path}")
 
-        logger.info(f"ENGINE_USE: Docling v2.66.0 | Processing: {file_path.name}")
+        logger.info(f"ENGINE_USE: Docling v2.86.0 | Processing: {file_path.name}")
 
         # Use overrides for batch processing, otherwise compute from file
         doc_hash = self._doc_hash_override or self._compute_doc_hash(file_path)
@@ -2067,7 +2053,7 @@ class V2DocumentProcessor:
             logger.info(f"Batch processing mode: page_offset={self._page_offset}")
 
         # EPUB pre-processing: extract XHTML chapters to a temporary HTML file.
-        # Docling 2.66.0 supports HTML but not EPUB natively.
+        # Docling 2.86.0 supports HTML but not EPUB natively.
         _tmp_epub_html: Optional[Path] = None
         if file_path.suffix.lower() == ".epub":
             _tmp_epub_html = self._epub_to_html(file_path)
@@ -2083,7 +2069,14 @@ class V2DocumentProcessor:
         import time as _time
 
         _start = _time.perf_counter()
-        result = self._converter.convert(str(file_path))
+        # Route through the adapter so post-Docling sanity stages (reading-order
+        # y-sort, drop-cap promotion) run when the plan opts in. Calling the
+        # raw self._converter would bypass them and re-create the page-13
+        # swap and dislocated drop-cap fixed by PLAN_DOCLING_POSTPROCESSOR.md.
+        if self._adapter is not None:
+            result = self._adapter.convert(str(file_path))
+        else:
+            result = self._converter.convert(str(file_path))
         _elapsed = _time.perf_counter() - _start
 
         print(f"✓ Docling conversion complete in {_elapsed:.1f}s", flush=True)
@@ -2117,9 +2110,62 @@ class V2DocumentProcessor:
         # Use Docling's HybridChunker for text elements (sentence-aware
         # splitting, proper heading hierarchy). Process IMAGE/TABLE
         # elements through the existing element-by-element pipeline.
+        #
+        # PATHOLOGICAL INPUT GUARD: If total text exceeds the safe
+        # threshold, skip HybridChunker to avoid CPU-bound hangs from
+        # the sentence-transformer tokenizer on massive inputs.
         # ================================================================
         _use_hybrid = True
         _hybrid_text_chunks: List[IngestionChunk] = []
+
+        # Extraction route check: hybrid_chunker_enabled flag controls whether
+        # HybridChunker is used. Scanned documents set this to False because
+        # HybridChunker assumes clean digital text and OCR output is noisy.
+        _use_hybrid = getattr(self, "_hybrid_chunker_enabled", True)
+        if not _use_hybrid:
+            logger.info(
+                "[EXTRACTION-ROUTE] hybrid_chunker_enabled=False: using element-by-element "
+                "chunking (HybridChunker disabled for scan-origin documents)"
+            )
+
+        # Guard: estimate total document text size before chunking, and
+        # detect any single pathological element (e.g. an index page that
+        # Docling extracts as one mega-element) that would feed a
+        # multi-million-token sequence to the sentence-transformer tokenizer.
+        if _use_hybrid:
+            _max_chars = getattr(self, "_max_chunker_input_chars", 500_000)
+            _max_per_elem = getattr(self, "_max_chunker_per_element_chars", 100_000)
+            _total_text_chars = 0
+            _max_elem_chars = 0
+            try:
+                for _item_tuple in self._get_ordered_doc_items(doc):
+                    _elem, _ = _item_tuple
+                    _elem_text = getattr(_elem, "text", None)
+                    if _elem_text:
+                        _elem_len = len(_elem_text)
+                        _total_text_chars += _elem_len
+                        if _elem_len > _max_elem_chars:
+                            _max_elem_chars = _elem_len
+                    if _total_text_chars > _max_chars or _max_elem_chars > _max_per_elem:
+                        break
+            except Exception:
+                pass
+
+            if _total_text_chars > _max_chars:
+                _use_hybrid = False
+                logger.warning(
+                    f"[HYBRID-CHUNKER-GUARD] Document text ({_total_text_chars:,} chars) "
+                    f"exceeds safe threshold ({_max_chars:,}). Falling back to "
+                    f"element-by-element chunking to avoid CPU hang."
+                )
+            elif _max_elem_chars > _max_per_elem:
+                _use_hybrid = False
+                logger.warning(
+                    f"[HYBRID-CHUNKER-GUARD] Single element ({_max_elem_chars:,} chars) "
+                    f"exceeds per-element threshold ({_max_per_elem:,}). Falling back "
+                    f"to element-by-element chunking to avoid pathological tokenization."
+                )
+
         if _use_hybrid:
             try:
                 _hybrid_text_chunks = self._process_text_with_hybrid_chunker(
@@ -2138,7 +2184,7 @@ class V2DocumentProcessor:
                 # When encoding corruption is detected, force-refine ALL chunks
                 # (the text layer has /C211 etc. that need LLM reconstruction).
                 # This is "Heal-over" — keep HybridChunker's structure, fix the text.
-                _encoding_corrupt = self._intelligence_metadata.get("has_encoding_corruption", False)
+                _encoding_corrupt = self.has_encoding_corruption
                 if self._refiner and _encoding_corrupt:
                     try:
                         self._refiner.config.min_refine_threshold = 0.0
@@ -2290,7 +2336,7 @@ class V2DocumentProcessor:
 
         assets_saved = len(list(self.assets_dir.glob("*.png")))
         logger.info(
-            f"ENGINE_USE: Docling v2.66.0 | Completed: {file_path.name} | "
+            f"ENGINE_USE: Docling v2.86.0 | Completed: {file_path.name} | "
             f"Doc ID: {doc_hash} | Assets saved: {assets_saved}"
         )
 
@@ -2317,13 +2363,39 @@ class V2DocumentProcessor:
         proper heading hierarchy from the document structure.
         """
         from docling_core.transforms.chunker import HybridChunker
+        import signal
 
+        _chunker_timeout = 120  # seconds per batch; fall back if exceeded
 
-        chunker = HybridChunker(
-            tokenizer="sentence-transformers/all-MiniLM-L6-v2",
-            max_tokens=350,  # ~1400 chars — keeps chunks under the 1500-char oversize gate
-        )
-        doc_chunks = list(chunker.chunk(doc))
+        chunker_kwargs: Dict[str, Any] = {
+            "tokenizer": "sentence-transformers/all-MiniLM-L6-v2",
+            "max_tokens": 350,  # ~1400 chars — keeps chunks under the 1500-char oversize gate
+        }
+        if getattr(self, "_suppress_layout_label_text", False):
+            from .engines.docling_serializers import MmragChunkingSerializerProvider
+            chunker_kwargs["serializer_provider"] = MmragChunkingSerializerProvider()
+        chunker = HybridChunker(**chunker_kwargs)
+
+        # Per-batch time guard: HybridChunker's sentence-transformer
+        # tokenizer can be slow on dense pages. If a single batch exceeds
+        # the timeout, fall back to element-by-element chunking.
+        def _chunker_alarm(signum, frame):
+            raise TimeoutError("HybridChunker exceeded per-batch time limit")
+
+        old_handler = signal.signal(signal.SIGALRM, _chunker_alarm)
+        try:
+            signal.alarm(_chunker_timeout)
+            doc_chunks = list(chunker.chunk(doc))
+            signal.alarm(0)  # Cancel alarm
+        except TimeoutError:
+            signal.alarm(0)
+            logger.warning(
+                f"[HYBRID-CHUNKER-GUARD] Batch exceeded {_chunker_timeout}s "
+                f"time limit. Falling back to element-by-element chunking."
+            )
+            raise  # Let caller set _use_hybrid=False via its except block
+        finally:
+            signal.signal(signal.SIGALRM, old_handler)
 
         # Filter out DOCUMENT_INDEX (TOC) elements
         try:
@@ -3392,7 +3464,7 @@ class V2DocumentProcessor:
                 chunk_count += 1
 
         logger.info(
-            f"ENGINE_USE: Docling v2.66.0 | " f"Written {chunk_count} chunks to {final_output_path}"
+            f"ENGINE_USE: Docling v2.86.0 | " f"Written {chunk_count} chunks to {final_output_path}"
         )
 
         return str(final_output_path)
@@ -3479,7 +3551,7 @@ class V2DocumentProcessor:
                 logger.debug(f"[ATOMIC-WRITE] {chunk_count} chunks written to {final_output_path}")
 
         logger.info(
-            f"ENGINE_USE: Docling v2.66.0 | "
+            f"ENGINE_USE: Docling v2.86.0 | "
             f"Written {chunk_count} chunks ATOMICALLY to {final_output_path}"
         )
 

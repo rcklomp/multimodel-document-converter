@@ -48,6 +48,7 @@ logger = logging.getLogger(__name__)
 class ProfileType(str, Enum):
     """Strategy profile type identifier."""
 
+    DIGITAL_LITERATURE = "digital_literature"  # Born-digital novels & narrative fiction
     DIGITAL_MAGAZINE = "digital_magazine"
     ACADEMIC_WHITEPAPER = "academic_whitepaper"
     SCANNED_DEGRADED = "scanned_degraded"
@@ -346,6 +347,89 @@ class DigitalMagazineProfile(BaseProfile):
                 semantic_overlap_ratio=0.10,
             )
         return None
+
+
+# ============================================================================
+# DIGITAL LITERATURE PROFILE
+# ============================================================================
+
+
+class DigitalLiteratureProfile(BaseProfile):
+    """
+    Profile for born-digital novels and narrative fiction.
+
+    SIGNATURE (HARRY Potter, Scholastic / Acrobat Distiller-style PDFs):
+    - domain == "literature" (set by diagnostic engine via dialogue density)
+    - Native digital, NOT scanned
+    - Long page counts (typical novel: 200-500 pages)
+    - Display-font drop caps at chapter starts
+    - Photographic cover artwork on front/back matter
+    - Decorative dingbats / scene breaks (drives image_density up while
+      median_dim stays small)
+
+    POST-DOCLING SANITY PASS (PLAN_DOCLING_POSTPROCESSOR.md):
+    This profile is the trigger for the four post-Docling stages:
+      1. reading_order_sort        - fixes paragraph swaps
+      2. dropcap_promotion          - merges stray "M" glyphs into the body
+      3. label-leak filter          - suppresses Other/Icon/Table classification
+      4. raised bitmap_area_threshold (0.92) - keeps OCR off cover photos
+
+    The plan field auto-enable lives in build_pdf_conversion_plan; this
+    strategy profile only needs to declare the right ProfileType so the
+    routing reaches the plan builder.
+
+    EXTRACTION:
+    - Smaller min_image dimensions than magazines (drop caps & dingbats are
+      ~30-80px); we still want to keep them as visible elements but not as
+      large editorial photos.
+    - Background extraction off - novels have no editorial photo background.
+    - Standard sensitivity (0.5).
+
+    VLM:
+    - Same strict, pixel-accurate stance as digital_magazine (HARRY's
+      illustrations are book artwork, not technical diagrams).
+    """
+
+    @property
+    def profile_type(self) -> ProfileType:
+        return ProfileType.DIGITAL_LITERATURE
+
+    @property
+    def name(self) -> str:
+        return "Born-Digital Literature"
+
+    def get_parameters(self) -> ProfileParameters:
+        return ProfileParameters(
+            sensitivity=0.5,
+            min_image_width=40,  # Catch drop caps and small dingbats
+            min_image_height=40,
+            extract_backgrounds=False,  # Novels have no editorial backgrounds
+            enable_shadow_extraction=False,
+            vlm_freedom=VLMFreedom.STRICT,
+            inject_scan_hints=False,
+            inject_historical_hints=False,
+            confidence_threshold=0.8,
+            strip_artifacts_from_text=False,
+            aggressive_deduplication=False,
+        )
+
+    def get_vlm_prompt_config(self) -> VLMPromptConfig:
+        return VLMPromptConfig(
+            base_hints=[
+                "This is a born-digital novel - illustrations are book artwork",
+                "Drop caps and dingbats are typographic ornaments, not content",
+                "Cover artwork is decorative; treat it as a photograph or illustration",
+            ],
+            artifact_hints=[],  # No scan artifacts in born-digital novels
+            domain_context="literature/narrative-fiction",
+            freedom_instruction=(
+                "STRICT MODE: Describe ONLY what you can clearly see. "
+                "Do not interpret narrative content from cover imagery."
+            ),
+        )
+
+    def should_use_diagnostic_context(self) -> bool:
+        return False
 
 
 # ============================================================================
@@ -783,6 +867,7 @@ class ProfileManager:
 
     # Registry of available profiles
     _profiles: Dict[ProfileType, type] = {
+        ProfileType.DIGITAL_LITERATURE: DigitalLiteratureProfile,
         ProfileType.DIGITAL_MAGAZINE: DigitalMagazineProfile,
         ProfileType.ACADEMIC_WHITEPAPER: AcademicWhitepaperProfile,
         ProfileType.SCANNED_DEGRADED: ScannedDegradedProfile,
@@ -832,6 +917,7 @@ class ProfileManager:
             # Map ClassifierProfileType to profile class
             type_mapping = {
                 ClassifierProfileType.ACADEMIC_WHITEPAPER: AcademicWhitepaperProfile,
+                ClassifierProfileType.DIGITAL_LITERATURE: DigitalLiteratureProfile,
                 ClassifierProfileType.DIGITAL_MAGAZINE: DigitalMagazineProfile,
                 ClassifierProfileType.SCANNED: ScannedProfile,
                 ClassifierProfileType.SCANNED_DEGRADED: ScannedDegradedProfile,
