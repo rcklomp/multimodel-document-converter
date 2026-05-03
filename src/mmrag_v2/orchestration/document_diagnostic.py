@@ -1453,6 +1453,27 @@ class DocumentDiagnosticEngine:
                 f"[DOMAIN-DETECT] Content: High dialogue ratio ({_dialogue_ratio:.2f}) "
                 f"+ {total_pages} pages + no tables → literature +0.8"
             )
+        elif (
+            _dialogue_pages >= 1
+            and total_pages > 20
+            and not has_tables
+            and 500 < avg_text_per_page < 2500
+        ):
+            # Any dialogue at all + 20+ pages + novel-density text + no tables
+            # → likely literature. The diagnostic only samples ~5 pages by
+            # default (DIAGNOSTIC_SAMPLE_PAGES), so a ratio threshold is too
+            # strict for moderate-length novels (one dialogue page in a 5-page
+            # sample is only 20%, below the long-form 0.3 cutoff).
+            # Excluded by avg_text_per_page > 2500: academic / legal docs.
+            # Excluded by has_tables: interview transcripts, manuals, forms.
+            # Catches the 30-page HARRY test slice and similar novel chapters.
+            content_score_literature += 0.4
+            logger.debug(
+                f"[DOMAIN-DETECT] Content: Some dialogue ({_dialogue_pages}/"
+                f"{_total_sampled} sampled pages) + {total_pages}pp + "
+                f"novel-density text ({avg_text_per_page:.0f}) + no tables "
+                f"→ literature +0.4"
+            )
         elif total_pages > 100 and not has_tables and avg_text_per_page < 2500:
             # Long document without tables or heavy academic text → possible literature
             content_score_literature += 0.3
