@@ -18,6 +18,31 @@
 > investigation step expanded with empirical Docling OCR-fallback
 > findings.
 
+> **v3 → v3.1 (2026-05-03):** Added the **Parallel-Site Audit**
+> cross-cutting principle (§2b) and a per-phase parallel-site audit
+> step. The lesson: today's earlier `processor.py:2072` bypass
+> happened because a single-site fix (the v2.7 §5 adapter refactor)
+> wasn't audited against parallel call sites. This rewrite found
+> several **existing fixes that may already cover the v2.8 gaps**:
+> - Phase 1: `batch_processor.py:730-743` already defines
+>   `_ctrl_table` and applies it unconditionally on chunk-dict
+>   export. The failing A_comprehensive_review output is dated
+>   2026-04-12, BEFORE this code shipped (commit `3bdbe0f`,
+>   2026-05-03). Phase 1 step 0 is now: **re-run conversion and check
+>   if Phase 1 work is even needed.**
+> - Phase 2: `processor.py:2079` STILL contains a fallback
+>   `else: result = self._converter.convert(...)` after today's bypass
+>   patch. The new static guard must understand this conditional or
+>   the fallback should be removed.
+> - Phase 3: `batch_processor.py:3052` already invokes
+>   `patch_corrupted_chunks(...)`. Phase 3 step 1 (gating
+>   investigation) must check if this line is reached for Combat
+>   pages, OR if it runs but doesn't heal.
+> - Phase 4: `cli.py:1112` AND `cli.py:1741` both call
+>   `decide_code_enrichment_for_pdf(...)` — the cheap-evidence trigger
+>   exists in TWO places (process command + batch command). Both must
+>   be audited.
+
 ---
 
 ## 1. Why this plan exists
@@ -75,6 +100,41 @@ Closing all four leaves the corpus in a state where:
   without remote inference. Remote CodeFormulaV2 remains a v2.9+
   option for documents where reconstruction is insufficient.
 
+## 2b. Parallel-Site Audit (cross-cutting principle)
+
+**Lesson learned 2026-05-03 (post-Docling sanity pass):** A
+single-site fix is suspect until parallel call sites in the
+pipeline are audited. The post-Docling sanity pass shipped without
+catching `processor.py:2072` for half a day because:
+- v2.7 §5's static guard banned Docling option *construction*
+  outside the adapter,
+- but `processor.py:2072` was *invocation* of an already-cached
+  converter (`self._converter.convert(...)`),
+- so the post-processors were silently bypassed for any path that
+  went through `V2DocumentProcessor.process_to_jsonl_atomic`
+  (i.e. the `process` CLI command without batching).
+
+**Mandatory step for every production-code phase in this plan:**
+before designing a fix, walk the parallel call sites that touch the
+same data. Ask:
+
+1. Does the issue ALREADY have a fix elsewhere in the pipeline that
+   the failing data simply hasn't been re-run through? (Check output
+   timestamps vs. relevant commit dates.)
+2. Does the existing fix have too narrow a gate (e.g. fires on
+   `\x00` only when the bug surface is `\x01`-`\x1F`)?
+3. Are there parallel boundaries (CLI process vs. CLI batch;
+   `BatchProcessor` vs. `V2DocumentProcessor`; `engines/pdf_engine.py`)
+   that need the same change?
+4. Is there an upstream library config (Docling, EasyOCR, OcrMac)
+   that already addresses the issue without custom code? (Per
+   "Libraries first, custom code last" — CLAUDE.md.)
+
+Each phase below has an explicit **Parallel-site audit** step listing
+the specific files / line ranges to inspect before writing code.
+Skipping the audit is the recurring failure mode the
+`processor.py:2072` incident exposed.
+
 ## 3. Phases
 
 Phases ordered to front-load the cheapest concrete fixes (Phase 0-2)
@@ -121,10 +181,21 @@ in-document separators with normal punctuation. Concrete case found:
 as a separator in the PDF source — strip-only would lose structure;
 replacing with `; ` preserves the keyword list.
 
-**Where:** Add at the chunk export boundary in
-`src/mmrag_v2/mapper.py` (or
-`src/mmrag_v2/validators/quality_filter_tracker.py` if that's where
-chunk-text normalization lives) so it runs once at finalization.
+**Parallel-site audit (do this FIRST):**
+
+| Site | File:line | Current behavior | Action |
+|---|---|---|---|
+| Existing ctrl-table | `batch_processor.py:730` | Defines `_ctrl_table = {c: None for c in range(32) if c not in (10, 9)} \| {127: None}` — covers 0x01 | Reuse, do not redefine |
+| Conditional gate | `batch_processor.py:731-732` | Only translates when `"\x00" in chunk.content` — gate too narrow | If 0x01 alone is the bug surface, broaden to `if any(0 <= ord(c) <= 31 and c not in '\n\t' for c in chunk.content)` OR rely on the unconditional pass at 740-743 |
+| Unconditional gate | `batch_processor.py:740-743` | Translates dumped chunk content unconditionally — already strips 0x01 | Verify this path is reached for the failing chunk |
+| Output age check | `output/A_comprehensive_review_on_hybrid_electri/ingestion.jsonl` | Timestamp 2026-04-12; predates the `_ctrl_table` code (commit `3bdbe0f`, 2026-05-03) | **Step 0: re-run conversion. Phase 1 may be a no-op.** |
+| Other export paths | `processor.py:2505` (`content=text.strip()`); `mapper.py` `create_*_chunk(...)` | Each constructs chunks; need to confirm they all flow through the existing `_ctrl_table` site | If any export path bypasses `batch_processor`'s sanitizer, replace = `; ` semantics needs to land there too |
+
+**Where (only if parallel-site audit confirms work is needed):**
+Replace logic should live where the existing `_ctrl_table` is
+applied (`batch_processor.py:740-743`). If the failing chunk
+doesn't go through that path, the fix is to route it there, not to
+add a parallel sanitizer.
 
 **Heuristic:**
 ```
@@ -171,6 +242,16 @@ outside the adapter. It misses raw `self._converter.convert(...)`
 *invocation* on a cached converter — exactly how `processor.py:2072`
 silently bypassed `apply_postprocessors` until the 2026-05-03 patch.
 
+**Parallel-site audit (do this FIRST):**
+
+| Site | File:line | Current behavior | Action |
+|---|---|---|---|
+| Bypass site fixed today | `processor.py:2076-2079` | `if self._adapter is not None: result = self._adapter.convert(...) else: result = self._converter.convert(...)` | The else-branch fallback is a guard violation. Either remove (adapter is always set in production) or whitelist the conditional in the guard. |
+| Indirect cached-converter use | `processor.py:1950` | `method = getattr(self._converter, method_name, None)` followed by `method(...)` if not None | Dynamic method lookup; guard must catch `getattr(self._converter, "convert", ...)` or document why it's safe. |
+| BatchProcessor adapter use | `batch_processor.py:1364` | `result = self._adapter.convert(batch_path)` | Already correct; positive-case sanity check. |
+| BatchProcessor get_converter sites | `batch_processor.py:1363, 2433` | `self._docling_converter = self._adapter.get_converter()` | Caches the converter; downstream call sites for `self._docling_converter.convert(...)` must be guarded too. |
+| PDFEngine | `engines/pdf_engine.py:147+` | Holds `self._adapter: Optional[DoclingPdfAdapter]` and `self._converter` | Same pattern as processor.py; verify no `self._converter.convert(...)` slips through. |
+
 **Approach:**
 1. Add `tests/test_pdf_conversion_plan.py::test_no_raw_converter_invocation_outside_adapter`
    — AST-walk every production `*.py` under `src/mmrag_v2/`. Flag any
@@ -181,8 +262,16 @@ silently bypassed `apply_postprocessors` until the 2026-05-03 patch.
    `engines/docling_adapter.py`.
 2. Allow-list pattern: `self._adapter.convert(...)` is fine because
    the adapter wraps it.
-3. Add a positive-case test that the guard fires on a synthetic
+3. **Decide what to do with `processor.py:2079` else-branch.** Either:
+   - Remove the fallback (the adapter is always set when the
+     processor handles a PDF; the else-branch is dead code).
+   - Or wrap the `else` in a `# nocoverage: guard-allow` comment
+     that the AST walker recognizes.
+4. Add a positive-case test that the guard fires on a synthetic
    bad-pattern source string passed via AST parser.
+5. Add a guard for the indirect `getattr(self._converter, ...)`
+   pattern at `processor.py:1950` — either whitelist explicitly
+   (after confirming it's safe) or block it.
 
 **Tests (red→green):**
 - `test_no_raw_converter_invocation_outside_adapter` — passes on
@@ -239,23 +328,35 @@ patching) is the correct granularity. The bug is that it isn't
 firing on the Combat chunks; investigation step is unchanged from
 v2.
 
+**Parallel-site audit (do this FIRST):**
+
+| Site | File:line | Current behavior | Action |
+|---|---|---|---|
+| Interceptor invocation | `batch_processor.py:3052` | `from .validators.corruption_interceptor import patch_corrupted_chunks; all_chunks = patch_corrupted_chunks(all_chunks, self._current_pdf_path)` | Verify this line is reached for Combat (add a logger.info at entry). If not reached → gating bug; if reached → re-extraction bug. |
+| Interceptor diagnostic check | `batch_processor.py:826-834` | Imports `has_encoding_artifacts` for a different downstream check | Confirm this isn't independently filtering the chunks in a way that hides whether the interceptor ran. |
+| `quarantine_corrupted_chunks` policy | `engines/pdf_plan.py` `corruption_recovery_policy` derived bool | Magazine plans default to `quarantine` (gate IS on) | Confirm the magazine route doesn't override to `keep` somewhere. |
+| OCR engine availability | `validators/corruption_interceptor.py` imports | Uses `pytesseract` | Apple Silicon may lack `tesserocr`/`tesseract`; check whether `OcrMacOptions` (Docling 2.86 native) is a drop-in replacement. |
+| `V2DocumentProcessor` non-batch path | `processor.py` finalization | Does NOT appear to call `patch_corrupted_chunks` | Verify; if non-batch path bypasses the interceptor, that's an independent gap (parallel-site lesson again). |
+
 **Steps:**
 1. **Investigate why CorruptionInterceptor isn't catching them.**
-   Possibilities:
-   - Gating: the interceptor only runs when
-     `quarantine_corrupted_chunks` is True — check the magazine
-     plan's `corruption_recovery_policy`.
-   - Re-extraction failure: the per-bbox OCR returns equally
-     corrupted text and the original is kept.
-   - Bbox routing: magazine multi-column pages need column-aware
-     bbox crops; the current single-bbox approach may straddle
-     ornament glyphs and data.
-   - Threshold: the interceptor may consider 13 `�` chars in a
-     500-char chunk below its threshold.
-   - OCR engine: the current interceptor uses `pytesseract`
-     (per its imports). Docling 2.86 ships `OcrMacOptions` which
-     is faster on Apple Silicon and works without `tesserocr`. If
-     OCR engine availability is the gating issue, switch to OcrMac.
+   Use the audit table above as the checklist:
+   - Confirm `patch_corrupted_chunks` is reached for Combat
+     conversions (add temporary logger.info or inspect existing
+     logs).
+   - If reached: per-bbox OCR is failing. Try switching OCR engine
+     to `OcrMacOptions` (faster on Apple Silicon, ships with Docling
+     2.86, works without `tesserocr`).
+   - If NOT reached: gating bug. Trace back to the magazine plan's
+     `corruption_recovery_policy`.
+   - Threshold check: 13 `�` in a 500-char chunk should easily
+     trip `has_encoding_artifacts` (the regex matches a single
+     `�`); if it doesn't, the bug is in the call path, not
+     the threshold.
+   - **Confirm V2DocumentProcessor non-batch path also runs the
+     interceptor.** If it doesn't, that's a parallel-site bug
+     (Combat happens to go through batch, but a future doc may
+     not).
 2. **Decide intervention layer based on step 1.** Options:
    - **A. Fix CorruptionInterceptor gating + switch to OcrMac
      engine (preferred — Docling-native, fixes existing
@@ -349,12 +450,25 @@ Docling 2.86 explicitly removes MPS from supported devices for
 supported_devices=[CPU, CUDA]`). For Chaubal's 359 pages that is
 ~150 minutes of CPU per full conversion.
 
+**Parallel-site audit (do this FIRST):**
+
+| Site | File:line | Current behavior | Action |
+|---|---|---|---|
+| Process command trigger | `cli.py:1112` | `needs_code_enrichment, code_reason, code_score = decide_code_enrichment_for_pdf(...)` | Verify it fires on Chaubal. |
+| Batch command trigger | `cli.py:1741` | Same call in the batch path | Same — verify both paths agree. |
+| Plan field consumer (adapter) | `engines/docling_adapter.py` `if self.plan.needs_code_enrichment: options.do_code_enrichment = True` | Already wired | Confirm adapter is actually invoked (Phase 2 covers this). |
+| Plan field reader (V2DocumentProcessor) | `processor.py:279, 303` | Reads `needs_code_enrichment` from plan AND from raw metadata pop | Two different read paths; confirm they agree. |
+| Plan field reader (BatchProcessor) | `batch_processor.py:617` | Reads from `plan.needs_code_enrichment` in `set_conversion_plan` | Single source. |
+| Cheap-evidence trigger logic | `tests/test_code_enrichment_decision.py` | Existing tests pin the decision boundaries | Add a Chaubal-shaped feature vector; assert trigger fires. |
+| MmragChunkingSerializerProvider interaction | `engines/docling_serializers.py` | Custom serializer suppresses picture labels | Verify it doesn't strip enriched code text (CodeItem text shouldn't go through the picture serializer, but worth sanity-checking the chunker's serialization order). |
+
 **Approach (Docling-native, no new code module):**
 1. **Confirm `needs_code_enrichment` cheap-evidence trigger fires
-   on Chaubal.** The trigger lives in CLI / batch plan-builder code;
-   verify it sets `needs_code_enrichment=True` for Chaubal based on
-   `CodeItem` count, code chunk ratio, or sampled regions. If it
-   does not fire, fix the trigger.
+   on Chaubal.** The trigger lives in CLI / batch plan-builder code
+   (TWO places per the audit above); verify both paths set
+   `needs_code_enrichment=True` for Chaubal based on `CodeItem`
+   count, code chunk ratio, or sampled regions. If either does not
+   fire, fix the trigger.
 2. **Run Chaubal full conversion with `needs_code_enrichment=True`.**
    Accept the ~150 min CPU cost as a one-off for v2.8's broad
    reconversion. Confirm `indentation_fidelity >= 0.85`.
@@ -574,6 +688,32 @@ matching commit):
     SCAN0013 calibration issue and Qdrant migration strategy.
   - Total estimate revised from 3-9 days → 3-7 days; external
     dependency removed.
+
+- **2026-05-03 v3.1** — Added §2b "Parallel-Site Audit" cross-cutting
+  principle and per-phase parallel-site audit tables. Triggered by
+  feedback that the post-Docling sanity pass had to be patched
+  (`processor.py:2072` bypass) because a single-site fix wasn't
+  audited against parallel call sites. Ground-truth findings from
+  the audit:
+  - Phase 1: an existing `_ctrl_table` in `batch_processor.py:730-743`
+    already handles 0x01. The failing
+    `A_comprehensive_review_on_hybrid_electri` output is dated
+    2026-04-12, BEFORE this code shipped (commit `3bdbe0f`,
+    2026-05-03). Phase 1 step 0 is now: **re-run the conversion
+    and check if Phase 1 work is even needed.** If the current code
+    already strips 0x01, Phase 1 is a no-op + smoke verify.
+  - Phase 2: `processor.py:2079` STILL contains a fallback
+    `else: result = self._converter.convert(...)` after today's
+    bypass patch. The new static guard must understand this
+    conditional or the fallback should be removed.
+  - Phase 3: `batch_processor.py:3052` already invokes
+    `patch_corrupted_chunks(...)`. The bug is gating, not absence.
+    Audit also found that `V2DocumentProcessor` non-batch path may
+    not run the interceptor — independent gap to verify.
+  - Phase 4: `cli.py:1112` AND `cli.py:1741` both call
+    `decide_code_enrichment_for_pdf(...)` — the cheap-evidence
+    trigger exists in TWO places (process command + batch command).
+    Both must be audited.
 
 - **2026-05-03 v3** — Per CLAUDE.md "Libraries first, custom code
   last", every phase re-audited against Docling 2.86 features:
