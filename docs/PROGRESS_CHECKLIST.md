@@ -18,7 +18,7 @@ Status vocabulary and evidence classes are defined in `docs/AGENT_GOVERNANCE.md`
 - [ ] Read `docs/PROJECT_STATUS.md`.
 - [ ] Read this checklist.
 - [ ] Read `AGENTS.md` for hard invariants.
-- [ ] Skim active plan docs: `docs/PLAN_V2.8_PRODUCTION_GAPS.md` (current execution plan), `docs/PLAN_DOCLING_POSTPROCESSOR.md` (Docling 2.86 sanity stages, shipped 2026-05-03). For overall arc context, `docs/archive/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md` (archived 2026-05-03; all features shipped) is retained as rationale.
+- [ ] Skim active plan docs: `docs/PLAN_V2.9_DRAFT_PROMPT.md` (next-cycle plan-writing prompt — v2.9 plan itself not yet drafted as of 2026-05-04). For shipped reference: `docs/PLAN_V2.8_PRODUCTION_GAPS.md` (SHIPPED 2026-05-04, tag `v2.8.0` on `645ab2b`) and `docs/PLAN_DOCLING_POSTPROCESSOR.md` (folded into v2.8). For overall arc context, `docs/archive/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md` (archived 2026-05-03) remains as rationale.
 - [ ] Run `git status --short` and identify pre-existing dirty files.
 - [ ] Check whether the task touches VLM, code blocks, classifier, conversion QA, or the post-Docling pipeline.
 - [ ] Do not start broad conversion until targeted tests for the touched area pass.
@@ -112,13 +112,13 @@ Custom fallback path (provisional, not the accepted primary fix):
 - Tests: `tests/test_fenced_flat_code_detection.py` (11 tests).
 - This fallback must not mask whether Docling-native/remote enrichment works — see `CLAUDE.md` guardrail.
 
-Next steps (open):
+Next steps (v2.9 scope — Workstream B is otherwise CLOSED):
 
-- [ ] Decide remote inference target/protocol for CodeFormulaV2.
-- [ ] Run targeted Chaubal pages through the selected lane.
-- [ ] Run Fluent Python as non-regression control through the selected lane.
-- [ ] Compare selected-lane output against current custom fenced-flat repair output.
-- [ ] Re-run Chaubal samples only after page/region evidence supports the selected path. (Ayeva re-run done — see Known failures above.)
+- [ ] Recover Ayeva CODE gate via ProfileClassifier rule 0c tightening (suppresses CodeFormulaV2 today). See `docs/PLAN_V2.9_DRAFT_PROMPT.md` Priority 3.
+- [ ] (v2.9 optional) Decide remote inference target/protocol for CodeFormulaV2 — only if code-heavy reconversions become routine (>1/week per `docs/DECISIONS.md` "Selective Code Enrichment Lane → Amendment 2026-05-03"). Today the client-local CPU path at ~27 sec/page is acceptable for one-off batch.
+- [x] Re-run targeted Chaubal pages: confirmed by v2.8 fresh re-conversion at `output/Chaubal_PyTorch_Projects/`, `indentation_fidelity=0.96` (was 0.54).
+- [x] Run Fluent Python as non-regression control: v2.8 fresh re-conversion AUDIT_PASS, 1602 chunks.
+- [x] Compare selected-lane output against custom fenced-flat repair: Docling-native CodeFormulaV2 wins; `_has_fenced_flat_code` retained only as the provisional fallback marker.
 
 Acceptance signals:
 

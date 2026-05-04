@@ -153,113 +153,14 @@ Tagged as `v2.8.0` (annotated tag, commit `9726b43`).
 
 ## [Folded into 2.8.0] — Post-Docling Sanity Pass (2026-05-03)
 
-> Note: this section originally landed as `[unreleased]`. It is now
-> bundled into the **v2.8.0** tag (the v2.8 plan explicitly sits on top
-> of these stages). Kept verbatim below for the per-feature breakdown;
-> the consolidated v2.8.0 section above lists the full closure.
-
-### Added
-- **Post-Docling reading-order y-sort** (`engines/docling_postprocess.py`).
-  Re-sorts each page's `body.children` by `(-bbox.t, bbox.l)` (BOTTOMLEFT) /
-  `(bbox.t, bbox.l)` (TOPLEFT). Fixes the HARRY page-13 swap where Docling
-  emitted paragraphs as `[para1, para3, para2]`. Items without a prov bbox
-  retain Docling's order; pages stay in ascending order so an item on page
-  14 never reorders ahead of a page-13 item.
-- **Drop-cap promotion** (`engines/docling_postprocess.py`). Two heuristics:
-  `apply_dropcap_promotion` for the standalone-glyph case (separate
-  `TextItem("M")` adjacent to a lowercase-starting paragraph), and
-  `_heal_inline_trailing_dropcap` for the actually-observed Docling 2.86
-  pattern: the drop cap "M" is appended INLINE at the end of the same
-  TextItem (`"r. and Mrs. Dursley...nonsense. M"`). Both move the glyph
-  to the front (`"Mr. and Mrs. Dursley..."`).
-- **Label-leak filter** (`engines/docling_serializers.py`). Custom
-  chunking serializer suppresses picture classification labels (`other`,
-  `icon`, `table`). Patches both the new `meta.classification` path
-  (via `blocked_meta_names={"classification"}`) and the legacy
-  `PictureClassificationData` annotations — the original "no caption"
-  rule was insufficient because pictures with BOTH a caption and a
-  classification annotation still leaked the label. Now strips
-  classification annotations across all pictures before delegating;
-  captions still flow through; metadata is restored after serialization
-  so downstream consumers see the full label set.
-- **OCR gating** (`bitmap_area_threshold` field on `PdfConversionPlan`).
-  Default 0.75 (raised from Docling's native 0.05); auto-raises to 0.92
-  for `digital_literature`, `digital_magazine`, and the
-  `image_heavy_magazine` route to keep OCR off photographic cover artwork.
-- **`digital_literature` profile** — new ProfileType across the routing
-  layer (`orchestration/profile_classifier.py` enum + `_score_digital_literature`
-  scorer + score loop + modality fallback; `orchestration/strategy_profiles.py`
-  `DigitalLiteratureProfile` strategy class + ProfileManager registry +
-  classifier→strategy `type_mapping`; `orchestration/strategy_orchestrator.py`
-  `PROFILE_TO_DOC_TYPE` mapping to `DocumentType.LITERATURE`). Auto-picks
-  for born-digital novels (HARRY signature: `domain=literature`,
-  `is_scan=False`, `page_count >= 50`, small `median_dim`). The plan
-  builder auto-enables the full post-processor pipeline for this profile:
-  `reading_order_strategy="y_sort_with_dropcap"`,
-  `suppress_layout_label_text=True`, `bitmap_area_threshold=0.92`.
-
-### Fixed
-- **Adapter bypass in `processor.py:2072`**. The cached Docling converter
-  was being invoked directly via `self._converter.convert()`, sidestepping
-  `DoclingPdfAdapter.convert()` and therefore `apply_postprocessors`. The
-  v2.7 §5 static guard banned `PdfPipelineOptions(` / `DocumentConverter(`
-  *construction* outside the adapter but did NOT catch raw `convert(...)`
-  *invocation*. Re-routed through `self._adapter.convert(str(file_path))`.
-- **Diagnostic literature detection on moderate-length docs** —
-  `document_diagnostic.py` Rule 0c added: `_dialogue_pages >= 1 AND
-  total_pages > 20 AND not has_tables AND 500 < avg_text_per_page < 2500
-  → literature += 0.4`. Catches the 30-page HARRY test slice where the
-  long-form Rule 0a (>0.3 dialogue ratio AND >50 pages) was unreachable
-  because only 5 pages get sampled by default
-  (`DIAGNOSTIC_SAMPLE_PAGES=5`) and only 1 had dialogue (ratio 0.20).
-- **HARRY pages 1-30 acceptance fixture**
-  (`tests/fixtures/harry_potter_pages_1_to_30/`). Paragraph-level expected
-  reading order extracted from PDF y-coordinates by `build_fixture.py`.
-  Scope: body pages 13-30 (front-matter pages 1-12 are display-typography
-  fragments out of scope for body-text reading order). Bound by
-  `tests/test_docling_postprocessor_acceptance.py`; runs against cached
-  JSONL via `HARRY_ACCEPTANCE_JSONL=<path>` or live via
-  `RUN_HARRY_ACCEPTANCE=1`. **Passes** against the live full-HARRY
-  conversion as of 2026-05-03; xfail removed.
-
-### Changed
-- `scripts/smoke_multiprofile.sh` matrix updated: HARRY moved from the
-  `scanned` row (where it had been a low-confidence catch-all) to a new
-  `digital_literature` row pointing at
-  `data/digital_literature/HarryPotter_and_the_Sorcerers_Stone.pdf`. The
-  freed `scanned` slot now points at `data/business_form/0013_140302111325_001.pdf`
-  to keep the scanned-route assertion covered.
-- `docs/ACCEPTANCE_ORDER_PROMPT.md` HARRY probe re-anchored: assertions
-  now check `profile=digital_literature`, `route=native_digital`, plus a
-  `HARRY-P13-SANITY` check that the page-13 chunk reads in PDF order,
-  the drop cap is healed, no `Other`/`Icon`/`Table` label leak, and no
-  cover-page OCR garbage. Added a `SCAN0013` probe against
-  `0013_140302111325_001.pdf` to cover the scanned-route assertion that
-  HARRY used to provide.
-
-### Test counts
-- 36 new tests across Phases 0-5 plus the digital_literature classifier
-  suite. Full unit suite: **570 passed, 2 skipped** (HARRY gated by env
-  var), 1 deselected (pre-existing unrelated `test_semantic_overlap`
-  failure unchanged).
-
-### Live evidence
-- `mmrag-v2 process data/digital_literature/HarryPotter_and_the_Sorcerers_Stone.pdf`
-  with no `--profile-override` → classifier auto-picks `digital_literature`,
-  plan resolves to `reading_order_strategy=y_sort_with_dropcap`,
-  `suppress_layout_label_text=True`, `bitmap_area_threshold=0.92`. Page 13
-  reads in PDF y-order with drop cap "M" at the front, no
-  `Other`/`Icon`/`Table` leak, no chunks for cover pages 1-4.
-- 30-page HARRY slice (`/tmp/harry_pages_1_30.pdf`) also auto-routes to
-  `digital_literature` after Rule 0c (no override needed).
-- Smoke matrix (`/tmp/smoke_post_dl_v2_20260503/`): 10/11
-  GATE_PASS + UNIVERSAL_PASS. HARRY row auto-routes to
-  `digital_literature` and passes both gates. The single GATE_FAIL is
-  on the new `scanned/0013_*` row (small business form: 17 text chunks
-  mean_len 39.4 chars, hits `micro_non_label_ratio=0.294`). Classifier
-  routing is correct (`detected_profile=scanned`); the gate is calibrated
-  for prose-heavy docs and is a probe-vs-gate calibration issue, not a
-  regression.
+Originally landed as `[unreleased]` and is now bundled into the **v2.8.0**
+release. The full Added/Changed/Fixed breakdown is in the consolidated
+**[2.8.0]** section above (look for the `Post-Docling reading-order y-sort`,
+drop-cap promotion, label-leak filter, and OCR gating bullets). The earlier
+verbatim duplicate has been removed to keep the changelog single-source.
+Per-feature historical context is preserved in commit `3bdbe0f` (post-Docling
+sanity pass + `digital_literature` profile) and in
+`docs/PLAN_DOCLING_POSTPROCESSOR.md` (the predecessor plan, marked shipped).
 
 ## [v2.7.1] — Contextual Retrieval (2026-05-01)
 
@@ -298,81 +199,15 @@ Tagged as `v2.8.0` (annotated tag, commit `9726b43`).
 
 ## [Folded into 2.8.0] — Milestone 1: Stabilize Extraction (2026-04-30 → 2026-05-01)
 
-### Added
-- **Shared PDF extraction plan + Docling adapter.** `src/mmrag_v2/engines/pdf_plan.py`
-  (`PdfConversionPlan` + `build_pdf_conversion_plan`) and `engines/docling_adapter.py`
-  (`DoclingPdfAdapter`) now own all `PdfPipelineOptions` / `DocumentConverter`
-  construction. `batch_processor.py`, `processor.py`, and `engines/pdf_engine.py`
-  consume the shared plan. AST-level static guards in
-  `tests/test_pdf_conversion_plan.py` reject any new construction outside the adapter.
-- **Plan Control Plane (Milestone 2).** `PdfConversionPlan` promoted to a typed
-  policy object: `extraction_route` vocabulary {native_digital, scanned_book,
-  image_heavy_magazine, technical_manual} with auto-detection; explicit
-  `hybrid_chunker_enabled`, `allow_page_level_visuals`, `asset_validation_policy`
-  (drop|keep|quarantine), `corruption_recovery_policy` (quarantine|keep|recover)
-  fields. Legacy bools (`drop_blank_assets`, `quarantine_corrupted_chunks`)
-  preserved as derived `@property` bridges.
-- **Vision-aided front-matter detection** moved after heading inference and TOC/forward
-  propagation. Uses Docling/shadow image extractions before the first chapter-like
-  heading to relabel non-chapter headings as "Front Matter". Preserves numbered/chapter
-  headings.
-- **Coordinate normalization audit.** `scripts/qa_universal_invariants.py` now
-  reads current `metadata.spatial` plus legacy `metadata.spatial_metadata`, fails
-  malformed/zero-area bboxes, and reports per-modality bbox distribution.
-  `ensure_normalized()` repairs one-unit extents inside the 0–1000 canvas.
-- **Domain-specific search priority** moved from converter to ingestor.
-  `scripts/ingest_to_qdrant.py` resolves `search_priority` from `document_domain`,
-  page position, and heading context while preserving stricter converter demotions.
-- **Classifier fallback fixes (Milestone 1.A).** Literature/long-form docs no
-  longer misroute as `digital_magazine`. Digital fallback default changed to
-  `TECHNICAL_MANUAL`. `tests/test_classifier_fallback.py` (9 tests).
-- **Extraction route controls (Milestone 1.B).** `extraction_route`,
-  `max_chunker_input_chars`, `drop_blank_assets`, `quarantine_corrupted_chunks`
-  fields on `PdfConversionPlan`. `scanned_book` route disables HybridChunker
-  and picture classification.
-- **HybridChunker pathological-input guard (Milestone 1.C).** Total-text guard
-  (default 500_000 chars) skips HybridChunker before tokenizer hangs.
-  Per-element guard (`max_chunker_per_element_chars`, default 100_000, added
-  2026-05-01) catches single mega-elements. Per-batch SIGALRM 120s remains as
-  the inner safety net. `tests/test_chunker_guard.py` (11 tests).
-- **Corruption quarantine (Milestone 1.D).** `BatchProcessor._quarantine_corrupted_text_chunks()`
-  drops post-patch corrupted text chunks; IMAGE/TABLE chunks are not quarantined.
-  `tests/test_corruption_quarantine.py` (8 tests) + bridge tests in
-  `tests/test_finalization_bridge.py`.
-- **Blank asset quarantine (Milestone 1.E).** `BatchProcessor._filter_blank_assets()`
-  + `_is_blank_asset()` (mean≈255/0, std<5). TABLE chunks with blank assets
-  are promoted to TEXT (preserving markdown). IMAGE chunks with blank assets
-  are dropped. `tests/test_blank_asset_quarantine.py` (7 tests).
-
-### Fixed
-- **RAG Guide 7200s hang.** `output/probe_rag_guide_guard/` AUDIT_PASS + GATE_PASS
-  + UNIVERSAL_PASS, 680 chunks, ~5 min conversion. Pathological batch 25 (pages
-  241-250) detected via SIGALRM and falls back to element-by-element chunking.
-- **Ayeva indentation fidelity 0.22 → 0.93.** Re-conversion at
-  `output/ayeva_qa_20260501/`; AUDIT_PASS + GATE_PASS + UNIVERSAL_PASS, 627
-  chunks, `infix_strict=0` (was 2). Profile reclassified `digital_magazine` →
-  `technical_manual` after the classifier fallback fix.
-- **Combat Aircraft corrupted-text leakage.** 0 corrupted text chunks in JSONL
-  (was 22 encoding artifacts + 79 high-corruption); IMAGE quality preserved.
-- **Harry Potter routed correctly.** Now `technical_manual` (was
-  `digital_magazine`); AUDIT_PASS + UNIVERSAL_PASS, 458 chunks.
-- **CarOK blank table asset.** Blank TABLE asset promoted to TEXT modality;
-  IMAGE category previously failing now passes.
-
-### Documentation
-- New: `docs/QUALITY_SNAPSHOT_2026-04-30.md`, `docs/QUALITY_SNAPSHOT_2026-05-01.md`.
-- Updated: `docs/PROJECT_STATUS.md`, `docs/PROGRESS_CHECKLIST.md`,
-  `docs/ARCHITECTURE.md`, `docs/CONVERSION_PROFILES.md`, `docs/DECISIONS.md`,
-  `AGENTS.md`, `CLAUDE.md`, `README.md` (OCR cascade).
-
-### Test counts
-- Focused Milestone 1 suite: 81 passed.
-- Focused Milestone 2 suite (`pdf_conversion_plan` + `chunker_guard`): 64 passed.
-- Full unit suite: 484 passed, 1 skipped, 0 failed.
-- Static guards: 2 passed.
-- Multi-profile smoke (Milestone 1 close): `output/smoke_multiprofile_20260501_105836/` 10/10 GATE_PASS + UNIVERSAL_PASS.
-- Multi-profile smoke (Milestone 2 close): `output/smoke_multiprofile_20260501_120514/` 10/10 GATE_PASS + UNIVERSAL_PASS.
-- Targeted probes: `output/probe_rag_guide_guard/` (M1) and `output/probe_milestone2_rag_guide/` (M2) — both AUDIT_PASS + GATE_PASS + UNIVERSAL_PASS.
+Originally landed as `[Unreleased]` and is now bundled into the **v2.8.0**
+release. The full Added/Changed/Fixed breakdown is in the consolidated
+**[2.8.0]** section above (look for the shared PDF extraction plan,
+Plan Control Plane typed policy fields, refactor boundary closeout, and
+Milestone 1 chunker-guard bullets). The earlier verbatim duplicate has been
+removed to keep the changelog single-source. Per-feature historical context
+is preserved in `docs/QUALITY_SNAPSHOT_2026-05-01.md` (banner-annotated as
+superseded by the 2026-05-04 baseline; selected metrics like Ayeva 0.93 do
+NOT reflect the v2.8 fresh re-conversion).
 
 ## [v2.7.0] - 2026-04-16
 

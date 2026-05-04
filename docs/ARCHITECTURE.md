@@ -1,8 +1,9 @@
 # 🏗️ Universal Multi-Format RAG Pipeline Architecture
 
-**Version:** v2.7.0 (schema version 2.7.0)
+**Engine version:** v2.8.0 (schema version 2.7.0 — de-aliased in v2.8; chunk-shape contract unchanged since v2.7).
 **Date:** May 2026
-**Status:** PRODUCTION — v2.7.0 is current
+**Status:** PRODUCTION — v2.8.0 is current (tag `645ab2b`, shipped 2026-05-04).
+**Policy Update (v2.8.0):** PLAN_V2.8 production gaps closed (Workstreams B, C, F + adapter-invocation static guard). Form acceptance class added (scanned forms / invoices route to `FORM_AUDIT_PASS` lane). Schema validator `_strip_c0_controls` is keyword-aware (replace C0/DEL runs with `; ` or ` ` instead of strip). Adapter-invocation guard (`tests/test_pdf_conversion_plan.py::test_no_raw_converter_invocation_outside_adapter`) blocks raw `self._converter.convert(...)` outside the adapter. See `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`.
 **Policy Update (v2.7.0):** Image extraction uses Docling layout model for all document types (PyMuPDF `page.get_images()` tested and reverted). 4 multimodal validation layers added: CorruptionInterceptor, POS Boundary Logic, Vision-Gated Hierarchy, Content-Type Classification. Encoding corruption uses heal-over strategy (keep HybridChunker + force refiner). TOC-based heading hierarchy via PyMuPDF bookmarks + content-based magazine TOC fallback. See `docs/DECISIONS.md`.
 **Policy Update (v2.5.0):** PDF extraction pathway is determined by **structural integrity tests** on the byte-stream, not by semantic content type. Three pre-flight checks (line-break health, visual-digital delta, geometry error rate) drive pathway decisions independently of the semantic profile.
 **Policy Update (v2.4.2-stable):** `IngestionChunk.visual_description` is now a top-level computed field. `VisionCache` is model-aware.
@@ -16,7 +17,7 @@
 
 ## 1. Executive Summary
 
-This document describes the current MM-Converter V2.7.0 architecture for robust multimodal ingestion across supported formats.
+This document describes the current MM-Converter v2.8.0 architecture for robust multimodal ingestion across supported formats. (Section headers below tagged "(v2.7.0)" reflect when individual subsystems were introduced; they are still accurate descriptions of current behavior unless explicitly noted.)
 
 ### Problem Statement
 

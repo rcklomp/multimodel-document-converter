@@ -1,8 +1,8 @@
 # SOFTWARE REQUIREMENTS SPECIFICATION: Multimodal RAG Ingestion Engine
 
 **Version:** v2.5.0-dev
-**Schema Version:** 2.5.0-dev (single source: `src/mmrag_v2/version.py`)
-**Status:** STALE — This SRS reflects v2.5.0. The codebase is at **v2.7.0**. Features added in v2.6–v2.7 (HybridChunker, multimodal validation layers, TOC-based heading hierarchy, Docling 2.86.0 picture/code-enrichment options, encoding heal-over, output provenance) are **not fully documented here**. If this SRS conflicts with `AGENTS.md`, `docs/DECISIONS.md`, or `docs/ARCHITECTURE.md`, the current docs win. A full SRS rewrite to v2.7 is pending.
+**Schema Version:** 2.5.0-dev (single source: `src/mmrag_v2/version.py` — current `__schema_version__=2.7.0`, `__engine_version__=2.8.0`)
+**Status:** STALE — This SRS reflects v2.5.0. The codebase is at **engine v2.8.0 / schema v2.7.0** as of 2026-05-04. Features added in v2.6–v2.8 (HybridChunker, multimodal validation layers, TOC-based heading hierarchy, Docling 2.86.0 picture/code-enrichment options, encoding heal-over via CorruptionInterceptor + quarantine, output provenance, v2.8 form acceptance class, v2.8 adapter-invocation static guard, v2.8 keyword-aware C0/DEL replacement in `_strip_c0_controls`, v2.8 CodeFormulaV2 enable lane, v2.8 collision-free Qdrant point IDs) are **not documented here**. If this SRS conflicts with `AGENTS.md`, `docs/DECISIONS.md`, or `docs/ARCHITECTURE.md`, the current docs win. A full SRS rewrite is pending.
 **Supersedes:** SRS v2.4.md
 **Design Philosophy:** Apply Specification Engineering primitives — self-contained problem statements, explicit acceptance criteria, constraint architecture, decomposed phases, and measurable evaluation design.
 

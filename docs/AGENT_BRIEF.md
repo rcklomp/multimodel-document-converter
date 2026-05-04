@@ -36,4 +36,4 @@ material only until it is rewritten.
 
 10) `docs/SRS_Multimodal_Ingestion_V2.5.md`
 - Historical contract reference only.
-- **Note:** The SRS is at v2.5 while the codebase is at v2.7.0. Features added in v2.6–v2.7 (multimodal validation layers, TOC-based heading hierarchy, Docling 2.86.0 picture/code-enrichment options, encoding heal-over, output provenance) are not fully reflected in the SRS. Use `AGENTS.md`, `docs/DECISIONS.md`, and `docs/ARCHITECTURE.md` for current v2.7 behavior.
+- **Note:** The SRS is at v2.5 while the codebase is at **v2.8.0** (engine; schema stays 2.7.0). Features added in v2.6–v2.8 (multimodal validation layers, TOC-based heading hierarchy, Docling 2.86.0 picture/code-enrichment options, encoding heal-over, output provenance, v2.8 form acceptance class, v2.8 adapter-invocation static guard, v2.8 keyword-aware C0/DEL replacement, v2.8 CodeFormulaV2 enable lane) are not reflected in the SRS. Use `AGENTS.md`, `docs/DECISIONS.md`, and `docs/ARCHITECTURE.md` for current behavior.

@@ -99,24 +99,30 @@ Companion docs:
 
 ## 📍 5. CURRENT STATE & DIRECTIVES (May 2026)
 
-**Version:** `v2.7.0` (schema version 2.7.0)  
-**Phase:** Production acceptance — see `docs/PROJECT_STATUS.md` for current counts.
+**Engine version:** `v2.8.0` (schema version `2.7.0` — de-aliased in v2.8; the chunk-shape contract is unchanged since v2.7).
+**Phase:** v2.8.0 SHIPPED 2026-05-04 (annotated tag on `645ab2b`). v2.9 planning underway. Current canonical baseline: `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`.
 
 **Active architecture decisions:**
 - PDF extraction pathway is determined by structural integrity pre-flight tests, not semantic profile. See `docs/DECISIONS.md` — "Structural Pathology over Semantic Profiling".
 - `IngestionMetadata` record is written as the first JSONL line (v2.6+); QA scripts must skip it.
 - VLM failure paths use differentiated sentinels (`[VLM_FAILED: response invalid]`, `[VLM_FAILED: call error]`, `[VLM_FAILED: parse error]`).
 - **Image extraction** uses Docling layout model for all document types. PyMuPDF `page.get_images()` was tested but reverted (unreliable for magazines/academic papers). See `docs/DECISIONS.md` — "Image Extraction Routing".
-- **Encoding corruption** uses heal-over strategy: keep HybridChunker for structure, force refiner on all chunks at `threshold=0.0`. See `docs/DECISIONS.md` — "Heal-Over for Encoding Corruption".
+- **Encoding corruption** uses heal-over strategy: `CorruptionInterceptor` per-bbox OCR + quarantine of unrepairable chunks (Workstream C closed in v2.8). See `docs/DECISIONS.md` — "Heal-Over for Encoding Corruption".
 - **4 multimodal validation layers** (v2.7): CorruptionInterceptor, POS Boundary Logic, Vision-Gated Hierarchy, Content-Type Classification. See `docs/DECISIONS.md`.
+- **Adapter-invocation guard** (v2.8 Phase 2): `tests/test_pdf_conversion_plan.py::test_no_raw_converter_invocation_outside_adapter` blocks any `self._converter.convert(...)` outside the adapter; promotes the v2.7 §5 rule from construction-only to construction+invocation.
+- **Form acceptance class** (v2.8 Phase 5a): scanned forms / invoices route to a `FORM_AUDIT_PASS` lane that skips prose-calibrated `micro_non_label_ratio`. See `docs/QUALITY_GATES.md` "Form / Invoice Acceptance Class". This is a first-class acceptance variant, NOT a waiver per `AGENT-VAL-01`.
 
 **QA policy:** All profiles use the standard 10% token variance tolerance. See `docs/QUALITY_GATES.md`.
 
-### Priority TODOs (Open)
-1. Stabilize model-agnostic VLM Source Sanctity enforcement. See `docs/PROGRESS_CHECKLIST.md`.
-2. Confirm Chaubal CODE gate after Milestone 1 fixes (Ayeva and RAG Guide now pass).
-3. Improve classifier correctness without using `--profile-override` in acceptance runs.
-4. Convert remaining pending documents and achieve full `AUDIT_PASS` across the corpus.
+### Priority TODOs (Open — v2.9 scope)
+Source: `docs/PLAN_V2.9_DRAFT_PROMPT.md` §2 (priorities 1-7). Top items:
+1. VLM enrichment of the `mmrag_v2_8` Qdrant collection (~5,500 image chunks have placeholder descriptions because v2.8 broad reconversion ran with `--vision-provider none`).
+2. Refiner smart-routing fix (`cli.py:686` config-default ignores `has_encoding_corruption`).
+3. ProfileClassifier rule 0c tightening (Ayeva mis-routed to `digital_literature`, suppresses CodeFormulaV2 → 0.83 vs 0.85 gate).
+4. Firearms heading regression — but FIX MUST RESPECT `AGENT-SPATIAL-20`; either re-route via `profile_classifier.py` (preferred) or propose explicit AGENT-SPATIAL-20 amendment.
+5. Within-file chunk_id collision fix (`_generate_chunk_id` should include position index; 427 dupes across the v2.8 corpus).
+6. Local VLM comparison (Workstream A — direct dependency for #1).
+7. Remote CodeFormulaV2 inference target (only if code-heavy reconversions become routine).
 5. Re-ingest to Qdrant after all documents pass.
 6. Establish per-category blind-test baselines for all document categories in the smoke test matrix.
 

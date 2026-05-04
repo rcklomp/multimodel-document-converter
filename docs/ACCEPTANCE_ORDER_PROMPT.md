@@ -35,7 +35,7 @@ Read these files FIRST and treat them as binding:
 2.  `docs/AGENT_GOVERNANCE.md`                 — evidence/status rules
 3.  `docs/PROJECT_STATUS.md`                   — current engineering state
 4.  `docs/DECISIONS.md`                        — architectural decisions
-5.  `docs/PLAN_V2.8_PRODUCTION_GAPS.md` — current execution plan (production-gap closure before broad reconversion). For architectural rationale see `docs/archive/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md`.
+5.  `docs/PLAN_V2.8_PRODUCTION_GAPS.md` — **SHIPPED 2026-05-04**, retained as the historical execution plan (the chain `5b0e13d → 645ab2b` on `main` and the `v2.8.0` annotated tag are its outcome). For the next execution cycle see `docs/PLAN_V2.9_DRAFT_PROMPT.md` (and the to-be-drafted `docs/PLAN_V2.9.md`). For architectural rationale see `docs/archive/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md`.
 6.  `docs/PROGRESS_CHECKLIST.md`               — pending items
 7.  `docs/QUALITY_GATES.md`                    — pass/fail thresholds
 8.  `docs/CONTEXTUAL_RETRIEVAL_PROMPT.md`      — companion (step 4)
@@ -48,8 +48,8 @@ Pinned invariants you must honour and cite in the verdict file:
 - `AGENT-SPATIAL-20` — single 20-unit vertical threshold
 - `AGENT-DOCS-01`  — minimal indexed docs
 
-**Version:** v2.7.x (schema 2.7.x). Python 3.10. Docling exact-pinned 2.86.0.
-**Phase:** Production acceptance — targeted fixes must pass before broad rerun.
+**Version:** engine v2.8.x / schema 2.7.x. Python 3.10. Docling exact-pinned 2.86.0.
+**Phase:** v2.8.0 SHIPPED 2026-05-04 (broad reconversion + Qdrant ingest complete). v2.9 cycle: see `docs/PLAN_V2.9_DRAFT_PROMPT.md`.
 
 ----------------------------------------------------------------------
 ## RUN IDENTITY (do this FIRST, before any other action)
@@ -486,10 +486,14 @@ else
   echo "OK   A4 no unjustified test softening" >> "$A"
 fi
 
-# A5. Schema/version stamping is current (2.7.x).
+# A5. Schema/version stamping is current (schema 2.7.x; engine 2.8.x in v2.8+).
 SVER=$(python -c "import mmrag_v2.version as v; print(v.SCHEMA_VERSION)" 2>/dev/null || echo "?")
 case "$SVER" in 2.7.*) echo "OK   A5 schema=$SVER" >> "$A" ;;
-                *)    echo "FAIL A5 schema=$SVER (expected 2.7.x)" >> "$A" ;;
+                *)    echo "FAIL A5 schema=$SVER (expected 2.7.x — schema is decoupled from engine since v2.8)" >> "$A" ;;
+esac
+EVER=$(python -c "from mmrag_v2.version import __engine_version__; print(__engine_version__)" 2>/dev/null || echo "?")
+case "$EVER" in 2.8.*) echo "OK   A5b engine=$EVER" >> "$A" ;;
+                *)    echo "FAIL A5b engine=$EVER (expected 2.8.x as of 2026-05-04)" >> "$A" ;;
 esac
 
 # A6. Every PHASE 2 FAIL has a matching red→green log pair in PHASE 3.
@@ -656,7 +660,7 @@ phase, fix the root cause, and regenerate the verdict.
 - `docs/AGENT_GOVERNANCE.md` — evidence/status rules
 - `docs/DECISIONS.md` — architectural decisions
 - `docs/QUALITY_GATES.md` — pass/fail thresholds
-- `docs/PLAN_V2.8_PRODUCTION_GAPS.md` — current execution plan (`docs/archive/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md` is the archived predecessor)
+- `docs/PLAN_V2.8_PRODUCTION_GAPS.md` — **SHIPPED 2026-05-04**, retained for historical context. For the next cycle see `docs/PLAN_V2.9_DRAFT_PROMPT.md` (`docs/archive/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md` is the older archived predecessor).
 - `docs/CONTEXTUAL_RETRIEVAL_PROMPT.md` — companion (combined plan §4)
 - `scripts/smoke_multiprofile.sh` — smoke runner
 - `scripts/qa_conversion_audit.py` — conversion audit
