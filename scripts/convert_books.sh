@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
-# Convert every PDF/EPUB in data/ for the v2.8 broad reconversion.
+# Convert every PDF/EPUB in data/ for the v2.9 broad reconversion.
 # Forms (business_form/) and spreadsheets (data_spreadsheet/) are first-class
 # RAG content per PLAN_V2.8 §5a — included.
 # Uses ~/.mmrag-v2.yml for VLM + refiner credentials.
+#
+# v2.9 (2026-05-04): --no-refiner DROPPED. The CLI's smart-routing fix
+# (cli._decide_enable_refiner; v2.9 Phase 2) only auto-enables the
+# refiner when has_encoding_corruption=True. Clean prose docs (HARRY)
+# no longer hammer qwen-plus per chunk. Encoding-corrupt docs
+# (Combat-class) still get the heal-over without manual flag intervention.
 set -uo pipefail
 
 LOG="output/_convert_books.log"
@@ -24,26 +30,13 @@ convert() {
   fi
 
   echo "$(now) START $name" | tee -a "$LOG"
-  # v2.8 broad-reconversion flags. VLM + refiner OFF for two reasons:
-  #
-  # 1. Apples-to-apples vs QUALITY_SNAPSHOT_2026-05-03 (the BEFORE column
-  #    was made under these flags). v2.8 deltas read cleanly.
-  #
-  # 2. The CLI's config-default auto-enable for refiner (cli.py:686) fires
-  #    on EVERY document when ~/.mmrag-v2.yml sets refiner.enabled=true,
-  #    bypassing the smart per-doc gate (has_encoding_corruption). On
-  #    HARRY (clean prose, zero corruption) this hammered qwen-plus with
-  #    rejected refinements (~half "Edit ratio exceeds budget"). The fix
-  #    belongs in cli.py — only auto-enable refiner from config when the
-  #    diagnostic actually flags corruption — but is v2.9 scope. For
-  #    tonight's broad reconversion, --no-refiner is the right gate.
-  #
-  # Phase 3 verified the CorruptionInterceptor + quarantine pipeline alone
-  # cleans Combat Aircraft (the canonical encoding-corruption case) to
-  # AUDIT_PASS without refiner. v2.9 should pair the smart-routing fix
-  # with a per-doc refiner re-pass for the corruption-flagged docs only.
+  # v2.9 broad-reconversion flags. VLM is OFF here because Phase 5b runs
+  # a targeted image-only enrichment via scripts/enrich_image_chunks_v29.py
+  # AFTER conversion completes. --no-refiner is no longer needed: the
+  # CLI's smart-routing fix only auto-enables the refiner when
+  # has_encoding_corruption=True (v2.9 Phase 2).
   python -m mmrag_v2.cli process "$src" -o "$outdir" -b "$batch_size" \
-    --vision-provider none --no-refiner --no-cache >>"$LOG" 2>&1
+    --vision-provider none --no-cache >>"$LOG" 2>&1
   local exit_code=$?
 
   if [ $exit_code -eq 0 ] && [ -f "$outdir/ingestion.jsonl" ]; then
@@ -56,7 +49,7 @@ convert() {
   fi
 }
 
-echo "$(now) === BROAD RECONVERSION v2.8.0 ===" | tee -a "$LOG"
+echo "$(now) === BROAD RECONVERSION v2.9.0 ===" | tee -a "$LOG"
 echo ""
 
 # === DIGITAL LITERATURE ===
