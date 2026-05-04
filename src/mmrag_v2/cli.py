@@ -192,6 +192,38 @@ def _configure_multiprocessing_start_method() -> None:
         logger.debug("[MP] start_method already configured")
 
 
+def _decide_enable_refiner(
+    *,
+    cli_flag: bool,
+    config_default_enabled: bool,
+    explicit_disable: bool,
+    explicit_enable: bool,
+    has_encoding_corruption: bool,
+) -> bool:
+    """v2.9 Phase 2: smart-routing decision for refiner enablement.
+
+    Inputs are normalized into the CLI's posture so the rule is a single
+    pure function:
+
+    - ``--no-refiner`` always wins (returns False).
+    - ``--enable-refiner`` always wins when no ``--no-refiner`` (returns True).
+    - Otherwise, the config default fires only when the diagnostic engine
+      reports ``has_encoding_corruption=True``. Clean-prose docs with
+      ``cfg.refiner.enabled=true`` no longer trigger per-chunk refiner
+      calls (the v2.8 HARRY symptom: edit-ratio rejection storm).
+
+    The CLI seam is the right place for this because ``has_encoding_corruption``
+    comes from the diagnostic engine, which runs before chunking.
+    """
+    if explicit_disable:
+        return False
+    if explicit_enable or cli_flag:
+        return True
+    if config_default_enabled and has_encoding_corruption:
+        return True
+    return False
+
+
 def _safe_cleanup_processor(instance: Optional[Any]) -> None:
     """
     Best-effort cleanup for processor-owned resources on error/exit.
@@ -679,12 +711,26 @@ def process_document(
         api_key = cfg.vlm.api_key
     if vlm_timeout == 180 and cfg.vlm.timeout != 120:
         vlm_timeout = cfg.vlm.timeout
-    # Config provides default when user didn't explicitly set a flag.
-    # But --no-refiner on the CLI must win over the config file.
+    # v2.9 Phase 2: refiner smart-routing.
+    # The config-default (cfg.refiner.enabled=true) is no longer eager —
+    # it only fires when the diagnostic engine reports
+    # has_encoding_corruption=True. Clean prose with the config default no
+    # longer hammers the cloud refiner per-chunk. Explicit --enable-refiner
+    # and --no-refiner CLI flags continue to win over the config default.
+    # See docs/PLAN_V2.9.md §Phase 2.
     import sys as _sys
     _refiner_explicitly_disabled = "--no-refiner" in _sys.argv
-    if not enable_refiner and cfg.refiner.enabled and not _refiner_explicitly_disabled:
-        enable_refiner = True
+    _refiner_explicitly_enabled = "--enable-refiner" in _sys.argv
+    _config_default_refiner_active = (
+        bool(cfg.refiner.enabled)
+        and not _refiner_explicitly_disabled
+        and not _refiner_explicitly_enabled
+    )
+    # Propagate config-side refiner provider/model/url/key defaults whenever
+    # refiner could possibly be enabled this run (explicit flag OR
+    # config-default + diagnostic-corruption later). The actual enable
+    # decision happens in the intelligence-metadata block below.
+    if enable_refiner or _config_default_refiner_active:
         if refiner_provider == "ollama" and cfg.refiner.provider:
             refiner_provider = cfg.refiner.provider
         if refiner_model is None and cfg.refiner.model:
@@ -1098,11 +1144,19 @@ def process_document(
                     "[bold yellow]⚠ AUTO-OVERRIDE:[/bold yellow] enable_ocr=True, force_ocr=True "
                     "(encoding corruption detected — text layer is unreliable)"
                 )
-            if not enable_refiner and not _refiner_explicitly_disabled:
+            # v2.9 Phase 2: smart-routing decision via _decide_enable_refiner.
+            new_enable_refiner = _decide_enable_refiner(
+                cli_flag=enable_refiner,
+                config_default_enabled=bool(cfg.refiner.enabled),
+                explicit_disable=_refiner_explicitly_disabled,
+                explicit_enable=_refiner_explicitly_enabled,
+                has_encoding_corruption=True,
+            )
+            if new_enable_refiner and not enable_refiner:
                 enable_refiner = True
                 console.print(
                     "[bold yellow]⚠ AUTO-OVERRIDE:[/bold yellow] enable_refiner=True "
-                    "(encoding corruption heal-over requires refiner)"
+                    "(encoding corruption heal-over requires refiner; config default active)"
                 )
 
         conversion_plan = None
@@ -1512,6 +1566,15 @@ def batch_process(
         console.print(f"[yellow]No files matching '{pattern}' found in {input_dir}[/yellow]")
         raise typer.Exit(code=0)
 
+    # v2.9 Phase 2 parallel-site fix: the batch command's per-file
+    # diagnostic-override block references _refiner_explicitly_disabled but
+    # never defined it (NameError if a batch run hit an encoding-corrupt
+    # PDF). Mirror the process command's flag-detection here so the gate
+    # is consistent across both CLI entry points.
+    import sys as _sys
+    _refiner_explicitly_disabled = "--no-refiner" in _sys.argv
+    _refiner_explicitly_enabled = "--enable-refiner" in _sys.argv
+
     resolved_key = resolve_api_key(api_key, vision_provider)
     resolved_refiner_key = refiner_api_key or api_key
 
@@ -1729,7 +1792,19 @@ def batch_process(
                         f"[bold yellow]⚠ AUTO-OVERRIDE ({doc_name}):[/bold yellow] enable_ocr=True, force_ocr=True "
                         "(encoding corruption detected)"
                     )
-                if not _file_enable_refiner and not _refiner_explicitly_disabled:
+                # v2.9 Phase 2: refiner smart-routing. The batch command does
+                # not load config (cfg) today, so config_default_enabled=False
+                # — only explicit --enable-refiner / --no-refiner / corruption
+                # combinations matter here. Using the shared helper keeps
+                # parity with the process command's gate.
+                new_enable_refiner = _decide_enable_refiner(
+                    cli_flag=_file_enable_refiner,
+                    config_default_enabled=False,
+                    explicit_disable=_refiner_explicitly_disabled,
+                    explicit_enable=_refiner_explicitly_enabled,
+                    has_encoding_corruption=True,
+                )
+                if new_enable_refiner and not _file_enable_refiner:
                     _file_enable_refiner = True
                     console.print(
                         f"[bold yellow]⚠ AUTO-OVERRIDE ({doc_name}):[/bold yellow] enable_refiner=True "
