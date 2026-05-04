@@ -917,6 +917,35 @@ class ProfileClassifier:
         reasoning = []
         confidence = 1.0
 
+        # v2.9 Phase 4: Firearms-class HARD REJECT.
+        # Long-form scanned docs with full-page image extraction (image_density
+        # >= 1.0 indicates the entire page is rendered as a single image, the
+        # signature of a heavy scan) belong on the scanned profile, not
+        # technical_manual. The chunker's heading-inheritance under
+        # technical_manual is stricter than under scanned and drops ~22% of
+        # heading coverage on these docs (Firearms regressed 100%→78% in
+        # v2.8 fresh, just under the 80% gate).
+        # AGENT-SPATIAL-20 respected — this is a profile-classifier scorer
+        # adjustment, not a per-profile spatial-threshold branch. The single
+        # 20-unit vertical refinement remains unchanged.
+        # Same threshold flips Earthship (also is_scan=True, image_density=1.0)
+        # back to scanned, restoring its v2.5 routing.
+        if (
+            f.is_scan
+            and f.image_density >= 1.0
+            and f.page_count > 100
+        ):
+            reasoning.append(
+                f"REJECTED: scanned long-form (image_density={f.image_density:.2f}, "
+                f"{f.page_count}pp) — route to scanned profile, not technical_manual"
+            )
+            return ProfileScore(
+                profile_type=ProfileType.TECHNICAL_MANUAL,
+                score=0.0,
+                reasoning=reasoning,
+                confidence=0.0,
+            )
+
         # V16 TECHNICAL DOMINANCE: Combo check FIRST
         # If technical domain + scan + low/no native text → almost certainly a scanned manual.
         # EXTENDED (v2.6): Domain detector is unreliable for scanned/OCR'd documents. An
