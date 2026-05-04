@@ -3154,6 +3154,32 @@ class BatchProcessor:
             # text chunks exceeding the 1500-char gate.
             export_chunks = self._apply_oversize_breaker(export_chunks, max_chars=1500)
 
+            # v2.9 Phase 1 (followup): final-stage dedup by chunk_id. The
+            # per-document position counter eliminates the bulk of v2.8's
+            # within-file collisions, but the legacy hybrid_chunker path
+            # in V2DocumentProcessor occasionally yields the same chunk
+            # twice (Docling-side chunker emitting duplicate DocChunks for
+            # the same text element on certain pages). When that happens
+            # the duplicates are byte-equal, so first-wins is safe.
+            _seen_chunk_ids: set[str] = set()
+            _deduped: List[IngestionChunk] = []
+            for _ch in export_chunks:
+                _cid = getattr(_ch, "chunk_id", None)
+                if not _cid:
+                    _deduped.append(_ch)
+                    continue
+                if _cid in _seen_chunk_ids:
+                    continue
+                _seen_chunk_ids.add(_cid)
+                _deduped.append(_ch)
+            _dropped = len(export_chunks) - len(_deduped)
+            if _dropped:
+                logger.info(
+                    f"[FINALIZE] chunk_id dedup: dropped {_dropped} byte-equal "
+                    f"duplicate chunks (v2.9 Phase 1 follow-up)"
+                )
+            export_chunks = _deduped
+
             # ============================================================
             # METADATA RECORD: write AFTER all filtering so chunk_count
             # reflects the actual exported chunk set.

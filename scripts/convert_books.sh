@@ -35,7 +35,10 @@ convert() {
   # AFTER conversion completes. --no-refiner is no longer needed: the
   # CLI's smart-routing fix only auto-enables the refiner when
   # has_encoding_corruption=True (v2.9 Phase 2).
-  python -m mmrag_v2.cli process "$src" -o "$outdir" -b "$batch_size" \
+  # Use ``conda run -n mmrag-v2`` so this script works whether the env
+  # is activated in the calling shell or not.
+  conda run -n mmrag-v2 --no-capture-output python -m mmrag_v2.cli process \
+    "$src" -o "$outdir" -b "$batch_size" \
     --vision-provider none --no-cache >>"$LOG" 2>&1
   local exit_code=$?
 

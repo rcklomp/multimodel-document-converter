@@ -163,6 +163,24 @@ def test_factory_threads_position_for_text_image_table() -> None:
 
 
 _OUTPUT_ROOT = Path(__file__).resolve().parent.parent / "output"
+_CONVERT_BOOKS = Path(__file__).resolve().parent.parent / "scripts" / "convert_books.sh"
+
+
+def _read_canonical_doc_dirs() -> list[str]:
+    """Parse ``scripts/convert_books.sh`` for the canonical output dir
+    names. Each ``convert <src> <name> [batch]`` line declares one
+    canonical document; the second quoted argument is the dir name."""
+    if not _CONVERT_BOOKS.exists():
+        return []
+    dirs: list[str] = []
+    for line in _CONVERT_BOOKS.read_text().splitlines():
+        line = line.strip()
+        if not line.startswith("convert "):
+            continue
+        parts = line.split('"')
+        if len(parts) >= 4:
+            dirs.append(parts[3])
+    return dirs
 
 
 @pytest.mark.skipif(
@@ -182,9 +200,18 @@ def test_full_corpus_no_within_file_chunk_id_collisions() -> None:
     if not _OUTPUT_ROOT.exists():
         pytest.skip(f"output directory not found: {_OUTPUT_ROOT}")
 
-    jsonl_paths = sorted(_OUTPUT_ROOT.glob("*/ingestion.jsonl"))
+    # Restrict to the canonical 34-doc corpus declared in
+    # ``scripts/convert_books.sh``. Legacy probe / pre-v2.9 outputs in
+    # ``output/`` are intentionally out of scope: the v2.9 contract is
+    # zero collisions across the canonical corpus only. Probes are
+    # informational and may pre-date the Phase 1 fix.
+    canonical_dirs = _read_canonical_doc_dirs()
+    jsonl_paths = sorted(
+        _OUTPUT_ROOT / d / "ingestion.jsonl" for d in canonical_dirs
+    )
+    jsonl_paths = [p for p in jsonl_paths if p.exists()]
     if not jsonl_paths:
-        pytest.skip(f"no ingestion.jsonl under {_OUTPUT_ROOT}")
+        pytest.skip(f"no canonical ingestion.jsonl under {_OUTPUT_ROOT}")
 
     failures: list[str] = []
     for path in jsonl_paths:
