@@ -4,7 +4,17 @@ Convert PDF, EPUB, HTML, and Office documents into structured JSONL datasets for
 
 The converter extracts text, images, and tables from complex documents while preserving spatial layout, document hierarchy, and semantic context. It handles everything from born-digital magazines to degraded scanned manuals.
 
-**Version 2.7.0** | Python 3.10 | Apple Silicon native | Docling 2.86.0
+**Version 2.8.0** | Python 3.10 | Apple Silicon native | Docling 2.86.0 | Schema 2.7.0
+
+> **v2.8.0 (2026-05-04):** All four PLAN_V2.8 production gaps closed —
+> Workstream F (control-char keyword separator), Workstream C (Combat
+> Aircraft ornament-glyph cleanup), Workstream B (Chaubal CodeFormulaV2
+> indentation lift 0.54 → 0.96), and v2.7 §5 adapter-invocation static
+> guard. Form acceptance class added (invoices/short scanned docs are
+> first-class RAG content). Broad re-conversion of the entire `data/`
+> corpus (34 PDF/EPUB) ingested into the new `mmrag_v2_8` Qdrant
+> collection. See `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`
+> for empirical Phase outcomes and v2.9 followups.
 
 ---
 

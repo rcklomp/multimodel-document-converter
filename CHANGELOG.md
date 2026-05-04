@@ -4,7 +4,159 @@ All notable changes to this project will be documented in this file. This projec
 
 > **Versioning note:** Historical entries before the `v2.4.x` line used an internal `v18.x` milestone scheme during rapid iteration and test/fix cycles. Only stable or decision-worthy checkpoints were recorded, so intermediate builds are intentionally omitted. From `v2.4` onward, entries follow the current public semantic line.
 
-## [unreleased] — Post-Docling Sanity Pass (2026-05-03)
+## [2.8.0] — 2026-05-04 — PLAN_V2.8 Production Gaps Closed
+
+Engine version bumps to **2.8.0**. Schema version stays **2.7.0** (no
+chunk-shape change; all v2.8 work is behavioral / pipeline-level).
+Tagged as `v2.8.0` (annotated tag, commit `9726b43`).
+
+### Added
+- **Form acceptance class for invoices / short scanned docs** (Phase 5a).
+  `scripts/evaluate_technical_manual_gates.py` now reads `total_pages`
+  from ingestion metadata + counts only real `parent_heading` entries
+  (auto-generated `[doc_id, "Page N"]` breadcrumbs do not count) →
+  detects `document_type=form` for short scanned docs, skips the
+  prose-calibrated `micro_non_label_ratio` and label-orphan checks,
+  emits `GATE_PASS [form: ...]`. `scripts/qa_conversion_audit.py`
+  emits `FORM_AUDIT_PASS` instead of the dismissive
+  `UNSUPPORTED_HIERARCHICAL_RAG`. New form acceptance class documented
+  in `docs/QUALITY_GATES.md`. SCAN0013 row in the smoke matrix flips
+  from `GATE_FAIL micro_non_label_ratio=0.294` to `GATE_PASS [form]`.
+  3 contract tests in `tests/test_form_audit_gate.py`.
+- **Adapter-invocation static guard** (Phase 2 — v2.7 §5 followup).
+  `tests/test_pdf_conversion_plan.py::test_no_raw_converter_invocation_outside_adapter`
+  AST-walks every production `*.py` and rejects any
+  `self._converter.convert(...)` / `self._docling_converter.convert(...)`
+  outside the adapter. Promotes the v2.7 §5 rule from "construction
+  guarded" to "construction + invocation guarded". 4 new guard tests
+  (1 real-code + 3 synthetic positive/negative).
+- **Cross-cutting Parallel-Site Audit principle** baked into
+  `docs/PLAN_V2.8_PRODUCTION_GAPS.md` §2b. Every production-code
+  change must walk parallel call sites before designing the fix.
+- **Phase 4 named contract tests** for the CodeFormulaV2 enable
+  decision (`tests/test_code_enrichment_decision.py`):
+  Chaubal positive, Fluent positive (non-regression control),
+  Combat negative (encoding corruption alone must not trigger).
+- **Phase 1 keyword-separator regression tests**
+  (`tests/test_oversize_pua_fixes.py`): 4 new tests pinning the
+  `\x01` → `; ` (prose) / `" "` (code) replacement contract.
+- **Phase 3 ornament-glyph contract tests**
+  (`tests/test_corruption_quarantine.py`): 3 tests pinning the
+  Combat page-66 detection contract + Arabic/CJK passthrough.
+- **Qdrant ingest collision-free point IDs**: deterministic UUID5
+  derived from `chunk_id`. 6 regression tests in
+  `tests/test_qdrant_point_id_collision.py`. Fixes the
+  multi-doc-per-collection ingest workflow (was overwriting all
+  docs with the largest single doc's chunks).
+- **Overnight pipeline scaffolding**: `scripts/v28_overnight_pipeline.sh`
+  (convert → audit → snapshot → commit) + `scripts/v28_build_after_snapshot.py`
+  (parses qa_audit SUMMARY, splits canonical from legacy probes,
+  emits delta column vs prior snapshot).
+- **Quality snapshots**:
+  `docs/QUALITY_SNAPSHOT_2026-05-03.md` (Phase 0 BEFORE) and
+  `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md` (Phase 5c AFTER
+  with empirical Phase outcomes + known limitations).
+
+### Changed
+- **Schema validator `_strip_c0_controls`** (Phase 1, Workstream F).
+  In `src/mmrag_v2/schema/ingestion_schema.py`, replaces runs of
+  C0/DEL controls with `; ` (prose context) or `" "` (code context)
+  instead of dropping them outright. Preserves the keyword-separator
+  structure that PDFs occasionally use `\x01` for. Existing test
+  `test_text_chunk_strips_c0_controls_but_preserves_newline_tab`
+  updated to reflect the new replace-vs-strip semantics.
+- **`src/mmrag_v2/processor.py`**: removed the dead else-branch at
+  line 2079 (`else: result = self._converter.convert(...)`). The
+  adapter is unconditionally constructed in `__init__` so the
+  fallback was both dead code AND a guard violation.
+- **`src/mmrag_v2/engines/pdf_engine.py`**: routed
+  `_convert_with_docling` through the adapter so post-Docling
+  sanity stages run (parallel-site fix per PLAN_V2.8 §2b).
+- **`scripts/convert_books.sh`**: extended manifest from 24 to 34
+  entries — every PDF/EPUB in `data/` now in scope, including the
+  business forms and data spreadsheet (first-class per the form
+  acceptance class). Added clear comment block on `--no-refiner
+  --vision-provider none --no-cache` flag rationale (apples-to-apples
+  vs Phase 0 baseline, plus refiner-config-default bug bypass).
+- **`scripts/qa_conversion_audit.py`**: TEXT verdict now honors
+  `is_form` consistently — fixes a contradictory
+  `TEXT: PASS / FORM_AUDIT_FAIL (TEXT)` output where the form bypass
+  worked at the label-print site but missed the fails-tracking site.
+- Stale `data/scanned/HarryPotter_*.pdf` paths fixed in 3 sites
+  (test fixture, classifier docstring, convert_books.sh) after the
+  2026-05-03 `digital_literature` data move.
+
+### Fixed
+- **Workstream F (0x01 keyword separator)** — `A_comprehensive_review_on_hybrid_electri`
+  fresh re-conversion: AUDIT_PASS, `ctrl_chunks=0` (was 1, total 4).
+  Keyword chunk now reads `"Hybrid electric vehicle; Hybrid energy
+  storage system; Architecture; ..."` — semantically intact.
+- **Workstream C (Combat ornament-glyph)** — `Combat_Aircraft_August_2025`
+  fresh re-conversion: AUDIT_PASS, `encoding_artifacts=0`,
+  `high_corruption=0` (was 48, 79). Empirical no-op outcome — the
+  shipped `CorruptionInterceptor` + quarantine + 2026-05-03
+  post-Docling sanity stages already heal Combat on a fresh run.
+- **Workstream B (Chaubal CodeFormulaV2)** — `Chaubal_PyTorch_Projects`
+  fresh re-conversion: AUDIT_PASS, `indentation_fidelity=0.96`
+  (was 0.54; target ≥0.85). CodeFormulaV2 engaged via the existing
+  cheap-evidence trigger + Docling adapter `do_code_enrichment=True`
+  plumbing.
+- **HARRY page-30 reading-order acceptance test** — locator was
+  matching chapter-heading text inside a downstream image-chunk's
+  auto-injected breadcrumb leak (`"[Figure on page N] | Context: ... > THE VANISHING GLASS"`)
+  and reporting a false swap. Fixed `_locate` to (a) only consider
+  text-modality chunks, (b) recognize `parent_heading` matches at
+  offset −1. Live HARRY pages-1-30 acceptance now passes.
+- **Qdrant ingest point_id collision** — `scripts/ingest_to_qdrant.py:439`
+  used `point_id = i + 1` (sequential per-file). Multi-doc-per-collection
+  ingest overwrote 32 of 34 docs with the largest doc's chunks
+  (only 1,690 / 22,587 chunks survived in the first ingest attempt).
+  Fixed via deterministic UUID5 from chunk_id; second ingest landed
+  22,137 / 22,160 unique chunks (100% of unique embeddable chunks).
+
+### Pre-flight evidence (committed in 5b0e13d → 9726b43)
+- `pytest tests/ -q`: **596 passed, 2 skipped, 0 failed.**
+- `bash scripts/smoke_multiprofile.sh`: **11/11 GATE_PASS + 11/11 UNIVERSAL_PASS.**
+- HARRY pages-1-30 live acceptance: **PASS.**
+- `mmrag_v2_8` Qdrant collection: **22,137 points**, status green,
+  768-dim vectors, `on_disk` storage. Sits side-by-side with the
+  17 healthy `*_v2` per-doc collections; nothing was overwritten in
+  user-owned data.
+
+### Known limitations (v2.9 scope, documented in tag message)
+1. `Ayeva_Python_Patterns` CODE FAIL (`indentation_fidelity=0.83` vs
+   `0.85` gate). Profile misclassified as `digital_literature`
+   (rule 0c misfire on a code-heavy book), suppressing the
+   `needs_code_enrichment` cheap-evidence trigger. Net 0.22 → 0.83
+   is a massive lift even without enrichment.
+2. `Firearms` HEADING coverage 78% (gate ≥80%). Profile changed
+   `scanned` → `technical_manual` between baselines; stricter
+   heading-inheritance leaves 178 chunks orphan-headed. Same
+   content fidelity, just less hierarchy annotation.
+3. Within-file `chunk_id` collisions (427 across the corpus,
+   largest contributor `KI_En_ChatGPT` 279). Schema generator
+   collapses identical content (boilerplate footers, repeated
+   page numbers) to the same ID. v2.9 fix: include the chunk's
+   `i+1` position in the hash seed.
+4. Refiner smart-routing (`cli.py:686`) enables refiner from
+   `~/.mmrag-v2.yml` `refiner.enabled=true` regardless of
+   `has_encoding_corruption`. v2.8 broad reconversion bypassed
+   this with `--no-refiner` for apples-to-apples vs Phase 0
+   baseline. v2.9 fix: gate the config-default enable on the
+   diagnostic just like the explicit auto-override at `cli.py:1101`.
+5. `mmrag_v2_8` collection has placeholder image descriptions
+   (`vision_status: pending`) because `--vision-provider none` was
+   used in the broad reconversion. v2.9 fix: targeted image-only
+   enrichment script that reads existing JSONLs, runs VLM per
+   image, updates `visual_description`/`refined_content`, and
+   re-ingests just the image points.
+
+## [Folded into 2.8.0] — Post-Docling Sanity Pass (2026-05-03)
+
+> Note: this section originally landed as `[unreleased]`. It is now
+> bundled into the **v2.8.0** tag (the v2.8 plan explicitly sits on top
+> of these stages). Kept verbatim below for the per-feature breakdown;
+> the consolidated v2.8.0 section above lists the full closure.
 
 ### Added
 - **Post-Docling reading-order y-sort** (`engines/docling_postprocess.py`).
@@ -144,7 +296,7 @@ All notable changes to this project will be documented in this file. This projec
 - Probe `output/probe_contextual_retrieval_rag_guide/`: AUDIT_PASS + UNIVERSAL_PASS, 680 chunks (text=559, image=99, table=22), `indentation_fidelity=0.91` — byte-identical to the Boundary Closeout baseline `output/probe_boundary_closeout_rag_guide/`.
 - Multi-profile smoke (Contextual Retrieval close): `output/smoke_multiprofile_20260501_153101/` 10/10 GATE_PASS + UNIVERSAL_PASS, including the Greenhouse blind-test document.
 
-## [Unreleased] — Milestone 1: Stabilize Extraction (2026-04-30 → 2026-05-01)
+## [Folded into 2.8.0] — Milestone 1: Stabilize Extraction (2026-04-30 → 2026-05-01)
 
 ### Added
 - **Shared PDF extraction plan + Docling adapter.** `src/mmrag_v2/engines/pdf_plan.py`
