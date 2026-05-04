@@ -28,8 +28,18 @@ import re
 import sys
 import time
 import urllib.request
+import uuid
 from pathlib import Path
 from typing import Any
+
+# Deterministic UUID namespace for Qdrant point IDs derived from chunk_id.
+# Using a fixed namespace (rather than NAMESPACE_DNS or random) so the same
+# chunk_id always maps to the same point_id across runs and across machines.
+# Critical for the multi-doc-per-collection workflow (e.g. PLAN_V2.8 broad
+# reconversion -> single mmrag_v2_8 collection): without a stable per-chunk
+# point ID, sequential `i+1` IDs collide across files and later docs
+# overwrite earlier ones.
+_POINT_ID_NAMESPACE = uuid.UUID("8b7c5e3a-1f4d-4b2a-9c1e-6d8a3f0b9c2e")
 
 # Contextual Retrieval — builds embedding text from hierarchical + neighbor context.
 from mmrag_v2.chunking.contextual_retrieval import build_contextualized_text
@@ -435,8 +445,12 @@ def main():
             literature_toc_page=literature_toc_page,
         )
 
-        # Use a stable integer ID (Qdrant needs int or UUID)
-        point_id = i + 1
+        # Stable, collision-free point ID across multiple files in one
+        # collection: deterministic UUID5 from the chunk's globally-unique
+        # chunk_id. Falls back to (source_file + integer index) when chunk_id
+        # is missing, which keeps single-file v2.7 behavior identical.
+        seed = chunk_id if chunk_id else f"{source_file}#{i}"
+        point_id = str(uuid.uuid5(_POINT_ID_NAMESPACE, seed))
 
         points_buffer.append({
             "id": point_id,
