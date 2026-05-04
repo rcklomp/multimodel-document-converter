@@ -527,6 +527,12 @@ class BatchProcessor:
         self._docling_converter = None  # Cached Docling DocumentConverter
         self._shadow_processor = None   # Cached V2DocumentProcessor for shadow extraction
 
+        # v2.9 Phase 1: per-document monotonic chunk counter feeding the
+        # ``position`` argument of ``create_*_chunk`` factories so two chunks
+        # with byte-identical (page, modality, content) get distinct chunk_ids.
+        # Reset at the top of process_pdf().
+        self._chunk_position: int = 0
+
         logger.info(
             f"BatchProcessor initialized: "
             f"batch_size={batch_size}, "
@@ -534,6 +540,12 @@ class BatchProcessor:
             f"timeout={vlm_timeout}s, "
             f"max_pages={max_pages if max_pages else 'ALL'}"
         )
+
+    def _next_chunk_position(self) -> int:
+        """Allocate the next per-document chunk position (v2.9 Phase 1)."""
+        pos = self._chunk_position
+        self._chunk_position = pos + 1
+        return pos
 
     def enable_refiner(
         self,
@@ -1585,6 +1597,7 @@ class BatchProcessor:
                                         hierarchy=hierarchy,
                                         extraction_method="digital_text_layer_fallback",
                                         content_classification=self._classify_text_content(part_text),
+                                        position=self._next_chunk_position(),
                                         **self._intelligence_metadata,
                                     )
                                     text_fallback_chunks.append(fallback_chunk)
@@ -2562,6 +2575,10 @@ class BatchProcessor:
         # Compute document hash BEFORE splitting
         self._doc_hash = self._compute_doc_hash(pdf_path)
         logger.info(f"Document hash: {self._doc_hash}")
+
+        # v2.9 Phase 1: reset per-document chunk position counter so chunk_id
+        # collisions cannot accumulate across documents in batch CLI runs.
+        self._chunk_position = 0
 
         # Workstream B: legacy callers still get the cheap pre-pass here.
         # Canonical CLI paths pass a PdfConversionPlan with this decision already made.
@@ -4921,6 +4938,7 @@ class BatchProcessor:
                     confidence_threshold=intel.get("confidence_threshold"),
                     document_domain=intel.get("document_domain"),
                     document_modality=intel.get("document_modality"),
+                    position=self._next_chunk_position(),
                 )
                 chunks.append(chunk)
 
@@ -7046,6 +7064,7 @@ class BatchProcessor:
                         prev_text=(ch.semantic_context.prev_text_snippet if ch.semantic_context else None),
                         next_text=(ch.semantic_context.next_text_snippet if ch.semantic_context else None),
                         content_classification=sub_content_classification,
+                        position=self._next_chunk_position(),
                         **{k: v for k, v in self._intelligence_metadata.items() if v is not None},
                     )
                     new_chunk.chunk_id = f"{ch.chunk_id}_o{idx+1}"
@@ -7905,6 +7924,7 @@ class BatchProcessor:
                             page_height=int(_pg_wh[1]) if _pg_wh and _pg_wh[1] > 0 else None,
                             extraction_method="recovery_frontpage",
                             content_classification=self._classify_recovery_text_content(text_clean),
+                            position=self._next_chunk_position(),
                             **self._intelligence_metadata,
                         )
                         _apply_toc_recovery_policy(recovery_chunk, toc_like_page)
@@ -7980,6 +8000,7 @@ class BatchProcessor:
                             hierarchy=hierarchy,
                             extraction_method="recovery_scan",  # Marks as rescued text
                             content_classification=self._classify_recovery_text_content(para_clean),
+                            position=self._next_chunk_position(),
                             **self._intelligence_metadata,
                         )
                         _apply_toc_recovery_policy(recovery_chunk, toc_like_page)
@@ -8051,6 +8072,7 @@ class BatchProcessor:
                                 extraction_method="recovery_subsurface",
                                 asset_ref=fig_chunk.asset_ref,
                                 content_classification=classification,
+                                position=self._next_chunk_position(),
                                 **self._intelligence_metadata,
                             )
                             _apply_toc_recovery_policy(recovery_chunk, toc_like_page)
@@ -8141,6 +8163,7 @@ class BatchProcessor:
                             page_height=int(_pg_wh3[1]) if _pg_wh3 and _pg_wh3[1] > 0 else None,
                             extraction_method="recovery_gap_fill",
                             content_classification=classification,
+                            position=self._next_chunk_position(),
                             **self._intelligence_metadata,
                         )
                         _apply_toc_recovery_policy(recovery_chunk, toc_like_page)
@@ -8752,6 +8775,7 @@ class BatchProcessor:
                         page_height=int(page_h) if page_h > 0 else None,
                         extraction_method="enhanced_frontpage",
                         content_classification=self._classify_recovery_text_content(text_clean),
+                        position=self._next_chunk_position(),
                         **self._intelligence_metadata,
                     )
                     new_chunks.append(new_chunk)
@@ -9146,6 +9170,7 @@ class BatchProcessor:
                         chunk.semantic_context.next_text_snippet if chunk.semantic_context else None
                     ),
                     content_classification=getattr(chunk.metadata, "content_classification", None),
+                    position=self._next_chunk_position(),
                     **{k: v for k, v in self._intelligence_metadata.items() if v is not None},
                 )
 

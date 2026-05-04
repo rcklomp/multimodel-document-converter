@@ -400,6 +400,16 @@ class V2DocumentProcessor:
         # Initialize Semantic Text Refiner (v18.2) - disabled by default
         self._refiner = None
 
+        # v2.9 Phase 1: per-document monotonic chunk counter feeding the
+        # ``position`` argument of ``create_*_chunk`` factories so two chunks
+        # with byte-identical (page, modality, content) get distinct chunk_ids.
+        # Reset by callers at the start of each document (process_document /
+        # process_to_jsonl_atomic). When this V2DocumentProcessor is used as a
+        # shadow extractor by BatchProcessor, position uniqueness within the
+        # shadow scope is sufficient — BatchProcessor owns its own counter for
+        # the canonical chunks.
+        self._chunk_position: int = 0
+
         # ================================================================
         # GEMINI AUDIT FIX: Initialize enhancement modules
         # ================================================================
@@ -1620,6 +1630,7 @@ class V2DocumentProcessor:
                             page_width=int(page_w),
                             page_height=int(page_h),
                             extraction_method="shadow",  # REQ-MM-07: Mark as shadow
+                            position=self._next_chunk_position(),
                             **self._intelligence_metadata,
                         )
 
@@ -2008,6 +2019,12 @@ class V2DocumentProcessor:
 
         # Return empty state as fallback
         return create_context_state()
+
+    def _next_chunk_position(self) -> int:
+        """Allocate the next per-document chunk position (v2.9 Phase 1)."""
+        pos = self._chunk_position
+        self._chunk_position = pos + 1
+        return pos
 
     def process_document(
         self,
@@ -2512,6 +2529,7 @@ class V2DocumentProcessor:
                 page_width=int(page_w),
                 page_height=int(page_h),
                 extraction_method="hybrid_chunker",
+                position=self._next_chunk_position(),
                 **self._intelligence_metadata,
             )
             chunk.semantic_context = semantic_context
@@ -2921,6 +2939,7 @@ class V2DocumentProcessor:
                 visual_description=visual_description,
                 page_width=int(img_page_w),
                 page_height=int(img_page_h),
+                position=self._next_chunk_position(),
                 # V2.4: Intelligence Stack Metadata
                 **self._intelligence_metadata,
             )
@@ -3094,6 +3113,7 @@ class V2DocumentProcessor:
                     page_width=int(tbl_page_w),
                     page_height=int(tbl_page_h),
                     extraction_method=table_extraction_method,
+                    position=self._next_chunk_position(),
                     # V2.4: Intelligence Stack Metadata
                     **self._intelligence_metadata,
                 )
@@ -3111,6 +3131,7 @@ class V2DocumentProcessor:
                     page_width=int(tbl_page_w),
                     page_height=int(tbl_page_h),
                     extraction_method=table_extraction_method,
+                    position=self._next_chunk_position(),
                     # V2.4: Intelligence Stack Metadata
                     **self._intelligence_metadata,
                 )
@@ -3392,6 +3413,7 @@ class V2DocumentProcessor:
                             chunk_text,
                             chunk_type,
                         ),
+                        position=self._next_chunk_position(),
                         # V2.4: Intelligence Stack Metadata
                         **self._intelligence_metadata,
                     )

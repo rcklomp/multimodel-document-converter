@@ -205,6 +205,10 @@ class DoclingToV2Mapper:
             "table": 0,
         }
 
+        # v2.9 Phase 1: per-document monotonic chunk counter so two chunks
+        # with byte-identical (page, modality, content) get distinct chunk_ids.
+        self._chunk_position: int = 0
+
         # Text buffer for context (REQ-MM-03)
         self._text_buffer: List[str] = []  # Previous text snippets (for prev_text_snippet)
         self._next_text_buffer: List[str] = []  # Lookahead for next_text_snippet
@@ -463,6 +467,8 @@ class DoclingToV2Mapper:
         # REQ-COORD-02: Get page dimensions for UI overlay support
         page_w, page_h = self._page_dims.get(page_no, (DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT))
 
+        position = self._chunk_position
+        self._chunk_position += 1
         chunk = create_image_chunk(
             doc_id=self.doc_hash,
             content=visual_description,
@@ -479,6 +485,7 @@ class DoclingToV2Mapper:
             height_px=height,
             page_width=int(page_w),
             page_height=int(page_h),
+            position=position,
             **self.intelligence_metadata,  # BUG-006 FIX: Propagate intelligence metadata
         )
 
@@ -550,6 +557,8 @@ class DoclingToV2Mapper:
         # REQ-COORD-02: Get page dimensions for UI overlay support
         page_w, page_h = self._page_dims.get(page_no, (DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT))
 
+        position = self._chunk_position
+        self._chunk_position += 1
         chunk = create_table_chunk(
             doc_id=self.doc_hash,
             content=content,
@@ -562,6 +571,7 @@ class DoclingToV2Mapper:
             page_width=int(page_w),
             page_height=int(page_h),
             extraction_method=extraction_method,
+            position=position,
             **self.intelligence_metadata,  # BUG-006 FIX: Propagate intelligence metadata
         )
 
@@ -601,6 +611,8 @@ class DoclingToV2Mapper:
 
         for chunk_text in chunks:
             if not self._is_noise_content(chunk_text):
+                position = self._chunk_position
+                self._chunk_position += 1
                 yield create_text_chunk(
                     doc_id=self.doc_hash,
                     content=chunk_text,
@@ -610,6 +622,7 @@ class DoclingToV2Mapper:
                     hierarchy=hierarchy,
                     chunk_type=chunk_type,
                     content_classification=self._classify_text_content(chunk_text, chunk_type),
+                    position=position,
                     **self.intelligence_metadata,  # BUG-006 FIX: Propagate intelligence metadata
                 )
 

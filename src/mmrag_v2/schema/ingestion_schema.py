@@ -712,9 +712,26 @@ def calculate_hierarchy_level(breadcrumb_path: List[str]) -> Optional[int]:
 # ============================================================================
 
 
-def _generate_chunk_id(doc_id: str, content: str, page: int, modality: str = "text") -> str:
-    """Generate unique chunk ID using content hash."""
-    hash_input = f"{doc_id}:{page}:{modality}:{content}"
+def _generate_chunk_id(
+    doc_id: str,
+    content: str,
+    page: int,
+    modality: str = "text",
+    position: int = 0,
+) -> str:
+    """Generate unique chunk ID using content hash.
+
+    The ``position`` argument is a per-document chunk index. Two chunks
+    with byte-identical ``(doc_id, page, modality, content)`` but
+    different ``position`` values get distinct ``chunk_id`` strings —
+    eliminating within-file collisions caused by repeated boilerplate
+    (page footers, identical short labels). The ``position=0`` default
+    is retained for backward-compatibility with tests and external
+    callers that do not allocate per-document positions; production
+    paths (BatchProcessor, V2DocumentProcessor) MUST thread a unique
+    position per chunk creation.
+    """
+    hash_input = f"{doc_id}:{page}:{modality}:{position}:{content}"
     content_hash = hashlib.sha256(hash_input.encode()).hexdigest()[:8]
     return f"{doc_id}_{page:03d}_{modality}_{content_hash}"
 
@@ -771,6 +788,7 @@ def create_text_chunk(
     confidence_threshold: Optional[float] = None,
     document_domain: Optional[str] = None,
     document_modality: Optional[str] = None,
+    position: int = 0,
 ) -> IngestionChunk:
     """
     Factory function to create a TEXT modality chunk.
@@ -779,7 +797,7 @@ def create_text_chunk(
     """
     content = _strip_c0_controls(content) or ""
     refined_content = _strip_c0_controls(refined_content)
-    chunk_id = _generate_chunk_id(doc_id, content, page_number, "text")
+    chunk_id = _generate_chunk_id(doc_id, content, page_number, "text", position)
 
     # Ensure hierarchy has level calculated
     if hierarchy is None:
@@ -867,6 +885,7 @@ def create_image_chunk(
     confidence_threshold: Optional[float] = None,
     document_domain: Optional[str] = None,
     document_modality: Optional[str] = None,
+    position: int = 0,
 ) -> IngestionChunk:
     """
     Factory function to create an IMAGE modality chunk.
@@ -878,7 +897,7 @@ def create_image_chunk(
 
     V2.4: Image chunks now carry intelligence metadata for full audit trail.
     """
-    chunk_id = _generate_chunk_id(doc_id, f"image:{asset_path}", page_number, "image")
+    chunk_id = _generate_chunk_id(doc_id, f"image:{asset_path}", page_number, "image", position)
 
     # Ensure hierarchy has level calculated
     if hierarchy is None:
@@ -958,6 +977,7 @@ def create_table_chunk(
     confidence_threshold: Optional[float] = None,
     document_domain: Optional[str] = None,
     document_modality: Optional[str] = None,
+    position: int = 0,
 ) -> IngestionChunk:
     """
     Factory function to create a TABLE modality chunk.
@@ -967,7 +987,7 @@ def create_table_chunk(
 
     V2.4: Table chunks now carry intelligence metadata for full audit trail.
     """
-    chunk_id = _generate_chunk_id(doc_id, f"table:{content[:50]}", page_number, "table")
+    chunk_id = _generate_chunk_id(doc_id, f"table:{content[:50]}", page_number, "table", position)
 
     # Ensure hierarchy has level calculated
     if hierarchy is None:
