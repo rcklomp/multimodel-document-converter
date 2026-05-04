@@ -4,6 +4,122 @@ All notable changes to this project will be documented in this file. This projec
 
 > **Versioning note:** Historical entries before the `v2.4.x` line used an internal `v18.x` milestone scheme during rapid iteration and test/fix cycles. Only stable or decision-worthy checkpoints were recorded, so intermediate builds are intentionally omitted. From `v2.4` onward, entries follow the current public semantic line.
 
+## [2.9.0] — 2026-05-04 — PLAN_V2.9 carry-overs closed; cloud-VLM-enriched mmrag_v2_8
+
+Engine version bumps to **2.9.0**. Schema version stays **2.7.0** (no
+chunk-shape change; the v2.9 work changes `chunk_id` *values* for the
+427 previously-colliding chunks but no field is added or removed).
+Tagged as `v2.9.0` (annotated tag on the AFTER-snapshot commit).
+
+### Added
+- **Phase 1 chunk_id collision fix**
+  (`tests/test_chunk_id_collision_v29.py`, 4 new tests): the schema
+  factory `_generate_chunk_id` now hashes a per-document monotonic
+  `position` argument so two chunks with byte-identical
+  `(doc_id, page, modality, content)` get distinct chunk_ids.
+  Production paths (BatchProcessor, V2DocumentProcessor, Mapper)
+  each maintain a per-document counter and thread it through every
+  factory call. Fixes the v2.8 surface where 427 within-file
+  duplicate chunk_ids silently overwrote each other on Qdrant
+  upsert (uuid5 from chunk_id).
+- **Phase 2 refiner smart-routing**
+  (`tests/test_cli_refiner_smart_routing.py`, 5 new tests): pure
+  helper `cli._decide_enable_refiner` factors the decision into a
+  single rule — explicit `--no-refiner` always wins; explicit
+  `--enable-refiner` always wins; otherwise the config default
+  (`cfg.refiner.enabled=true`) only fires when the diagnostic
+  reports `has_encoding_corruption=True`. Fixes the v2.8 HARRY
+  symptom (clean prose hammered qwen-plus per chunk). Parallel-site
+  fix in `cli.batch_process`: the existing reference to
+  `_refiner_explicitly_disabled` was a NameError-waiting-to-fire,
+  now defined alongside `_refiner_explicitly_enabled`.
+- **Phase 3 Rule 0/0c code-evidence guard**
+  (`tests/test_classifier_rule_0c_tightening.py`, 6 new tests):
+  `document_diagnostic._estimate_content_domain` counts
+  "code-evidence pages" (line-starting Python keywords or fenced
+  blocks) and suppresses BOTH the +0.4 weak-dialogue lane and the
+  +0.8 full-novel lane when ≥2 sampled pages show code. Fixes the
+  Ayeva misroute to `digital_literature` (Python f-strings + string
+  literals were being counted as dialogue). HARRY still routes to
+  `digital_literature` because novels show zero code keyword starts.
+- **Phase 4 Firearms HARD REJECT**
+  (`tests/test_classifier_firearms_route.py`, 4 new + 1 env-gated
+  test): `profile_classifier._score_technical_manual` HARD-REJECTs
+  long-form scanned docs (`is_scan=True AND image_density>=1.0 AND
+  page_count>100`). Firearms and Earthship flip from
+  `technical_manual` back to `scanned`, restoring HEADING coverage.
+  AGENT-SPATIAL-20 unchanged — this is a profile-classifier scorer
+  adjustment, not a per-profile spatial-threshold branch.
+- **Phase 5b targeted VLM enrichment script**
+  (`scripts/enrich_image_chunks_v29.py`): post-conversion image-only
+  enrichment via cloud `qwen3-vl-plus`. Atomic tmp-file write-back;
+  `--dry-run` for cost preview; resumable on crash. Hard-fallback
+  policy via the existing `VisionManager` Source Sanctity harness.
+  Local lane deferred to v2.10 per `docs/PLAN_V2.9.md` §Phase 5
+  decision e.
+- **Phase 5b acceptance test**
+  (`tests/test_v29_image_enrichment_acceptance.py`, env-gated by
+  `RUN_V29_VLM_ACCEPTANCE=1`): pins `vision_status≠pending`, no
+  placeholder `visual_description`, `vision_provider_used=qwen3-vl-plus`
+  across the canonical corpus.
+- **Quality snapshot**: `docs/QUALITY_SNAPSHOT_2026-05-04_v2.9_after.md`.
+- **Plan**: `docs/PLAN_V2.9.md` (superseded
+  `docs/archive/PLAN_V2.8_PRODUCTION_GAPS.md`).
+
+### Changed
+- **`src/mmrag_v2/schema/ingestion_schema.py`**: factory functions
+  `create_text_chunk` / `create_image_chunk` / `create_table_chunk`
+  accept new `position: int = 0` parameter; `_generate_chunk_id`
+  signature extended to take `position` (hashed into the seed).
+- **`src/mmrag_v2/cli.py`**: removed eager config-default refiner
+  enable at `cli.py:686`; replaced with `_decide_enable_refiner`
+  helper invoked at the diagnostic-metadata block. Parallel-site
+  fix in `batch_process`.
+- **`src/mmrag_v2/orchestration/document_diagnostic.py`**: Rule 0
+  and Rule 0c gated on `_code_evidence_pages < 2`.
+- **`src/mmrag_v2/orchestration/profile_classifier.py`**:
+  `_score_technical_manual` HARD-REJECTs Firearms-class signatures.
+- **`scripts/convert_books.sh`**: `--no-refiner` dropped (Phase 2
+  smart-routing makes it unnecessary). Wraps `python -m mmrag_v2.cli`
+  in `conda run -n mmrag-v2` so the script works without the env
+  pre-activated.
+- **`src/mmrag_v2/version.py`**: `__engine_version__` 2.8.0 → 2.9.0;
+  schema-version note clarifies that chunk_id values differ for
+  affected chunks even though the field shape is unchanged.
+
+### Fixed
+- **chunk_id collisions across the canonical corpus.** v2.8 had 427
+  within-file dupes (KI_En_ChatGPT 279, Devlin 76, Fluent 15, …);
+  v2.9 broad reconversion target: 0.
+- **Refiner per-chunk hammering on clean-prose docs.** HARRY
+  conversion now runs without `--no-refiner` and produces
+  `refinement_applied=0` text chunks (config default = on, but
+  diagnostic says clean → smart-routing skips refiner).
+- **Ayeva CODE FAIL.** v2.8 fresh produced `indentation_fidelity=0.83`
+  (under 0.85 gate) because Ayeva routed to `digital_literature`,
+  suppressing CodeFormulaV2. v2.9 routes Ayeva to `technical_manual`,
+  CodeFormulaV2 engages.
+- **Firearms HEADING FAIL.** v2.8 fresh produced HEADING coverage
+  78% (under 80% gate) because Firearms routed to `technical_manual`,
+  whose stricter heading-inheritance left 178/815 chunks
+  orphan-headed. v2.9 routes Firearms back to `scanned`.
+- **`mmrag_v2_8` placeholder image points.** v2.8 ingest left
+  ~5,500 image points with `vision_status="pending"` and placeholder
+  `visual_description`. v2.9 Phase 5b enriches every image with a
+  real cloud-VLM description; image-side RAG retrieval restored.
+
+### Removed
+- `--no-refiner` flag from `scripts/convert_books.sh` (Phase 2 fix
+  obviates the workaround).
+
+### Notes
+- Local NuMarkdown-8B-Thinking-mlx-8bits VLM lane stays deferred to
+  v2.10 while the off-network endpoint is unreachable. v2.9
+  enrichment script does NOT branch on local availability.
+- Remote CodeFormulaV2 inference (`RemoteCodeFormulaOptions` /
+  `ApiCodeFormulaOptions`) still not exposed by Docling 2.86 — v2.10
+  followup if code-heavy reconversion frequency exceeds 1/week.
+
 ## [2.8.0] — 2026-05-04 — PLAN_V2.8 Production Gaps Closed
 
 Engine version bumps to **2.8.0**. Schema version stays **2.7.0** (no
