@@ -31,7 +31,7 @@ Tagged as `v2.8.0` (annotated tag, commit `9726b43`).
   guarded" to "construction + invocation guarded". 4 new guard tests
   (1 real-code + 3 synthetic positive/negative).
 - **Cross-cutting Parallel-Site Audit principle** baked into
-  `docs/PLAN_V2.8_PRODUCTION_GAPS.md` §2b. Every production-code
+  `docs/archive/PLAN_V2.8_PRODUCTION_GAPS.md` §2b. Every production-code
   change must walk parallel call sites before designing the fix.
 - **Phase 4 named contract tests** for the CodeFormulaV2 enable
   decision (`tests/test_code_enrichment_decision.py`):
@@ -160,7 +160,7 @@ drop-cap promotion, label-leak filter, and OCR gating bullets). The earlier
 verbatim duplicate has been removed to keep the changelog single-source.
 Per-feature historical context is preserved in commit `3bdbe0f` (post-Docling
 sanity pass + `digital_literature` profile) and in
-`docs/PLAN_DOCLING_POSTPROCESSOR.md` (the predecessor plan, marked shipped).
+`docs/archive/PLAN_DOCLING_POSTPROCESSOR.md` (the predecessor plan, marked shipped).
 
 ## [v2.7.1] — Contextual Retrieval (2026-05-01)
 
@@ -205,7 +205,7 @@ release. The full Added/Changed/Fixed breakdown is in the consolidated
 Plan Control Plane typed policy fields, refactor boundary closeout, and
 Milestone 1 chunker-guard bullets). The earlier verbatim duplicate has been
 removed to keep the changelog single-source. Per-feature historical context
-is preserved in `docs/QUALITY_SNAPSHOT_2026-05-01.md` (banner-annotated as
+is preserved in `docs/archive/quality_snapshots/QUALITY_SNAPSHOT_2026-05-01.md` (banner-annotated as
 superseded by the 2026-05-04 baseline; selected metrics like Ayeva 0.93 do
 NOT reflect the v2.8 fresh re-conversion).
 

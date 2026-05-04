@@ -97,7 +97,7 @@ detection, and chunking, with these differences:
 | `extract_backgrounds` | False | Novels have no editorial-photo backgrounds |
 | Routing trigger | `domain == "literature" AND not is_scan AND page_count >= 50 AND median_dim small` | `_score_digital_literature` in `orchestration/profile_classifier.py` |
 
-**Plan reference:** `docs/PLAN_DOCLING_POSTPROCESSOR.md` documents the four
+**Plan reference:** `docs/archive/PLAN_DOCLING_POSTPROCESSOR.md` documents the four
 post-Docling stages (reading-order y-sort, drop-cap promotion, label-leak
 filter, OCR gating) and the routing/wiring across `profile_classifier.py`,
 `strategy_profiles.py`, `strategy_orchestrator.py`. Acceptance fixture:

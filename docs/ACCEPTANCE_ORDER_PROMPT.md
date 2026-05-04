@@ -3,7 +3,7 @@
 **Copy everything below this line as your Claude Code prompt.**
 
 This prompt drives **step 5 (Acceptance Order)** of the combined plan covering
-the open-issues plan-of-approach, `docs/PLAN_V2.8_PRODUCTION_GAPS.md` (current
+the open-issues plan-of-approach, `docs/archive/PLAN_V2.8_PRODUCTION_GAPS.md` (current
 execution plan), and `docs/archive/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md`
 (archived 2026-05-03; retained as architectural rationale).
 It is intentionally adversarial: the agent must prove — with reproducible
@@ -35,10 +35,10 @@ Read these files FIRST and treat them as binding:
 2.  `docs/AGENT_GOVERNANCE.md`                 — evidence/status rules
 3.  `docs/PROJECT_STATUS.md`                   — current engineering state
 4.  `docs/DECISIONS.md`                        — architectural decisions
-5.  `docs/PLAN_V2.8_PRODUCTION_GAPS.md` — **SHIPPED 2026-05-04**, retained as the historical execution plan (the chain `5b0e13d → 645ab2b` on `main` and the `v2.8.0` annotated tag are its outcome). For the next execution cycle see `docs/PLAN_V2.9_DRAFT_PROMPT.md` (and the to-be-drafted `docs/PLAN_V2.9.md`). For architectural rationale see `docs/archive/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md`.
+5.  `docs/archive/PLAN_V2.8_PRODUCTION_GAPS.md` — **SHIPPED 2026-05-04**, retained as the historical execution plan (the chain `5b0e13d → 645ab2b` on `main` and the `v2.8.0` annotated tag are its outcome). For the next execution cycle see `docs/PLAN_V2.9_DRAFT_PROMPT.md` (and the to-be-drafted `docs/PLAN_V2.9.md`). For architectural rationale see `docs/archive/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md`.
 6.  `docs/PROGRESS_CHECKLIST.md`               — pending items
 7.  `docs/QUALITY_GATES.md`                    — pass/fail thresholds
-8.  `docs/CONTEXTUAL_RETRIEVAL_PROMPT.md`      — companion (step 4)
+8.  `docs/archive/CONTEXTUAL_RETRIEVAL_PROMPT.md`      — companion (step 4)
 
 Pinned invariants you must honour and cite in the verdict file:
 - `AGENT-VAL-01` — blind-test smoke pass; no hardcoded filenames in production
@@ -660,8 +660,8 @@ phase, fix the root cause, and regenerate the verdict.
 - `docs/AGENT_GOVERNANCE.md` — evidence/status rules
 - `docs/DECISIONS.md` — architectural decisions
 - `docs/QUALITY_GATES.md` — pass/fail thresholds
-- `docs/PLAN_V2.8_PRODUCTION_GAPS.md` — **SHIPPED 2026-05-04**, retained for historical context. For the next cycle see `docs/PLAN_V2.9_DRAFT_PROMPT.md` (`docs/archive/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md` is the older archived predecessor).
-- `docs/CONTEXTUAL_RETRIEVAL_PROMPT.md` — companion (combined plan §4)
+- `docs/archive/PLAN_V2.8_PRODUCTION_GAPS.md` — **SHIPPED 2026-05-04**, retained for historical context. For the next cycle see `docs/PLAN_V2.9_DRAFT_PROMPT.md` (`docs/archive/PLAN_V2.7_DOCUMENT_UNDERSTANDING.md` is the older archived predecessor).
+- `docs/archive/CONTEXTUAL_RETRIEVAL_PROMPT.md` — companion (combined plan §4)
 - `scripts/smoke_multiprofile.sh` — smoke runner
 - `scripts/qa_conversion_audit.py` — conversion audit
 - `scripts/qa_universal_invariants.py` — universal invariant checker

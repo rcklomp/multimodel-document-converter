@@ -18,7 +18,7 @@ ach provides essential context that the plan must respect:
 1. **`docs/PROJECT_STATUS.md`** — Current state, active baseline, open items, known failures, completed work. This tells you what's broken and what's fixed. The "Active Baseline" pointer leads to QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md.
 2. **`docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`** — The v2.9 BEFORE state. Empirical Phase outcomes from v2.8, the 4 documented v2.9 followups (Ayeva, Firearms, chunk_id dupes, refiner smart-routing), and the Qdrant ingest evidence (22,137 / 22,160 unique chunks in `mmrag_v2_8`, all images placeholder).
 3. **`docs/PROGRESS_CHECKLIST.md`** — Workstream-level status tracking. Workstreams B, C, F are now `[x] CLOSED 2026-05-04`. Read the v2.8 closure entries to understand what's already done before duplicating any item in v2.9.
-4. **`docs/PLAN_V2.8_PRODUCTION_GAPS.md`** — Study the *structure* of this plan. It is the gold standard for execution planning in this project. Your v2.9 plan must follow its format: phases, parallel-site audits, TDD red→green, acceptance gates, decision log. Pay particular attention to §2b Parallel-Site Audit (the lesson from `processor.py:2072`).
+4. **`docs/archive/PLAN_V2.8_PRODUCTION_GAPS.md`** — Study the *structure* of this plan. It is the gold standard for execution planning in this project. Your v2.9 plan must follow its format: phases, parallel-site audits, TDD red→green, acceptance gates, decision log. Pay particular attention to §2b Parallel-Site Audit (the lesson from `processor.py:2072`).
 5. **`docs/DECISIONS.md`** — Architectural decisions and their rationale. Your plan must not contradict any ratified decision. If a decision needs revisiting, document that as a phase investigation step. Note especially the 2026-05-03 amendment to "Selective Code Enrichment Lane" (client-local CPU CodeFormulaV2 is acceptable for one-off batch).
 6. **`AGENTS.md`** — Hard invariants (numbered `AGENT-*`). These are non-negotiable constraints. Reference them in your plan where relevant. **Critical:** if your phase appears to require violating an invariant (e.g. AGENT-SPATIAL-20 forbids profile-specific spatial branches), do not silently violate it — make the conflict explicit, propose an investigation step, and either find a respecting fix or document the proposed amendment.
 7. **`docs/QUALITY_GATES.md`** — Pass/fail thresholds. All phases must produce outputs that satisfy these gates. The form acceptance class (added 2026-05-04 in v2.8 Phase 5a) is documented here; FORM_PASS and "GATE_PASS [form: ...]" are first-class success states, NOT waivers.
@@ -122,7 +122,7 @@ Create `docs/PLAN_V2.9.md` following this exact structure (modeled on `PLAN_V2.8
 
 **Status:** Draft v1.0
 **Owner:** [workstream owner]
-**Successor to:** `docs/PLAN_V2.8_PRODUCTION_GAPS.md` (shipped 2026-05-04)
+**Successor to:** `docs/archive/PLAN_V2.8_PRODUCTION_GAPS.md` (shipped 2026-05-04)
 **Related:** `docs/PROJECT_STATUS.md`, `docs/PROGRESS_CHECKLIST.md`,
 `docs/QUALITY_GATES.md`, `docs/DECISIONS.md`
 ```

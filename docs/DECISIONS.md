@@ -207,7 +207,7 @@ inference setup for v2.9.
 
 **Drift insurance:** `tests/test_contextual_retrieval.py::test_no_contextual_marker_strings_in_production_code` walks every `*.py` under `src/mmrag_v2/` and `scripts/` and fails the moment a non-allowlisted file contains a marker literal or calls `build_contextualized_text(...)`. Rejection criterion: any write of those strings into a chunk-creation helper, refiner output, or payload field is a P0 defect.
 
-**Evidence:** Focused contextual suite `32 passed`; static guards `2 passed`; focused boundary suite `93 passed`; full unit suite `512 passed, 1 skipped, 0 failed`; probe `output/probe_contextual_retrieval_rag_guide/` AUDIT_PASS + UNIVERSAL_PASS with byte-identical structural shape (680 chunks: text=559 / image=99 / table=22; `indentation_fidelity=0.91`) to the Boundary Closeout baseline `output/probe_boundary_closeout_rag_guide/`; smoke `output/smoke_multiprofile_20260501_153101/` 10/10 GATE_PASS + UNIVERSAL_PASS, including the Greenhouse blind-test document. See `docs/QUALITY_SNAPSHOT_2026-05-01.md` "Contextual Retrieval (Anthropic approach)".
+**Evidence:** Focused contextual suite `32 passed`; static guards `2 passed`; focused boundary suite `93 passed`; full unit suite `512 passed, 1 skipped, 0 failed`; probe `output/probe_contextual_retrieval_rag_guide/` AUDIT_PASS + UNIVERSAL_PASS with byte-identical structural shape (680 chunks: text=559 / image=99 / table=22; `indentation_fidelity=0.91`) to the Boundary Closeout baseline `output/probe_boundary_closeout_rag_guide/`; smoke `output/smoke_multiprofile_20260501_153101/` 10/10 GATE_PASS + UNIVERSAL_PASS, including the Greenhouse blind-test document. See `docs/archive/quality_snapshots/QUALITY_SNAPSHOT_2026-05-01.md` "Contextual Retrieval (Anthropic approach)".
 
 ---
 
@@ -235,7 +235,7 @@ inference setup for v2.9.
 **Decision:** Born-digital novels are routed through a new `digital_literature`
 profile that opts into four post-Docling sanity stages applied at the
 `DoclingPdfAdapter.convert()` seam. Successor to v2.7 §5; full plan at
-`docs/PLAN_DOCLING_POSTPROCESSOR.md`.
+`docs/archive/PLAN_DOCLING_POSTPROCESSOR.md`.
 
 **Rationale:**
 - Docling 2.86 produces four reproducible failure modes on born-digital

@@ -554,7 +554,7 @@ class HTMLEngine(FormatEngine):
 | Module | Change |
 |--------|--------|
 | `src/mmrag_v2/batch_processor.py` | Route through `PdfConversionPlan` → Docling adapter → UIR → ElementProcessor; legacy direct Docling paths must shrink, not expand |
-| `src/mmrag_v2/engines/docling_postprocess.py` | Post-Docling sanity stages (reading-order y-sort, drop-cap promotion + inline-trailing heal). Runs at `DoclingPdfAdapter.convert()` after Docling returns; gated by `PdfConversionPlan.reading_order_strategy`. See `docs/PLAN_DOCLING_POSTPROCESSOR.md`. |
+| `src/mmrag_v2/engines/docling_postprocess.py` | Post-Docling sanity stages (reading-order y-sort, drop-cap promotion + inline-trailing heal). Runs at `DoclingPdfAdapter.convert()` after Docling returns; gated by `PdfConversionPlan.reading_order_strategy`. See `docs/archive/PLAN_DOCLING_POSTPROCESSOR.md`. |
 | `src/mmrag_v2/engines/docling_serializers.py` | Custom `MmragChunkingSerializerProvider` for `HybridChunker`. Suppresses picture classification labels (`Other`/`Icon`/`Table`) on both the new `meta.classification` path (via `blocked_meta_names`) and the legacy `PictureClassificationData` annotation path. Gated by `PdfConversionPlan.suppress_layout_label_text`. |
 | `src/mmrag_v2/ocr/layout_aware_processor.py` | Proper layout detection (not full-page fallback) |
 | `src/mmrag_v2/vision/vision_prompts.py` | Defines VISUAL_ONLY_PROMPT policy and response validation helpers |

@@ -20,9 +20,9 @@ The current quality reference point is:
 
 - **`docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`** (current — v2.8 Phase 5c AFTER state: 30/34 canonical-corpus PASS including 1 FORM_PASS; all four PLAN_V2.8 production gaps empirically FIXED on the named target docs; Ayeva + Firearms documented as diagnostic-classifier drift v2.9 followups).
 - `docs/QUALITY_SNAPSHOT_2026-05-03.md` (v2.8 Phase 0 BEFORE state: 30/37 outputs PASS — preserved as the before-column for the 2026-05-04 deltas).
-- `docs/QUALITY_SNAPSHOT_2026-05-01.md` (Milestone 1 + 2 closure, RAG Guide unblock, Ayeva re-conversion, contextual retrieval)
-- `docs/QUALITY_SNAPSHOT_2026-04-30.md` (Vision-Aided Front Matter, Shared PDF Plan, Coordinate Audit, Domain-Specific Search Priority completion evidence)
-- `docs/QUALITY_SNAPSHOT_2026-04-29.md` (pre-Milestone-1 corpus baseline; rows for Ayeva and Harry Potter are now stale and superseded by the entries above)
+- `docs/archive/quality_snapshots/QUALITY_SNAPSHOT_2026-05-01.md` (Milestone 1 + 2 closure, RAG Guide unblock, Ayeva re-conversion, contextual retrieval)
+- `docs/archive/quality_snapshots/QUALITY_SNAPSHOT_2026-04-30.md` (Vision-Aided Front Matter, Shared PDF Plan, Coordinate Audit, Domain-Specific Search Priority completion evidence)
+- `docs/archive/quality_snapshots/QUALITY_SNAPSHOT_2026-04-29.md` (pre-Milestone-1 corpus baseline; rows for Ayeva and Harry Potter are now stale and superseded by the entries above)
 
 Use the latest snapshot as the before-state for future comparisons. v2.8 commit chain on `main`: `5b0e13d` (Phases 0-5b code+tests) → `c2e795e` (audit-the-audit fix + overnight pipeline scaffolding) → `9e4b8f8` (raw AFTER snapshot) → `59994f9` (snapshot annotated with empirical Phase outcomes + known limitations + Qdrant resolution). `tests/test_docling_postprocessor_acceptance.py` (HARRY pages 13-30 reading-order fixture) passes live and is the binding regression test.
 
@@ -87,7 +87,7 @@ Reverse-chronological. Each entry's evidence files are tracked. The `[Folded int
 - Refactor Boundary Closeout: `complete` (2026-05-01). Removed `BatchProcessor.set_intelligence_metadata` deprecated `[V2.8-COMPAT]` API; added typed-policy round-trip drift insurance test.
 - Milestone 2 — Plan Control Plane: `complete` (2026-05-01). `PdfConversionPlan` promoted to typed policy object.
 - Milestone 1 — Stabilize Extraction: `complete` (2026-05-01). RAG Guide unblocked, per-element chunker guard. **⚠ Ayeva 0.93 reading from this milestone is from the older probe; v2.8 canonical reads 0.83 FAIL — see `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`.**
-- Vision-Aided Front Matter / Domain Search Priority / Coordinate Audit: `complete` (2026-04-30). See `docs/QUALITY_SNAPSHOT_2026-04-30.md` (banner-annotated as superseded for any specific metric drift; the architectural changes are still active).
+- Vision-Aided Front Matter / Domain Search Priority / Coordinate Audit: `complete` (2026-04-30). See `docs/archive/quality_snapshots/QUALITY_SNAPSHOT_2026-04-30.md` (banner-annotated as superseded for any specific metric drift; the architectural changes are still active).
 - Dependency metadata: Docling exact-pinned to `2.86.0` in `pyproject.toml`; engine version bumped 2.7.0 → 2.8.0 in v2.8 release commit `645ab2b`.
 
 ## Immediate Next Work

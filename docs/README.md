@@ -42,7 +42,7 @@ Stable rules. These should change rarely.
 - `docs/DECISIONS.md`
 - `docs/QUALITY_GATES.md`
 - `docs/ARCHITECTURE.md`
-- `docs/SRS_Multimodal_Ingestion_V2.5.md`
+- `docs/archive/SRS_Multimodal_Ingestion_V2.5.md`
   - Stale v2.5 reference; not the current source of truth for v2.8 behavior. Use `AGENTS.md`, `docs/DECISIONS.md`, `docs/ARCHITECTURE.md` instead.
 
 ### Layer 1: Current State
@@ -52,9 +52,9 @@ Compact project status. These files should be updated whenever a session changes
 - `docs/PROJECT_STATUS.md`
 - `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md` — **current canonical baseline** (v2.8.0 SHIPPED)
 - `docs/QUALITY_SNAPSHOT_2026-05-03.md` — v2.8 BEFORE baseline (kept frozen so the AFTER snapshot's delta column is reproducible; not a current-state document)
-- `docs/QUALITY_SNAPSHOT_2026-05-01.md` — superseded; banner-annotated. Specifically: Ayeva 0.93 reading is from the older probe under different flags; v2.8 fresh re-conversion reads 0.83 FAIL.
-- `docs/QUALITY_SNAPSHOT_2026-04-30.md` — superseded; banner-annotated.
-- `docs/QUALITY_SNAPSHOT_2026-04-29.md` — superseded; banner-annotated.
+- `docs/archive/quality_snapshots/QUALITY_SNAPSHOT_2026-05-01.md` — superseded; banner-annotated. Specifically: Ayeva 0.93 reading is from the older probe under different flags; v2.8 fresh re-conversion reads 0.83 FAIL.
+- `docs/archive/quality_snapshots/QUALITY_SNAPSHOT_2026-04-30.md` — superseded; banner-annotated.
+- `docs/archive/quality_snapshots/QUALITY_SNAPSHOT_2026-04-29.md` — superseded; banner-annotated.
 
 ### Layer 2: Work Logs And Execution
 
@@ -64,8 +64,8 @@ Operational checklists, commands, and historical notes.
 - `docs/TESTING.md`
 - `docs/CONVERSION_PROFILES.md`
 - `docs/PLAN_V2.9_DRAFT_PROMPT.md` — prompt for drafting `docs/PLAN_V2.9.md` (next execution cycle)
-- `docs/PLAN_V2.8_PRODUCTION_GAPS.md` — **SHIPPED 2026-05-04** (annotated tag `v2.8.0` on `645ab2b`); retained for historical context
-- `docs/PLAN_DOCLING_POSTPROCESSOR.md` — shipped 2026-05-03; folded into v2.8 (post-Docling sanity pass + `digital_literature` profile)
+- `docs/archive/PLAN_V2.8_PRODUCTION_GAPS.md` — **SHIPPED 2026-05-04** (annotated tag `v2.8.0` on `645ab2b`); retained for historical context
+- `docs/archive/PLAN_DOCLING_POSTPROCESSOR.md` — shipped 2026-05-03; folded into v2.8 (post-Docling sanity pass + `digital_literature` profile)
 - `docs/archive/` — completed plans (`PLAN_V2.7_DOCUMENT_UNDERSTANDING.md`, `PLAN_HYBRID_CHUNKER_MIGRATION.md`) and historical notes
 
 ## Update Rules
