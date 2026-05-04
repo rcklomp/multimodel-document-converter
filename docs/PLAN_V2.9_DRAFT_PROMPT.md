@@ -12,8 +12,7 @@ Follow these instructions precisely. The plan must be actionable, evidence-based
 
 ## Step 1: Read Required Documentation
 
-Before drafting the plan, read the following files in order. ENOT what I asked
-ach provides essential context that the plan must respect:
+Before drafting the plan, read the following files in order. It provides essential context that the plan must respect:
 
 1. **`docs/PROJECT_STATUS.md`** — Current state, active baseline, open items, known failures, completed work. This tells you what's broken and what's fixed. The "Active Baseline" pointer leads to QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md.
 2. **`docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`** — The v2.9 BEFORE state. Empirical Phase outcomes from v2.8, the 4 documented v2.9 followups (Ayeva, Firearms, chunk_id dupes, refiner smart-routing), and the Qdrant ingest evidence (22,137 / 22,160 unique chunks in `mmrag_v2_8`, all images placeholder).
