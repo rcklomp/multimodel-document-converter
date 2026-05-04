@@ -4,8 +4,8 @@
 **Owner:** ingestion pipeline
 **Successor to:** `docs/archive/PLAN_V2.8_PRODUCTION_GAPS.md` (shipped 2026-05-04, tag `v2.8.0` on `645ab2b`)
 **Related:** `docs/PROJECT_STATUS.md`, `docs/PROGRESS_CHECKLIST.md`,
-`docs/QUALITY_GATES.md`, `docs/DECISIONS.md`, `docs/AGENT_GOVERNANCE.md`,
-`AGENTS.md`
+`docs/QUALITY_GATES.md`, `docs/DECISIONS.md`, `docs/ARCHITECTURE.md`,
+`docs/AGENT_GOVERNANCE.md`, `AGENTS.md`, `CHANGELOG.md`
 
 ---
 
@@ -75,8 +75,10 @@ state:
    `UNIVERSAL_PASS` (no waivers; `GATE_PASS [form: ...]` /
    `FORM_AUDIT_PASS` count as variants only when `document_type=form`
    per `docs/QUALITY_GATES.md` "Form / Invoice Acceptance Class").
-5. `pytest tests/ -q` ≥ **610 passed, 0 failed** (596 baseline + 14+
-   new tests across phases 1-4).
+5. `pytest tests/ -q` reports ≥ **615 passed, 0 failed**
+   (596 v2.8 baseline + 4 Phase 1 + 4 Phase 2 + 6 Phase 3 + 5 Phase 4
+   = 19 new contract tests, plus the env-gated Phase 5 acceptance
+   test which is not counted in the steady-state total).
 6. Within-file `chunk_id` duplicates across the 34 canonical JSONLs:
    **0** (was 427 in v2.8 AFTER).
 7. `mmrag_v2_8` Qdrant collection contains exactly the unique
@@ -235,7 +237,7 @@ single point").
 | Image factory caller | `ingestion_schema.py:881` | `_generate_chunk_id(doc_id, f"image:{asset_path}", page_number, "image")` | Same; image dupes are rare (asset_path usually unique) but the contract should hold |
 | Table factory caller | `ingestion_schema.py:970` | `_generate_chunk_id(doc_id, f"table:{content[:50]}", page_number, "table")` | Same; tables can collide when two short tables on a page share the same first 50 chars |
 | Direct chunk creators (`mapper.py`) | `src/mmrag_v2/mapper.py` `create_*_chunk` | Each constructs an `IngestionChunk` then calls the factory | Audit whether the call sites already track a per-document position; if not, source one before the factory call |
-| Schema version impact | `__schema_version__=2.7.0` (`src/mmrag_v2/version.py`) | Field shape unchanged | The `chunk_id` *value* changes for affected chunks but the field shape doesn't → schema version stays 2.7.0 (no bump) |
+| Schema version impact | `__schema_version__=2.7.0` (`src/mmrag_v2/version.py`) | Field shape unchanged | The `chunk_id` *value* changes for affected chunks but the field shape doesn't → schema version stays 2.7.0 (no bump). **Consumer warning required** (see §6 Cross-Phase Concerns): schema_version `2.7.0` in v2.9 does NOT guarantee `chunk_id` stability with v2.8 outputs. RAG adapters / Qdrant consumers that key on chunk_id for cross-version mapping must rebuild from v2.9. |
 | Qdrant `point_id` impact | `scripts/ingest_to_qdrant.py:453` `uuid5(_POINT_ID_NAMESPACE, chunk_id)` | Deterministic uuid5 from chunk_id (v2.8 fix `0d3cc36`) | The 427 affected chunks get **new** uuid5s; old uuid5s become orphans on next ingest. Migration step is in Phase 5 (drop-and-recreate `mmrag_v2_8`). |
 | Existing test coverage | `tests/test_qdrant_point_id_collision.py` (6 tests) | Pins the uuid5 mapping but assumes unique input chunk_ids | New test file at the schema layer is needed; do not weaken the Qdrant-layer tests |
 
@@ -380,12 +382,18 @@ flag — masking the bug, not fixing it.
 - `scripts/convert_books.sh` no longer carries `--no-refiner` after
   Phase 5 verification.
 
-**Risk:** Low. The fix is moving a single conditional and adding a
-gate; the existing diagnostic-override path is already exercised by
-v2.7-era tests for the OCR auto-override. **Constraint:** must not
-violate `AGENT-VAL-01` (no document-specific or filename-specific
-behavior). Check satisfied — the gate is on `has_encoding_corruption`,
-a structural-integrity flag.
+**Risk:** Low–Medium. The fix is moving a single conditional and
+adding a gate; the existing diagnostic-override path is already
+exercised by v2.7-era tests for the OCR auto-override. **Risk
+escalates to Medium if the parallel-site audit finds the `batch`
+command (`cli.py:1741` neighborhood) carries a divergent flow** —
+e.g. refiner config defaults applied at a different boundary, or a
+separate `intelligence_metadata` block. If divergence is found, the
+1–2 h estimate inflates; document the actual flow in the commit
+message and update §7 effort. **Constraint:** must not violate
+`AGENT-VAL-01` (no document-specific or filename-specific behavior).
+Check satisfied — the gate is on `has_encoding_corruption`, a
+structural-integrity flag.
 
 **Estimated effort:** **1–2 h engineering** + ~30 min per-doc
 verification (run HARRY 10-page subset + Combat 10-page subset to
@@ -439,23 +447,32 @@ novel.
 
 1. **Source the code-density signal.** `DocumentDiagnosticEngine`
    already counts `CodeItem`s and code-candidate regions for the
-   `needs_code_enrichment` trigger. Promote the
-   `code_evidence_pages` (or equivalent — exact field name to
-   confirm during investigation) into the diagnostic features
-   surface available to Rule 0c.
+   `needs_code_enrichment` trigger (call site
+   `decide_code_enrichment_for_pdf` at `cli.py:1112` / `cli.py:1741`
+   and downstream in `batch_processor.py`). The diagnostic feature
+   used in this plan as `code_evidence_pages` is a **placeholder
+   name** — the exact field/method to surface from the existing
+   trigger logic must be confirmed during the investigation.
+   Candidates per source code: `CodeItem` count per sampled page,
+   code-chunk ratio, sampled code-candidate region count. Pick one
+   (or a derived count) and thread it onto the diagnostic features
+   object that Rule 0c consumes. **Treat `code_evidence_pages` in
+   the rule sketch below as TBD until the investigation confirms
+   the exact source.**
 2. **Tighten Rule 0c** at `document_diagnostic.py:1457-1475`:
    ```
    _dialogue_pages >= 1
    AND total_pages > 20
    AND not has_tables
    AND 500 < avg_text_per_page < 2500
-   AND code_evidence_pages < 2   # NEW
+   AND <code_evidence_signal> < <threshold>   # NEW; see step 1
    → literature += 0.4
    ```
-   *Why this threshold:* Chaubal's v2.8 fresh has CodeFormulaV2
-   engaged on multiple pages → `code_evidence_pages >> 2`. HARRY
-   has 0. The 2-page threshold is conservative enough not to flip
-   Combat (a magazine with incidental code-shape decorations).
+   *Why this gate:* Chaubal's v2.8 fresh has CodeFormulaV2 engaged
+   on multiple pages → strong code-evidence signal. HARRY has none.
+   Threshold must be conservative enough not to flip Combat
+   (a magazine with incidental code-shape decorations) — calibrate
+   on the v2.8 fresh feature vectors during the investigation.
 3. **Re-run the regression tests** for the `digital_literature`
    profile (7 tests) — they MUST still pass on HARRY and the other
    pinned positives. If any flips, that's a contract change → stop
@@ -578,11 +595,23 @@ preference order:
      branches. `AGENT-SPATIAL-20` is respected.
 3. **If (a) fails** (i.e. no scorer adjustment can route Firearms
    correctly without breaking another doc):
-   - Stop, document the failure analysis with concrete numbers
-     (which alternative routes were considered, which broke).
-   - Propose an explicit `AGENT-SPATIAL-20` amendment in
-     `AGENTS.md` + new `docs/DECISIONS.md` entry with the empirical
-     case. **Get user sign-off before implementing the amendment.**
+   - **STOP — user consultation required.** Do NOT proceed to (b)
+     unilaterally. Open a paused commit (or a draft PR) with the
+     investigation evidence:
+     - Firearms feature-vector diff (pre-v2.8 vs v2.8 fresh).
+     - Computed scorer scores per ProfileType for that vector,
+       both pre- and post-attempted-fix.
+     - List of alternative scorer adjustments tried and which
+       canonical doc each one broke (with the broken doc's
+       specific gate failure).
+     - The exact wording of the proposed `AGENT-SPATIAL-20`
+       amendment for `AGENTS.md` and the proposed
+       `docs/DECISIONS.md` decision-log entry.
+   - Surface the paused state in the commit message + a note in
+     `docs/PROJECT_STATUS.md` "Active Baseline" so the user sees
+     it on next session start.
+   - Resume only after explicit user sign-off on the amendment.
+     Auto-amending `AGENTS.md` Level 0 invariants is forbidden.
 4. **Verify the smoke matrix and the full canonical corpus** —
    Firearms reaches HEADING ≥ 80% AND no other row regresses
    (especially the SCAN0013 form-lane row, which already routes to
@@ -663,12 +692,22 @@ NOT branch on local availability**. (May add a
       `GATE_PASS [form: ...]` for SCAN0013 is the only acceptable
       `[form]` variant; per `AGENT-VAL-01` no other doc may use the
       form lane as a workaround.
-- [ ] Alibaba DashScope API key reachable; Source Sanctity validated
-      (PCWorld + Combat-style hallucination probes from
-      `tests/fixtures/blind_set_manifest.json` re-run pre-flight to
-      confirm the cloud endpoint still passes — text-reading hits
-      ≤ 22.2%, hard fallbacks ≤ 21.4%, Combat-style hallucinations
-      = 0).
+- [ ] Alibaba DashScope API key reachable; Source Sanctity
+      pre-flight passes. Re-run the PCWorld + Combat-style
+      hallucination probes from `tests/fixtures/blind_set_manifest.json`
+      against the current cloud endpoint and **establish a v2.9 cloud
+      baseline** for text-reading-hit rate, hard-fallback rate, and
+      Combat-style hallucination count. The 2026-04-29 PCWorld cloud
+      reference numbers (text-reading 22.2%, hard fallbacks 21.4%,
+      Combat-style hallucinations = 0; per `docs/PROGRESS_CHECKLIST.md`
+      Workstream A) are **reference points, not hard caps for v2.9**
+      — the cloud endpoint or model behavior may have drifted since.
+      Acceptance gate is "v2.9 pre-flight numbers ≤ 2026-04-29 cloud
+      reference + 5 percentage-point cushion, AND Combat-style
+      hallucinations strictly = 0." If the pre-flight breaches the
+      cushion, **stop** and re-evaluate (regress on prompt? fall
+      back to the prior model snapshot? defer Phase 5b to v2.10?)
+      before burning cloud spend on the full ~5,500-image run.
 - [ ] HARRY pages-1-30 acceptance fixture
       (`tests/test_docling_postprocessor_acceptance.py`) green
       against the most recent live HARRY conversion.
@@ -689,6 +728,16 @@ NOT branch on local availability**. (May add a
 #### Steps
 
 **5a. Broad reconversion (post-Phase-1-through-4 fixes).**
+
+**Parallelism note:** `scripts/convert_books.sh` runs sequentially
+by design — `AGENTS.md` §1.4 caps RAM at ~8 GB and batch size at
+≤10 pages, and Docling 2.86's CodeFormulaV2 path is CPU-bound and
+already saturates a single core. Running 2-3 docs concurrently could
+breach the 8 GB ceiling on the code-heavy docs (Chaubal/Ayeva CPU
++ tensor allocations). v2.9 keeps the sequential posture; if Phase 5
+runtime exceeds 2 days, propose a parallelism investigation as a
+v2.10 followup with empirical RAM measurements rather than
+parallelizing inside this cycle.
 
 1. Run `bash scripts/convert_books.sh` with the v2.9 flag posture
    (drop `--no-refiner` if Phase 2 verification confirmed
@@ -731,6 +780,29 @@ NOT branch on local availability**. (May add a
        the existing sanitizer + retry harness (per Workstream A).
      - On hard fallback: write `vision_status="hard_fallback"`,
        record the failure reason, do NOT inflate to "complete".
+   - **Write-back is atomic-replace, never in-place line edit.**
+     JSONL is append-friendly but not random-access-edit-friendly,
+     and a crash mid-enrichment must not leave a half-written
+     canonical output. Pattern:
+       - Stream each input line to `ingestion.jsonl.v29tmp` in the
+         same directory (same filesystem, so `os.replace` is atomic
+         on POSIX).
+       - On every Nth chunk (configurable, default 50), `fsync` the
+         temp file so a crash loses ≤ N enrichments, not the whole
+         file.
+       - When the iteration completes successfully AND the temp
+         file's line-count matches the original's line-count AND
+         every image chunk's `vision_status` is `complete` or
+         `hard_fallback`, `os.replace(tmp_path, original_path)`.
+       - On any exception or count-mismatch, leave the temp file in
+         place with a `.failed` suffix and exit non-zero. The
+         original is untouched.
+       - Add a resume mode: on rerun, detect existing
+         `ingestion.jsonl.v29tmp.failed` and continue from the last
+         enriched chunk_id (skip already-`complete` entries).
+   - Add a per-doc dry-run mode (`--dry-run`) that reports the
+     image-chunk count + estimated cost without making API calls,
+     so cost can be verified before the multi-hour run.
    - **DO NOT branch on local-VLM availability.** Hardcode cloud.
      (Add `# v2.10: re-evaluate local NuMarkdown-8B endpoint`
      comment at the provider-selection line.)
@@ -744,10 +816,42 @@ NOT branch on local availability**. (May add a
 
 **5c. Qdrant `mmrag_v2_8` drop-and-recreate.**
 
-1. Confirm no consumer is using `mmrag_v2_8` (the v2.8 ingest
-   evidence shows it has no production retrieval state — per
-   project memory).
-2. Drop the collection:
+1. **Concrete consumer-absence verification** (do NOT rely on
+   project memory alone before destroying data):
+   - Inspect the collection metadata for last-write timestamp and
+     point count to confirm it matches the v2.8 ingest snapshot
+     (22,137 points; last write 2026-05-04):
+     ```bash
+     curl -sS http://localhost:6333/collections/mmrag_v2_8 | jq .
+     curl -sS http://localhost:6333/collections/mmrag_v2_8/points/count \
+       -X POST -H "Content-Type: application/json" -d '{"exact":true}'
+     ```
+   - Check the Qdrant container logs for any read traffic in the
+     prior 24 h (any `GET /collections/mmrag_v2_8/points/search` or
+     `/.../recommend` would indicate a consumer):
+     ```bash
+     docker logs --since 24h <qdrant-container-name> 2>&1 \
+       | grep -i mmrag_v2_8 | grep -iE 'search|recommend|scroll|query'
+     ```
+     Expected: **zero** matches. Any match → stop, identify the
+     consumer, get sign-off before dropping.
+   - Confirm no `*.py` under the user's broader workspace
+     (sibling RAG-adapter projects, scripts/) imports / queries
+     `mmrag_v2_8`:
+     ```bash
+     grep -rn "mmrag_v2_8" "$HOME/Projects" 2>/dev/null \
+       | grep -v "MM-Converter-V2.4.1/docs" \
+       | grep -v "MM-Converter-V2.4.1/output" \
+       | grep -vE "\\.(md|txt|jsonl|log|json):"
+     ```
+     Expected: only references inside this project's
+     scripts/CHANGELOG/snapshots. Any external consumer hit →
+     stop and notify.
+   - **If any of the three checks is non-empty, abort 5c.**
+     Re-evaluate: side-by-side ingest into `mmrag_v2_9` (creates
+     a parallel collection; old consumers keep working; new
+     consumers point at the new one) becomes the fallback.
+2. Drop the collection (only after step 1 passes):
    ```bash
    curl -X DELETE http://localhost:6333/collections/mmrag_v2_8
    ```
@@ -816,7 +920,8 @@ evidence:**
   `vision_status="pending"` entries, all
   `vision_provider_used == "qwen3-vl-plus"` (or
   `"hard_fallback"` with a recorded reason — hard-fallback rate
-  capped at the v2.8 cloud baseline of ~21.4%).
+  ≤ the v2.9 cloud baseline established in the Phase 5 pre-flight
+  + 5 percentage-point cushion).
 
 **Done when:**
 - All 7 Goals from §2 are met empirically.
@@ -862,8 +967,10 @@ bash scripts/smoke_multiprofile.sh
 
 # 2. Full unit suite
 pytest tests/ -q
-# expected: ≥610 passed, 0 failed (596 baseline + 4 Phase 1 +
-# 4 Phase 2 + 6 Phase 3 + 5 Phase 4 + 1 Phase 5 acceptance).
+# expected: ≥615 passed, 0 failed (596 v2.8 baseline + 19 new
+# contract tests = 4 Phase 1 + 4 Phase 2 + 6 Phase 3 + 5 Phase 4).
+# The Phase 5 acceptance test is env-gated (RUN_V29_VLM_ACCEPTANCE=1)
+# and is NOT counted in the steady-state total.
 
 # 3. Per-doc audit — no FAIL row in the canonical 34
 for doc in output/<v29_run>/*/ingestion.jsonl; do
@@ -1008,6 +1115,33 @@ Failure on any of the six = no tag.
 - Local NuMarkdown-8B endpoint reachability — re-check before
   v2.10 planning.
 
+**Consumer-side warnings (Phase 1 chunk_id semantics):**
+- `__schema_version__` stays at `2.7.0` because the chunk-shape
+  contract is unchanged. **However, `chunk_id` *values* differ
+  for the 427 within-file-collision chunks** between v2.8 outputs
+  and v2.9 outputs. Downstream consumers that key on `chunk_id`
+  for cross-version mapping (RAG adapters that cache vectors
+  against chunk_id; sister projects' `*_v2` collections) MUST
+  rebuild from v2.9 outputs after v2.9 ships — same-`schema_version`
+  is NOT a stability guarantee for chunk_id this cycle.
+- The decision-log entry recording this (Phase 1, decision (a))
+  also lands in `docs/DECISIONS.md` so consumers can find it
+  outside this plan.
+
+**Architecture / classification scope clarity (Phase 4 Firearms):**
+- `docs/DECISIONS.md` "Structural Pathology over Semantic
+  Profiling (v2.5.0)" rules that **extraction pathway** (use
+  digital text / OCR rescue / force OCR) is determined by
+  structural integrity flags, not semantic profile. Phase 4 is
+  about **profile classification routing** (`scanned` vs
+  `technical_manual`), NOT extraction pathway. Firearms's
+  structural-integrity flags (`is_scan=true`,
+  `has_encoding_corruption=false`, `has_flat_text_corruption=false`)
+  remain unchanged across v2.8 and v2.9; the extraction pathway
+  must not flip. Phase 4 verifies this by checking that
+  `extraction_method` per chunk and the auto-OCR auto-overrides
+  in `cli.py:1093-1106` produce the same outputs as v2.8 fresh.
+
 ## 7. Effort Summary
 
 | Phase | Engineering estimate | Runtime / external | External dependency? |
@@ -1019,6 +1153,16 @@ Failure on any of the six = no tag.
 | Phase 4 — Firearms route fix | 3–6 h (path (a)); +1 day if (b) `AGENT-SPATIAL-20` amendment required | — | User sign-off (only if (b)) |
 | Phase 5 — Broad reconversion + drop/recreate + VLM enrichment + AFTER snapshot | ~4 h script + snapshot | ~1–2 days conversion runtime; ~6–10 h cloud-VLM runtime; ~2.5 h CPU per code-heavy doc | Alibaba DashScope API + spend |
 | **Total** | **~10–18 h engineering** (path (a)); **+1 day** if path (b) | **~2–3 days runtime** | Cloud VLM is the dominant external dependency; cost recorded on completion |
+
+**RAM ceiling note (`AGENTS.md` §1.4 — ≤8 GB target):** Phase 5 is
+the only phase that risks the ceiling. Code-heavy docs (Chaubal,
+Ayeva) load CodeFormulaV2 weights on CPU + Docling layout model + a
+~10-page batch render in memory simultaneously. v2.8's broad
+reconversion did not hit OOM at sequential batch-size=10 (per Phase
+5c evidence), but no formal RAM profile exists. Phase 5a should
+record peak RSS via `/usr/bin/time -l` (macOS) or `time -v` (Linux)
+on the first code-heavy doc; if peak exceeds ~7 GB, document it as
+a v2.10 followup rather than retro-fitting parallelism into v2.9.
 
 ## 8. Decision Log
 
