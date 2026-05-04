@@ -122,11 +122,11 @@ Next steps (open):
 
 Acceptance signals:
 
-- [x] Ayeva passes CODE gate (`indentation_fidelity=0.93`, 2026-05-01).
-- [ ] Chaubal passes CODE gate.
-- [ ] Fluent Python remains AUDIT_PASS.
-- [ ] Code chunk count does not collapse artificially.
-- [x] `scripts/smoke_multiprofile.sh` remains green (10/10 rows, latest `output/smoke_multiprofile_20260501_105836/`).
+- [~] Ayeva CODE gate — historically [x] at `indentation_fidelity=0.93` from 2026-05-01 probe (`output/ayeva_qa_20260501/`); **superseded by 2026-05-04 v2.8 fresh re-conversion at 0.83 FAIL** (canonical `output/Ayeva_Python_Patterns/`, profile mis-routed to `digital_literature`). v2.9 followup will recover the gate via rule-0c tightening — see Workstream D.
+- [x] Chaubal passes CODE gate (2026-05-04 v2.8 fresh, `indentation_fidelity=0.96`, CodeFormulaV2 engaged).
+- [x] Fluent Python remains AUDIT_PASS (2026-05-04 v2.8 fresh, 1602 chunks).
+- [x] Code chunk count does not collapse artificially (Chaubal 152 code chunks; Fluent retains expected count).
+- [x] `scripts/smoke_multiprofile.sh` remains green (latest 2026-05-04, 11/11 GATE_PASS + 11/11 UNIVERSAL_PASS, including form lane).
 
 ## Document Understanding Plan Items
 
@@ -274,7 +274,7 @@ Fixes applied:
 - [x] E. Blank-asset quarantine before export (`tests/test_blank_asset_quarantine.py` + bridge tests).
 - [x] F. Per-element pathological guard `max_chunker_per_element_chars` (default 100_000) — defense-in-depth, added 2026-05-01.
 
-Probes (all `AUDIT_PASS` + `UNIVERSAL_PASS`): Harry Potter (458 chunks, reclassified to `technical_manual`); CarOK (`output/probe_carok/`, blank table promoted to TEXT); Combat Aircraft (584 chunks, 0 corrupted leaks); RAG Guide (680 chunks, `indentation_fidelity=0.91`, `output/probe_rag_guide_guard/`).
+Probes (Milestone 1 era, kept for archaeology): Harry Potter (458 chunks, then-route `technical_manual` — **superseded 2026-05-03**, now auto-routes to `digital_literature`); CarOK (`output/probe_carok/`, blank table promoted to TEXT — **note: this probe has 0 chunks and HEADING FAILs in the v2.8 audit; v2.9 should drop or rebuild it**); Combat Aircraft (584 chunks, 0 corrupted leaks — confirmed by v2.8 fresh re-conversion at 0/0 in `output/Combat_Aircraft_August_2025/`); RAG Guide (680 chunks, `indentation_fidelity=0.91`, `output/probe_rag_guide_guard/`). Current canonical state is in `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`.
 
 Test evidence (2026-05-01): focused `81 passed`; full unit suite `467 passed, 1 skipped, 0 failed`; static guards `2 passed`; smoke `output/smoke_multiprofile_20260501_105836/` 10/10 GATE_PASS + UNIVERSAL_PASS.
 

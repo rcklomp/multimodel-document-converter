@@ -1,5 +1,11 @@
 # Quality Snapshot 2026-05-03
 
+> **NOT a current-state document.** This is the v2.8 BEFORE baseline,
+> referenced by the AFTER snapshot's delta column. Current canonical
+> baseline is **`docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`**;
+> read that for the latest per-document audit verdicts. This file is
+> kept frozen so the delta column remains reproducible.
+
 **Purpose:** Lock the as-is BEFORE state for v2.8 (`docs/PLAN_V2.8_PRODUCTION_GAPS.md`) so deltas from Phases 1-4 are measurable. This is the Phase 0 deliverable.
 
 **Predecessor:** `docs/QUALITY_SNAPSHOT_2026-05-01.md` (Milestone 1 + 2 closure, contextual retrieval).

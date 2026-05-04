@@ -1,5 +1,12 @@
 # Quality Snapshot 2026-04-30
 
+> **⚠ SUPERSEDED — historical reference only.**
+> The current canonical baseline is
+> **`docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`**.
+> Numbers in this file are pre-v2.8 and have been re-measured. If a
+> metric here disagrees with the 2026-05-04 snapshot, the 2026-05-04
+> snapshot wins.
+
 ## Vision-Aided Front Matter Detection
 
 Status: `complete`

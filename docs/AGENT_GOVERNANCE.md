@@ -105,3 +105,33 @@ Keep docs useful by limiting growth:
 - Archive stale plans instead of duplicating them.
 
 When adding more than 50 lines of documentation, remove, consolidate, or archive stale detail unless the new content is a durable contract. Current state belongs in `PROJECT_STATUS.md`; task state belongs in `PROGRESS_CHECKLIST.md`; evidence belongs in dated snapshots.
+
+## Canonicality Rule (added 2026-05-04)
+
+When a metric (e.g. `indentation_fidelity`, `encoding_artifacts`,
+`ctrl_chunks`) appears in BOTH a layer-1 status doc (`PROJECT_STATUS.md`,
+`PROGRESS_CHECKLIST.md`) AND a layer-2 dated snapshot, **the latest
+dated snapshot is canonical.** The current canonical baseline is named
+in `PROJECT_STATUS.md` "Active Baseline" (the first bullet).
+
+When v2.N work supersedes a metric reported in a prior snapshot or
+status entry:
+
+1. The new snapshot becomes the canonical source for that metric.
+2. The prior snapshot must get a `> ⚠ SUPERSEDED — historical
+   reference only.` banner at the top, pointing at the new snapshot.
+3. Any layer-1 reference to the old metric must be inline-annotated
+   (e.g. `**⚠ Superseded YYYY-MM-DD** — see <new-snapshot>`) — do not
+   delete the old number; future agents need to compare. Marker
+   conventions:
+   - `[x]` becomes `[~]` when an item is historically complete but
+     superseded (still useful for archaeology, no longer current).
+   - Inline `(was X)` is fine for short metric updates.
+   - For longer narrative entries, append a `**⚠ Superseded ...**`
+     sentence rather than rewriting from scratch.
+
+This rule was added after the v2.9 plan-writing prompt picked up
+stale `Ayeva indentation_fidelity=0.93` from layer-1 docs while the
+canonical v2.8 fresh re-conversion read `0.83 FAIL`. The two numbers
+are both correct in their respective contexts; the failure was that
+layer-1 docs did not mark the v2.8 supersession.

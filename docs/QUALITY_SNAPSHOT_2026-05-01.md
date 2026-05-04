@@ -1,5 +1,17 @@
 # Quality Snapshot 2026-05-01
 
+> **⚠ SUPERSEDED — historical reference only.**
+> The current canonical baseline is
+> **`docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`**.
+> Specifically: the `Ayeva_Python_Patterns indentation_fidelity=0.93`
+> reading in this file is from the `output/ayeva_qa_20260501/` probe
+> under `--enable-doctr --ocr-mode auto` flags. The v2.8 fresh
+> re-conversion (2026-05-04, canonical `output/Ayeva_Python_Patterns/`)
+> reads `0.83 FAIL` because the profile was re-routed to
+> `digital_literature` (rule 0c misfire), suppressing the
+> `needs_code_enrichment` cheap-evidence trigger and CodeFormulaV2.
+> Tracked as a v2.9 followup.
+
 ## Milestone 1: Stabilize Extraction First
 
 Status: `complete`

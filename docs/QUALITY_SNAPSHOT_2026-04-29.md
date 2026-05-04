@@ -1,5 +1,15 @@
 # Quality Snapshot 2026-04-29
 
+> **⚠ SUPERSEDED — historical reference only.**
+> The current canonical baseline is
+> **`docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`**.
+> Chronological successor chain: 2026-04-29 → 2026-04-30 → 2026-05-01 →
+> 2026-05-03 (v2.8 BEFORE) → 2026-05-04 (v2.8 AFTER, current).
+> Numbers in this file (e.g. specific `indentation_fidelity` /
+> `encoding_artifacts` / `ctrl_chunks` per document) are pre-v2.8 and
+> have been re-measured. If a metric here disagrees with the
+> 2026-05-04 snapshot, the 2026-05-04 snapshot wins.
+
 Purpose: reference point before further work on model-agnostic VLM enforcement, code-block fidelity, classifier quality, and remaining conversion issues.
 
 This snapshot records observed quality from existing outputs under `output/` plus the current prompt-harness experiments. It is not a final acceptance report. Use it as a before/after comparison target.
