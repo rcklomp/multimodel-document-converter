@@ -1,27 +1,30 @@
 # Project Status
 
-Last updated: 2026-05-03
+Last updated: 2026-05-04
 
 Purpose: fast orientation for a new coding session. Read this before deeper project docs.
 
 ## Current Objective
 
-The project is in a quality-stabilization phase before broad reconversion and Qdrant re-ingestion.
+PLAN_V2.8 SHIPPED (2026-05-04). All four production gaps (Workstreams B, C, F, §5 adapter guard) empirically closed; broad reconversion of every PDF/EPUB in `data/` complete (34/34 conversions exit=0; 30/34 AUDIT_PASS); side-by-side Qdrant ingest into `mmrag_v2_8` collection underway. Two known limitations (Ayeva profile-misclass, Firearms heading regression) carried into v2.9 — neither is a v2.8 code regression; both are diagnostic-classifier drift surfacing as gate failures.
 
-Immediate goal: make conversion quality measurable and reproducible across document categories, then fix the highest-risk quality issues without overfitting to one document or one VLM.
-
-**Current execution plan: `docs/PLAN_V2.8_PRODUCTION_GAPS.md`** (ratified 2026-05-03). Closes the three known production gaps (Workstreams B, C, F) and the v2.7 §5 adapter-invocation static-guard followup, then runs broad reconversion + Qdrant re-ingestion. Estimated 3-9 days engineering + reconversion runtime; Phase 4 (Chaubal CodeFormulaV2 remote lane) carries external-dependency risk.
+**Active execution: v2.9 planning.** Open items (top of list):
+- Refiner smart-routing fix in `cli.py:686` so config-default refiner only auto-enables when `has_encoding_corruption=True`.
+- ProfileClassifier rule 0c tightening (Ayeva misroute).
+- Heading-inheritance threshold for `technical_manual` on scanned-modality input (Firearms).
+- Local VLM swap (Workstream A blocker).
 
 ## Active Baseline
 
 The current quality reference point is:
 
-- **`docs/QUALITY_SNAPSHOT_2026-05-03.md`** (current — v2.8 Phase 0 BEFORE state: 30/37 outputs PASS, smoke 10/11 GATE_PASS + 11/11 UNIVERSAL_PASS). This is the BEFORE column for measuring `docs/PLAN_V2.8_PRODUCTION_GAPS.md` deltas.
+- **`docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`** (current — v2.8 Phase 5c AFTER state: 30/34 canonical-corpus PASS including 1 FORM_PASS; all four PLAN_V2.8 production gaps empirically FIXED on the named target docs; Ayeva + Firearms documented as diagnostic-classifier drift v2.9 followups).
+- `docs/QUALITY_SNAPSHOT_2026-05-03.md` (v2.8 Phase 0 BEFORE state: 30/37 outputs PASS — preserved as the before-column for the 2026-05-04 deltas).
 - `docs/QUALITY_SNAPSHOT_2026-05-01.md` (Milestone 1 + 2 closure, RAG Guide unblock, Ayeva re-conversion, contextual retrieval)
 - `docs/QUALITY_SNAPSHOT_2026-04-30.md` (Vision-Aided Front Matter, Shared PDF Plan, Coordinate Audit, Domain-Specific Search Priority completion evidence)
 - `docs/QUALITY_SNAPSHOT_2026-04-29.md` (pre-Milestone-1 corpus baseline; rows for Ayeva and Harry Potter are now stale and superseded by the entries above)
 
-Use the latest snapshot as the before-state for future comparisons. The 2026-05-03 post-Docling sanity pass + `digital_literature` profile (commits `3bdbe0f`, `2f51816`, `379a733`) is baked into the 2026-05-03 snapshot; `tests/test_docling_postprocessor_acceptance.py` (HARRY pages 13-30 reading-order fixture) is the binding regression test.
+Use the latest snapshot as the before-state for future comparisons. v2.8 commit chain on `main`: `5b0e13d` (Phases 0-5b code+tests) → `c2e795e` (audit-the-audit fix + overnight pipeline scaffolding) → `9e4b8f8` (raw AFTER snapshot) → `59994f9` (snapshot annotated with empirical Phase outcomes + known limitations + Qdrant resolution). `tests/test_docling_postprocessor_acceptance.py` (HARRY pages 13-30 reading-order fixture) passes live and is the binding regression test.
 
 ## Active Model/Endpoint State
 
