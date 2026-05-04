@@ -1437,6 +1437,20 @@ class DocumentDiagnosticEngine:
         # Novels/fiction: moderate-high text density, dialogue markers, many pages,
         # low table/diagram density. Check the sampled text for dialogue quotation marks.
         _dialogue_pages = 0
+        # v2.9 Phase 3: code-evidence pre-pass that guards Rule 0c (the
+        # +0.4 weak-dialogue lane). Programming books like Ayeva's
+        # "Mastering Python Design Patterns" are misread as dialogue
+        # because Python f-strings and string literals contain quote
+        # characters. Count pages whose sample shows clear code patterns
+        # (line-starting Python keywords or fenced blocks); suppress the
+        # +0.4 contribution when 2+ sampled pages look like code. The
+        # keyword set mirrors ``batch_processor._CODE_EVIDENCE_KEYWORDS``
+        # so the literature guard and the code-enrichment trigger share
+        # the same cheap signal.
+        _code_evidence_pages = 0
+        _CODE_KEYWORDS = (
+            "def ", "class ", "import ", "from ", "return ", "yield ",
+        )
         _total_sampled = len(page_diagnostics) or 1
         for pd in page_diagnostics:
             page_text = getattr(pd, "page_text_sample", "") or ""
@@ -1444,20 +1458,63 @@ class DocumentDiagnosticEngine:
             _dq = page_text.count('"') + page_text.count('\u201c') + page_text.count('\u201d')
             if _dq >= 4:  # At least 2 dialogue exchanges on the page
                 _dialogue_pages += 1
+            # v2.9 Phase 3: code evidence \u2014 fenced block OR any line
+            # starting with a strong code keyword counts the page in.
+            if page_text:
+                _has_fence = "```" in page_text
+                _kw_lines = sum(
+                    1 for _line in page_text.splitlines()
+                    if any(_line.lstrip().startswith(_kw) for _kw in _CODE_KEYWORDS)
+                )
+                if _has_fence or _kw_lines >= 1:
+                    _code_evidence_pages += 1
         _dialogue_ratio = _dialogue_pages / _total_sampled
 
-        if _dialogue_ratio > 0.3 and total_pages > 50 and not has_tables:
+        if (
+            _dialogue_ratio > 0.3
+            and total_pages > 50
+            and not has_tables
+            # v2.9 Phase 3: extend the code-evidence guard to the
+            # full-novel +0.8 lane. Ayeva-class Python books have
+            # f-strings + docstrings that cross the >= 4 quote-per-page
+            # threshold easily; without this guard a 296-page code book
+            # gets +0.8 from Rule 0 even when the cheap signal already
+            # shows code on multiple pages. The threshold mirrors Rule 0c
+            # (>=2 sampled code pages → suppress).
+            and _code_evidence_pages < 2
+        ):
             # >30% of sampled pages have dialogue + long document + no tables → literature
             content_score_literature += 0.8
             logger.debug(
                 f"[DOMAIN-DETECT] Content: High dialogue ratio ({_dialogue_ratio:.2f}) "
-                f"+ {total_pages} pages + no tables → literature +0.8"
+                f"+ {total_pages} pages + no tables + "
+                f"code_evidence_pages={_code_evidence_pages} (<2) → literature +0.8"
+            )
+        elif (
+            _dialogue_ratio > 0.3
+            and total_pages > 50
+            and not has_tables
+            and _code_evidence_pages >= 2
+        ):
+            logger.debug(
+                f"[DOMAIN-DETECT] Content: full-novel lane SUPPRESSED — "
+                f"dialogue ratio {_dialogue_ratio:.2f} on {total_pages}pp but "
+                f"code_evidence_pages={_code_evidence_pages} (>=2) — code book"
             )
         elif (
             _dialogue_pages >= 1
             and total_pages > 20
             and not has_tables
             and 500 < avg_text_per_page < 2500
+            # v2.9 Phase 3: suppress when the sample shows code on >=2
+            # pages. Python's quoted strings count as dialogue under the
+            # cheap heuristic above; without this guard the Ayeva
+            # "Mastering Python Design Patterns" book misroutes to
+            # digital_literature and skips CodeFormulaV2 (CODE FAIL at
+            # indentation_fidelity=0.83). HARRY shows zero code keyword
+            # starts so the guard does not change its routing. See
+            # docs/PLAN_V2.9.md §Phase 3.
+            and _code_evidence_pages < 2
         ):
             # Any dialogue at all + 20+ pages + novel-density text + no tables
             # → likely literature. The diagnostic only samples ~5 pages by
@@ -1472,7 +1529,22 @@ class DocumentDiagnosticEngine:
                 f"[DOMAIN-DETECT] Content: Some dialogue ({_dialogue_pages}/"
                 f"{_total_sampled} sampled pages) + {total_pages}pp + "
                 f"novel-density text ({avg_text_per_page:.0f}) + no tables "
+                f"+ code_evidence_pages={_code_evidence_pages} (<2) "
                 f"→ literature +0.4"
+            )
+        elif (
+            _dialogue_pages >= 1
+            and total_pages > 20
+            and not has_tables
+            and 500 < avg_text_per_page < 2500
+            and _code_evidence_pages >= 2
+        ):
+            # v2.9 Phase 3: explicit log path so misrouting investigations
+            # can see that the dialogue lane fired but was suppressed.
+            logger.debug(
+                f"[DOMAIN-DETECT] Content: dialogue lane SUPPRESSED — "
+                f"code_evidence_pages={_code_evidence_pages} (>=2) on "
+                f"{_total_sampled} sampled pages indicates a code book"
             )
         elif total_pages > 100 and not has_tables and avg_text_per_page < 2500:
             # Long document without tables or heavy academic text → possible literature
