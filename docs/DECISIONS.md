@@ -318,6 +318,128 @@ A companion guard test should follow.
 
 ---
 
+## chunk_id position component (v2.9 Phase 1, 2026-05-04)
+**Decision:** `_generate_chunk_id` hashes a per-document monotonic
+`position` argument so two chunks with byte-identical `(doc_id,
+page, modality, content)` get distinct chunk_ids.
+
+**Rationale:**
+- v2.8 broad reconversion produced 22,587 chunks across 34 docs that
+  collapsed to 22,160 unique chunk_ids — 427 within-file dupes
+  (largest contributors: KI_En_ChatGPT 279, Devlin 76, Fluent 15)
+  on boilerplate footers, repeated page numbers, identical short labels.
+- The dupes silently overwrote each other on Qdrant upsert (uuid5 from
+  chunk_id, v2.8 commit `0d3cc36`) leaving `mmrag_v2_8` non-deterministic.
+- Schema version stays `2.7.0` (chunk_id *value* changes, field shape
+  doesn't). Consumer warning: downstream RAG adapters that key on
+  chunk_id for cross-version mapping MUST rebuild from v2.9 outputs;
+  same-`schema_version` is NOT a stability guarantee for chunk_id this
+  cycle.
+
+**Migration:** absorbed via Phase 5c drop-and-recreate of `mmrag_v2_8`
+(no production retrieval state had been built up post-v2.8 ship, per
+project memory).
+
+## Refiner Smart-Routing (v2.9 Phase 2, 2026-05-04)
+**Decision:** The CLI's config-default refiner-enable
+(`cfg.refiner.enabled=true` in `~/.mmrag-v2.yml`) is no longer eager.
+It only fires when the diagnostic engine reports
+`has_encoding_corruption=True`. Explicit `--enable-refiner` and
+`--no-refiner` CLI flags continue to win over the config default.
+
+**Rationale:**
+- v2.8 broad reconversion's first attempt left HARRY (clean prose,
+  zero encoding corruption) hammering qwen-plus per chunk because
+  `cli.py:686` set `enable_refiner=True` from the config before the
+  diagnostic engine ran. Refinements were rejected (~half "Edit ratio
+  53.16% exceeds budget") but each call still cost a round trip.
+- Aligns with the existing "Heal-Over for Encoding Corruption (v2.7.0)"
+  decision: heal-over fires on a structural-integrity flag, not on a
+  config preference.
+
+**Operationalization:** pure helper `cli._decide_enable_refiner` is the
+single decision point; both `process` and `batch` CLI commands route
+through it. AGENT-VAL-01 compliant — the gate is a numeric flag, not
+document- or filename-specific.
+
+## Code-Evidence Guard for Literature Lanes (v2.9 Phase 3, 2026-05-04)
+**Decision:** `document_diagnostic._estimate_content_domain` Rule 0
+(+0.8 full-novel) and Rule 0c (+0.4 weak-dialogue) are both gated on
+`_code_evidence_pages < 2`. A page counts toward `_code_evidence_pages`
+when its sample shows fenced code (` ``` `) OR a line starting with a
+strong Python keyword (`def `, `class `, `import `, `from `, `return `,
+`yield `).
+
+**Rationale:**
+- v2.8 fresh re-conversion of Ayeva's "Mastering Python Design Patterns"
+  routed to `digital_literature`, suppressing CodeFormulaV2. CODE FAIL
+  at `indentation_fidelity=0.83` (under the 0.85 hard gate).
+- Python f-strings, docstrings, and short string literals push code-
+  heavy book pages over the cheap "≥4 quote chars" dialogue threshold
+  even when the page is clearly source code.
+- The keyword set mirrors `batch_processor._CODE_EVIDENCE_KEYWORDS` so
+  the literature guard and the code-enrichment trigger draw on the
+  same cheap signal. Threshold conservative — HARRY shows zero code
+  keyword starts and remains in `digital_literature`.
+
+**AGENT-VAL-01 compliance:** the new gate is a numeric threshold on a
+pre-existing diagnostic feature, not document- or filename-specific
+logic. Compliant.
+
+## Firearms-class HARD REJECT in technical_manual (v2.9 Phase 4, 2026-05-04)
+**Decision:** `_score_technical_manual` HARD-REJECTs (returns
+`score=0.0`, `confidence=0.0`) when `f.is_scan AND
+f.image_density >= 1.0 AND f.page_count > 100`. Long-form scanned docs
+with full-page image extraction belong on the `scanned` profile, not
+`technical_manual`.
+
+**Rationale:**
+- v2.8 broad reconversion routed Firearms (292pp scanned_degraded
+  modality, image_density=1.0, editorial domain) to `technical_manual`
+  because the 2026-04-30 Workstream D Milestone 1 fix made
+  `technical_manual` the digital fallback for long-form non-magazine
+  docs.
+- The chunker's heading-inheritance under `technical_manual` is stricter
+  than under `scanned` and dropped Firearms HEADING coverage from 100%
+  to 78% (under the 80% gate). Earthship (canonical scanned book; same
+  signature) was also misrouting.
+
+**AGENT-SPATIAL-20 compliance:** path (a) of the plan — profile-classifier
+scorer adjustment, NOT a per-profile spatial-threshold branch. The
+single 20-unit vertical refinement rule is unchanged.
+
+## Cloud-Only VLM for v2.9 Image Enrichment (v2.9 Phase 5, 2026-05-04)
+**Decision:** v2.9 Phase 5b image enrichment is locked to cloud
+`qwen3-vl-plus` (Alibaba DashScope international endpoint). The
+`scripts/enrich_image_chunks_v29.py` script does NOT branch on local
+availability.
+
+**Rationale:**
+- Local `NuMarkdown-8B-Thinking-mlx-8bits` at
+  `http://10.0.10.246:8000/v1` is unreachable from off-network machines
+  (project memory, confirmed 2026-05-04).
+- Per `docs/AGENT_GOVERNANCE.md` Completion Rule 4, the local VLM
+  comparison is **explicitly removed from v2.9 scope** — not pending.
+- Re-evaluate the local lane in v2.10 when network reachability returns.
+
+## Drop-and-Recreate `mmrag_v2_8` Migration (v2.9 Phase 5c, 2026-05-04)
+**Decision:** Migrate the `mmrag_v2_8` Qdrant collection via DELETE +
+recreate + re-ingest from the v2.9 outputs, NOT via side-by-side
+ingest into `mmrag_v2_9`.
+
+**Rationale:**
+- No production retrieval state has been built up post-v2.8 ship (per
+  project memory; verified by inspecting collection-write timestamps
+  and 24h read traffic before drop).
+- Phase 1's chunk_id-collision migration would otherwise leave ~427
+  orphan points pointing at indeterminate upsert winners. Drop-and-
+  recreate gives a clean populate at zero rollback cost.
+- Fallback: if the consumer-absence verification at the top of Phase
+  5c finds any external reader, abort and fall back to side-by-side
+  ingest into `mmrag_v2_9`.
+- The 17 sister `*_v2` per-doc collections are user-owned and out of
+  scope.
+
 ## Chunk Size Governance
 **Decision:** Chunk length is governed per profile and verified with acceptance metrics; no universal hard min/max.
 
