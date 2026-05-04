@@ -161,24 +161,56 @@ baseline. Both are documented v2.9 followups, not v2.8 blockers.
   `technical_manual`-routed scanned docs OR extend the `scanned`
   profile to claim Firearms-shape inputs.
 
-## Qdrant re-ingestion — RESOLVED
+## Qdrant re-ingestion — COMPLETE
 
 The container deadlock that initially blocked ingest was cleared
 2026-05-04 ~06:50 by the user (removing 11 deadlock-prone collections
 from the sister project's bind-mounted storage volume). 17 healthy
 `*_v2` collections remain. Side-by-side ingest into the new
-`mmrag_v2_8` collection ran via `tmp/v28_ingest.sh` (kicks off
+`mmrag_v2_8` collection ran via `tmp/v28_ingest.sh` (loops
 `scripts/ingest_to_qdrant.py` once per canonical doc with
-`--collection mmrag_v2_8 --model nomic-embed-text`) — first call uses
-`--recreate` to start fresh, subsequent calls append.
+`--collection mmrag_v2_8 --model nomic-embed-text`).
 
-**Verification (run after ingest finishes):**
+**Mid-run point_id collision fix (committed `0d3cc36`):** the first
+ingest attempt landed only 1,690 points — the size of the largest
+single doc. Root cause: `ingest_to_qdrant.py:439` used
+`point_id = i + 1`, sequential per-file, so every subsequent file
+overwrote the previous file's points 1..N. Fix: derive `point_id`
+as a deterministic `uuid.uuid5(_POINT_ID_NAMESPACE, chunk_id)`
+(globally unique because chunk_id embeds doc-hash + page + type +
+content-hash). 6 regression tests added in
+`tests/test_qdrant_point_id_collision.py`. Re-ingest after the fix
+landed all unique chunks correctly.
+
+**Final verification (run AT 2026-05-04 07:33 UTC after ingest v2 finished):**
+
+| Quantity | Count | Notes |
+|---|---|---|
+| Total chunk_ids across 34 canonical JSONLs | 22,587 | sum of `wc -l ... -1` per file |
+| Unique chunk_ids | 22,160 | 427 within-file duplicate chunk_ids — see v2.9 followup |
+| Embedding errors logged by ingest | 23 | nomic-embed-text rejected too-long content (mostly Combat p66 reconstructed text + 4 long tables) |
+| Points in `mmrag_v2_8` collection | 22,137 | matches: 22,160 unique − 23 embed errors |
+
+**100% of unique, embeddable chunks ingested.** The `mmrag_v2_8`
+collection sits side-by-side with the existing 17 `*_v2` per-doc
+collections; nothing was overwritten in user-owned data.
+
 ```bash
-# Confirm collection exists and chunk count matches sum(JSONL line counts)
-curl -sS http://localhost:6333/collections/mmrag_v2_8 | jq '.result.points_count'
-# Compare with: sum of `wc -l output/<canonical>/ingestion.jsonl` minus 34 (one
-# ingestion_metadata header per file)
+# Reproduce verification
+curl -sS http://localhost:6333/collections/mmrag_v2_8/points/count \
+  -X POST -H "Content-Type: application/json" -d '{"exact":true}'
+# → {"result":{"count":22137}, "status":"ok"}
 ```
+
+**v2.9 followup — schema chunk_id collisions:** 427 within-file
+duplicate chunk_ids (largest contributors: KI_En_ChatGPT 279 dupes,
+Devlin 76, Fluent 15) come from the v2.7+ schema generator
+`_generate_chunk_id(doc_id, content, page_number, type)` collapsing to
+the same hash for repeated identical content (boilerplate footers,
+repeated page numbers, etc.). Not a v2.8 regression. v2.9 fix:
+include the chunk's `i+1` index in the hash seed so
+visually-identical chunks at different document positions retain
+distinct IDs.
 
 # 6. Verify chunk counts match JSONL line counts (no silent drops)
 # 7. Tag v2.8.0 once verification passes
