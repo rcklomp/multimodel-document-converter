@@ -225,6 +225,18 @@ def _enrich_one(
 
     elapsed = time.perf_counter() - t0
 
+    # VisionManager.enrich_image returns "[VLM_FAILED: ...]" when the
+    # provider exception path fires (cloud timeout, 5xx, etc.). Treat
+    # those exactly like the explicit-exception branch above so they
+    # don't leak into visual_description and trigger downstream RAG
+    # retrieval on a placeholder.
+    if description and description.lstrip().startswith("[VLM_FAILED"):
+        md["vision_status"] = "hard_fallback"
+        md["vision_error"] = description
+        md["vision_provider_used"] = _CLOUD_MODEL
+        md["vision_attempts"] = int(md.get("vision_attempts") or 0) + 1
+        return rec, False
+
     rec["visual_description"] = description
     md["visual_description"] = description
     md["refined_content"] = description
