@@ -54,7 +54,10 @@ def _text_row(chunk_id: str, spatial: dict | None = None) -> dict:
         "chunk_id": chunk_id,
         "doc_id": "coordaudit01",
         "modality": "text",
-        "content": "Text content.",
+        # v2.9: per-fixture-distinct content so the within-page dupe
+        # gate in qa_universal_invariants doesn't flag synthetic test
+        # data as duplicate text emissions.
+        "content": f"Text content for {chunk_id}.",
         "metadata": metadata,
     }
 

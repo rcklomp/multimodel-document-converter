@@ -33,6 +33,20 @@ conda run -n mmrag-v2 bash scripts/smoke_multiprofile.sh
 ```
 Expected: `GATE_PASS` + `UNIVERSAL_PASS` in every row of the summary table.
 
+### Single-Conversion Full QA
+```bash
+conda run -n mmrag-v2 python scripts/qa_full_conversion.py \
+  output/<document>/ingestion.jsonl \
+  --source-pdf "data/<category>/<source>.pdf"
+```
+
+Expected: `QA_PASS`. `QA_WARN` means the output is structurally usable but has
+advisory issues to review before ingestion; `QA_FAIL` means the conversion is
+not production-clean. The wrapper runs the existing QA scripts and adds
+deterministic checks for missing pages, duplicate long text, per-page outliers,
+localized corruption, image-description quality, asset health, and table
+corruption.
+
 ### Process vs Batch (Parity)
 ```bash
 PDF="data/academic_journal/AIOS LLM Agent Operating System.pdf"

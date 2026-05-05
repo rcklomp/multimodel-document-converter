@@ -1526,17 +1526,26 @@ class V2DocumentProcessor:
                                 f"Shadow asset covers {area_ratio:.1%} of page. Checking VLM..."
                             )
 
+                            # v2.9: defer instead of discard. The
+                            # post-conversion enrichment script handles
+                            # placeholder image chunks with vision_status
+                            # ='pending'. Discarding here was erasing
+                            # full-page-image pages from magazine corpora
+                            # (e.g. Combat p4 lost its 9-image spread).
                             if not self._vision_manager:
-                                logger.warning(
+                                logger.info(
                                     f"[SHADOW-EXTRACTION][FULL-PAGE-GUARD] Page {actual_page_no}: "
-                                    f"DISCARDING full-page shadow asset (no VLM for verification)"
+                                    f"DEFERRING full-page shadow asset (no conversion-time VLM; "
+                                    f"will enrich post-conversion)"
                                 )
                                 print(
-                                    f"    ⛔ [SHADOW-VLM-GUARD] Discarded full-page shadow asset "
+                                    f"    ⏸ [SHADOW-VLM-GUARD] Deferred full-page shadow asset "
                                     f"on page {actual_page_no}",
                                     flush=True,
                                 )
-                                continue  # DISCARD
+                                # Fall through — emit the chunk as a
+                                # placeholder; the enrichment script picks
+                                # it up via vision_status="pending".
 
                         # Increment figure counter for shadow assets
                         element_indices["figure"] += 1
@@ -2428,6 +2437,16 @@ class V2DocumentProcessor:
             pass  # Older docling-core without DocItemLabel
 
         chunks: List[IngestionChunk] = []
+        # v2.9: per-page content dedup. Docling's HybridChunker can yield
+        # the same doc_chunk text 60+ times for cell-rich tables (e.g. the
+        # squadron-roster table on Combat Aircraft p66 produced 73 byte-
+        # equal text dupes). The downstream chunk_id position counter
+        # gives each emission a distinct id, but the content is identical
+        # — wasted index space + skewed retrieval scores. Drop dupes
+        # here at the producer rather than papering over them at the
+        # writer.
+        _seen_per_page: Dict[int, set[str]] = {}
+        _hybrid_dedup_skipped = 0
         for i, dc in enumerate(doc_chunks):
             text = dc.text
             if not text or not text.strip():
@@ -2458,6 +2477,18 @@ class V2DocumentProcessor:
                             max(0, min(COORD_SCALE, x1)),
                             max(0, min(COORD_SCALE, max(y0, y1))),
                         ]
+
+            # v2.9 hybrid_chunker content dedup: drop byte-equal text
+            # bodies on the same page. Tables with many cells trigger
+            # Docling to yield the same enclosing-text DocChunk per cell;
+            # this collapses Combat p66's 77 text emissions to ~4 unique
+            # bodies as expected.
+            _norm_text = text.strip()
+            _page_seen = _seen_per_page.setdefault(page_no, set())
+            if _norm_text in _page_seen:
+                _hybrid_dedup_skipped += 1
+                continue
+            _page_seen.add(_norm_text)
 
             # Extract headings from HybridChunker metadata, filtered through
             # our heading validator (rejects credit lines, copyright, TOC fill)
@@ -2538,6 +2569,12 @@ class V2DocumentProcessor:
             chunk._dc_ref = dc  # type: ignore[attr-defined]
 
             chunks.append(chunk)
+
+        if _hybrid_dedup_skipped:
+            logger.info(
+                f"[HYBRID-CHUNKER] Dedup-skipped {_hybrid_dedup_skipped} byte-equal "
+                f"text emissions (Docling cell-rich-table cluster)"
+            )
 
         # Fill next_text_snippet
         for i in range(len(chunks) - 1):
@@ -2777,72 +2814,83 @@ class V2DocumentProcessor:
                     f"(threshold: 95%). Checking VLM availability..."
                 )
 
-                # IRON-07: If no VLM, DISCARD the asset
+                # v2.9 architecture: conversion runs with --vision-provider
+                # none; image enrichment is a separate post-step driven by
+                # ``scripts/enrich_image_chunks_v29.py``. Discarding full-page
+                # assets when the conversion-time VLM is absent erases entire
+                # pages from the corpus (Combat p4 lost all 9 image chunks
+                # this way in the v2.9 broad reconversion). Defer the
+                # editorial-vs-UI verification to the enrichment step
+                # instead: emit the chunk with vision_status="pending" and
+                # let the post-conversion VLM decide.
                 if not self._vision_manager or self._vision_manager is None:
-                    logger.warning(
-                        f"[FULL-PAGE-GUARD] Page {page_no}: DISCARDING full-page asset "
-                        f"(area_ratio={area_ratio:.1%}). No VLM available for verification. "
+                    logger.info(
+                        f"[FULL-PAGE-GUARD] Page {page_no}: DEFERRING full-page asset "
+                        f"(area_ratio={area_ratio:.1%}). Will enrich post-conversion. "
                         f"Asset: {asset_name}"
                     )
                     print(
-                        f"    ⛔ [VLM-GUARD] Discarded full-page asset on page {page_no} "
-                        f"(no VLM verification available)",
+                        f"    ⏸ [VLM-GUARD] Deferred full-page asset on page {page_no} "
+                        f"(awaiting post-conversion enrichment)",
                         flush=True,
                     )
-                    return  # DISCARD - do not save, do not yield chunk
-
-                # IRON-07: VLM VERIFICATION - Actually verify the asset is editorial
-                logger.info(
-                    f"[FULL-PAGE-GUARD] Page {page_no}: Running VLM verification for full-page asset..."
-                )
-                try:
-                    # Call VLM with verification prompt
-                    verification_prompt = (
-                        "Is this image editorial content (photo, illustration, infographic, diagram) "
-                        "or is it a UI element/page scan/navigation element? "
-                        "Answer 'EDITORIAL' if it contains meaningful visual content, "
-                        "or 'UI' if it's just a page background, navigation, or UI element."
+                    # Fall through — the chunk is still emitted. The
+                    # placeholder visual_description is the existing
+                    # ``[Figure on page N]`` sentinel, picked up by the
+                    # enrichment script's placeholder-detection.
+                else:
+                    # IRON-07: VLM VERIFICATION - Actually verify the asset is editorial
+                    logger.info(
+                        f"[FULL-PAGE-GUARD] Page {page_no}: Running VLM verification for full-page asset..."
                     )
+                    try:
+                        # Call VLM with verification prompt
+                        verification_prompt = (
+                            "Is this image editorial content (photo, illustration, infographic, diagram) "
+                            "or is it a UI element/page scan/navigation element? "
+                            "Answer 'EDITORIAL' if it contains meaningful visual content, "
+                            "or 'UI' if it's just a page background, navigation, or UI element."
+                        )
 
-                    verification_result = self._vision_manager.enrich_image(
-                        image=raw_image,
-                        state=state,
-                        page_number=page_no,
-                        anchor_text=verification_prompt,
-                    )
+                        verification_result = self._vision_manager.enrich_image(
+                            image=raw_image,
+                            state=state,
+                            page_number=page_no,
+                            anchor_text=verification_prompt,
+                        )
 
-                    # Check VLM response
-                    if verification_result and "UI" in verification_result.upper():
-                        logger.warning(
-                            f"[FULL-PAGE-GUARD] Page {page_no}: VLM identified as UI element: '{verification_result}'. "
-                            f"DISCARDING asset: {asset_name}"
+                        # Check VLM response
+                        if verification_result and "UI" in verification_result.upper():
+                            logger.warning(
+                                f"[FULL-PAGE-GUARD] Page {page_no}: VLM identified as UI element: '{verification_result}'. "
+                                f"DISCARDING asset: {asset_name}"
+                            )
+                            print(
+                                f"    ⛔ [VLM-VERIFICATION] Discarded full-page asset on page {page_no} "
+                                f"(VLM: UI element)",
+                                flush=True,
+                            )
+                            return  # DISCARD - VLM says it's UI
+                        else:
+                            logger.info(
+                                f"[FULL-PAGE-GUARD] Page {page_no}: VLM verified as editorial: '{verification_result}'. "
+                                f"KEEPING asset: {asset_name}"
+                            )
+                            print(
+                                f"    ✅ [VLM-VERIFICATION] Verified full-page editorial asset on page {page_no}",
+                                flush=True,
+                            )
+
+                    except Exception as vlm_err:
+                        logger.error(
+                            f"[FULL-PAGE-GUARD] Page {page_no}: VLM verification failed: {vlm_err}. "
+                            f"DISCARDING asset for safety: {asset_name}"
                         )
                         print(
-                            f"    ⛔ [VLM-VERIFICATION] Discarded full-page asset on page {page_no} "
-                            f"(VLM: UI element)",
+                            f"    ⛔ [VLM-VERIFICATION] VLM error on page {page_no}, discarding for safety",
                             flush=True,
                         )
-                        return  # DISCARD - VLM says it's UI
-                    else:
-                        logger.info(
-                            f"[FULL-PAGE-GUARD] Page {page_no}: VLM verified as editorial: '{verification_result}'. "
-                            f"KEEPING asset: {asset_name}"
-                        )
-                        print(
-                            f"    ✅ [VLM-VERIFICATION] Verified full-page editorial asset on page {page_no}",
-                            flush=True,
-                        )
-
-                except Exception as vlm_err:
-                    logger.error(
-                        f"[FULL-PAGE-GUARD] Page {page_no}: VLM verification failed: {vlm_err}. "
-                        f"DISCARDING asset for safety: {asset_name}"
-                    )
-                    print(
-                        f"    ⛔ [VLM-VERIFICATION] VLM error on page {page_no}, discarding for safety",
-                        flush=True,
-                    )
-                    return  # DISCARD - VLM failed, err on side of caution
+                        return  # DISCARD - VLM failed, err on side of caution
 
             # STEP 3: Only save to disk if size check passed AND VLM guard passed
             print(

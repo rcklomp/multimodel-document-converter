@@ -45,6 +45,23 @@ def count_encoding_artifacts(text: str) -> int:
     return len(CORRUPTION_PATTERNS.findall(text))
 
 
+def is_irreparably_corrupt(text: str, ratio_threshold: float = 0.10) -> bool:
+    """v2.9: True when more than ``ratio_threshold`` of the text consists
+    of replacement-character / glyph-placeholder runs. Combat p66's
+    40k-char squadron table is ~17% replacement chars — Tesseract on
+    that region produces equally garbled output, so the OCR-patch heal
+    path can't fix it. Such chunks should be quarantined rather than
+    re-emitted as canonical content."""
+    if not text:
+        return False
+    n = len(text)
+    if n == 0:
+        return False
+    artifact_chars = sum(text.count(c) for c in ("�",))
+    artifact_chars += sum(len(m) for m in CORRUPTION_PATTERNS.findall(text))
+    return artifact_chars / n > ratio_threshold
+
+
 def patch_corrupted_chunks(
     chunks: List["IngestionChunk"],
     pdf_path: Optional[Path] = None,
@@ -79,10 +96,14 @@ def patch_corrupted_chunks(
 
     from ..schema.ingestion_schema import Modality
 
-    # Find corrupted chunks
+    # v2.9: extend to TABLE modality. Combat Aircraft p66 has a
+    # 40,753-char squadron-roster table where the typography glyphs
+    # decode as `�` runs; the interceptor previously skipped
+    # tables and let the corruption land in the canonical output.
+    _PATCH_MODALITIES = {Modality.TEXT, Modality.TABLE}
     corrupted = []
     for i, ch in enumerate(chunks):
-        if ch.modality != Modality.TEXT or not ch.content:
+        if ch.modality not in _PATCH_MODALITIES or not ch.content:
             continue
         if has_encoding_artifacts(ch.content):
             corrupted.append(i)
@@ -94,12 +115,21 @@ def patch_corrupted_chunks(
 
     # Open PDF once for all patches
     doc = None
+    quarantined: set[int] = set()
     try:
         doc = fitz.open(pdf_path)
         patched = 0
 
         for idx in corrupted:
             ch = chunks[idx]
+            # v2.9: irreparable chunks (>10% replacement chars) get
+            # quarantined here rather than re-OCR'd. The squadron-roster
+            # table on Combat p66 is the canonical case — Tesseract can
+            # not recover it because the typography itself is the issue,
+            # not a missing CMap.
+            if is_irreparably_corrupt(ch.content):
+                quarantined.add(idx)
+                continue
             page_no = ch.metadata.page_number if ch.metadata else None
             bbox = ch.metadata.spatial.bbox if ch.metadata and ch.metadata.spatial else None
 
@@ -158,5 +188,12 @@ def patch_corrupted_chunks(
     finally:
         if doc:
             doc.close()
+
+    if quarantined:
+        logger.warning(
+            f"[CORRUPTION-INTERCEPTOR] Quarantining {len(quarantined)} irreparably-corrupt "
+            f"chunks (>10% replacement chars; OCR-patch cannot recover)"
+        )
+        chunks = [ch for i, ch in enumerate(chunks) if i not in quarantined]
 
     return chunks

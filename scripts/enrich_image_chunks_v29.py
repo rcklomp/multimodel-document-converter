@@ -237,6 +237,14 @@ def _enrich_one(
         md["vision_attempts"] = int(md.get("vision_attempts") or 0) + 1
         return rec, False
 
+    # Per IngestionChunk schema, ``content`` is the canonical
+    # "Text content or VLM description" field. For image chunks the
+    # convention is that ``content`` carries the visual description
+    # post-enrichment. Earlier v2.9 runs forgot to update this field
+    # → semantic_fidelity gate read the residual placeholder and
+    # reported image_placeholder_ratio=1.0 even though the metadata
+    # had real descriptions. Fix: write to all three positions.
+    rec["content"] = description
     rec["visual_description"] = description
     md["visual_description"] = description
     md["refined_content"] = description

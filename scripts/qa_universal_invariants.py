@@ -93,6 +93,12 @@ class UniversalResult:
     empty_content_text: int = 0         # text chunk with empty/whitespace-only content
     missing_modality: int = 0           # chunk with no modality field
 
+    # v2.9 invariants
+    pages_with_chunks: set = field(default_factory=set)
+    text_dupe_excess: int = 0          # within-page byte-equal text dupes beyond 1 occurrence each
+    irreparably_corrupt_chunks: int = 0 # >10% replacement-char content emitted to canonical output
+    text_bodies_per_page: Dict = field(default_factory=dict)  # page_no -> Counter
+
     # Examples for debugging
     examples: List[str] = field(default_factory=list)
     bbox_stats: Dict[str, BBoxStats] = field(
@@ -145,6 +151,29 @@ def check(path: Path) -> UniversalResult:
 
             meta = obj.get("metadata") or {}
             chunk_id = obj.get("chunk_id", f"line_{lineno}")
+
+            # ── v2.9: track which pages produce chunks (for coverage) ────
+            page_no = meta.get("page_number")
+            if page_no:
+                r.pages_with_chunks.add(int(page_no))
+
+            # ── v2.9: irreparable-corruption check ──────────────────────
+            content = obj.get("content") or ""
+            if content:
+                n = len(content)
+                replacement_chars = content.count("�")
+                if n > 0 and replacement_chars / n > 0.10:
+                    r.irreparably_corrupt_chunks += 1
+                    r.add_example(
+                        f"chunk_id={chunk_id} page={page_no}: irreparably corrupt "
+                        f"({replacement_chars}/{n} chars are replacement glyphs)"
+                    )
+
+            # ── v2.9: per-page text dupe tracking ────────────────────────
+            if modality == "text" and page_no and content.strip():
+                page_int = int(page_no)
+                bodies = r.text_bodies_per_page.setdefault(page_int, {})
+                bodies[content.strip()] = bodies.get(content.strip(), 0) + 1
 
             # ── Invariant 1: text chunks must have chunk_type ────────────
             if modality == "text":
@@ -271,6 +300,39 @@ def main(argv: list[str]) -> int:
     print(f"bbox_missing_page_dims={r.bbox_missing_dims}")
     print(f"empty_text_chunks={r.empty_content_text}")
     print(f"missing_modality={r.missing_modality}")
+
+    # v2.9: page coverage + within-page text dupe + irreparable corruption
+    text_dupe_excess = 0
+    for page_no, bodies in r.text_bodies_per_page.items():
+        for body, count in bodies.items():
+            if count > 1:
+                text_dupe_excess += (count - 1)
+    r.text_dupe_excess = text_dupe_excess
+
+    # Page-coverage gate: every page within the processed range must
+    # produce at least one chunk. We use the observed [min..max] range
+    # rather than the full document's total_pages so partial-page test
+    # runs (e.g. ``--pages 65,66,67``) don't fire false alarms; missing
+    # pages WITHIN the processed range still fail the gate.
+    missing_pages: list[int] = []
+    if r.pages_with_chunks:
+        observed_min = min(r.pages_with_chunks)
+        observed_max = max(r.pages_with_chunks)
+        missing_pages = [
+            p for p in range(observed_min, observed_max + 1)
+            if p not in r.pages_with_chunks
+        ]
+
+    print(
+        f"page_coverage={len(r.pages_with_chunks)} pages chunked "
+        f"(observed range: {min(r.pages_with_chunks) if r.pages_with_chunks else 'n/a'}.."
+        f"{max(r.pages_with_chunks) if r.pages_with_chunks else 'n/a'}, "
+        f"declared total: {_format_optional_int(r.total_pages)}); "
+        f"missing_pages={missing_pages[:10]}"
+        + (f" (+{len(missing_pages) - 10} more)" if len(missing_pages) > 10 else "")
+    )
+    print(f"within_page_text_dupe_excess={r.text_dupe_excess}")
+    print(f"irreparably_corrupt_chunks={r.irreparably_corrupt_chunks}")
     for modality in MODALITIES:
         print(_format_bbox_stats(modality, r.bbox_stats[modality]))
 
@@ -283,6 +345,13 @@ def main(argv: list[str]) -> int:
         fails.append(f"empty_text_chunks={r.empty_content_text}")
     if r.missing_modality > 0:
         fails.append(f"missing_modality={r.missing_modality}")
+    # v2.9 hard gates
+    if missing_pages:
+        fails.append(f"missing_pages={len(missing_pages)} (first: {missing_pages[:5]})")
+    if r.text_dupe_excess > 0:
+        fails.append(f"within_page_text_dupe_excess={r.text_dupe_excess}")
+    if r.irreparably_corrupt_chunks > 0:
+        fails.append(f"irreparably_corrupt_chunks={r.irreparably_corrupt_chunks}")
 
     # bbox_missing_dims is a warning, not a hard fail — some OCR paths
     # don't produce spatial metadata at all, which is acceptable.

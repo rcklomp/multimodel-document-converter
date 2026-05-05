@@ -3099,6 +3099,46 @@ class BatchProcessor:
         # when it reads title, spine, and bleed-through as separate instances.
         all_chunks = self._dedup_intra_chunk_repeats(all_chunks)
 
+        # v2.9 cross-chunk dedup: drop byte-equal text/table content on
+        # the same page. The corruption interceptor's per-bbox OCR
+        # frequently runs Tesseract on overlapping regions of a single
+        # corrupted table (e.g. Combat Aircraft p66 squadron roster),
+        # producing identical OCR output for ~19 source chunks. Each
+        # patched chunk then survives the oversize-breaker as a 4-part
+        # split, leaving the canonical output with ~74 byte-equal text
+        # rows per real OCR result. First-wins dedup at this stage
+        # collapses those redundant rows without changing extraction
+        # decisions upstream.
+        _seen: Dict[Tuple[int, str, str], int] = {}
+        _deduped: List[IngestionChunk] = []
+        _cross_chunk_dropped = 0
+        for _ch in all_chunks:
+            if _ch.modality not in (Modality.TEXT, Modality.TABLE):
+                _deduped.append(_ch)
+                continue
+            _content = (_ch.content or "").strip()
+            if not _content:
+                _deduped.append(_ch)
+                continue
+            _page = (
+                _ch.metadata.page_number
+                if _ch.metadata and _ch.metadata.page_number
+                else 0
+            )
+            _key = (int(_page), _ch.modality.value, _content)
+            if _key in _seen:
+                _cross_chunk_dropped += 1
+                continue
+            _seen[_key] = 1
+            _deduped.append(_ch)
+        if _cross_chunk_dropped:
+            logger.info(
+                f"[CROSS-CHUNK-DEDUP] Dropped {_cross_chunk_dropped} byte-equal "
+                f"text/table chunks on same page (post-corruption-patch + "
+                f"post-oversize-breaker)"
+            )
+        all_chunks = _deduped
+
         # Write aggregated output to master JSONL with deduplication
         output_jsonl = self.output_dir / "ingestion.jsonl"
         written_chunks = 0
@@ -9468,14 +9508,24 @@ class BatchProcessor:
             if self._is_full_page_bbox(bbox):
                 fullpage_count += 1
 
-                # FIX #1: IRON-07 - HARD VLM VERIFICATION CALL
-                # "Geen verificatie = geen inclusie" - NO VLM = DISCARD
+                # v2.9: defer instead of discard. The conversion-time
+                # path is intentionally run with --vision-provider none
+                # in the v2.9 architecture; VLM-side verification + real
+                # description happens in the post-conversion enrichment
+                # script (`scripts/enrich_image_chunks_v29.py`). Hard
+                # discard at this site previously erased every page that
+                # only had full-page imagery (Combat p4 lost its 9-image
+                # spread). Mark the chunk as pending and let it through.
                 if self._vision_manager is None:
-                    logger.warning(
-                        f"[FULL-PAGE-GUARD] DISCARDING full-page asset on "
-                        f"page {chunk.metadata.page_number} (no VLM available - IRON-07)"
+                    logger.info(
+                        f"[FULL-PAGE-GUARD] DEFERRING full-page asset on "
+                        f"page {chunk.metadata.page_number} (no conversion-time "
+                        f"VLM; will enrich post-conversion)"
                     )
-                    continue  # DISCARD - skip this chunk
+                    if chunk.metadata:
+                        chunk.metadata.vision_status = "pending"
+                    filtered.append(chunk)
+                    continue
 
                 # CRITICAL: Hard VLM verification call - if VLM exists, use it to verify
                 try:
