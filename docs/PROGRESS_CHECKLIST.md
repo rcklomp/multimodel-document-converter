@@ -175,7 +175,11 @@ Acceptance signals:
 
 Goal: documents route through plausible profiles using `ProfileClassifier`, without acceptance overrides.
 
-Current status: `[~]` — `implemented` (Milestone 1: 2026-04-30; new `digital_literature` profile added 2026-05-03).
+Current status: `[x]` — **CLOSED 2026-05-05 (PLAN_V2.9 Phase 3 + 4).**
+v2.9 Phase 3 added a code-evidence guard to literature Rules 0/0c
+(closes Ayeva misroute); Phase 4 added a HARD REJECT in the
+technical_manual scorer for long-form scanned docs (closes Firearms
+profile-flip; Earthship also re-routed back to scanned).
 
 Fixes applied (Milestone 1, 2026-04-30):
 
@@ -214,11 +218,18 @@ Acceptance signals:
 
 Goal: representative non-magazine digital outputs have real VLM descriptions or intentionally disabled VLM status, not accidental placeholders.
 
-Current status: `[ ]`
+Current status: `[x]` — **CLOSED 2026-05-05 (PLAN_V2.9 Phase 5b/5c).**
+3,684 image chunks across the canonical 34-doc corpus enriched via
+cloud `qwen3-vl-plus` (3,651 success, 33 hard_fallback at 0.9% corpus
+rate). `mmrag_v2_8` Qdrant collection drop-and-recreated; image-side
+RAG retrieval restored end-to-end. Local NuMarkdown lane deferred to
+v2.10 per the plan's §Phase 5 decision e (endpoint unreachable).
 
 Known state:
 
-- [ ] Many older digital outputs pass audit with no-VLM advisory placeholder image descriptions.
+- [x] Canonical v2.9 outputs have real cloud-VLM `visual_description`
+      values (or documented `vision_status="hard_fallback"` with
+      recorded reason for the 33 timeouts).
 - [x] Scanned/manual outputs such as Earthship and Firearms have real image descriptions and pass image gates.
 
 Next steps:

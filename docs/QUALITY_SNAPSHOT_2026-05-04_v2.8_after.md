@@ -1,5 +1,10 @@
 # Quality Snapshot 2026-05-04 — v2.8 AFTER
 
+> ⚠ **SUPERSEDED — historical reference only.** The active baseline
+> is [`docs/QUALITY_SNAPSHOT_2026-05-04_v2.9_after.md`](QUALITY_SNAPSHOT_2026-05-04_v2.9_after.md)
+> (v2.9 AFTER). This v2.8 snapshot is preserved as the BEFORE column
+> for the v2.9 deltas; do not use it as a current state reference.
+
 **Purpose:** AFTER state for the v2.8 broad reconversion (Phase 5c).
 Compare against `docs/QUALITY_SNAPSHOT_2026-05-03.md` for the BEFORE column.
 
