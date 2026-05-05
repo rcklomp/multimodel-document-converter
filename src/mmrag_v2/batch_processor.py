@@ -2919,12 +2919,6 @@ class BatchProcessor:
 
         # Apply quality filters (this fills the QualityFilterTracker)
         filtered_chunks = self._apply_quality_filters(all_chunks)
-        _trace_p3 = Counter()
-        for _ch in filtered_chunks:
-            if _ch.metadata and _ch.metadata.page_number:
-                _trace_p3[int(_ch.metadata.page_number)] += 1
-        for _p in [29, 54, 72, 101]:
-            logger.info(f"[FINALIZE-TRACE] p{_p} after quality_filters: {_trace_p3[_p]}")
         # Keep a stable baseline count for recovery bookkeeping (avoid in-place mutations)
         filtered_baseline_count = len(filtered_chunks)
         filtered_count = len(all_chunks) - filtered_baseline_count
@@ -5707,6 +5701,22 @@ class BatchProcessor:
             cur_method = cur.metadata.extraction_method if cur.metadata else ""
             nxt_method = nxt.metadata.extraction_method if nxt.metadata else ""
             if "pagesplit" in (cur_method or "") or "pagesplit" in (nxt_method or ""):
+                continue
+
+            # v2.9: skip cross-page merges. This filter exists to
+            # rejoin sentences split across regions on the SAME page
+            # by layout-aware OCR. Cross-page mid-sentence breaks
+            # ("...rather a" → "lot; Harry didn't feel brave...") are
+            # legitimate page boundaries — merging them assigns the
+            # latter page's content to the former and erases its
+            # page attribution (HARRY p131, p141 lost this way).
+            cur_page = (
+                cur.metadata.page_number if cur.metadata else None
+            )
+            nxt_page = (
+                nxt.metadata.page_number if nxt.metadata else None
+            )
+            if cur_page is not None and nxt_page is not None and int(cur_page) != int(nxt_page):
                 continue
 
             cur_text = cur.content.rstrip()
