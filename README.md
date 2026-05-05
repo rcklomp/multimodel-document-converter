@@ -4,17 +4,36 @@ Convert PDF, EPUB, HTML, and Office documents into structured JSONL datasets for
 
 The converter extracts text, images, and tables from complex documents while preserving spatial layout, document hierarchy, and semantic context. It handles everything from born-digital magazines to degraded scanned manuals.
 
-**Version 2.8.0** | Python 3.10 | Apple Silicon native | Docling 2.86.0 | Schema 2.7.0
+**Version 2.9.0** | Python 3.10 | Apple Silicon native | Docling 2.86.0 | Schema 2.7.0
 
-> **v2.8.0 (2026-05-04):** All four PLAN_V2.8 production gaps closed —
-> Workstream F (control-char keyword separator), Workstream C (Combat
-> Aircraft ornament-glyph cleanup), Workstream B (Chaubal CodeFormulaV2
-> indentation lift 0.54 → 0.96), and v2.7 §5 adapter-invocation static
-> guard. Form acceptance class added (invoices/short scanned docs are
-> first-class RAG content). Broad re-conversion of the entire `data/`
-> corpus (34 PDF/EPUB) ingested into the new `mmrag_v2_8` Qdrant
-> collection. See `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`
-> for empirical Phase outcomes and v2.9 followups.
+> **v2.9.0 (2026-05-05):** Closes the four PLAN_V2.9 carry-overs from
+> v2.8 and ships a cloud-VLM-enriched `mmrag_v2_8` Qdrant collection.
+>
+> - **Phase 1 — chunk_id collisions eliminated.** Per-document
+>   monotonic `position` is hashed into the chunk-id seed; v2.8's 427
+>   within-file duplicates are now 0 across the canonical 34-doc
+>   corpus.
+> - **Phase 2 — refiner smart-routing.** `cli._decide_enable_refiner`
+>   gates the config-default refiner on `has_encoding_corruption`;
+>   clean-prose docs no longer hammer the cloud refiner per chunk.
+>   `--no-refiner` workaround dropped from `scripts/convert_books.sh`.
+> - **Phase 3 — Ayeva profile re-route.** `document_diagnostic`
+>   Rules 0/0c gain a code-evidence guard; Python books no longer
+>   misroute to `digital_literature`. Ayeva: `indentation_fidelity`
+>   0.83 → 0.96, profile=`technical_manual`, AUDIT_PASS.
+> - **Phase 4 — Firearms HARD REJECT.** `_score_technical_manual`
+>   HARD-REJECTs long-form scanned docs (`is_scan=True AND
+>   image_density>=1.0 AND page_count>100`); Firearms/Earthship route
+>   back to `scanned`. AGENT-SPATIAL-20 unchanged.
+> - **Phase 5 — image-side RAG retrieval restored.** 3,684 image
+>   chunks enriched via cloud `qwen3-vl-plus` (3,651 success / 33
+>   hard_fallback at 0.9% corpus rate). `mmrag_v2_8` drop-and-recreated;
+>   22,446 unique points (was 22,137).
+>
+> **32/34 canonical AUDIT_PASS** (was 30/34 in v2.8). Smoke matrix:
+> 11/11 GATE_PASS + UNIVERSAL_PASS. See
+> [`docs/QUALITY_SNAPSHOT_2026-05-04_v2.9_after.md`](docs/QUALITY_SNAPSHOT_2026-05-04_v2.9_after.md)
+> for empirical Phase outcomes and v2.10 followups.
 
 ---
 
