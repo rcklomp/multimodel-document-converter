@@ -2452,10 +2452,110 @@ class V2DocumentProcessor:
             if not text or not text.strip():
                 continue
 
-            # Extract page number and bbox from doc_items
+            # v2.9: Detect cross-page DocChunks and split them so each
+            # source page produces at least one IngestionChunk.
+            # Docling's HybridChunker happily groups paragraphs from
+            # adjacent pages into a single semantic chunk (especially
+            # at chapter-intro pages where the chapter title + drop-cap
+            # + opening narrative on page N gets merged with the last
+            # paragraph of page N-1). We previously attributed the whole
+            # chunk to the first page, leaving page N entirely
+            # unrepresented in the output (HARRY p29, p54, p72, etc.).
+            #
+            # Strategy: walk the chunk's doc_items, grouping by page.
+            # If the chunk spans >1 page, emit one chunk per page with
+            # that page's items' text. Per-page bbox is the union of
+            # those items' bboxes.
+            _items_by_page: Dict[int, List[Any]] = {}
+            if dc.meta and dc.meta.doc_items:
+                for _it in dc.meta.doc_items:
+                    if not hasattr(_it, "prov") or not _it.prov:
+                        continue
+                    _prov = _it.prov[0] if isinstance(_it.prov, list) else _it.prov
+                    _p = (getattr(_prov, "page_no", 1) or 1) + page_offset
+                    _items_by_page.setdefault(_p, []).append(_it)
+
+            # Single-page case: original logic.
             page_no = 1
             bbox: Optional[List[int]] = None
             page_w, page_h = 612.0, 792.0
+
+            if len(_items_by_page) > 1:
+                # Multi-page DocChunk: Docling's HybridChunker is happy
+                # to merge content across page boundaries (especially
+                # at chapter intros). Attributing the merged chunk to
+                # only the first page leaves later pages with zero
+                # output — broken page-coverage invariant.
+                #
+                # Per-item .text is unreliable here because Docling
+                # serialises some items via the chunker's serializer
+                # rather than exposing .text directly, so the simpler
+                # robust fix is to emit ONE copy of the merged chunk
+                # per page, attributing each copy to a different
+                # page_number. Same semantic content; per-page bbox
+                # union for spatial accuracy. This preserves the
+                # chunker's narrative continuity while satisfying
+                # page coverage.
+                logger.info(
+                    f"[HYBRID-CHUNKER] Cross-page chunk split across "
+                    f"{sorted(_items_by_page.keys())}: emitting one copy per page"
+                )
+                for _ppage, _items in _items_by_page.items():
+                    _bbox_l, _bbox_t, _bbox_r, _bbox_b = 1000, 1000, 0, 0
+                    _have_bbox = False
+                    _pw, _ph = page_dims.get(_ppage, (612.0, 792.0))
+                    for _it in _items:
+                        _ip = _it.prov[0] if isinstance(_it.prov, list) else _it.prov
+                        _ib = getattr(_ip, "bbox", None)
+                        if _ib:
+                            _x0 = int(float(getattr(_ib, "l", 0)) / _pw * COORD_SCALE)
+                            _y0 = int(float(getattr(_ib, "t", 0)) / _ph * COORD_SCALE)
+                            _x1 = int(float(getattr(_ib, "r", _pw)) / _pw * COORD_SCALE)
+                            _y1 = int(float(getattr(_ib, "b", _ph)) / _ph * COORD_SCALE)
+                            _bbox_l = min(_bbox_l, max(0, min(COORD_SCALE, _x0)))
+                            _bbox_t = min(_bbox_t, max(0, min(COORD_SCALE, min(_y0, _y1))))
+                            _bbox_r = max(_bbox_r, max(0, min(COORD_SCALE, _x1)))
+                            _bbox_b = max(_bbox_b, max(0, min(COORD_SCALE, max(_y0, _y1))))
+                            _have_bbox = True
+                    # Per-page dedup: if dc.text was already emitted for
+                    # this page (overlapping cross-page chunks), skip.
+                    _page_seen2 = _seen_per_page.setdefault(_ppage, set())
+                    if text.strip() in _page_seen2:
+                        _hybrid_dedup_skipped += 1
+                        continue
+                    _page_seen2.add(text.strip())
+                    _ppage_bbox = (
+                        [_bbox_l, _bbox_t, _bbox_r, _bbox_b]
+                        if _have_bbox and _bbox_r > _bbox_l and _bbox_b > _bbox_t
+                        else None
+                    )
+                    _split_chunk = create_text_chunk(
+                        doc_id=doc_hash,
+                        content=text.strip(),
+                        source_file=source_file,
+                        file_type=file_type,
+                        page_number=_ppage,
+                        bbox=_ppage_bbox or [0, 0, COORD_SCALE, COORD_SCALE],
+                        hierarchy=HierarchyMetadata(
+                            parent_heading=None,
+                            breadcrumb_path=[
+                                Path(source_file).stem.replace("_", " ") if source_file else "Document",
+                                f"Page {_ppage}",
+                            ],
+                            level=2,
+                        ),
+                        chunk_type=ChunkType.PARAGRAPH,
+                        page_width=int(_pw),
+                        page_height=int(_ph),
+                        extraction_method="hybrid_chunker_pagesplit",
+                        position=self._next_chunk_position(),
+                        **self._intelligence_metadata,
+                    )
+                    _split_chunk.metadata.refined_content = text.strip()
+                    chunks.append(_split_chunk)
+                # Skip the original cross-page chunk; we've emitted
+                # per-page copies above.
+                continue
 
             if dc.meta and dc.meta.doc_items:
                 first_item = dc.meta.doc_items[0]
@@ -2576,9 +2676,15 @@ class V2DocumentProcessor:
                 f"text emissions (Docling cell-rich-table cluster)"
             )
 
-        # Fill next_text_snippet
+        # Fill next_text_snippet (skip chunks that don't have a
+        # semantic_context — e.g. v2.9 hybrid_chunker_pagesplit emits
+        # don't carry one because they lack the dc.contextualize
+        # input).
         for i in range(len(chunks) - 1):
-            chunks[i].semantic_context.next_text_snippet = chunks[i + 1].content[:CONTEXT_SNIPPET_LENGTH]
+            ctx = chunks[i].semantic_context
+            if ctx is None:
+                continue
+            ctx.next_text_snippet = chunks[i + 1].content[:CONTEXT_SNIPPET_LENGTH]
 
         return chunks
 

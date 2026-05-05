@@ -2919,6 +2919,12 @@ class BatchProcessor:
 
         # Apply quality filters (this fills the QualityFilterTracker)
         filtered_chunks = self._apply_quality_filters(all_chunks)
+        _trace_p3 = Counter()
+        for _ch in filtered_chunks:
+            if _ch.metadata and _ch.metadata.page_number:
+                _trace_p3[int(_ch.metadata.page_number)] += 1
+        for _p in [29, 54, 72, 101]:
+            logger.info(f"[FINALIZE-TRACE] p{_p} after quality_filters: {_trace_p3[_p]}")
         # Keep a stable baseline count for recovery bookkeeping (avoid in-place mutations)
         filtered_baseline_count = len(filtered_chunks)
         filtered_count = len(all_chunks) - filtered_baseline_count
@@ -5693,6 +5699,16 @@ class BatchProcessor:
             cur = chunks[cur_idx]
             nxt = chunks[nxt_idx]
 
+            # v2.9: skip merge when either side is a page-coverage
+            # split copy (hybrid_chunker_pagesplit). Those are
+            # intentional duplicates of cross-page chunks; merging
+            # them would reattribute the latter page's content to the
+            # former and break page coverage.
+            cur_method = cur.metadata.extraction_method if cur.metadata else ""
+            nxt_method = nxt.metadata.extraction_method if nxt.metadata else ""
+            if "pagesplit" in (cur_method or "") or "pagesplit" in (nxt_method or ""):
+                continue
+
             cur_text = cur.content.rstrip()
             nxt_text = nxt.content.lstrip()
             ends_mid = not _re.search(r"[.!?:;\"')\]}\d]\s*$", cur_text)
@@ -5729,10 +5745,19 @@ class BatchProcessor:
 
         Uses word-set overlap: if >85% of words in a shorter chunk appear
         in an earlier chunk, drop the shorter one.
+
+        v2.9: page-scoped — same-content chunks on DIFFERENT pages are
+        kept. The hybrid_chunker_pagesplit emit deliberately copies a
+        cross-page DocChunk to each source page (HARRY p28+p29 chapter-
+        intro narrative). The near-dup filter must not collapse those
+        copies; otherwise the page-coverage invariant breaks. Real
+        manual-style cross-section repetition still gets caught when
+        it happens on the same page (rare) or via the more aggressive
+        post-corruption cross-chunk dedup at finalization.
         """
         import re as _re
 
-        seen_word_sets: list[set[str]] = []
+        seen_per_page: Dict[int, list[set[str]]] = {}
         kept: list[IngestionChunk] = []
         dropped = 0
 
@@ -5742,14 +5767,20 @@ class BatchProcessor:
                 continue
 
             words = set(_re.findall(r"[a-zA-Z]{3,}", ch.content.lower()))
+            page = (
+                int(ch.metadata.page_number)
+                if ch.metadata and ch.metadata.page_number
+                else 0
+            )
+            page_seen = seen_per_page.setdefault(page, [])
             if len(words) < 5:
                 # Very short chunks — keep (headings, labels)
                 kept.append(ch)
-                seen_word_sets.append(words)
+                page_seen.append(words)
                 continue
 
             is_dup = False
-            for seen in seen_word_sets:
+            for seen in page_seen:
                 if not seen:
                     continue
                 overlap = len(words & seen) / len(words)
@@ -5760,15 +5791,15 @@ class BatchProcessor:
             if is_dup:
                 dropped += 1
                 logger.debug(
-                    f"[NEAR-DEDUP] Dropped near-duplicate chunk ({len(ch.content)} chars, "
-                    f"{overlap:.0%} overlap)"
+                    f"[NEAR-DEDUP] Dropped near-duplicate chunk on p{page} "
+                    f"({len(ch.content)} chars, {overlap:.0%} overlap)"
                 )
             else:
                 kept.append(ch)
-                seen_word_sets.append(words)
+                page_seen.append(words)
 
         if dropped:
-            logger.info(f"[NEAR-DEDUP] Removed {dropped} near-duplicate text chunks")
+            logger.info(f"[NEAR-DEDUP] Removed {dropped} near-duplicate text chunks (page-scoped)")
 
         return kept
 

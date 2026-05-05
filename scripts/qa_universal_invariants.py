@@ -346,12 +346,19 @@ def main(argv: list[str]) -> int:
     if r.missing_modality > 0:
         fails.append(f"missing_modality={r.missing_modality}")
     # v2.9 hard gates
-    if missing_pages:
-        fails.append(f"missing_pages={len(missing_pages)} (first: {missing_pages[:5]})")
     if r.text_dupe_excess > 0:
         fails.append(f"within_page_text_dupe_excess={r.text_dupe_excess}")
     if r.irreparably_corrupt_chunks > 0:
         fails.append(f"irreparably_corrupt_chunks={r.irreparably_corrupt_chunks}")
+    # missing_pages here is ADVISORY only — qa_universal_invariants
+    # has no source-PDF context, so it can't tell blank pages apart
+    # from real content-loss. The blank-aware gate lives in
+    # qa_full_conversion (which takes --source-pdf). Reporting only.
+    if missing_pages:
+        print(
+            f"WARN: missing_pages={len(missing_pages)} "
+            f"(advisory; see qa_full_conversion.py with --source-pdf for blank-page-aware check)"
+        )
 
     # bbox_missing_dims is a warning, not a hard fail — some OCR paths
     # don't produce spatial metadata at all, which is acceptable.

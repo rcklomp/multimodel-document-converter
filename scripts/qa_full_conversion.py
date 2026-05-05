@@ -140,6 +140,39 @@ def _read_pdf_page_count(path: Path) -> Optional[int]:
         return None
 
 
+def _read_blank_pages_in_source(path: Path) -> set[int]:
+    """Return the set of source-PDF page numbers (1-based) that are
+    genuinely empty — no extractable text, no images, no useful blocks.
+
+    Books often have blank versos / chapter dividers. Counting those
+    as "missing chunks" would false-alarm the gate. We only fail the
+    gate on pages that have real content in the source but no output
+    chunk.
+    """
+    blank: set[int] = set()
+    try:
+        import pymupdf  # type: ignore
+
+        doc = pymupdf.open(path)
+    except Exception:
+        return blank
+    try:
+        for idx in range(doc.page_count):
+            page = doc.load_page(idx)
+            text = (page.get_text("text") or "").strip()
+            images = page.get_images(full=True)
+            blocks = page.get_text("blocks") or []
+            # "Blank" = no extractable text AND no images AND no
+            # meaningful drawing blocks. A single empty block is
+            # typical PyMuPDF output for blank pages.
+            non_trivial_blocks = [b for b in blocks if isinstance(b, tuple) and len(b) >= 5 and (b[4] or "").strip()]
+            if not text and not images and not non_trivial_blocks:
+                blank.add(idx + 1)
+    finally:
+        doc.close()
+    return blank
+
+
 def _run_script(script_name: str, jsonl_path: Path) -> ScriptResult:
     script_path = SCRIPT_DIR / script_name
     proc = subprocess.run(
@@ -180,16 +213,40 @@ def _page_coverage_issues(
         return issues
 
     pages_with_chunks = {p for p in (_chunk_page(c) for c in chunks) if p}
-    missing = [p for p in range(1, total_pages + 1) if p not in pages_with_chunks]
-    if missing:
+    missing_all = [p for p in range(1, total_pages + 1) if p not in pages_with_chunks]
+
+    # If we have the source PDF, separate genuinely-blank pages from
+    # real content-loss. Blank pages are advisory; content-loss is a
+    # hard fail. Without the source, we cannot distinguish — the
+    # whole list stays at the original severity.
+    blank_pages = _read_blank_pages_in_source(source_pdf) if source_pdf else set()
+    missing_with_content = [p for p in missing_all if p not in blank_pages]
+    missing_blank = [p for p in missing_all if p in blank_pages]
+
+    if missing_blank:
+        preview = ", ".join(str(p) for p in missing_blank[:10])
+        suffix = "" if len(missing_blank) <= 10 else f" ... (+{len(missing_blank) - 10})"
+        issues.append(
+            Issue(
+                "INFO",
+                "MISSING_PAGES_BLANK",
+                f"{len(missing_blank)} blank source page(s) have no chunks (acceptable): "
+                f"{preview}{suffix}",
+            )
+        )
+    if missing_with_content:
         severity = "WARN" if allow_missing_pages else "FAIL"
-        preview = ", ".join(str(p) for p in missing[:20])
-        suffix = "" if len(missing) <= 20 else f" ... (+{len(missing) - 20})"
+        preview = ", ".join(str(p) for p in missing_with_content[:20])
+        suffix = (
+            "" if len(missing_with_content) <= 20
+            else f" ... (+{len(missing_with_content) - 20})"
+        )
         issues.append(
             Issue(
                 severity,
                 "MISSING_PAGES",
-                f"{len(missing)} page(s) have no chunks: {preview}{suffix}",
+                f"{len(missing_with_content)} non-blank source page(s) have no chunks: "
+                f"{preview}{suffix}",
             )
         )
     return issues
