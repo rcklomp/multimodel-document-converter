@@ -2982,7 +2982,6 @@ class BatchProcessor:
                     and em in (
                         "recovery_scan",
                         "recovery_gap_fill",
-                        "recovery_page_coverage",
                     )
                     and ch.content
                     and len(ch.content) > 1200
@@ -3078,21 +3077,7 @@ class BatchProcessor:
         # Quarantine unrepairable corrupted chunks.
         all_chunks = self._quarantine_corrupted_text_chunks(all_chunks)
 
-        # Remove empty chunks and garbled TOC/table chunks.
-        # Docling leaks internal cell markers (", 1 =", ", 2 =") into TOC text.
-        # These are navigation metadata, not RAG content — the heading hierarchy
-        # already captures the document structure.
-        import re as _re
-        _TOC_MARKER = _re.compile(r",\s*\d+\s*=")
-
-        def _is_garbled_toc(content: str) -> bool:
-            return len(_TOC_MARKER.findall(content)) >= 3
-
-        all_chunks = [
-            c for c in all_chunks
-            if c.content and c.content.strip()
-            and not (c.modality == Modality.TEXT and _is_garbled_toc(c.content))
-        ]
+        all_chunks = self._sanitize_toc_cell_markers(all_chunks)
 
         # Final oversize breaker — catches chunks created or enlarged by
         # recovery, merging, or other post-processing passes.
@@ -3142,16 +3127,6 @@ class BatchProcessor:
                 f"post-oversize-breaker)"
             )
         all_chunks = _deduped
-
-        # Page-coverage recovery is separate from token-variance recovery.
-        # Run it after the final destructive text filters, because TOC/index
-        # pages can survive extraction but be removed by cleanup. The pass
-        # checks the final candidate set and restores source text-layer content
-        # only for pages that would otherwise have zero chunks.
-        all_chunks = self._recover_missing_text_layer_pages(
-            chunks=all_chunks,
-            source_file=pdf_path.name,
-        )
 
         # Write aggregated output to master JSONL with deduplication
         output_jsonl = self.output_dir / "ingestion.jsonl"
@@ -4167,6 +4142,48 @@ class BatchProcessor:
             ch.metadata.search_priority = "low"
         except Exception:
             pass
+
+    def _sanitize_toc_cell_markers(
+        self, chunks: List[IngestionChunk]
+    ) -> List[IngestionChunk]:
+        """Strip Docling internal cell markers without dropping TOC/index text."""
+        import re
+
+        marker = re.compile(r",\s*\d+\s*=")
+
+        def has_marker_noise(content: str) -> bool:
+            return len(marker.findall(content or "")) >= 3
+
+        sanitized: List[IngestionChunk] = []
+        changed = 0
+        for ch in chunks:
+            if not ch.content or not ch.content.strip():
+                continue
+            if ch.modality == Modality.TEXT and has_marker_noise(ch.content):
+                cleaned = marker.sub(" ", ch.content)
+                cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+                cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+                if not cleaned:
+                    continue
+                ch.content = cleaned
+                try:
+                    if ch.metadata and ch.metadata.refined_content:
+                        refined = marker.sub(" ", ch.metadata.refined_content)
+                        refined = re.sub(r"[ \t]{2,}", " ", refined)
+                        refined = re.sub(r"\n{3,}", "\n\n", refined).strip()
+                        ch.metadata.refined_content = refined or cleaned
+                except Exception:
+                    pass
+                self._demote_toc_index_chunk(ch)
+                changed += 1
+            sanitized.append(ch)
+
+        if changed:
+            logger.info(
+                "[TOC-SANITIZE] Stripped Docling cell markers from %d TOC/index chunk(s)",
+                changed,
+            )
+        return sanitized
 
     def _maybe_demote_false_code_chunk(self, ch: IngestionChunk) -> None:
         """
@@ -7705,98 +7722,6 @@ class BatchProcessor:
     # ========================================================================
     # TEXT INTEGRITY SCOUT (Recovery Mode)
     # ========================================================================
-
-    def _recover_missing_text_layer_pages(
-        self,
-        chunks: List[IngestionChunk],
-        source_file: str,
-    ) -> List[IngestionChunk]:
-        """Recover source-PDF text on pages that would otherwise emit no chunks.
-
-        This is a page-coverage safety net, not a token-balance repair. It
-        exists for TOC/index/front-matter pages that Docling labels as document
-        index material and HybridChunker may omit entirely. The source text layer
-        is still first-party OCR/native extraction, so emitting it preserves
-        source sanctity and avoids a VLM transcription fallback.
-        """
-        if not self._current_pdf_path or not self._current_pdf_path.exists():
-            return chunks
-
-        pages_with_chunks = {
-            int(ch.metadata.page_number)
-            for ch in chunks
-            if ch.metadata and ch.metadata.page_number and (ch.content or "").strip()
-        }
-
-        recovered: List[IngestionChunk] = []
-        doc: Optional[fitz.Document] = None
-        try:
-            doc = fitz.open(self._current_pdf_path)
-            for page_idx in range(len(doc)):
-                page_no = page_idx + 1
-                if self._processed_pages is not None and page_no not in self._processed_pages:
-                    continue
-                if page_no in pages_with_chunks:
-                    continue
-
-                page = doc.load_page(page_idx)
-                raw_text = (page.get_text("text") or "").strip()
-                if not raw_text:
-                    continue
-
-                text = self._strip_control_chars(raw_text)
-                text = self._remove_standalone_page_number_lines(text)
-                text = self._remove_all_digit_only_lines(text)
-                text = self._fix_linebreak_hyphenation(text).strip()
-                if len(text) < 20:
-                    continue
-
-                page_w = float(page.rect.width) if page.rect.width else 612.0
-                page_h = float(page.rect.height) if page.rect.height else 792.0
-                doc_title = Path(source_file).stem if source_file else "Document"
-                hierarchy = HierarchyMetadata(
-                    parent_heading=None,
-                    breadcrumb_path=[doc_title, f"Page {page_no}", "[RECOVERED-PAGE]"],
-                    level=3,
-                )
-                chunk = create_text_chunk(
-                    doc_id=self._doc_hash or "unknown",
-                    content=text,
-                    source_file=source_file,
-                    file_type=FileType.PDF,
-                    page_number=page_no,
-                    hierarchy=hierarchy,
-                    bbox=[0, 0, COORD_SCALE, COORD_SCALE],
-                    page_width=int(page_w),
-                    page_height=int(page_h),
-                    extraction_method="recovery_page_coverage",
-                    content_classification=self._classify_recovery_text_content(text),
-                    position=self._next_chunk_position(),
-                    **self._intelligence_metadata,
-                )
-                if self._is_toc_or_index_text(text):
-                    self._demote_toc_index_chunk(chunk)
-                recovered.append(chunk)
-                pages_with_chunks.add(page_no)
-        except Exception as exc:
-            logger.warning("[PAGE-COVERAGE-RECOVERY] Failed: %s", exc)
-            return chunks
-        finally:
-            if doc is not None:
-                try:
-                    doc.close()
-                except Exception:
-                    pass
-
-        if not recovered:
-            return chunks
-
-        logger.info(
-            "[PAGE-COVERAGE-RECOVERY] Recovered %d text-layer page(s) with zero chunks: %s",
-            len(recovered),
-            [ch.metadata.page_number for ch in recovered[:20] if ch.metadata],
-        )
-        return chunks + recovered
 
     def _run_text_integrity_scout(
         self,
