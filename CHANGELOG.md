@@ -4,12 +4,24 @@ All notable changes to this project will be documented in this file. This projec
 
 > **Versioning note:** Historical entries before the `v2.4.x` line used an internal `v18.x` milestone scheme during rapid iteration and test/fix cycles. Only stable or decision-worthy checkpoints were recorded, so intermediate builds are intentionally omitted. From `v2.4` onward, entries follow the current public semantic line.
 
-## [2.9.0] — 2026-05-04 — PLAN_V2.9 carry-overs closed; cloud-VLM-enriched mmrag_v2_8
+## [Unreleased] — v2.9 in progress (NOT SHIPPED)
 
-Engine version bumps to **2.9.0**. Schema version stays **2.7.0** (no
-chunk-shape change; the v2.9 work changes `chunk_id` *values* for the
-427 previously-colliding chunks but no field is added or removed).
-Tagged as `v2.9.0` (annotated tag on the AFTER-snapshot commit).
+> **2026-05-06 retraction.** A `v2.9.0` annotated tag was created
+> on 2026-05-05 against a 32/34 PASS reading from the
+> `qa_conversion_audit.py`-only gate, then deleted on 2026-05-06
+> after a user-driven QA review showed the loose gate had missed
+> several real defects (HARRY chapter-intro pages silently merged
+> into adjacent pages; Combat Aircraft p4 lost its full-page imagery;
+> Combat p66 emitted 73 byte-equal copies of a corrupted-table chunk;
+> the Phase 5b enrichment script never updated the canonical
+> ``content`` field). The original `[2.9.0]` entry below has been
+> marked `[Unreleased]` until the corpus actually clears the strict
+> four-gate acceptance bar (``scripts/qa_full_conversion.py``;
+> documented in ``docs/TESTING.md``).
+
+Engine version on `main` reads **2.9.0** (bumped during the in-flight
+work). Schema version stays **2.7.0** (no chunk-shape change). The
+`v2.9.0` git tag is **not** present.
 
 ### Added
 - **Phase 1 chunk_id collision fix**

@@ -4,36 +4,69 @@ Convert PDF, EPUB, HTML, and Office documents into structured JSONL datasets for
 
 The converter extracts text, images, and tables from complex documents while preserving spatial layout, document hierarchy, and semantic context. It handles everything from born-digital magazines to degraded scanned manuals.
 
-**Version 2.9.0** | Python 3.10 | Apple Silicon native | Docling 2.86.0 | Schema 2.7.0
+**Version 2.8.0** (last shipped tag) | v2.9 in-progress on `main` | Python 3.10 | Apple Silicon native | Docling 2.86.0 | Schema 2.7.0
 
-> **v2.9.0 (2026-05-05):** Closes the four PLAN_V2.9 carry-overs from
-> v2.8 and ships a cloud-VLM-enriched `mmrag_v2_8` Qdrant collection.
+> **v2.9 status (2026-05-06): IN PROGRESS — NOT SHIPPED.** A previous
+> attempt to tag `v2.9.0` was reverted after user-driven QA review
+> showed the loose `qa_conversion_audit.py`-only gate had given a
+> false 32/34 PASS. Under a stricter four-gate acceptance
+> (`scripts/qa_full_conversion.py` — audit + universal + hygiene +
+> semantic_fidelity, plus deterministic page-coverage / dup-excess /
+> corruption / image-quality checks documented in
+> [`docs/TESTING.md`](docs/TESTING.md)), the post-enrichment v2.9
+> corpus reports **5 PASS / 3 WARN / 26 FAIL out of 34**.
 >
-> - **Phase 1 — chunk_id collisions eliminated.** Per-document
->   monotonic `position` is hashed into the chunk-id seed; v2.8's 427
->   within-file duplicates are now 0 across the canonical 34-doc
->   corpus.
-> - **Phase 2 — refiner smart-routing.** `cli._decide_enable_refiner`
->   gates the config-default refiner on `has_encoding_corruption`;
->   clean-prose docs no longer hammer the cloud refiner per chunk.
->   `--no-refiner` workaround dropped from `scripts/convert_books.sh`.
-> - **Phase 3 — Ayeva profile re-route.** `document_diagnostic`
->   Rules 0/0c gain a code-evidence guard; Python books no longer
->   misroute to `digital_literature`. Ayeva: `indentation_fidelity`
->   0.83 → 0.96, profile=`technical_manual`, AUDIT_PASS.
-> - **Phase 4 — Firearms HARD REJECT.** `_score_technical_manual`
->   HARD-REJECTs long-form scanned docs (`is_scan=True AND
->   image_density>=1.0 AND page_count>100`); Firearms/Earthship route
->   back to `scanned`. AGENT-SPATIAL-20 unchanged.
-> - **Phase 5 — image-side RAG retrieval restored.** 3,684 image
->   chunks enriched via cloud `qwen3-vl-plus` (3,651 success / 33
->   hard_fallback at 0.9% corpus rate). `mmrag_v2_8` drop-and-recreated;
->   22,446 unique points (was 22,137).
+> Real bug fixes that did land on `main` during the v2.9 cycle:
 >
-> **32/34 canonical AUDIT_PASS** (was 30/34 in v2.8). Smoke matrix:
-> 11/11 GATE_PASS + UNIVERSAL_PASS. See
-> [`docs/QUALITY_SNAPSHOT_2026-05-04_v2.9_after.md`](docs/QUALITY_SNAPSHOT_2026-05-04_v2.9_after.md)
-> for empirical Phase outcomes and v2.10 followups.
+> - **chunk_id collision fix** — per-document monotonic ``position``
+>   hashed into the chunk-id seed; v2.8's 427 within-file dupes
+>   collapsed.
+> - **Refiner smart-routing** — config-default refiner now only
+>   auto-enables on ``has_encoding_corruption=True``; clean-prose docs
+>   stop hammering the cloud refiner.
+> - **Cross-page DocChunk page-coverage split** — Docling's
+>   HybridChunker emits chunks that span page boundaries; the chunker
+>   now emits one IngestionChunk per source page so chapter-intro
+>   pages aren't lost.
+> - **Mid-sentence merger and near-duplicate filter are now
+>   page-scoped** — they no longer reattribute one page's content to
+>   another or drop legitimate cross-page split copies.
+> - **`CorruptionInterceptor` extended to TABLE modality + OCR-failure
+>   patterns** — em-dash runs and CS filler glyphs now route through
+>   the patch+quarantine path that previously only handled CIDFont
+>   and replacement-character corruption.
+> - **`FULL-PAGE-GUARD` defers full-page assets when no conversion-time
+>   VLM** — Combat Aircraft p4 (and all magazine pages whose only
+>   content is a full-page image) now emit placeholder image chunks
+>   that the post-conversion enrichment script picks up. Previously
+>   the chunks were discarded outright.
+> - **`scripts/qa_full_conversion.py` strict gate** added as the
+>   real acceptance bar.
+>
+> Open work for the actual v2.9 ship:
+>
+> - **MISSING_PAGES on TOC/index pages** — affects ~18 of the 26
+>   QA_FAIL docs (frontmatter pages 5–12 and back-matter index pages
+>   produce zero chunks). Removing the
+>   `DocItemLabel.DOCUMENT_INDEX` filter at chunker time only
+>   recovered some pages; a deeper Docling-or-pipeline filter still
+>   drops the rest.
+> - **Combat Aircraft p66** — squadron-roster table chunk still has
+>   the corrupted typography that the OCR-failure regex doesn't quite
+>   match (em-dash run shorter than threshold). Down from 5 corrupt
+>   chunks → 1.
+> - **Several specific-doc audits** — Adedeji p301 table, Devlin /
+>   Earthship / Firearms specific audit failures, KI_En_ChatGPT EPUB
+>   LABEL ratio (pre-existing).
+> - **Short VLM descriptions** — the gate's 20-char minimum flags
+>   terse-but-valid responses like "Venn diagram." Several docs hit
+>   single-digit miss counts.
+>
+> Active baseline:
+> [`docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`](docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md).
+> The v2.9 working snapshot at
+> [`docs/QUALITY_SNAPSHOT_2026-05-06_v2.9_strict_gate.md`](docs/QUALITY_SNAPSHOT_2026-05-06_v2.9_strict_gate.md)
+> tracks current strict-gate state honestly.
 
 ---
 

@@ -318,6 +318,16 @@ A companion guard test should follow.
 
 ---
 
+> **Note on the v2.9 entries below.** These decisions are real and
+> the corresponding code is on `main` as of 2026-05-06. They are
+> NOT part of a shipped release: the v2.9.0 tag was created on
+> 2026-05-05 and removed on 2026-05-06 after a user-driven QA review
+> surfaced defects that blocked the strict-gate ship. Treat the
+> entries as design rationale for in-flight changes, not as shipped
+> decisions. See
+> [`docs/QUALITY_SNAPSHOT_2026-05-06_v2.9_strict_gate.md`](QUALITY_SNAPSHOT_2026-05-06_v2.9_strict_gate.md)
+> for the current strict-gate state.
+
 ## chunk_id position component (v2.9 Phase 1, 2026-05-04)
 **Decision:** `_generate_chunk_id` hashes a per-document monotonic
 `position` argument so two chunks with byte-identical `(doc_id,

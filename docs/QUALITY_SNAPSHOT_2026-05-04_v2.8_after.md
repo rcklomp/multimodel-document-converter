@@ -1,9 +1,12 @@
 # Quality Snapshot 2026-05-04 — v2.8 AFTER
 
-> ⚠ **SUPERSEDED — historical reference only.** The active baseline
-> is [`docs/QUALITY_SNAPSHOT_2026-05-04_v2.9_after.md`](QUALITY_SNAPSHOT_2026-05-04_v2.9_after.md)
-> (v2.9 AFTER). This v2.8 snapshot is preserved as the BEFORE column
-> for the v2.9 deltas; do not use it as a current state reference.
+> **Active baseline.** v2.8.0 is the most recent shipped tag. A
+> v2.9.0 tag was attempted on 2026-05-05 and removed on 2026-05-06
+> when a user-driven review surfaced defects the loose audit-only
+> gate had missed; the v2.8 baseline is therefore once again the
+> canonical reference. The v2.9 working state is tracked in
+> [`docs/QUALITY_SNAPSHOT_2026-05-06_v2.9_strict_gate.md`](QUALITY_SNAPSHOT_2026-05-06_v2.9_strict_gate.md)
+> with the strict-gate honest numbers.
 
 **Purpose:** AFTER state for the v2.8 broad reconversion (Phase 5c).
 Compare against `docs/QUALITY_SNAPSHOT_2026-05-03.md` for the BEFORE column.

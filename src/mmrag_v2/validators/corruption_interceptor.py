@@ -35,9 +35,23 @@ CORRUPTION_PATTERNS = re.compile(
 )
 
 
+# v2.9: OCR-failure signatures the encoding-pattern regex misses.
+# Tesseract emits these when it can't recognise the underlying glyphs
+# (Combat p66 squadron-roster table). Chunks matching go through the
+# same patch+quarantine path as encoding-corrupted text.
+OCR_FAILURE_PATTERNS = re.compile(
+    "[—]{6,}"          # 6+ em-dashes in a row (typography table failure)
+    "|[CS]{10,}"            # 10+ C/S in a row (filler glyph)
+)
+
+
 def has_encoding_artifacts(text: str) -> bool:
     """Check if text contains encoding corruption artifacts."""
-    return bool(CORRUPTION_PATTERNS.search(text))
+    if CORRUPTION_PATTERNS.search(text):
+        return True
+    if OCR_FAILURE_PATTERNS.search(text):
+        return True
+    return False
 
 
 def count_encoding_artifacts(text: str) -> int:
@@ -46,12 +60,20 @@ def count_encoding_artifacts(text: str) -> int:
 
 
 def is_irreparably_corrupt(text: str, ratio_threshold: float = 0.10) -> bool:
-    """v2.9: True when more than ``ratio_threshold`` of the text consists
-    of replacement-character / glyph-placeholder runs. Combat p66's
-    40k-char squadron table is ~17% replacement chars — Tesseract on
-    that region produces equally garbled output, so the OCR-patch heal
-    path can't fix it. Such chunks should be quarantined rather than
-    re-emitted as canonical content."""
+    """v2.9: True when the text is mostly garbled OCR / placeholder
+    glyphs and cannot be salvaged. Combat p66's 40k-char squadron
+    table is the canonical example.
+
+    Detects either:
+    * >``ratio_threshold`` (default 10%) of the text being replacement
+      chars or CIDFont/uniXXXX/\\xHH escapes — same metric as the
+      patcher uses, so chunks the patcher can't fix get quarantined.
+    * Long em-dash runs (`—————`) — Tesseract emits these on
+      typography tables it can't recognise; even 6+ in a row signals
+      the chunk is unsalvageable.
+    * Long C/S character runs (`CCCCCCCCCC`, `SSSSSSSSSS`) — typical
+      Tesseract failure mode on stylised text.
+    """
     if not text:
         return False
     n = len(text)
@@ -59,7 +81,16 @@ def is_irreparably_corrupt(text: str, ratio_threshold: float = 0.10) -> bool:
         return False
     artifact_chars = sum(text.count(c) for c in ("�",))
     artifact_chars += sum(len(m) for m in CORRUPTION_PATTERNS.findall(text))
-    return artifact_chars / n > ratio_threshold
+    if artifact_chars / n > ratio_threshold:
+        return True
+    # OCR-failure signatures the regex patcher misses: long runs of
+    # em-dashes or C/S chars indicate the OCR could not recognise
+    # the underlying glyphs and emitted filler.
+    if re.search(r"[—]{6,}", text):
+        return True
+    if re.search(r"[CS]{10,}", text):
+        return True
+    return False
 
 
 def patch_corrupted_chunks(

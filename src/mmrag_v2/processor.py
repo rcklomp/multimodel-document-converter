@@ -2423,18 +2423,13 @@ class V2DocumentProcessor:
         finally:
             signal.signal(signal.SIGALRM, old_handler)
 
-        # Filter out DOCUMENT_INDEX (TOC) elements
-        try:
-            from docling_core.types.doc.labels import DocItemLabel
-            doc_chunks = [
-                dc for dc in doc_chunks
-                if not any(
-                    getattr(item, "label", "") == DocItemLabel.DOCUMENT_INDEX
-                    for item in (dc.meta.doc_items if dc.meta and dc.meta.doc_items else [])
-                )
-            ]
-        except (ImportError, AttributeError):
-            pass  # Older docling-core without DocItemLabel
+        # v2.9: keep DOCUMENT_INDEX (TOC) elements. Previously these
+        # were filtered out as boilerplate, but TOC pages contain real
+        # navigation content (chapter titles, section refs, page nums)
+        # that the page-coverage gate legitimately expects to see. The
+        # garbled-TOC filter at finalization (`_TOC_MARKER` regex) still
+        # drops chunks where Docling's cell-marker noise leaks through;
+        # legitimate TOC pages survive that filter and are emitted.
 
         chunks: List[IngestionChunk] = []
         # v2.9: per-page content dedup. Docling's HybridChunker can yield

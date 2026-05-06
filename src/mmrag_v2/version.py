@@ -16,8 +16,14 @@ scattering across the codebase.
 # chunk_id for cross-version mapping must rebuild from v2.9 outputs.
 __schema_version__ = "2.7.0"
 
-# Engine/runtime version (PLAN_V2.9 closes the four v2.8 carry-overs
-# — chunk_id collision, refiner smart-routing, Ayeva misroute,
-# Firearms heading regression — and ships the cloud-VLM-enriched
-# mmrag_v2_8 collection. Bump to 2.9.0.)
-__engine_version__ = "2.9.0"
+# Engine/runtime version. v2.8.0 is the most recent shipped tag.
+# A v2.9.0 tag was attempted on 2026-05-05 and removed on 2026-05-06
+# after a user-driven QA review surfaced defects the loose gate had
+# missed; v2.9 is in progress on `main` but no v2.9.0 git tag exists.
+# The version string below reads `2.9.0-dev` to reflect that the
+# code on `main` carries the v2.9 in-flight fixes (chunk_id, refiner
+# routing, cross-page split, page-scoped dedup/merge, corruption
+# interceptor extension, full-page defer, enrichment content-field)
+# without claiming a release.
+# See docs/QUALITY_SNAPSHOT_2026-05-06_v2.9_strict_gate.md.
+__engine_version__ = "2.9.0-dev"

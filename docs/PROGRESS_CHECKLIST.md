@@ -175,11 +175,17 @@ Acceptance signals:
 
 Goal: documents route through plausible profiles using `ProfileClassifier`, without acceptance overrides.
 
-Current status: `[x]` — **CLOSED 2026-05-05 (PLAN_V2.9 Phase 3 + 4).**
+Current status: `[~]` — **PARTIALLY APPLIED on `main`; NOT SHIPPED.**
 v2.9 Phase 3 added a code-evidence guard to literature Rules 0/0c
-(closes Ayeva misroute); Phase 4 added a HARD REJECT in the
-technical_manual scorer for long-form scanned docs (closes Firearms
-profile-flip; Earthship also re-routed back to scanned).
+(Ayeva misroute fixed at the diagnostic / classifier layer);
+Phase 4 added a HARD REJECT in the technical_manual scorer for
+long-form scanned docs (Firearms / Earthship re-routed to scanned).
+Both code changes are on `main`, but the v2.9.0 tag was retracted
+2026-05-06 because the broader strict-gate review showed Ayeva
+still fails QA_FAIL with MISSING_PAGES on its TOC pages and
+Firearms still fails the audit script. Closure is gated on the
+v2.9 ship; tracking remains open in
+`docs/QUALITY_SNAPSHOT_2026-05-06_v2.9_strict_gate.md`.
 
 Fixes applied (Milestone 1, 2026-04-30):
 
@@ -218,12 +224,18 @@ Acceptance signals:
 
 Goal: representative non-magazine digital outputs have real VLM descriptions or intentionally disabled VLM status, not accidental placeholders.
 
-Current status: `[x]` — **CLOSED 2026-05-05 (PLAN_V2.9 Phase 5b/5c).**
-3,684 image chunks across the canonical 34-doc corpus enriched via
-cloud `qwen3-vl-plus` (3,651 success, 33 hard_fallback at 0.9% corpus
-rate). `mmrag_v2_8` Qdrant collection drop-and-recreated; image-side
-RAG retrieval restored end-to-end. Local NuMarkdown lane deferred to
-v2.10 per the plan's §Phase 5 decision e (endpoint unreachable).
+Current status: `[~]` — **ENRICHMENT SCRIPT FUNCTIONAL on `main`;
+NOT SHIPPED.** The 2026-05-05 v2.9.0 tag was retracted; the
+re-conversion under the strict gate plus Phase 5b enrichment ran
+again on 2026-05-06 (4,329 enriched / 46 hard_fallback ≈ 1.0%
+corpus rate via cloud `qwen3-vl-plus`). The Qdrant `mmrag_v2_8`
+collection was NOT refreshed because v2.9 has not shipped — it
+still holds the v2.8.0 ingest. The strict gate flags
+IMAGE_DESCRIPTION_UNUSABLE on several docs because the cloud VLM
+sometimes emits valid but terse responses (e.g., "Venn diagram.")
+shorter than the gate's 20-char minimum. Closure is gated on the
+v2.9 ship and the gate-threshold decision; current state in
+`docs/QUALITY_SNAPSHOT_2026-05-06_v2.9_strict_gate.md`.
 
 Known state:
 
