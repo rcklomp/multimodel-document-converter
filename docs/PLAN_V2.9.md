@@ -1,6 +1,6 @@
-# Plan: v2.9 — Close v2.8 Carry-Overs and Ship VLM-Enriched `mmrag_v2_8`
+# Plan: v2.9 — Strict-Gate Recovery and `mmrag_v2_8` Ship Contract
 
-**Status:** Draft v1.0 (2026-05-04)
+**Status:** Draft v2.0 (2026-05-06) — post-retraction recovery plan
 **Owner:** ingestion pipeline
 **Successor to:** `docs/archive/PLAN_V2.8_PRODUCTION_GAPS.md` (shipped 2026-05-04, tag `v2.8.0` on `645ab2b`)
 **Related:** `docs/PROJECT_STATUS.md`, `docs/PROGRESS_CHECKLIST.md`,
@@ -11,52 +11,66 @@
 
 ## 1. Why this plan exists
 
-**v2.9 thesis (one sentence):** Close the four v2.8 carry-overs (Ayeva
-profile misroute, Firearms heading regression, schema chunk_id
-collisions, refiner smart-routing) and ship the `mmrag_v2_8` Qdrant
-collection with VLM-enriched image points so the 34-doc canonical
-corpus reaches **34/34 PASS without manual flag workarounds** and
-image-side RAG retrieval is restored end-to-end — leaving v2.10 free
-for the SRS rewrite + UIR refactor.
+**v2.9 thesis (one sentence):** Recover from the retracted v2.9.0
+attempt by closing the strict-gate failure classes on the 34-doc
+canonical corpus, then refresh `mmrag_v2_8` only after
+`scripts/qa_full_conversion.py` proves the corpus is shippable.
 
-### v2.8 Completion Recap (Active Baseline)
+The original 2026-05-04 v2.9 plan was a forward roadmap for the
+four v2.8 carry-overs (chunk_id collisions, refiner smart-routing,
+Ayeva profile routing, Firearms heading regression) plus image
+enrichment. Those implementation phases have now landed on `main`,
+but the 2026-05-06 strict gate exposed that the corpus still is not
+shippable. Treat the earlier phase bodies below as historical
+implementation detail and re-verification context, not as fresh work
+to start from the top.
 
-`docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md` is the v2.9 BEFORE
-state:
+### Current Baseline (v2.9 BEFORE)
 
-- Engine `__engine_version__=2.8.0`, schema `__schema_version__=2.7.0`
-  (de-aliased; chunk-shape unchanged since v2.7).
-- Test suite: **596 passed, 2 skipped, 0 failed.**
-- Smoke matrix: **11/11 GATE_PASS + 11/11 UNIVERSAL_PASS** (incl. the
-  new `digital_literature` slot for HARRY and the form-lane row for
-  `scanned/0013_140302111325_001`).
-- Broad reconversion: 34/34 PDF/EPUB exit=0; **30/34 canonical PASS**
-  (incl. 1 `FORM_PASS`).
-- Qdrant `mmrag_v2_8`: **22,137 / 22,160** unique embeddable chunks
-  ingested (collision-free `point_id` from commit `0d3cc36`).
-- 7-commit v2.8 chain on `main`:
-  `5b0e13d → c2e795e → 9e4b8f8 → 59994f9 → 2f94503 → 0d3cc36 → 9726b43 → 645ab2b`.
+The active v2.9 BEFORE state is
+`docs/QUALITY_SNAPSHOT_2026-05-06_v2.9_strict_gate.md`, not the
+2026-05-04 v2.8 AFTER snapshot.
 
-### Workstreams, symptoms, concrete patterns, last evidence
+- Strict gate: **5 PASS / 3 WARN / 26 FAIL out of 34**.
+- Canonical gate: `scripts/qa_full_conversion.py`, which bundles
+  audit + universal invariants + hygiene + semantic fidelity plus
+  deterministic page-coverage, duplicate-excess, corruption, and
+  image-quality checks.
+- The earlier audit-only gate (`scripts/qa_conversion_audit.py`) is
+  a sub-check only. It missed the defects that caused the v2.9.0 tag
+  retraction and must not be used as the ship bar.
+- `mmrag_v2_8` remains the v2.8.0 Qdrant collection at 22,137
+  points. It has not been refreshed for v2.9 because v2.9 is not
+  shippable.
+- Phase 5b enrichment did run against the failed v2.9 corpus:
+  **4,329 enriched / 46 hard_fallback**. Short but plausible VLM
+  descriptions remain a gate-calibration issue.
+- The v2.9.0 tag was created on 2026-05-05 and deleted on
+  2026-05-06 after strict-gate review.
 
-| Workstream | Symptom | Concrete pattern (verified 2026-05-04) | Last evidence |
-|---|---|---|---|
-| **E — VLM enrichment (`mmrag_v2_8`)** | ~5,500 image points have placeholder `visual_description="[Figure on page N] | Context: ..."`, `vision_status="pending"`, `refined_content=null`. Image-side RAG retrieval degraded — searching for "wizard ornament" cannot match. | v2.8 broad reconversion ran with `--vision-provider none --no-refiner --no-cache` for apples-to-apples baseline matching; nothing dispatched a VLM call. | 22,137 points in `mmrag_v2_8`; ~5,500 are images |
-| **Refiner smart-routing** | HARRY (clean prose, zero encoding corruption) hammered qwen-plus per chunk during the v2.8 broad reconversion's first attempt; refinements rejected ("Edit ratio 53.16% exceeds budget"). | `cli.py:686` config-default enable fires whenever `~/.mmrag-v2.yml` `refiner.enabled=true`, regardless of `has_encoding_corruption`. The diagnostic-driven auto-override at `cli.py:1101-1102` is dead code under the config-default path. | v2.8 used `--no-refiner` to mask the bug; documented in `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md` Phase 5c gating decisions |
-| **Ayeva profile misroute (Workstream D)** | `Ayeva_Python_Patterns` v2.8 fresh routes to `digital_literature`, suppresses `needs_code_enrichment`, CodeFormulaV2 never engages. CODE FAIL at `indentation_fidelity=0.83` (just under the 0.85 hard gate). | Rule 0c at `document_diagnostic.py:1457` (`_dialogue_pages >= 1 AND total_pages > 20 AND not has_tables AND 500 < avg_text_per_page < 2500 → literature += 0.4`) misfires on a code-heavy book — Python code with quoted strings reads as dialogue. | `output/Ayeva_Python_Patterns/ingestion.jsonl` (v2.8 fresh, `digital_literature`, 0.83) vs `output/ayeva_qa_20260501/ingestion.jsonl` (probe, `technical_manual`, 0.93) |
-| **Firearms heading regression** | Profile changed `scanned` → `technical_manual` between v2.8 baselines; chunker's stricter heading-inheritance leaves 178/815 chunks orphan-headed. HEADING coverage 100% → 78% (gate ≥80%). | Same content fidelity, just less hierarchy annotation. Naive fix (relax threshold per profile) directly violates `AGENT-SPATIAL-20`. Constraint conflict to resolve before designing the fix. | `output/Firearms/ingestion.jsonl` (v2.8 fresh) — see `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md` "Known Limitations" |
-| **Schema `chunk_id` collisions** | 22,587 chunks in v2.8 corpus collapse to 22,160 unique `chunk_id`s — **427 within-file duplicates** (largest contributor `KI_En_ChatGPT_Praktische_Gids` 279, then `Devlin_LLM_Agents` 76, `Fluent_Python` 15). Boilerplate footers / repeated page numbers / identical short labels collide. | `_generate_chunk_id` at `src/mmrag_v2/schema/ingestion_schema.py:715` hashes `f"{doc_id}:{page}:{modality}:{content}"` — does NOT include the chunk's per-document position. Two visually-identical chunks on the same page collapse to the same id; on Qdrant upsert (uuid5 from chunk_id, commit `0d3cc36`) the 427 duplicates silently overwrite each other. | `output/<canonical>/ingestion.jsonl` × 34; ingest evidence in v2.8 AFTER snapshot |
+### Shipped Code vs Strict-Gate Residuals
+
+| Original phase | Shipped evidence on `main` | Strict-gate residual |
+|---|---|---|
+| Phase 1 chunk_id collision fix | `eae27e8` shipped; later `ae8b891` added canonical-only corpus scan / dedup safety net | Re-verify 0 within-file duplicates after the next strict-gate reconversion |
+| Phase 2 refiner smart-routing | `b1b2f3f` shipped; `scripts/convert_books.sh` no longer needs `--no-refiner` | Re-verify clean-prose byte stability and encoding-corrupt refiner activation under strict gate |
+| Phase 3 Rule 0c tightening (Ayeva) | `51f0884` shipped | Ayeva still fails strict gate via `MISSING_PAGES`, not the original profile-route issue |
+| Phase 4 Firearms HARD REJECT | `3fbce7a` shipped | Firearms still has `SCRIPT_GATE_FAIL` / image-description issues under strict gate |
+| Phase 5 prep and enrichment | `538cf89`, `ae8b891`, `ec11cb5`; enrichment run produced 4,329 enriched / 46 hard_fallback | `MISSING_PAGES`, short VLM descriptions, localized corruption, and doc-specific audit failures still block ship |
+| Failed ship attempt | `v2.9.0` tag created 2026-05-05, deleted 2026-05-06 | No tag until strict gate passes and governance evidence is durable |
 
 ### What closing all phases achieves
 
-- **34/34 canonical PASS** across `scripts/qa_conversion_audit.py`,
-  with no `--no-refiner` workaround in `scripts/convert_books.sh`.
+- **34/34 canonical PASS** across `scripts/qa_full_conversion.py`
+  with source-PDF page awareness for every PDF and no manual flag
+  workarounds.
 - Every chunk has a globally-unique `chunk_id` (and therefore a
   globally-unique uuid5 `point_id`). 0 within-file collisions on the
   next broad reconversion.
 - `mmrag_v2_8` repopulated from a clean drop-and-recreate, with every
-  ~5,500 image point carrying a real cloud-VLM `visual_description`
-  + `vision_status="complete"`.
+  image point carrying either a real cloud-VLM `visual_description`
+  with `vision_status="complete"` or a bounded, documented
+  `hard_fallback` state.
 - v2.10 inherits a corpus and a vector store with no behavioral debt
   attributable to v2.8.
 
@@ -64,9 +78,11 @@ state:
 
 ### Goals (measurable from JSONL / audit / Qdrant counts)
 
-1. `scripts/qa_conversion_audit.py output/<v29_run>/<doc>/ingestion.jsonl`
-   reports `AUDIT_PASS` or `FORM_AUDIT_PASS` for **all 34 canonical
-   docs**. No row remains in `FAIL` from the v2.8 AFTER snapshot.
+1. `scripts/qa_full_conversion.py output/<v29_run>/<doc>/ingestion.jsonl`
+   reports `QA_PASS` or an explicitly allowed form/document-class
+   pass variant for **all 34 canonical docs**. `QA_WARN` is not a
+   ship state unless the warning class is first promoted into an
+   explicit pass variant in `docs/QUALITY_GATES.md` with rationale.
 2. `Ayeva_Python_Patterns` v2.9 fresh: `profile_type=technical_manual`
    AND `indentation_fidelity ≥ 0.85` AND CODE PASS.
 3. `Firearms` v2.9 fresh: `HEADING coverage ≥ 0.80` AND content
@@ -75,16 +91,18 @@ state:
    `UNIVERSAL_PASS` (no waivers; `GATE_PASS [form: ...]` /
    `FORM_AUDIT_PASS` count as variants only when `document_type=form`
    per `docs/QUALITY_GATES.md` "Form / Invoice Acceptance Class").
-5. `pytest tests/ -q` reports ≥ **615 passed, 0 failed**
-   (596 v2.8 baseline + 4 Phase 1 + 4 Phase 2 + 6 Phase 3 + 5 Phase 4
-   = 19 new contract tests, plus the env-gated Phase 5 acceptance
-   test which is not counted in the steady-state total).
+5. `pytest tests/ -q` reports the current committed test count or
+   higher with **0 failed**. As of the strict-gate recovery cycle,
+   the suite is already above the original 615-test planning target;
+   do not use the stale 596/615 counts as a success signal.
 6. Within-file `chunk_id` duplicates across the 34 canonical JSONLs:
    **0** (was 427 in v2.8 AFTER).
 7. `mmrag_v2_8` Qdrant collection contains exactly the unique
    embeddable chunk count of the v2.9 broad reconversion, freshly
    recreated. **0 image points** with `vision_status="pending"`;
-   `visual_description` non-placeholder for every image point.
+   `vision_status="hard_fallback"` remains at or below the
+   documented threshold established in the v2.9 cloud pre-flight and
+   every hard fallback has a recorded reason.
 8. `scripts/convert_books.sh` runs **without** `--no-refiner` and
    produces byte-stable text output for clean-prose docs (HARRY) plus
    refiner-applied output for encoding-corrupt docs (Combat-class).
@@ -154,516 +172,356 @@ Each phase below has an explicit **Parallel-site audit** table.
 
 ## 3. Phases
 
-Phases ordered cheapest-first so the snapshot baseline + the surgical
-schema/CLI fixes land before the diagnostic investigation (Ayeva /
-Firearms) and before the heavy Phase 5 reconversion + VLM enrichment
-runtime.
+Current-cycle phases are ordered to avoid another expensive broad
+conversion until deterministic extraction loss is closed. The
+2026-05-04 Phase 1-4 bodies remain below as shipped implementation
+history; their code must be re-verified under the current strict
+gate after Phase 1 produces clean outputs.
+
+Current recovery sequence:
+
+| Current phase | Purpose | Status scope |
+|---|---|---|
+| Phase 0 | Establish current strict-gate baseline from the 2026-05-06 snapshot and current working tree | `implemented` once docs/tests agree |
+| Phase 1 | TOC/index page-loss closure contract | active blocker |
+| Phase 2 | Re-verify already-shipped v2.9 fixes under strict gate | pending Phase 1 outputs |
+| Phase 3 | Resolve `IMAGE_DESCRIPTION_UNUSABLE` policy/model behavior | pending page-loss closure |
+| Phase 4 | Resolve localized hard failures (Combat, Adedeji, Devlin, Earthship, Firearms, KI_En_ChatGPT) | pending page-loss closure |
+| Phase 5 | Broad reconversion, enrichment, Qdrant drop/recreate, AFTER snapshot | blocked until Phases 1-4 pass strict gate |
 
 ---
 
-### Phase 0 — Lock the v2.8 AFTER state as the v2.9 BEFORE
+### Phase 0 — Establish current strict-gate baseline
 
-**What:** Re-run the v2.8 acceptance harness from a clean checkout
-to confirm the entry state is reproducible **before any code change**.
-Without this, "did v2.9 improve anything" becomes hand-waving — the
-Phase 0 step in v2.8's plan was load-bearing for exactly the same
-reason.
+**What:** Treat `docs/QUALITY_SNAPSHOT_2026-05-06_v2.9_strict_gate.md`
+as the current v2.9 BEFORE and make sure the working tree and docs
+all point at the same gate. This replaces the stale 2026-05-04
+"v2.8 AFTER is v2.9 BEFORE" framing.
 
 **Steps:**
-1. `git status --short` — confirm tree is clean (no in-progress edits).
-   Stash or commit any local changes first.
-2. `pytest tests/ -q` — expect **596 passed, 2 skipped, 0 failed**.
-   If different, capture the diff and update the v2.9 baseline note
-   before proceeding.
-3. `bash scripts/smoke_multiprofile.sh` — expect **11/11 GATE_PASS +
-   11/11 UNIVERSAL_PASS** (incl. the form lane row for
-   `scanned/0013_140302111325_001` and the `digital_literature` slot
-   for HARRY).
-4. Verify Qdrant baseline:
+1. `git status --short` — identify in-flight edits. For the current
+   cycle, the first implementation commit should include the
+   `batch_processor.py` TOC sanitizer/recovery-removal change plus
+   `tests/test_toc_cell_marker_sanitizer.py`, extended by the Phase 1
+   contract tests below.
+2. Reproduce the strict-gate summary against canonical outputs:
+   `scripts/qa_full_conversion.py` over all 34 `output/*/ingestion.jsonl`
+   rows, with `--source-pdf` for PDFs where available. Expected
+   baseline: **5 PASS / 3 WARN / 26 FAIL** unless a tracked snapshot
+   supersedes it. If the result diverges, stop and either commit a
+   v2.9 baseline-delta note before Phase 1 begins or refresh the
+   strict-gate snapshot. Do not silently proceed on stale numbers.
+3. `pytest tests/ -q` — record the current suite count, not the stale
+   596/615 planning count. Expected: 0 failed.
+4. `bash scripts/smoke_multiprofile.sh` — still required by
+   `AGENT-VAL-01`, but it is no longer sufficient as the ship gate.
+5. Verify Qdrant is still the unrefreshed v2.8 collection:
    ```bash
    curl -sS http://localhost:6333/collections/mmrag_v2_8/points/count \
      -X POST -H "Content-Type: application/json" -d '{"exact":true}'
    # expected: {"result":{"count":22137}, "status":"ok"}
    ```
-5. Spot-check three representative outputs to confirm the v2.8
-   AFTER metrics:
-   - `output/A_comprehensive_review_on_hybrid_electri/ingestion.jsonl`
-     → `ctrl_chunks=0`.
-   - `output/Combat_Aircraft_August_2025/ingestion.jsonl`
-     → `encoding_artifacts=0`, `high_corruption=0`.
-   - `output/Chaubal_PyTorch_Projects/ingestion.jsonl`
-     → `indentation_fidelity ≥ 0.85`.
-6. Note the canonical baseline pointer in
-   `docs/PROJECT_STATUS.md` "Active Baseline" (already
-   `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`); if any of the
-   above checks drift, **stop and reconcile** before opening any
-   Phase 1+ commit.
+   This confirms Qdrant has not been refreshed prematurely; it does
+   not prove v2.9 quality.
 
 **Done when:**
-- All four reproducibility checks match the v2.8 AFTER snapshot
-  numbers exactly (or any drift is committed as a v2.9 baseline
-  delta note before phase work begins).
-- `docs/PROJECT_STATUS.md` "Active Baseline" still references
-  `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`.
+- `PROJECT_STATUS.md`, this plan, and the strict-gate snapshot agree
+  that v2.9 is `in-progress`, not shipped.
+- The current BEFORE is explicitly the 2026-05-06 strict-gate state.
+- The first new code commit is scoped to the TOC/index page-loss
+  contract, not another broad reconversion.
 
 **Risk:** Low. Read-only verification.
 
 **Estimated effort:** 30 min (commands run; Qdrant container must be
-up). No engineering time.
+up). No engineering time beyond reconciling any doc drift.
 
 ---
 
-### Phase 1 — Schema: within-file `chunk_id` collision fix
+### Historical Implementation Phases 1-4 — Shipped, Not Active
 
-**What:** `src/mmrag_v2/schema/ingestion_schema.py:715`
-(`_generate_chunk_id(doc_id, content, page, modality)`) hashes
-`f"{doc_id}:{page}:{modality}:{content}"`. Two chunks on the same page
-with byte-identical `content` collapse to the same id. The 34-doc
-v2.8 corpus has **427** within-file dupes (largest contributors:
-`KI_En_ChatGPT_Praktische_Gids` 279, `Devlin_LLM_Agents` 76,
-`Fluent_Python` 15) — typically boilerplate page footers, repeated
-page numbers, identical short labels. The dupes silently overwrite
-each other on Qdrant upsert (the v2.8 ingest landed `22,137` from
-`22,160` unique − 23 embed errors; the 427 collisions are
-indistinguishable in `mmrag_v2_8` from "successful upserts of a
-single point").
+The original 2026-05-04 implementation plan for chunk_id collisions,
+refiner smart-routing, Ayeva Rule 0c, and Firearms routing has shipped
+on `main` (`eae27e8`, `b1b2f3f`, `51f0884`, `3fbce7a`, with Phase 5
+prep in `538cf89`, `ae8b891`, `ec11cb5`). These sections are no
+longer active implementation steps. Their contracts are re-verified in
+current Phase 2 after current Phase 1 produces page-loss-clean outputs.
 
-**Parallel-site audit (do this FIRST):**
-
-| Site | File:line | Current behavior | Action |
-|---|---|---|---|
-| Generator | `src/mmrag_v2/schema/ingestion_schema.py:715` | `_generate_chunk_id(doc_id, content, page, modality)` hashes 4 fields, no position component | **The fix site.** Add per-document chunk index to the hash seed. |
-| Text factory caller | `ingestion_schema.py:782` | `_generate_chunk_id(doc_id, content, page_number, "text")` | Must thread the chunk's `i+1` position from the call stack |
-| Image factory caller | `ingestion_schema.py:881` | `_generate_chunk_id(doc_id, f"image:{asset_path}", page_number, "image")` | Same; image dupes are rare (asset_path usually unique) but the contract should hold |
-| Table factory caller | `ingestion_schema.py:970` | `_generate_chunk_id(doc_id, f"table:{content[:50]}", page_number, "table")` | Same; tables can collide when two short tables on a page share the same first 50 chars |
-| Direct chunk creators (`mapper.py`) | `src/mmrag_v2/mapper.py` `create_*_chunk` | Each constructs an `IngestionChunk` then calls the factory | Audit whether the call sites already track a per-document position; if not, source one before the factory call |
-| Schema version impact | `__schema_version__=2.7.0` (`src/mmrag_v2/version.py`) | Field shape unchanged | The `chunk_id` *value* changes for affected chunks but the field shape doesn't → schema version stays 2.7.0 (no bump). **Consumer warning required** (see §6 Cross-Phase Concerns): schema_version `2.7.0` in v2.9 does NOT guarantee `chunk_id` stability with v2.8 outputs. RAG adapters / Qdrant consumers that key on chunk_id for cross-version mapping must rebuild from v2.9. |
-| Qdrant `point_id` impact | `scripts/ingest_to_qdrant.py:453` `uuid5(_POINT_ID_NAMESPACE, chunk_id)` | Deterministic uuid5 from chunk_id (v2.8 fix `0d3cc36`) | The 427 affected chunks get **new** uuid5s; old uuid5s become orphans on next ingest. Migration step is in Phase 5 (drop-and-recreate `mmrag_v2_8`). |
-| Existing test coverage | `tests/test_qdrant_point_id_collision.py` (6 tests) | Pins the uuid5 mapping but assumes unique input chunk_ids | New test file at the schema layer is needed; do not weaken the Qdrant-layer tests |
-
-**Approach:**
-
-1. Extend `_generate_chunk_id` signature to accept a `position` int
-   (default `0` for backward compatibility but require it for new
-   call sites; mark the default-zero path deprecated in the
-   docstring). Hash seed becomes
-   `f"{doc_id}:{page}:{modality}:{position}:{content}"`.
-2. Update the three factory functions
-   (`text`, `image`, `table` at `ingestion_schema.py:782/881/970`)
-   to thread a per-document `position` from their callers.
-3. Audit `mapper.py` / `processor.py` / `batch_processor.py` chunk
-   construction sites — each maintains a per-document chunk index;
-   confirm it's plumbed through to the factory call.
-4. Update existing fixtures and golden outputs only where the test's
-   *contract* is unaffected (i.e. tests that compute chunk_id at
-   runtime still pass; tests with hard-coded chunk_id strings need
-   the new value computed once and committed).
-
-**Tests (red→green) — 4 new in `tests/test_chunk_id_collision_v29.py`:**
-
-- `test_within_file_dupe_content_yields_distinct_chunk_ids` — build
-  two chunks with `(doc_id, page, modality, content)` identical and
-  position differing by 1; assert `chunk_id` strings differ.
-- `test_chunk_id_stable_under_position_zero_default` — same fixture
-  with default `position=0`; assert chunk_id matches a pre-computed
-  hex (deterministic; no drift across runs).
-- `test_factory_threads_position_for_text_image_table` — call each
-  factory twice on the same `(content, page)` with positions 0 and
-  1; assert all six results have distinct chunk_ids.
-- `test_full_corpus_no_within_file_chunk_id_collisions` —
-  parameterized scan across `output/<canonical>/ingestion.jsonl`
-  (env-gated `RUN_CORPUS_SCAN=1`); count
-  `len(chunk_ids) - len(set(chunk_ids))` per file; assert 0. Until
-  Phase 5 reconversion lands, the test is xfailed (or skipped) but
-  the assertion contract is committed now.
-
-**Done when:**
-- 4 new tests green.
-- `pytest tests/ -q` passes (no fixture-breakage from the signature
-  change).
-- Code-review confirmation that every direct factory call site
-  threads `position` (i.e. the `position=0` default isn't being
-  abused as an escape hatch in production paths).
-- Phase 5 reconversion's collision-count audit reports 0 within-file
-  dupes (verified at the end of Phase 5).
-
-**Risk:** Low–Medium. Surgical at the generator, broad at the call
-sites. Mitigation: the `position=0` default keeps existing tests and
-external callers compiling; production paths must be migrated
-explicitly.
-
-**Estimated effort:** **1.5–2 h engineering** + 1 h regression-test
-authoring.
+For detailed historical rationale, use the commit history and the
+2026-05-04 decision-log entries in this plan. Do not restart work from
+these historical phases.
 
 ---
 
-### Phase 2 — CLI: refiner smart-routing fix (`cli.py:686`)
+### Phase 1 — TOC/index page-loss closure contract
 
-**What:** The CLI's config-default refiner-enable logic at
-`src/mmrag_v2/cli.py:684-687`:
+**What:** Close the strict-gate `MISSING_PAGES` class before any
+new broad conversion, cloud VLM enrichment, Qdrant refresh, tag, or
+v2.9 completion claim. This phase exists because the 2026-05-06
+strict gate shows `MISSING_PAGES` dominates the remaining 26 FAILs,
+and because the working-tree direction deliberately removes the
+anti-pattern of final-stage `recovery_page_coverage` reconstruction.
 
-```python
-import sys as _sys
-_refiner_explicitly_disabled = "--no-refiner" in _sys.argv
-if not enable_refiner and cfg.refiner.enabled and not _refiner_explicitly_disabled:
-    enable_refiner = True
+**Scope:** Deterministic extraction/filtering only. Do not spend VLM
+tokens here. Run targeted conversions with `--vision-provider none`
+and, where valid for the diagnostic, `--no-refiner`.
+
+**Non-negotiable contract:**
+
+- A visible, non-blank TOC/index/content page must emit at least one
+  real chunk.
+- The pipeline must preserve or sanitize source chunks; it must not
+  create synthetic final-stage text-layer recovery chunks.
+- No production code may contain or emit `recovery_page_coverage`.
+- Gate tuning for short VLM descriptions is out of scope until this
+  page-loss class is closed.
+- Combat p66 and other localized corruption failures remain separate
+  hard failures after this phase.
+
+#### Step 0 — Re-baseline after recovery removal
+
+The first measurement must run on the current working tree after
+`_recover_missing_text_layer_pages` has been removed. Previous
+numbers may have been masked by that recovery path.
+
+1. Convert Kimothi fresh:
+   ```bash
+   conda run -n mmrag-v2 python -m mmrag_v2.cli process \
+     "data/technical_manual/A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf" \
+     --output-dir output/probe_kimothi_toc_contract \
+     --vision-provider none \
+     --batch-size 10 \
+     --no-refiner \
+     --no-ocr
+   ```
+2. Run strict QA with source-PDF page awareness:
+   ```bash
+   conda run -n mmrag-v2 python scripts/qa_full_conversion.py \
+     output/probe_kimothi_toc_contract/ingestion.jsonl \
+     --source-pdf "data/technical_manual/A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf" \
+     --no-require-image-descriptions \
+     --allow-warnings
+   ```
+3. Record only the comparable signal for this phase:
+   non-blank `MISSING_PAGES`, page set, chunk counts by page, and
+   whether any chunk uses `extraction_method="recovery_page_coverage"`.
+
+**Stop condition:** If the post-removal baseline is worse than the
+last probe, diagnose the newly exposed drop first. Do not jump to a
+single page fix.
+
+#### Step 1 — Trace one known-failing page through the pipeline
+
+Pick Hao p5 or p6 first, because the strict-gate snapshot already
+indicates partial recovery behavior around Hao p5-p10. The unit of
+work is not "fix page 250"; it is "find the stage where a visible
+TOC/index page disappears."
+
+Trace the page through:
+
+| Stage | Question | Required evidence |
+|---|---|---|
+| Docling raw document | Does Docling expose text/items for the page? | page-scoped item count and labels |
+| post-Docling serializer | Does `engines/docling_serializers.py` keep the page content? | page-scoped serialized item count |
+| HybridChunker input | Is `DocItemLabel.DOCUMENT_INDEX` or another label still suppressed before chunking? | item labels by page before chunker |
+| HybridChunker output | Does Docling emit DocChunks for the page? | DocChunks by page before MMRAG filtering |
+| BatchProcessor final filters | Does final cleanup sanitize/keep the chunks? | IngestionChunks by page and extraction method |
+
+The single most informative log is **HybridChunker DocChunks by page
+before any MMRAG filtering**. If the page is absent there, debug
+Docling/serializer/input labels. If present there, debug our
+filtering/final emission.
+
+Also do a two-minute OCR-route check for Hao p5-p7: confirm the
+technical-manual route and OCR/image thresholds are not diverting a
+decorated TOC page into a zero-text lane.
+
+#### Step 2 — Cheap targeted page-window probes
+
+Use concrete CLI page-range support; do not run full documents for
+this diagnostic loop.
+
+| Shape | Probe | Pages | Why |
+|---|---|---:|---|
+| front TOC + back index | Kimothi | `1-15,245-255` | Known front TOC and back index failure; current best progress signal |
+| front TOC + large back index | Hao | `1-15,496-503` | Exercises both early contents and dense back-matter index |
+| code/manual TOC | Python_Cookbook or Fluent_Python | `1-15` | Ensures code-book front matter is not a one-off |
+
+Use:
+
+```bash
+conda run -n mmrag-v2 python -m mmrag_v2.cli process <PDF> \
+  --pages <range> \
+  --output-dir output/probe_<doc>_toc_contract \
+  --vision-provider none \
+  --batch-size 10 \
+  --no-refiner
 ```
 
-Fires whenever `~/.mmrag-v2.yml` has `refiner.enabled=true`,
-**regardless of `has_encoding_corruption`**. The diagnostic-driven
-auto-override at `cli.py:1101-1102` is dead code under the
-config-default path because `enable_refiner` is already `True` by
-the time it runs. Empirical: v2.8 broad reconversion's first
-attempt left HARRY (clean prose, zero encoding corruption) hammering
-qwen-plus per chunk with refinements rejected ("Edit ratio 53.16%
-exceeds budget"). The remediation in v2.8 was the `--no-refiner`
-flag — masking the bug, not fixing it.
+For each probe, require:
 
-**Parallel-site audit (do this FIRST):**
+- all non-blank requested TOC/index pages have at least one chunk;
+- no emitted chunk has `extraction_method="recovery_page_coverage"`;
+- chunk counts are page-set deterministic across two Kimothi runs;
+- no page-window probe creates new corruption, empty-text, or bbox
+  invariant failures.
 
-| Site | File:line | Current behavior | Action |
-|---|---|---|---|
-| Config-default enable (process) | `cli.py:683-695` | Eagerly sets `enable_refiner=True` from `cfg.refiner.enabled` before diagnostics run | **Fix site.** Defer the decision until after diagnostic detects `has_encoding_corruption`. |
-| Diagnostic-driven auto-override (process) | `cli.py:1093-1106` | Sets `enable_ocr=True, force_ocr=True` and (gated on `not _refiner_explicitly_disabled`) `enable_refiner=True` when `intelligence_metadata.get("has_encoding_corruption")` | After Phase 2, this becomes the *primary* refiner-enable site under the config-default path. |
-| `batch` command equivalent | `cli.py` `batch` command body (around `cli.py:1741`) | Need to confirm the same config-default → diagnostic-override sequence is wired identically; v2.8 plan §2b found the cheap-evidence trigger lived in TWO places (`cli.py:1112` AND `cli.py:1741`); check whether refiner-enable also has a parallel site | If so, fix both. |
-| Refiner config consumer | `src/mmrag_v2/refiner.py` | Reads `enable_refiner` flag passed in by CLI; doesn't inspect `has_encoding_corruption` itself | Unchanged. Decision belongs at the CLI seam. |
-| Refiner threshold-override on encoding corruption | `batch_processor.py` (per `docs/DECISIONS.md` "Heal-Over for Encoding Corruption") | `threshold=0.0` is set when `has_encoding_corruption` is true | Unchanged. The existing heal-over code path still fires once Phase 2 routes refiner-enable correctly. |
-| `convert_books.sh` flag posture | `scripts/convert_books.sh` | Currently passes `--no-refiner` for apples-to-apples vs v2.8 baseline | After Phase 2 lands AND Phase 5 reconversion proves byte-stability for clean-prose docs, drop `--no-refiner`. |
+#### Step 3 — Strengthen tests before wider conversion
 
-**Approach:**
+The existing unit-level sanitizer test
+(`tests/test_toc_cell_marker_sanitizer.py`, currently the starting
+point for the in-flight change) is useful but insufficient. Add or
+extend tests so this phase has a durable contract:
 
-1. Move the config-default check OUT of `cli.py:683-695` (where
-   `enable_refiner` is set before diagnostic runs) and INTO the
-   intelligence-metadata block at `cli.py:1093-1106` (where
-   `has_encoding_corruption` is known).
-2. Replace the existing
-   `if not enable_refiner and cfg.refiner.enabled and not _refiner_explicitly_disabled:`
-   at line 686 with **only the model/provider/url/key default
-   propagation** (lines 688-695) — leave `enable_refiner` at its
-   CLI-supplied value.
-3. In the diagnostic-override block at `cli.py:1101-1102`, expand
-   the gate so the config-default still wins when corruption is
-   detected:
-   ```python
-   _config_default_active = cfg.refiner.enabled and not _refiner_explicitly_disabled
-   if intelligence_metadata.get("has_encoding_corruption") and _config_default_active:
-       if not enable_refiner:
-           enable_refiner = True
-   ```
-   (This is the integration point — explicit corruption signal
-   gates the auto-enable; explicit `--enable-refiner` from the user
-   bypasses the gate entirely; explicit `--no-refiner` always wins.)
-4. **Mirror the same change in the `batch` command** if the
-   parallel-site audit confirms the duplicate logic exists there.
-5. After Phase 5 reconversion proves byte-stable text for clean-prose
-   docs, drop `--no-refiner` from `scripts/convert_books.sh`.
+- static guard in `tests/test_pdf_conversion_plan.py` or an adjacent
+  static-guard test: no production file contains
+  `recovery_page_coverage` or `PAGE-COVERAGE-RECOVERY`;
+- acceptance fixture for at least one real TOC/index page window,
+  asserting `pages_with_chunks` includes the expected visible pages;
+- sanitizer negative case: ordinary chunks without Docling cell
+  markers are not demoted/promoted as TOC/index chunks;
+- if an E2E fixture is too expensive for the default test suite,
+  make it explicitly env-gated and document the command in
+  `docs/TESTING.md`.
 
-**Tests (red→green) — 4 new in `tests/test_cli_refiner_smart_routing.py`:**
+#### Step 4 — Mini-matrix before full conversion
 
-- `test_refiner_off_by_default_when_clean_prose` — fake
-  `intelligence_metadata={"has_encoding_corruption": False}` +
-  `cfg.refiner.enabled=True`; assert the resulting `enable_refiner`
-  passed into `BatchProcessor` is `False`.
-- `test_refiner_on_when_encoding_corruption_detected` — fake
-  `intelligence_metadata={"has_encoding_corruption": True}` +
-  `cfg.refiner.enabled=True`; assert `enable_refiner=True`.
-- `test_refiner_explicit_no_refiner_always_wins` — `--no-refiner` in
-  argv + corruption detected; assert `enable_refiner=False`.
-- `test_refiner_explicit_enable_refiner_bypasses_diagnostic` —
-  `--enable-refiner` in argv + clean prose; assert `enable_refiner=True`.
+Do not use a 5-doc smoke as the only bridge to full reconversion.
+Either:
 
-**Done when:**
-- 4 new tests green.
-- v2.9 broad reconversion (Phase 5) runs WITHOUT `--no-refiner` and
-  produces byte-stable text for HARRY (clean prose) AND
-  refiner-applied text for `Combat_Aircraft_August_2025` (encoding
-  corruption — but Phase 5 will use whatever profile the v2.9
-  pipeline routes to; spot-check).
-- `scripts/convert_books.sh` no longer carries `--no-refiner` after
-  Phase 5 verification.
+- reconvert all 18 `MISSING_PAGES` docs with `--vision-provider none
+  --no-refiner`, or
+- cluster by failure shape and run at least two docs per shape
+  (`front-only`, `back-only`, `front+back`), then require the unpicked
+  docs' stale-output chunk counts to remain within ±2% of the
+  re-baseline expectation before expanding.
 
-**Risk:** Low–Medium. The fix is moving a single conditional and
-adding a gate; the existing diagnostic-override path is already
-exercised by v2.7-era tests for the OCR auto-override. **Risk
-escalates to Medium if the parallel-site audit finds the `batch`
-command (`cli.py:1741` neighborhood) carries a divergent flow** —
-e.g. refiner config defaults applied at a different boundary, or a
-separate `intelligence_metadata` block. If divergence is found, the
-1–2 h estimate inflates; document the actual flow in the commit
-message and update §7 effort. **Constraint:** must not violate
-`AGENT-VAL-01` (no document-specific or filename-specific behavior).
-Check satisfied — the gate is on `has_encoding_corruption`, a
-structural-integrity flag.
+Promotion criteria for Phase 5:
 
-**Estimated effort:** **1–2 h engineering** + ~30 min per-doc
-verification (run HARRY 10-page subset + Combat 10-page subset to
-confirm the routing matrix).
+- strict-gate `MISSING_PAGES` count is 0 on the targeted/clustered
+  reconversions, or every residual is a documented, reproducible,
+  visibly blank/near-blank source page;
+- no `recovery_page_coverage` string exists in production code or
+  emitted JSONL;
+- Kimothi page-set output is deterministic across two fresh runs;
+- short-VLM-description and Combat p66 failures are the only major
+  remaining classes, and both are explicitly deferred to their own
+  phases;
+- `pytest` targeted contract tests pass.
+
+**Done when:** The above promotion criteria are met and the next
+run is justified as a broad validation run, not another blind
+diagnostic loop.
+
+**Risk:** Medium. The likely bug may sit upstream of MMRAG filtering
+inside Docling or its serialized input labels, so this phase may end
+with a smaller custom preservation hook or an upstream-library
+limitation note. It must not end with synthetic final-stage page
+reconstruction.
+
+**Path (b) escape hatch:** If the trace proves Docling drops visible
+non-blank TOC/index pages before MMRAG receives recoverable chunks,
+stop and get user sign-off before introducing any narrower recovery
+path. Any approved recovery must be source-page-aware, limited to
+visible non-blank pages, produce a distinct documented status, and
+still satisfy the static guard that production code does not emit
+`recovery_page_coverage`.
+
+**Estimated effort:** 1-2 h for the trace and targeted probes;
+additional time only if the disappearance is inside Docling rather
+than our serializer/filter chain.
 
 ---
 
-### Phase 3 — Workstream D: ProfileClassifier rule 0c tightening (Ayeva)
+### Phase 2 — Re-verify shipped v2.9 fixes under strict gate
 
-**What:** `Ayeva_Python_Patterns` v2.8 fresh re-conversion routes to
-`digital_literature` instead of `technical_manual`, suppressing the
-`needs_code_enrichment` cheap-evidence trigger (CodeFormulaV2
-doesn't auto-engage for the `digital_literature` profile). Empirical:
+**What:** After Phase 1 produces page-loss-clean outputs, re-verify
+the fixes that already shipped on `main`. This phase is verification,
+not re-implementation, unless strict-gate outputs expose a regression.
 
-- BEFORE (probe `output/ayeva_qa_20260501/`, 2026-05-01,
-  `--enable-doctr --ocr-mode auto`): `profile=technical_manual`,
-  CODE PASS, `indentation_fidelity=0.93`.
-- AFTER (v2.8 fresh `output/Ayeva_Python_Patterns/`, 2026-05-04):
-  `profile=digital_literature`, CODE FAIL,
-  `indentation_fidelity=0.83` (just under the 0.85 hard gate).
+**Checks:**
 
-Rule 0c was added 2026-05-03 in commit `2f51816`
-(`document_diagnostic.py:1457-1475`):
+- `chunk_id`: for every `output/<doc>/ingestion.jsonl`,
+  `len(chunk_ids) - len(set(chunk_ids)) == 0`.
+- Refiner smart-routing:
+  `HARRY` has `refinement_applied == 0` for all chunks;
+  `Combat_Aircraft_August_2025` has `refinement_applied > 0` on
+  encoding-corrupt repair candidates; conversion logs do not show
+  repeated edit-ratio rejection spam.
+- Ayeva: `profile_type == "technical_manual"` AND CodeFormulaV2
+  engages AND `indentation_fidelity >= 0.85`.
+- Firearms: `profile_type in {"scanned", "scanned_degraded"}` AND
+  HEADING coverage `>= 0.80` AND no `AGENT-SPATIAL-20` violation.
+- HARRY: `profile_type == "digital_literature"` and
+  `tests/test_docling_postprocessor_acceptance.py` passes against
+  the new conversion.
 
-```
-_dialogue_pages >= 1
-AND total_pages > 20
-AND not has_tables
-AND 500 < avg_text_per_page < 2500
-→ literature += 0.4
-```
-
-The hypothesis is that Python code blocks include strings with
-quotation marks that the dialogue heuristic
-(`document_diagnostic.py:1443-1446`, "≥4 double-quote chars on a
-page → dialogue page") misreads. Ayeva is a code-heavy book, NOT a
-novel.
-
-**Parallel-site audit (do this FIRST):**
-
-| Site | File:line | Current behavior | Action |
-|---|---|---|---|
-| Rule 0c | `src/mmrag_v2/orchestration/document_diagnostic.py:1457-1475` | `_dialogue_pages >= 1 AND total_pages > 20 AND not has_tables AND 500 < avg_text_per_page < 2500 → literature += 0.4` | **Fix site.** Add a code-density inverse-signal guard. |
-| Rule 0 (full novel) | `document_diagnostic.py:1449-1455` | `_dialogue_ratio > 0.3 AND total_pages > 50 AND not has_tables → literature += 0.8` | Keep unchanged; the +0.8 path requires high dialogue ratio AND >50 pages (HARRY's signature). Ayeva is 359 pages so it could in principle hit the +0.8 path too — verify it doesn't (i.e. the *ratio*, not just count, of dialogue pages is low for Ayeva). |
-| Profile scorer (digital_literature) | `src/mmrag_v2/orchestration/profile_classifier.py` `_score_digital_literature` | Reads `domain=literature` 0.50, `page_count ≥50` 0.20, etc. (per `docs/DECISIONS.md` "Post-Docling Sanity Pass + `digital_literature` Profile") | A code-density inverse-signal could ALSO live here ("HARD REJECT if `code_evidence_pages ≥ 2`") — but the upstream cleaner fix is at Rule 0c. |
-| `needs_code_enrichment` decision | `cli.py:1112` (process) AND `cli.py:1741` (batch) calls `decide_code_enrichment_for_pdf(...)` | Current behavior triggers CodeFormulaV2 for Chaubal (technical_manual route) but NOT for Ayeva (digital_literature route) | Unchanged. Phase 3's classifier fix re-routes Ayeva → `technical_manual`, which makes `needs_code_enrichment` fire on cheap evidence as designed. |
-| Existing classifier tests | `tests/test_classifier_digital_literature.py` (7 tests), `tests/test_classifier_fallback.py::test_harry_potter_like_literature` | Pins HARRY → `digital_literature`, code-heavy books → NOT `digital_literature` | DO NOT WEAKEN. v2.9 fix must keep all 7 + the negative case green. |
-| Diagnostic test fixtures | `tests/fixtures/` for code-evidence | New fixture needed: an Ayeva-shaped feature vector (low dialogue ratio per page, HIGH code_evidence_pages) | Add to a new test file. |
-
-**Approach:**
-
-1. **Source the code-density signal.** `DocumentDiagnosticEngine`
-   already counts `CodeItem`s and code-candidate regions for the
-   `needs_code_enrichment` trigger (call site
-   `decide_code_enrichment_for_pdf` at `cli.py:1112` / `cli.py:1741`
-   and downstream in `batch_processor.py`). The diagnostic feature
-   used in this plan as `code_evidence_pages` is a **placeholder
-   name** — the exact field/method to surface from the existing
-   trigger logic must be confirmed during the investigation.
-   Candidates per source code: `CodeItem` count per sampled page,
-   code-chunk ratio, sampled code-candidate region count. Pick one
-   (or a derived count) and thread it onto the diagnostic features
-   object that Rule 0c consumes. **Treat `code_evidence_pages` in
-   the rule sketch below as TBD until the investigation confirms
-   the exact source.**
-2. **Tighten Rule 0c** at `document_diagnostic.py:1457-1475`:
-   ```
-   _dialogue_pages >= 1
-   AND total_pages > 20
-   AND not has_tables
-   AND 500 < avg_text_per_page < 2500
-   AND <code_evidence_signal> < <threshold>   # NEW; see step 1
-   → literature += 0.4
-   ```
-   *Why this gate:* Chaubal's v2.8 fresh has CodeFormulaV2 engaged
-   on multiple pages → strong code-evidence signal. HARRY has none.
-   Threshold must be conservative enough not to flip Combat
-   (a magazine with incidental code-shape decorations) — calibrate
-   on the v2.8 fresh feature vectors during the investigation.
-3. **Re-run the regression tests** for the `digital_literature`
-   profile (7 tests) — they MUST still pass on HARRY and the other
-   pinned positives. If any flips, that's a contract change → stop
-   and document.
-4. **Verify on the v2.8 fresh outputs** (no reconversion needed yet):
-   load each canonical `intelligence_metadata` (first JSONL line),
-   re-run the rule logic offline, confirm Ayeva flips to
-   `technical_manual` and HARRY stays on `digital_literature`.
-
-**Tests (red→green) — 6 new in `tests/test_classifier_rule_0c_tightening.py`:**
-
-- `test_rule_0c_fires_for_harry_dialogue_low_code` — feature vector
-  with HARRY's signature (high dialogue ratio low code evidence,
-  29-page test slice); assert literature score includes the +0.4
-  contribution.
-- `test_rule_0c_suppressed_for_ayeva_code_heavy_book` — feature
-  vector with Ayeva's signature (some quoted strings on dialogue
-  pages BUT `code_evidence_pages >= 2`); assert literature score
-  does NOT include +0.4.
-- `test_rule_0c_suppressed_for_chaubal_pytorch_book` — Chaubal's
-  feature vector; assert literature score does NOT include +0.4.
-- `test_rule_0c_suppressed_for_fluent_python_book` — non-regression
-  control; assert classifier still routes Fluent → `technical_manual`.
-- `test_ayeva_routes_to_technical_manual_post_fix` — full classifier
-  output on Ayeva's `intelligence_metadata`; assert
-  `profile_type == "technical_manual"`.
-- `test_harry_routes_to_digital_literature_post_fix` — non-regression
-  control; assert HARRY still routes to `digital_literature`.
-
-**Done when:**
-- 6 new tests green.
-- All 7 existing `tests/test_classifier_digital_literature.py` tests
-  remain green.
-- All 9 existing `tests/test_classifier_fallback.py` tests remain
-  green.
-- v2.9 fresh re-conversion of Ayeva (in Phase 5):
-  `profile_type=technical_manual`, CodeFormulaV2 engages,
-  `indentation_fidelity ≥ 0.85`, CODE PASS.
-- HARRY v2.9 fresh re-conversion: still routes to
-  `digital_literature`, page-13 reading-order acceptance test
-  passes.
-
-**Risk:** Medium. Classifier changes have the highest blast radius
-of v2.9 phases — every routed doc could in principle flip. The
-parallel-site audit is mandatory; the 6 named tests cover the main
-contract surface. **AGENTS.md compliance:** no document-specific or
-filename-specific logic added (the new gate is a numeric threshold
-on a feature already used by `needs_code_enrichment`).
-
-**Estimated effort:** **2–4 h engineering** (mostly investigation +
-test authoring) + ~10 min Ayeva re-conversion verification.
+**Done when:** The above checks pass under `scripts/qa_full_conversion.py`
+outputs generated after Phase 1. Audit-only PASS is not sufficient.
 
 ---
 
-### Phase 4 — Firearms heading regression (with `AGENT-SPATIAL-20` resolution)
+### Phase 3 — Resolve `IMAGE_DESCRIPTION_UNUSABLE`
 
-**What:** `Firearms` v2.8 fresh re-conversion: profile changed
-`scanned` → `technical_manual` between baselines, and the chunker's
-heading-inheritance is stricter under `technical_manual`. HEADING
-coverage **100% → 78%** (gate is ≥80%). 178 / 815 chunks now lack
-`parent_heading`. Same content fidelity (chunk count 1690 vs 1691),
-just less hierarchy annotation.
+**What:** Decide and implement the strict-gate handling for terse but
+valid VLM responses such as `Venn diagram.` or `Line chart.`. This is
+gate/model behavior, not extraction.
 
-**Constraint conflict to resolve before designing the fix:**
-`AGENT-SPATIAL-20` says "Refinement logic must rely on a single
-20-unit vertical threshold. No profile-specific or heading-specific
-branches allowed." (`AGENTS.md` §1.6) The naive fix — relaxing the
-heading threshold for `technical_manual` on scanned-modality input —
-**directly violates this**. Two acceptable resolutions, in
-preference order:
+**Allowed paths:**
 
-- **(a) Re-route Firearms to the `scanned` profile.** Investigate
-  why the classifier flipped the route; the fix lives in
-  `profile_classifier.py`, not in any spatial threshold. Respects
-  `AGENT-SPATIAL-20` unchanged.
-- **(b) Propose an explicit `AGENT-SPATIAL-20` amendment** in
-  `AGENTS.md` + a new entry in `docs/DECISIONS.md`, with empirical
-  evidence that the single-threshold rule no longer serves the
-  corpus. Requires user sign-off; do NOT auto-amend.
+- **Path (a), gate calibration:** if `vision_status="complete"` and
+  the image class is simple/non-text-heavy, treat short valid
+  descriptions as `WARN`, not `FAIL`. Keep `FAIL` for complex,
+  text-heavy, or placeholder-like responses.
+- **Path (b), VLM retry:** if the asset is complex or text-heavy,
+  re-prompt cloud VLM for a fuller visual description and keep the
+  strict failure until the response improves.
 
-**Default: (a). Fall back to (b) only if (a) demonstrably fails.**
+**Acceptance:**
 
-**Parallel-site audit (do this FIRST):**
+- 0 placeholder descriptions.
+- 0 pending image chunks.
+- `hard_fallback` rate is bounded by the documented v2.9 cloud
+  threshold and every fallback has a reason.
+- Short complete descriptions are classified consistently by asset
+  complexity, not by a flat character count alone.
 
-| Site | File:line | Current behavior | Action |
-|---|---|---|---|
-| Firearms intelligence metadata | `output/Firearms/ingestion.jsonl:1` | v2.8 fresh: `profile_type=technical_manual`, `document_type=scanned_degraded`, `is_scan=true`, `total_pages=292`, `image_density=1.0` | The classifier saw `is_scan=true` AND `image_density=1.0` and STILL chose `technical_manual` over `scanned`. That's the routing bug to investigate. |
-| Profile scorer (scanned) | `src/mmrag_v2/orchestration/profile_classifier.py` `_score_scanned` | Should boost on `is_scan=true` + scanned-shaped image density | Inspect the score for Firearms's feature vector; identify why `technical_manual` outscored it. |
-| Profile scorer (technical_manual) | `_score_technical_manual` | Per Workstream D Milestone 1 (2026-04-30), this became the digital fallback for long-form non-magazine non-scanned docs | Confirm Firearms isn't tripping a fallback branch unintentionally. |
-| Diagnostic baseline | `data/scanned/Firearms.pdf` (or wherever the file lives now) | Pre-v2.8 baseline routed to `scanned` cleanly | Compare the diagnostic features at the 2026-04-29 baseline run vs the v2.8 fresh run — what changed? |
-| Heading inheritance threshold | `batch_processor.py` (chunker post-processing) | Stricter under `technical_manual` (the v2.7-era POS Boundary + heading promotion rules) | DO NOT modify per profile (`AGENT-SPATIAL-20`). |
-| 20-unit vertical threshold | wherever it lives (search `20`-unit refinement) | Single threshold applied everywhere | DO NOT branch. |
-| HARRY scanned-route assertion | `tests/test_classifier_fallback.py` | `is_scan=true` doesn't catch born-digital novels (HARRY routes via `_score_digital_literature`'s HARD REJECT scans) | Confirm Firearms's feature vector doesn't accidentally trip a `digital_literature` HARD REJECT path that misroutes elsewhere |
-| `data_spreadsheet` already-questionable route | per `docs/PROGRESS_CHECKLIST.md` Workstream D | Routes to `technical_manual` (acceptable) | Unrelated; do not collateral-fix. |
+---
 
-**Approach:**
+### Phase 4 — Localized strict-gate hard failures
 
-1. **Investigate the route flip (option (a)).**
-   - Compare Firearms's diagnostic features (pre-v2.8 vs v2.8 fresh)
-     by re-running `DocumentDiagnosticEngine` on the same PDF and
-     dumping the feature vector. Diff against the prior baseline's
-     `intelligence_metadata` line.
-   - Trace the `_score_scanned` vs `_score_technical_manual` scores
-     for that vector. Identify which signal moved.
-   - The most likely root cause: the 2026-04-30 Milestone 1 fix
-     changed the `digital fallback default` from `DIGITAL_MAGAZINE`
-     to `TECHNICAL_MANUAL` (`docs/PROGRESS_CHECKLIST.md` Workstream D),
-     which made `technical_manual` the catch-all for long-form
-     non-magazine docs. Firearms (`is_scan=true`, 292 pages) may be
-     tripping this catch-all instead of `scanned`.
-2. **Apply the targeted scorer fix** in
-   `src/mmrag_v2/orchestration/profile_classifier.py`. Acceptable
-   patterns:
-   - Add a stronger `is_scan=true` weight to `_score_scanned` so it
-     wins on Firearms-shape inputs.
-   - Add a HARD REJECT to `_score_technical_manual` that suppresses
-     it for inputs with `is_scan=true` AND `image_density >= 1.0`
-     AND `total_pages > 100` (Firearms's signature).
-   - Both are profile-scorer adjustments, NOT spatial-threshold
-     branches. `AGENT-SPATIAL-20` is respected.
-3. **If (a) fails** (i.e. no scorer adjustment can route Firearms
-   correctly without breaking another doc):
-   - **STOP — user consultation required.** Do NOT proceed to (b)
-     unilaterally. Open a paused commit (or a draft PR) with the
-     investigation evidence:
-     - Firearms feature-vector diff (pre-v2.8 vs v2.8 fresh).
-     - Computed scorer scores per ProfileType for that vector,
-       both pre- and post-attempted-fix.
-     - List of alternative scorer adjustments tried and which
-       canonical doc each one broke (with the broken doc's
-       specific gate failure).
-     - The exact wording of the proposed `AGENT-SPATIAL-20`
-       amendment for `AGENTS.md` and the proposed
-       `docs/DECISIONS.md` decision-log entry.
-   - Surface the paused state in the commit message + a note in
-     `docs/PROJECT_STATUS.md` "Active Baseline" so the user sees
-     it on next session start.
-   - Resume only after explicit user sign-off on the amendment.
-     Auto-amending `AGENTS.md` Level 0 invariants is forbidden.
-4. **Verify the smoke matrix and the full canonical corpus** —
-   Firearms reaches HEADING ≥ 80% AND no other row regresses
-   (especially the SCAN0013 form-lane row, which already routes to
-   `scanned` and must continue to do so).
+**What:** Resolve the remaining non-page-loss hard failures after
+Phases 1-3:
 
-**Tests (red→green) — 5 new in `tests/test_classifier_firearms_route.py`:**
+| Class | Docs | Phase 4 posture |
+|---|---|---|
+| Known table corruption | Combat Aircraft p66; Adedeji p301 | **Must close.** Known repair/quarantine shape; no ship with corrupted table/text emitted. |
+| Likely page-loss overlap | Devlin, Earthship, Firearms script-gate failures; any `PAGE_CHUNK_OUTLIER` coupled to `MISSING_PAGES` | Re-evaluate after Phase 1. If still failing, fix under Phase 4 with a doc-specific investigation but no filename-specific production logic. |
+| Pre-existing EPUB label issue | KI_En_ChatGPT EPUB label/universal failure | Deferrable only with explicit user sign-off and snapshot rationale, because the strict-gate snapshot marks it as pre-existing. |
+| New residuals | Any remaining localized corruption surfaced by the current strict gate | Triage into one of the above classes before any tag decision. |
 
-- `test_firearms_feature_vector_routes_to_scanned` — feature vector
-  pulled from `output/Firearms/ingestion.jsonl:1` (intelligence
-  metadata); assert classifier returns `scanned` (or
-  `scanned_degraded`).
-- `test_firearms_heading_coverage_at_least_80pct_post_fix` — load a
-  v2.9 fresh re-conversion JSONL (env-gated `RUN_FIREARMS_VERIFY=1`,
-  populated by Phase 5); compute
-  `len([c for c in chunks if c.metadata.hierarchy.parent_heading]) /
-  total_text_chunks`; assert ≥ 0.80.
-- `test_scan0013_still_routes_to_scanned` — form's feature vector;
-  assert `scanned` (non-regression — must still hit form lane).
-- `test_earthship_still_routes_to_scanned` — non-regression (Earthship
-  is the canonical scanned book).
-- `test_harry_still_routes_to_digital_literature` — non-regression
-  (the classifier-flip bug must not surface a HARRY regression).
+**Rules:**
 
-**Done when:**
-- 5 new tests green (or the corpus-verify test xfailed pending Phase 5).
-- v2.9 fresh re-conversion of Firearms: `profile_type=scanned` (or
-  `scanned_degraded`), HEADING coverage ≥ 80%, chunk count within
-  ±2% of v2.8 fresh's 1690.
-- Smoke matrix 11/11 GATE_PASS + UNIVERSAL_PASS.
-- `AGENT-SPATIAL-20` constraint respected — no profile-specific
-  spatial-threshold branch added. (If (b) was required, the
-  amendment is checked into `AGENTS.md` + `docs/DECISIONS.md`
-  with user sign-off recorded in this plan's §8 decision log.)
+- Do not loosen negative tests or strict-gate assertions to match
+  current output.
+- Prefer quarantine or upstream extraction fixes over emitting known
+  corrupted table/text chunks.
+- Keep document-specific investigation local to the failure, but do
+  not add filename-specific production logic.
 
-**Risk:** Medium–High. Classifier scorer adjustments have corpus-wide
-blast radius. The 5 named regression tests are the contract surface;
-a sixth (full smoke matrix run) must pass before this phase merges.
-
-**Estimated effort:**
-- Path (a): **3–6 h engineering** (mostly investigation +
-  scorer-tuning + corpus verification).
-- Path (b): **+1 day** if `AGENT-SPATIAL-20` amendment proves
-  necessary (drafting, user sign-off, doc updates). Plan effort
-  total assumes (a); flag if (b) is taken.
+**Done when:** Combat p66 and Adedeji p301 are fixed or quarantined
+and pass `qa_full_conversion.py`; page-loss-overlap failures are
+re-tested after Phase 1 and either pass or have a concrete fix; the
+only allowable residual is the pre-existing KI_En_ChatGPT EPUB label
+class with explicit user sign-off and snapshot rationale.
 
 ---
 
 ### Phase 5 — Broad reconversion + Qdrant migration + VLM enrichment + AFTER snapshot
 
-**What:** With Phases 0–4 closed, run the broad reconversion that
-verifies all four code fixes land on real corpus data, drop and
-recreate the `mmrag_v2_8` Qdrant collection (Phase 1 chunk_id
+**What:** With current Phases 0–4 closed, run the broad reconversion that
+verifies all shipped code fixes land on real corpus data, drop and
+recreate the `mmrag_v2_8` Qdrant collection (historical Phase 1 chunk_id
 migration callout), run the **Priority 1 VLM enrichment** of all
 ~5,500 image chunks via cloud `qwen3-vl-plus`, re-ingest the corpus
 clean, and produce the v2.9 AFTER snapshot.
@@ -671,7 +529,7 @@ clean, and produce the v2.9 AFTER snapshot.
 This phase is **not optional**. The Ayeva, Firearms, refiner-routing,
 and chunk_id fixes are unverifiable without re-converting the corpus.
 Per the prompt's mandatory shape, Phase 5 also runs the chunk_id
-migration callout from Phase 1 (drop-and-recreate `mmrag_v2_8` to
+migration callout from historical Phase 1 (drop-and-recreate `mmrag_v2_8` to
 absorb the new collision-free chunk_ids cleanly).
 
 **VLM choice — locked to cloud `qwen3-vl-plus` only.** Local
@@ -684,8 +542,13 @@ NOT branch on local availability**. (May add a
 
 #### Pre-flight checklist
 
-- [ ] Phases 0-4 all merged and tagged.
-- [ ] `pytest tests/ -q` reports ≥ **610 passed, 0 failed**.
+- [ ] Phases 0-4 all merged; no broad-conversion tag or
+      completion claim exists before Phase 5 finishes.
+- [ ] Phase 1 closed: targeted/clustered TOC-index probes have
+      `MISSING_PAGES=0` for non-blank pages, no emitted
+      `recovery_page_coverage`, and deterministic Kimothi page sets.
+- [ ] `pytest tests/ -q` reports the current committed suite count
+      or higher, **0 failed**.
 - [ ] `bash scripts/smoke_multiprofile.sh` reports **11/11 GATE_PASS
       + 11/11 UNIVERSAL_PASS** with no waivers (`AGENT-VAL-01`,
       CLAUDE.md "Project Invariants", `docs/QUALITY_GATES.md`).
@@ -716,10 +579,10 @@ NOT branch on local availability**. (May add a
 
 | Site | File:line | Current behavior | Action |
 |---|---|---|---|
-| Conversion runner | `scripts/convert_books.sh` | 34 entries, `--vision-provider none --no-refiner --no-cache` | After Phase 2 lands AND clean-prose byte-stability is verified, drop `--no-refiner`. Keep `--vision-provider none --no-cache` (Phase 5's targeted enrichment script handles VLM, not the conversion). |
+| Conversion runner | `scripts/convert_books.sh` | 34 entries; v2.9 prep removed the `--no-refiner` workaround | Keep `--vision-provider none --no-cache`; Phase 5's targeted enrichment script handles VLM, not conversion-time VLM. |
 | Image chunk pending status | per-doc `output/<doc>/ingestion.jsonl` | `vision_status="pending"`, `visual_description="[Figure on page N] | Context: <breadcrumb>"`, `refined_content=null` for image chunks | The enrichment script is the consumer; it must read these fields and write back `vision_status="complete"`, real `visual_description`, populated `refined_content`. |
 | Ingestion script payload writer | `scripts/ingest_to_qdrant.py:316-317, 399-400` | Pulls `metadata.visual_description` or top-level `visual_description` for the payload `visual_description` field | Confirm the enrichment script writes BOTH locations consistently (or pick one — the schema canonical is `metadata.visual_description`). |
-| `point_id` derivation | `scripts/ingest_to_qdrant.py:42, 453` | `uuid5(_POINT_ID_NAMESPACE, chunk_id)` | After Phase 1 lands, the `chunk_id` value changes for the 427 affected chunks; re-ingest produces new `point_id`s for those points. Drop-and-recreate cleans this up. |
+| `point_id` derivation | `scripts/ingest_to_qdrant.py:42, 453` | `uuid5(_POINT_ID_NAMESPACE, chunk_id)` | Historical Phase 1 changed chunk_id values for the 427 affected chunks; re-ingest produces new `point_id`s for those points. Drop-and-recreate cleans this up. |
 | Existing `mmrag_v2_8` state | Qdrant 22,137 points | **No production retrieval state has been built up** (per project memory, the collection was just created 2026-05-04). | Drop-and-recreate is safe — no rollback of consumer state needed. Recommended option per the prompt §2 Priority 5 migration consideration. |
 | 17 sister `*_v2` per-doc collections | Qdrant containers | Pre-existing user-owned data; out of v2.9 scope | DO NOT TOUCH. Drop only `mmrag_v2_8`. |
 | Vision Source Sanctity validator | `src/mmrag_v2/vision/vision_prompts.py`, `src/mmrag_v2/vision/vision_manager.py` | Existing text-reading detection + sanitizer + retry harness | The enrichment script MUST call through the existing `VisionManager` so Source Sanctity rules apply (no text transcription, visual-only prompt, retry on detected text-reading). |
@@ -727,7 +590,7 @@ NOT branch on local availability**. (May add a
 
 #### Steps
 
-**5a. Broad reconversion (post-Phase-1-through-4 fixes).**
+**5a. Broad reconversion (after current Phases 1-4 pass).**
 
 **Parallelism note:** `scripts/convert_books.sh` runs sequentially
 by design — `AGENTS.md` §1.4 caps RAM at ~8 GB and batch size at
@@ -739,11 +602,13 @@ runtime exceeds 2 days, propose a parallelism investigation as a
 v2.10 followup with empirical RAM measurements rather than
 parallelizing inside this cycle.
 
-1. Run `bash scripts/convert_books.sh` with the v2.9 flag posture
-   (drop `--no-refiner` if Phase 2 verification confirmed
-   byte-stability for clean-prose docs; otherwise document why it
-   stays).
-2. Per-doc audit: `python scripts/qa_conversion_audit.py output/<v29_run>/<doc>/ingestion.jsonl`.
+1. Run `bash scripts/convert_books.sh` with the existing v2.9 flag
+   posture. `--no-refiner` was already removed in `538cf89`; verify
+   it remains absent rather than re-doing that change.
+2. Per-doc strict gate:
+   `python scripts/qa_full_conversion.py output/<v29_run>/<doc>/ingestion.jsonl --source-pdf <matching-source-pdf-when-pdf>`.
+   `qa_conversion_audit.py` may still be inspected, but only as a
+   sub-check.
 3. Targeted verification:
    - **Ayeva:** `profile_type=technical_manual`,
      `indentation_fidelity ≥ 0.85`, CODE PASS.
@@ -760,7 +625,11 @@ parallelizing inside this cycle.
 
 **5b. Targeted image-only VLM enrichment (Priority 1).**
 
-1. Author `scripts/enrich_image_chunks_v29.py` (new). Behavior:
+1. Verify and run the existing `scripts/enrich_image_chunks_v29.py`
+   against the post-Phase-1 regenerated corpus. The script shipped
+   in `538cf89` and was used for the 2026-05-06 enrichment run
+   (4,329 enriched / 46 hard_fallback); Phase 5b is not an authoring
+   task unless verification exposes a defect. Required behavior:
    - Iterate `output/<v29_run>/<doc>/ingestion.jsonl`.
    - For each chunk where `modality == "image"` AND
      `vision_status in {"pending", "done"}` AND `visual_description`
@@ -780,7 +649,7 @@ parallelizing inside this cycle.
        the existing sanitizer + retry harness (per Workstream A).
      - On hard fallback: write `vision_status="hard_fallback"`,
        record the failure reason, do NOT inflate to "complete".
-   - **Write-back is atomic-replace, never in-place line edit.**
+   - **Verify write-back is atomic-replace, never in-place line edit.**
      JSONL is append-friendly but not random-access-edit-friendly,
      and a crash mid-enrichment must not leave a half-written
      canonical output. Pattern:
@@ -797,18 +666,19 @@ parallelizing inside this cycle.
        - On any exception or count-mismatch, leave the temp file in
          place with a `.failed` suffix and exit non-zero. The
          original is untouched.
-       - Add a resume mode: on rerun, detect existing
+       - Confirm resume mode: on rerun, detect existing
          `ingestion.jsonl.v29tmp.failed` and continue from the last
          enriched chunk_id (skip already-`complete` entries).
-   - Add a per-doc dry-run mode (`--dry-run`) that reports the
+   - Confirm the per-doc dry-run mode (`--dry-run`) reports the
      image-chunk count + estimated cost without making API calls,
      so cost can be verified before the multi-hour run.
    - **DO NOT branch on local-VLM availability.** Hardcode cloud.
      (Add `# v2.10: re-evaluate local NuMarkdown-8B endpoint`
      comment at the provider-selection line.)
-2. Per-doc audit again: `python scripts/qa_conversion_audit.py
-   ...` — `placeholder_ratio` for image chunks should drop to 0%
-   for docs that completed enrichment.
+2. Per-doc strict gate again:
+   `python scripts/qa_full_conversion.py ...` — placeholder ratio for
+   image chunks should drop to 0% for docs that completed enrichment,
+   and `IMAGE_DESCRIPTION_UNUSABLE` must follow the Phase 3 policy.
 3. Run `python scripts/vlm_quality_summary.py
    output/<v29_run>/<doc>/ingestion.jsonl --production` for at
    least the blind-set documents (Greenhouse, etc. — see
@@ -816,7 +686,12 @@ parallelizing inside this cycle.
 
 **5c. Qdrant `mmrag_v2_8` drop-and-recreate.**
 
-1. **Concrete consumer-absence verification** (do NOT rely on
+1. **Strict-gate proof before destructive action:** the post-Phase-5b
+   corpus must have `QA_PASS` for all 34 canonical docs under
+   `scripts/qa_full_conversion.py`, or every non-PASS must have
+   explicit user sign-off recorded in the AFTER snapshot draft.
+   If this is not true, abort 5c.
+2. **Concrete consumer-absence verification** (do NOT rely on
    project memory alone before destroying data):
    - Inspect the collection metadata for last-write timestamp and
      point count to confirm it matches the v2.8 ingest snapshot
@@ -851,26 +726,26 @@ parallelizing inside this cycle.
      Re-evaluate: side-by-side ingest into `mmrag_v2_9` (creates
      a parallel collection; old consumers keep working; new
      consumers point at the new one) becomes the fallback.
-2. Drop the collection (only after step 1 passes):
+3. Drop the collection (only after steps 1-2 pass):
    ```bash
    curl -X DELETE http://localhost:6333/collections/mmrag_v2_8
    ```
-3. Re-create with the v2.8 schema (vector dim, distance metric —
+4. Re-create with the v2.8 schema (vector dim, distance metric —
    confirmed in `scripts/ingest_to_qdrant.py`).
-4. Re-ingest the v2.9 corpus:
+5. Re-ingest the v2.9 corpus:
    ```bash
    bash tmp/v29_ingest.sh   # (loop scripts/ingest_to_qdrant.py once per canonical doc)
    ```
    Use `--collection mmrag_v2_8 --model nomic-embed-text` (same as
-   v2.8). The new chunk_ids from Phase 1 produce new uuid5
+   v2.8). The new chunk_ids from historical Phase 1 produce new uuid5
    `point_id`s; the re-ingest is a clean populate.
-5. Verify:
+6. Verify:
    ```bash
    curl -sS http://localhost:6333/collections/mmrag_v2_8/points/count \
      -X POST -H "Content-Type: application/json" -d '{"exact":true}'
    # expected: count == (sum of unique chunk_ids across 34 v2.9 JSONLs) − (embed errors)
    ```
-6. Spot-check image retrieval — query with a Source-Sanctity-safe
+7. Spot-check image retrieval — query with a Source-Sanctity-safe
    prompt for a known image (e.g. wizard ornament from HARRY,
    F-35 photo from Combat) and confirm a hit on the corresponding
    image point.
@@ -882,7 +757,7 @@ parallelizing inside this cycle.
    (`docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`):
    - Per-document audit table (BEFORE / AFTER / Delta).
    - Smoke matrix table.
-   - Phase 1-4 empirical outcomes (target docs and their before/after
+   - Current Phase 1-4 empirical outcomes (target docs and their before/after
      metrics).
    - Qdrant ingest evidence (chunk count, point count, embed errors).
    - Image enrichment evidence (placeholder ratio before/after,
@@ -904,9 +779,9 @@ parallelizing inside this cycle.
 **Tests (red→green) — not test code; this phase produces *empirical*
 evidence:**
 
-- The Phase 1-4 contract tests (already authored in those phases)
+- The historical Phase 1-4 contract tests
   must all pass.
-- The corpus-scan parametrized test from Phase 1
+- The corpus-scan parametrized test from historical Phase 1
   (`test_full_corpus_no_within_file_chunk_id_collisions`) un-skips
   with `RUN_CORPUS_SCAN=1` against the v2.9 outputs and asserts 0
   collisions.
@@ -924,7 +799,7 @@ evidence:**
   + 5 percentage-point cushion).
 
 **Done when:**
-- All 7 Goals from §2 are met empirically.
+- All 8 Goals from §2 are met empirically.
 - v2.9 AFTER snapshot exists and `docs/PROJECT_STATUS.md` "Active
   Baseline" points at it.
 - v2.8 AFTER snapshot
@@ -932,7 +807,8 @@ evidence:**
   `> ⚠ SUPERSEDED — historical reference only.` banner per the
   `docs/AGENT_GOVERNANCE.md` "Canonicality Rule (added 2026-05-04)".
 - `mmrag_v2_8` Qdrant collection contains the v2.9 chunk_count;
-  zero placeholder image points.
+  zero placeholder image points, zero pending image points, and
+  bounded documented hard fallbacks.
 - `v2.9.0` annotated tag on the AFTER-snapshot commit.
 
 **Risk:** Medium. Three runtime cost components dominate; engineering
@@ -957,7 +833,16 @@ numbers match the v2.8 cloud baseline.
 The plan is "done" when:
 
 ```bash
-# 1. Smoke matrix — every row GATE_PASS + UNIVERSAL_PASS, no waivers
+# 1. Strict full-conversion gate — canonical ship bar
+for doc in output/<v29_run>/*/ingestion.jsonl; do
+  python scripts/qa_full_conversion.py "$doc" \
+    --source-pdf <matching-source-pdf-when-pdf>
+done
+# expected: QA_PASS for all 34, except explicit documented
+# form/document-class variants allowed by docs/QUALITY_GATES.md.
+# qa_conversion_audit.py is a sub-check inside this gate, not the bar.
+
+# 2. Smoke matrix — every row GATE_PASS + UNIVERSAL_PASS, no waivers
 bash scripts/smoke_multiprofile.sh
 # expected: 11/11 GATE_PASS + 11/11 UNIVERSAL_PASS.
 # `GATE_PASS [form: ...]` for the SCAN0013 row is acceptable
@@ -965,37 +850,40 @@ bash scripts/smoke_multiprofile.sh
 # ONLY when document_type=form. Per AGENT-VAL-01 no other row
 # may use the form lane as a workaround.
 
-# 2. Full unit suite
+# 3. Full unit suite
 pytest tests/ -q
-# expected: ≥615 passed, 0 failed (596 v2.8 baseline + 19 new
-# contract tests = 4 Phase 1 + 4 Phase 2 + 6 Phase 3 + 5 Phase 4).
-# The Phase 5 acceptance test is env-gated (RUN_V29_VLM_ACCEPTANCE=1)
-# and is NOT counted in the steady-state total.
+# expected: current committed suite count or higher, 0 failed.
+# Do not use the stale 596/615 planning numbers as evidence.
 
-# 3. Per-doc audit — no FAIL row in the canonical 34
+# 4. Recovery-path static guard
+pytest tests/test_pdf_conversion_plan.py -q -k recovery_page_coverage
+# expected: static guard passes; no production code contains or emits
+# recovery_page_coverage / PAGE-COVERAGE-RECOVERY.
+
+# 5. Per-doc audit — sub-check only; no FAIL row in the canonical 34
 for doc in output/<v29_run>/*/ingestion.jsonl; do
   python scripts/qa_conversion_audit.py "$doc"
 done
 # expected: AUDIT_PASS (or FORM_AUDIT_PASS for the SCAN0013-class
 # scanned forms) for all 34 canonical rows.
 
-# 4. Universal invariants — zero hard fails on every output
+# 6. Universal invariants — sub-check only; zero hard fails on every output
 for doc in output/<v29_run>/*/ingestion.jsonl; do
   python scripts/qa_universal_invariants.py "$doc"
 done
 # expected: UNIVERSAL_PASS on all 34.
 
-# 5. Qdrant point-count verification
+# 7. Qdrant point-count verification
 curl -sS http://localhost:6333/collections/mmrag_v2_8/points/count \
   -X POST -H "Content-Type: application/json" -d '{"exact":true}'
 # expected: count == (unique chunk_ids across 34 v2.9 JSONLs) − (embed errors).
 
-# 6. Image enrichment audit — zero placeholders
+# 8. Image enrichment audit — zero placeholders, bounded fallbacks
 python scripts/vlm_quality_summary.py output/<v29_run>/<doc>/ingestion.jsonl --production
 # expected for every doc: placeholder_ratio = 0%, vision_provider_used=qwen3-vl-plus
-# for every non-fallback image chunk.
+# for every non-fallback image chunk; hard_fallback <= documented v2.9 threshold.
 
-# 7. Tag
+# 9. Tag
 git tag v2.9.0
 # only after the 6 Completion Rules below are all satisfied.
 ```
@@ -1029,22 +917,24 @@ A workstream may be marked `complete` only when:
 6. A fresh coding session can reproduce the claim without chat
    history.
 
-Apply each requirement explicitly to the v2.9.0 tag commit:
+Apply each requirement explicitly to the v2.9.0 tag commit. These are
+not satisfied until the evidence exists:
 
-1. ✓ All §2 Goals met empirically (audit + Qdrant + smoke).
-2. ✓ v2.9 AFTER snapshot is `tracked` in `docs/`; outputs are
+1. Will satisfy when all §2 Goals are met empirically (strict gate +
+   Qdrant + smoke).
+2. Will satisfy when the v2.9 AFTER snapshot is `tracked` in `docs/`; outputs are
    `local-run` with commands recorded in §3 / `convert_books.sh`.
-3. ✓ Known limitations documented in v2.9 AFTER snapshot under
+3. Will satisfy when known limitations are documented in v2.9 AFTER snapshot under
    "Known Limitations" (the deferred-conditional remote
    CodeFormulaV2 trigger; the v2.10 local-VLM swap; any
    Phase-5b hard-fallback image rate above zero).
-4. ✓ Local VLM comparison is **explicitly removed from v2.9 scope**
+4. Will satisfy when local VLM comparison is **explicitly removed from v2.9 scope**
    (deferred to v2.10 — see §2 Non-Goals; project memory pin).
-5. ✓ `PROJECT_STATUS.md` "Active Baseline" points at the v2.9
+5. Will satisfy when `PROJECT_STATUS.md` "Active Baseline" points at the v2.9
    AFTER snapshot; `PROGRESS_CHECKLIST.md` flips updated; the
    v2.8 AFTER snapshot is banner-marked superseded per the
    Canonicality Rule.
-6. ✓ A fresh agent reading `PROJECT_STATUS.md` →
+6. Will satisfy when a fresh agent reading `PROJECT_STATUS.md` →
    `PROGRESS_CHECKLIST.md` → `AGENTS.md` →
    `docs/QUALITY_SNAPSHOT_<v29>_after.md` reproduces the v2.9
    claim from tracked files alone.
@@ -1074,29 +964,31 @@ Failure on any of the six = no tag.
 - `docs/PROGRESS_CHECKLIST.md` — flip `[ ]` items to `[x]` as each
   phase closes; record evidence path + test counts.
 - `docs/PROJECT_STATUS.md` — refresh "Active Baseline" pointer when
-  Phase 5d lands the AFTER snapshot.
-- `docs/DECISIONS.md` — add entries for: (a) Phase 1 chunk_id
-  generator includes position component, (b) Phase 2 refiner
-  smart-routing gate on `has_encoding_corruption`, (c) Phase 4
-  Firearms route resolution (path (a) or path (b) — record which).
+  Phase 5 sub-step 5d lands the AFTER snapshot.
+- `docs/DECISIONS.md` — make sure entries exist for historical
+  Phase 1 chunk_id semantics, historical refiner smart-routing,
+  historical Firearms route resolution, current Phase 1
+  TOC/index page-loss closure, Phase 3 short-description policy, and
+  any Phase 4 localized corruption decisions.
 - `CHANGELOG.md` — `[2.9.0]` entry summarizing all phases at the
   end (mirrors v2.8 [2.8.0] entry style).
 - v2.8 AFTER snapshot
   (`docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`) gets the
   superseded banner per the Canonicality Rule.
 - `AGENTS.md` "Priority TODOs" list updated post-v2.9 to drop the
-  closed items; document any `AGENT-SPATIAL-20` amendment if
-  Phase 4 path (b) was taken.
+  closed items; document any historical Firearms
+  `AGENT-SPATIAL-20` amendment only if the historical path (b) was
+  actually taken.
 
 **Test contract integrity** (per CLAUDE.md, `AGENTS.md` AGENT-TEST-01,
 `docs/AGENT_GOVERNANCE.md` "Test Contract Rules"):
 
 - The 7 existing `tests/test_classifier_digital_literature.py` tests
-  must remain green through Phase 3.
+  must remain green through every current phase.
 - The 9 existing `tests/test_classifier_fallback.py` tests must
-  remain green through Phase 4.
+  remain green through every current phase.
 - The 6 existing `tests/test_qdrant_point_id_collision.py` tests
-  must remain green through Phase 1 (the schema change must NOT
+  must remain green (the historical schema change must NOT
   break the Qdrant-layer `point_id` derivation contract).
 - Workstream B negative tests
   (`tests/test_code_enrichment_decision.py`) are contracts: do not
@@ -1104,8 +996,8 @@ Failure on any of the six = no tag.
 - `tests/test_docling_postprocessor_acceptance.py` HARRY pages 13-30
   fixture passes through every phase.
 - HARRY-class regression: HARRY MUST keep auto-routing to
-  `digital_literature` after Phase 3 (Rule 0c tightening) and after
-  Phase 4 (Firearms route fix).
+  `digital_literature`; current Phase 2 re-verifies this after the
+  already-shipped Rule 0c and Firearms classifier changes.
 
 **Upstream tracking:**
 - HybridChunker per-item token guard remains an upstream-Docling ask.
@@ -1115,7 +1007,7 @@ Failure on any of the six = no tag.
 - Local NuMarkdown-8B endpoint reachability — re-check before
   v2.10 planning.
 
-**Consumer-side warnings (Phase 1 chunk_id semantics):**
+**Consumer-side warnings (historical Phase 1 chunk_id semantics):**
 - `__schema_version__` stays at `2.7.0` because the chunk-shape
   contract is unchanged. **However, `chunk_id` *values* differ
   for the 427 within-file-collision chunks** between v2.8 outputs
@@ -1146,13 +1038,13 @@ Failure on any of the six = no tag.
 
 | Phase | Engineering estimate | Runtime / external | External dependency? |
 |---|---|---|---|
-| Phase 0 — Lock baseline | 30 min | — | Qdrant container up |
-| Phase 1 — chunk_id collision fix | 1.5–2 h + 1 h tests | — | None |
-| Phase 2 — Refiner smart-routing | 1–2 h + ~30 min verify | — | None |
-| Phase 3 — Rule 0c tightening (Ayeva) | 2–4 h + ~10 min Ayeva re-conversion | — | None |
-| Phase 4 — Firearms route fix | 3–6 h (path (a)); +1 day if (b) `AGENT-SPATIAL-20` amendment required | — | User sign-off (only if (b)) |
+| Phase 0 — Current strict-gate baseline | 30 min | — | Qdrant container up |
+| Phase 1 — TOC/index page-loss closure | 1-2 h trace + targeted probes; more if Docling-side | targeted `--pages` conversions | User sign-off only for Path (b) recovery |
+| Phase 2 — Re-verify shipped fixes | 1-2 h analysis after Phase 1 outputs | targeted/full strict-gate checks | None |
+| Phase 3 — Short VLM description resolution | 1-3 h depending on gate-vs-reprompt path | possible limited cloud retries | Alibaba DashScope if Path (b) |
+| Phase 4 — Localized hard failures | 3-8 h depending on corruption/doc-specific failures | targeted page conversions | None |
 | Phase 5 — Broad reconversion + drop/recreate + VLM enrichment + AFTER snapshot | ~4 h script + snapshot | ~1–2 days conversion runtime; ~6–10 h cloud-VLM runtime; ~2.5 h CPU per code-heavy doc | Alibaba DashScope API + spend |
-| **Total** | **~10–18 h engineering** (path (a)); **+1 day** if path (b) | **~2–3 days runtime** | Cloud VLM is the dominant external dependency; cost recorded on completion |
+| **Total current cycle** | **~8–18 h engineering** before broad run, depending on localized failures | **~2–3 days runtime** once Phase 5 is justified | Cloud VLM is the dominant external dependency; cost recorded on completion |
 
 **RAM ceiling note (`AGENTS.md` §1.4 — ≤8 GB target):** Phase 5 is
 the only phase that risks the ceiling. Code-heavy docs (Chaubal,
@@ -1165,6 +1057,35 @@ on the first code-heavy doc; if peak exceeds ~7 GB, document it as
 a v2.10 followup rather than retro-fitting parallelism into v2.9.
 
 ## 8. Decision Log
+
+- **2026-05-06 v2.0 (decision g)** — v2.9.0 tag retracted.
+  The tag created on 2026-05-05 was deleted on 2026-05-06 because
+  the audit-only gate missed strict defects: page loss, image/content
+  placeholder issues, localized corruption, and script-gate failures.
+  Status vocabulary is `in-progress` / `implemented`, not `complete`.
+
+- **2026-05-06 v2.0 (decision h)** — `scripts/qa_full_conversion.py`
+  is the canonical v2.9 acceptance gate. `qa_conversion_audit.py`
+  remains a sub-check only. The current BEFORE state is
+  `docs/QUALITY_SNAPSHOT_2026-05-06_v2.9_strict_gate.md`
+  (**5 PASS / 3 WARN / 26 FAIL**), not the 2026-05-04 v2.8 AFTER
+  snapshot.
+
+- **2026-05-06 v2.0 (decision i)** — final-stage
+  `recovery_page_coverage` reconstruction is rejected as an
+  anti-pattern. The current direction is to preserve/sanitize real
+  TOC/index chunks before destructive cleanup. The first new code
+  commit in this cycle should contain the in-flight
+  `batch_processor.py` sanitizer/recovery-removal change plus its
+  tests, then extend those tests with the Phase 1 static and
+  acceptance guards.
+
+- **2026-05-06 v2.0 (decision j)** — phase order revised around the
+  strict-gate failure classes. Current Phase 1 closes TOC/index
+  page loss; current Phase 2 re-verifies already-shipped fixes;
+  current Phase 3 resolves short VLM descriptions; current Phase 4
+  resolves localized hard failures; current Phase 5 is blocked until
+  those classes pass strict gate.
 
 - **2026-05-04 v1.0** — Plan ratified for execution. Scope locked
   to the four documented v2.8 carry-overs (Ayeva, Firearms,

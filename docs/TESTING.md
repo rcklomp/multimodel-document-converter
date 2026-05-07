@@ -47,6 +47,26 @@ deterministic checks for missing pages, duplicate long text, per-page outliers,
 localized corruption, image-description quality, asset health, and table
 corruption.
 
+### TOC / Index Page-Loss Contract (env-gated)
+Phase 1 v2.9 uses generated page-window probes to lock the TOC/index page-loss
+contract without making the default test suite run Docling conversions.
+
+First generate or preserve these outputs:
+- `output/probe_kimothi_toc_contract_codex/ingestion.jsonl`
+- `output/probe_kimothi_toc_contract_codex_rerun/ingestion.jsonl`
+- `output/probe_hao_toc_contract_codex/ingestion.jsonl`
+- `output/probe_python_cookbook_toc_contract_codex/ingestion.jsonl`
+
+Then run:
+```bash
+RUN_TOC_PAGE_CONTRACT=1 conda run -n mmrag-v2 python -m pytest \
+  tests/test_toc_index_page_contract.py -q
+```
+
+Expected: `4 passed`. If the probe outputs were cleaned from `output/`, the
+test fails with an explicit missing-output assertion. Without
+`RUN_TOC_PAGE_CONTRACT=1`, the same file is skipped by default.
+
 ### Process vs Batch (Parity)
 ```bash
 PDF="data/academic_journal/AIOS LLM Agent Operating System.pdf"

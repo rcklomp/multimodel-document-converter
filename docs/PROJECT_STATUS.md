@@ -63,8 +63,12 @@ work" below).
   contents) and back-matter index pages produce zero output chunks.
   Removing the ``DocItemLabel.DOCUMENT_INDEX`` filter at chunker time
   partially helped; a deeper Docling- or pipeline-side filter is
-  still dropping the rest. Unblocking this brings most of the failed
-  docs to QA_PASS.
+  still dropping the rest. The next phase is the binding
+  ``docs/PLAN_V2.9.md`` current Phase 1 contract: re-baseline after removal
+  of final-stage recovery, trace one failing page through Docling raw
+  → serializer → HybridChunker → final filters, then run targeted
+  page-window probes before any broad reconversion or VLM spend.
+  Unblocking this brings most of the failed docs to QA_PASS.
 - **Combat Aircraft p66.** The squadron-roster table chunk still
   contains the corrupted typography that the OCR-failure regex
   doesn't quite match (em-dash run shorter than the 6-in-a-row

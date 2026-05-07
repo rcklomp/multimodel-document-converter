@@ -137,6 +137,7 @@ class MmragChunkingDocSerializer(ChunkingDocSerializer):
     """ChunkingDocSerializer with the label-leak-suppressing picture serializer."""
 
     picture_serializer: Any = MmragMarkdownPictureSerializer()
+    skip_pages: set[int] = set()
     params: MarkdownParams = MarkdownParams(
         image_mode=ImageRefMode.PLACEHOLDER,
         image_placeholder="",
@@ -145,9 +146,22 @@ class MmragChunkingDocSerializer(ChunkingDocSerializer):
         blocked_meta_names=_BLOCKED_META_NAMES,
     )
 
+    def serialize(self, *, item: Any = None, **kwargs: Any) -> SerializationResult:  # type: ignore[override]
+        if item is not None and self.skip_pages:
+            prov = getattr(item, "prov", None)
+            if prov:
+                first = prov[0] if isinstance(prov, list) else prov
+                page_no = getattr(first, "page_no", None)
+                if page_no in self.skip_pages:
+                    return SerializationResult(text="", spans=[])
+        return super().serialize(item=item, **kwargs)
+
 
 class MmragChunkingSerializerProvider(ChunkingSerializerProvider):
     """Provider that hands MmragChunkingDocSerializer to the chunker."""
 
+    def __init__(self, skip_pages: set[int] | None = None) -> None:
+        self.skip_pages = set(skip_pages or set())
+
     def get_serializer(self, doc: DoclingDocument) -> BaseDocSerializer:  # type: ignore[override]
-        return MmragChunkingDocSerializer(doc=doc)
+        return MmragChunkingDocSerializer(doc=doc, skip_pages=self.skip_pages)

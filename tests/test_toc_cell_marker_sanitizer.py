@@ -43,3 +43,14 @@ def test_toc_cell_marker_sanitizer_keeps_chunk_and_strips_markers() -> None:
 def test_toc_cell_marker_sanitizer_still_drops_empty_chunks() -> None:
     processor = BatchProcessor(output_dir="/tmp/mmrag-test", vision_provider="none")
     assert processor._sanitize_toc_cell_markers([_chunk("   ")]) == []
+
+
+def test_toc_cell_marker_sanitizer_does_not_demote_plain_chunks() -> None:
+    processor = BatchProcessor(output_dir="/tmp/mmrag-test", vision_provider="none")
+    chunk = _chunk("This ordinary paragraph has no Docling table cell markers.")
+
+    sanitized = processor._sanitize_toc_cell_markers([chunk])
+
+    assert len(sanitized) == 1
+    assert sanitized[0].content == "This ordinary paragraph has no Docling table cell markers."
+    assert sanitized[0].metadata.chunk_type == ChunkType.PARAGRAPH

@@ -3183,6 +3183,22 @@ class BatchProcessor:
             # text chunks exceeding the 1500-char gate.
             export_chunks = self._apply_oversize_breaker(export_chunks, max_chars=1500)
 
+            # Final guard: drop any text chunk that ended up empty after
+            # all upstream sanitisers/dedup/breaker passes. The strict gate's
+            # empty_text_chunks invariant (UNIVERSAL_FAIL) cannot tolerate
+            # even one such chunk; this catches every upstream path at once.
+            _pre_empty = len(export_chunks)
+            export_chunks = [
+                c for c in export_chunks
+                if c.modality != Modality.TEXT or (c.content and c.content.strip())
+            ]
+            _empty_dropped = _pre_empty - len(export_chunks)
+            if _empty_dropped:
+                logger.info(
+                    f"[FINALIZE] Dropped {_empty_dropped} empty text chunk(s) "
+                    f"before JSONL write (UNIVERSAL_FAIL safety net)"
+                )
+
             # v2.9 Phase 1 (followup): final-stage dedup by chunk_id. The
             # per-document position counter eliminates the bulk of v2.8's
             # within-file collisions, but the legacy hybrid_chunker path
@@ -3391,6 +3407,21 @@ class BatchProcessor:
                             if not vr.is_valid:
                                 meta["vision_validation_issues"] = vr.issues
                         chunk_dict["metadata"] = meta
+
+                    # Final-final guard: skip text chunks whose content was
+                    # zeroed by the technical_manual JSONL-level sanitiser
+                    # above (control-char strip, page-number/digit-only line
+                    # removal). Writing them would trigger UNIVERSAL_FAIL
+                    # on empty_text_chunks and is never a valid retrieval row.
+                    if (
+                        chunk_dict.get("modality") == "text"
+                        and not (chunk_dict.get("content") or "").strip()
+                    ):
+                        logger.debug(
+                            "[FINALIZE] Skipping write of empty text chunk "
+                            f"{chunk_dict.get('chunk_id')}"
+                        )
+                        continue
 
                     json_line = json.dumps(chunk_dict, ensure_ascii=False)
                     write_buffer.append(json_line)
@@ -7152,6 +7183,9 @@ class BatchProcessor:
                     max_chars=max_chars,
                     overlap_chars=0,  # no overlap — prevents duplicate sentence content
                 )
+            # Drop empty/whitespace-only parts so a trailing-newline edge case
+            # does not emit an empty "Part N/N" chunk (UNIVERSAL_FAIL trigger).
+            parts = [p for p in parts if p and p.strip()]
             if len(parts) <= 1:
                 out.append(ch)
                 continue

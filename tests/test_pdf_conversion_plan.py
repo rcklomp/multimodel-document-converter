@@ -683,6 +683,28 @@ def test_no_raw_converter_invocation_outside_adapter():
     )
 
 
+def test_no_recovery_page_coverage_path_in_production_code():
+    """Final-stage page-coverage reconstruction is banned in production code."""
+    root = Path(__file__).resolve().parents[1]
+    banned = (
+        "recovery_page_coverage",
+        "PAGE-COVERAGE-RECOVERY",
+        "_recover_missing_text_layer_pages",
+    )
+    violations = []
+
+    for path in _production_python_files():
+        source = path.read_text(encoding="utf-8")
+        for marker in banned:
+            if marker in source:
+                violations.append(f"{path.relative_to(root)} ({marker})")
+
+    assert violations == [], (
+        "Found banned page-coverage recovery path in production code:\n  "
+        + "\n  ".join(violations)
+    )
+
+
 def test_guard_fires_on_synthetic_bypass():
     """Positive-case: the AST walker must flag the bypass pattern."""
     bad = "def f(self, p):\n    return self._converter.convert(p)\n"

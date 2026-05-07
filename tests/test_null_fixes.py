@@ -142,6 +142,85 @@ def test_oversize_split_non_code_has_content_classification():
         )
 
 
+def test_finalize_drops_empty_text_chunks_before_jsonl_write():
+    """Final-stage safety net: any text chunk that ended up with empty
+    content (after all upstream sanitisers/dedup/breaker passes) must be
+    dropped before JSONL write so the strict-gate empty_text_chunks
+    invariant (UNIVERSAL_FAIL) holds. Regression for Kimothi page 253."""
+    from mmrag_v2.schema.ingestion_schema import (
+        ChunkType,
+        HierarchyMetadata,
+        Modality,
+    )
+
+    bp = _make_batch_processor()
+    valid = create_text_chunk(
+        doc_id=bp._doc_hash,
+        content="real back-index content",
+        source_file="t.pdf",
+        file_type=FileType.PDF,
+        page_number=10,
+        hierarchy=HierarchyMetadata(breadcrumb_path=["Doc"], level=1),
+    )
+    blank = create_text_chunk(
+        doc_id=bp._doc_hash,
+        content=" ",  # whitespace-only — survives create_text_chunk, must be dropped at finalize
+        source_file="t.pdf",
+        file_type=FileType.PDF,
+        page_number=10,
+        hierarchy=HierarchyMetadata(breadcrumb_path=["Doc"], level=1),
+    )
+    # The bug shape — content was emptied by an upstream sanitiser after creation.
+    emptied = create_text_chunk(
+        doc_id=bp._doc_hash,
+        content="placeholder",
+        source_file="t.pdf",
+        file_type=FileType.PDF,
+        page_number=10,
+        hierarchy=HierarchyMetadata(breadcrumb_path=["Doc"], level=1),
+    )
+    emptied.content = ""
+
+    chunks = [valid, blank, emptied]
+    # Replicate the finalize-stage filter (line ~3186 of process_pdf).
+    filtered = [
+        c for c in chunks
+        if c.modality != Modality.TEXT or (c.content and c.content.strip())
+    ]
+    assert filtered == [valid], "empty/whitespace-only text chunks must be dropped"
+
+
+def test_oversize_split_drops_empty_trailing_part():
+    """A chunk that splits with a whitespace-only trailing remainder must
+    NOT emit an empty Part N/N chunk (would trigger UNIVERSAL_FAIL on
+    empty_text_chunks). Regression for v2.9 Phase 1 dense-index
+    pageskip + oversize-breaker interaction (Kimothi page 253)."""
+    from mmrag_v2.schema.ingestion_schema import ChunkType, HierarchyMetadata
+
+    bp = _make_batch_processor()
+
+    # Build a non-code chunk whose last paragraph break leaves a tail
+    # that becomes empty after strip — the failure shape we just hit.
+    body = ("paragraph one. " * 100).rstrip() + "\n\n  \n"  # trailing whitespace block
+    chunk = create_text_chunk(
+        doc_id=bp._doc_hash,
+        content=body,
+        source_file="test.pdf",
+        file_type=FileType.PDF,
+        page_number=253,
+        hierarchy=HierarchyMetadata(breadcrumb_path=["Doc", "index"], level=2),
+    )
+    chunk.metadata.chunk_type = ChunkType.PARAGRAPH
+    chunk.metadata.content_classification = "editorial"
+
+    result = bp._apply_oversize_breaker([chunk], max_chars=1500)
+
+    for sub in result:
+        assert sub.content and sub.content.strip(), (
+            f"oversize split emitted empty chunk: id={sub.chunk_id!r}"
+        )
+
+
 def test_oversize_split_code_classified_as_code():
     """Code sub-chunks retain 'code' classification (regression guard)."""
     from mmrag_v2.schema.ingestion_schema import ChunkType, HierarchyMetadata

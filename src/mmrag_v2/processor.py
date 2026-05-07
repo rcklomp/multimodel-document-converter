@@ -93,6 +93,180 @@ from .vision.vision_manager import VisionManager, create_vision_manager
 logger = logging.getLogger(__name__)
 
 
+_INDEX_REF_RE = re.compile(r"\b\d{1,4}(,\s*\d{1,4}){2,}\b")
+_TOC_LEADER_RE = re.compile(r"\.{2,}\s*\d{1,4}\s*$")
+# Back-index entries within a Docling DocumentIndex cell are separated by a
+# single space between the previous entry's trailing digit and the next
+# entry's leading letter. Splitting on this boundary lets us dedup at entry
+# granularity across overlapping sliding-window cells.
+_INDEX_ENTRY_SPLIT = re.compile(r"(?<=\d)\s+(?=[A-Za-z])")
+_SHORT_INDEX_LABELS = {
+    "tablecell",
+    "table_cell",
+    "listitem",
+    "list_item",
+    "documentindex",
+    "document_index",
+}
+
+
+def _docling_item_page_no(item: Any) -> Optional[int]:
+    prov = getattr(item, "prov", None)
+    if not prov:
+        return None
+    first = prov[0] if isinstance(prov, list) else prov
+    page_no = getattr(first, "page_no", None)
+    return int(page_no) if page_no else None
+
+
+def _docling_item_label(item: Any) -> str:
+    label = getattr(item, "label", "")
+    value = getattr(label, "value", label)
+    return str(value or "").replace("-", "_").replace(" ", "_").lower()
+
+
+def _docling_item_text(item: Any) -> str:
+    return str(getattr(item, "text", "") or "").strip()
+
+
+def _docling_text_items_for_page(doc: Any, page_no: int) -> List[Any]:
+    texts = getattr(doc, "texts", None)
+    if texts is None:
+        return [
+            item
+            for item, _level in doc.iterate_items()
+            if _docling_item_page_no(item) == page_no and _docling_item_text(item)
+        ]
+    return [
+        item
+        for item in texts
+        if _docling_item_page_no(item) == page_no and _docling_item_text(item)
+    ]
+
+
+def _docling_document_index_items_for_page(doc: Any, page_no: int) -> List[Any]:
+    return [
+        item
+        for item, _level in doc.iterate_items()
+        if _docling_item_page_no(item) == page_no
+        and _docling_item_label(item) in {"document_index", "documentindex"}
+    ]
+
+
+def _docling_document_index_lines(item: Any) -> List[str]:
+    # Docling 2.86 emits DocumentIndex grids with massive byte-equal cell
+    # repetition (15-67x per page on Ayeva back-index) AND each surviving
+    # unique cell carries a sliding window over the same back-index entry
+    # sequence. Splitting at entry boundaries (digit-then-letter) and
+    # deduping at entry granularity collapses both layers of duplication
+    # so retrieval sees each back-index reference exactly once per page.
+    data = getattr(item, "data", None)
+    grid = getattr(data, "grid", None)
+    if grid:
+        seen: set[str] = set()
+        lines: List[str] = []
+        for row in grid:
+            for cell in row:
+                cell_text = str(getattr(cell, "text", "") or "")
+                if not cell_text.strip():
+                    continue
+                # Split at entry boundary; preserves alphabet-header cells
+                # like "M" / "S" that have no digit (split returns one piece).
+                for raw_entry in _INDEX_ENTRY_SPLIT.split(cell_text):
+                    entry = _sanitize_toc_index_text(raw_entry)
+                    if entry and entry not in seen:
+                        lines.append(entry)
+                        seen.add(entry)
+        if lines:
+            return lines
+    text = _docling_item_text(item)
+    return [text] if text else []
+
+
+def _classify_dense_index_pages(doc: Any) -> set[int]:
+    """Return pages that should bypass HybridChunker as dense TOC/index pages.
+
+    Docling's ``document_index`` label is authoritative: real Ayeva index
+    pages expose empty DocumentIndex containers during ``iterate_items()``
+    while their text lives inside the node's table data. When Docling does
+    not emit DocumentIndex, the secondary shape gates catch TOC/index pages
+    made from table cells or list items.
+    """
+    by_page: Dict[int, Dict[str, int]] = {}
+    dense_pages: set[int] = set()
+    for item, _level in doc.iterate_items():
+        page_no = _docling_item_page_no(item)
+        if page_no is None:
+            continue
+        text = _docling_item_text(item)
+        label = _docling_item_label(item)
+        if label in {"document_index", "documentindex"}:
+            dense_pages.add(page_no)
+        stats = by_page.setdefault(
+            page_no,
+            {
+                "items": 0,
+                "text_items": 0,
+                "index_refs": 0,
+                "toc_leaders": 0,
+                "short_index_tokens": 0,
+                "digit_short_tokens": 0,
+            },
+        )
+        stats["items"] += 1
+        if text:
+            stats["text_items"] += 1
+        if _INDEX_REF_RE.search(text):
+            stats["index_refs"] += 1
+        if _TOC_LEADER_RE.search(text):
+            stats["toc_leaders"] += 1
+        if (
+            label in _SHORT_INDEX_LABELS
+            and text
+            and len(text) <= 12
+            and "\n" not in text
+        ):
+            stats["short_index_tokens"] += 1
+            if re.fullmatch(r"\d{1,4}", text):
+                stats["digit_short_tokens"] += 1
+
+    for page_no, stats in by_page.items():
+        if page_no in dense_pages:
+            continue
+        text_items = stats["text_items"]
+        if text_items < 8:
+            continue
+        index_score = (
+            stats["index_refs"] * 3
+            + stats["toc_leaders"] * 3
+            + stats["short_index_tokens"]
+        )
+        evidence_count = stats["index_refs"] + stats["toc_leaders"]
+        signal_ratio = (
+            stats["index_refs"] + stats["toc_leaders"] + stats["short_index_tokens"]
+        ) / max(text_items, 1)
+        if (
+            (
+                text_items >= 18
+                and index_score >= 14
+                and signal_ratio >= 0.35
+                and (evidence_count >= 2 or stats["digit_short_tokens"] >= 6)
+            )
+            or (stats["index_refs"] >= 4 and stats["short_index_tokens"] >= 8)
+            or (stats["toc_leaders"] >= 5 and signal_ratio >= 0.30)
+        ):
+            dense_pages.add(page_no)
+    return dense_pages
+
+
+def _sanitize_toc_index_text(text: str) -> str:
+    marker = re.compile(r",\s*\d+\s*=")
+    cleaned = marker.sub(" ", text or "")
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
 # ============================================================================
 # CONSTANTS
 # ============================================================================
@@ -667,9 +841,20 @@ class V2DocumentProcessor:
         if self._looks_like_code(text):
             return False
 
-        # Use same validation as heading
-        if not is_valid_heading(text):
-            logger.debug(f"[DENOISE] Rejected content (invalid): '{text}'")
+        # Body text must not be validated as a heading. The heading validator
+        # intentionally rejects long/multi-sentence strings; using it here
+        # drops legitimate element-by-element fallback text from TOC/index
+        # pages when HybridChunker times out on dense Docling cells.
+        if len(text) < 2:
+            logger.debug(f"[DENOISE] Rejected content (too short): '{text}'")
+            return True
+
+        if re.fullmatch(r"(?:page\s*)?\d+", text, flags=re.IGNORECASE):
+            logger.debug(f"[DENOISE] Rejected content (page number): '{text}'")
+            return True
+
+        if not any(c.isalpha() for c in text):
+            logger.debug(f"[DENOISE] Rejected content (no alphabetic text): '{text}'")
             return True
 
         return False
@@ -2397,9 +2582,18 @@ class V2DocumentProcessor:
             "tokenizer": "sentence-transformers/all-MiniLM-L6-v2",
             "max_tokens": 350,  # ~1400 chars — keeps chunks under the 1500-char oversize gate
         }
-        if getattr(self, "_suppress_layout_label_text", False):
+        dense_index_pages = _classify_dense_index_pages(doc)
+        if dense_index_pages:
+            logger.info(
+                "[HYBRID-CHUNKER] Routing dense TOC/index page(s) around "
+                "HybridChunker: %s",
+                sorted((page + page_offset) for page in dense_index_pages),
+            )
+        if getattr(self, "_suppress_layout_label_text", False) or dense_index_pages:
             from .engines.docling_serializers import MmragChunkingSerializerProvider
-            chunker_kwargs["serializer_provider"] = MmragChunkingSerializerProvider()
+            chunker_kwargs["serializer_provider"] = MmragChunkingSerializerProvider(
+                skip_pages=dense_index_pages
+            )
         chunker = HybridChunker(**chunker_kwargs)
 
         # Per-batch time guard: HybridChunker's sentence-transformer
@@ -2415,13 +2609,38 @@ class V2DocumentProcessor:
             signal.alarm(0)  # Cancel alarm
         except TimeoutError:
             signal.alarm(0)
-            logger.warning(
-                f"[HYBRID-CHUNKER-GUARD] Batch exceeded {_chunker_timeout}s "
-                f"time limit. Falling back to element-by-element chunking."
+            logger.error(
+                "[HYBRID-CHUNKER-GUARD] Per-batch timeout fired despite "
+                "pre-flight dense-page routing — investigate which page "
+                "slipped the classifier. Falling back to element-by-element "
+                "chunking."
             )
             raise  # Let caller set _use_hybrid=False via its except block
         finally:
             signal.signal(signal.SIGALRM, old_handler)
+
+        if dense_index_pages:
+            leaked_pages: set[int] = set()
+            kept_doc_chunks = []
+            for dc in doc_chunks:
+                pages = set()
+                if dc.meta and dc.meta.doc_items:
+                    for _it in dc.meta.doc_items:
+                        _p = _docling_item_page_no(_it)
+                        if _p is not None:
+                            pages.add(_p)
+                leak = pages & dense_index_pages
+                if leak:
+                    leaked_pages.update(leak)
+                    continue
+                kept_doc_chunks.append(dc)
+            if leaked_pages:
+                logger.error(
+                    "[HYBRID-CHUNKER] Serializer skip leaked dense page item(s) "
+                    "from page(s) %s; dropping affected DocChunk(s)",
+                    sorted((page + page_offset) for page in leaked_pages),
+                )
+            doc_chunks = kept_doc_chunks
 
         # v2.9: keep DOCUMENT_INDEX (TOC) elements. Previously these
         # were filtered out as boilerplate, but TOC pages contain real
@@ -2671,17 +2890,170 @@ class V2DocumentProcessor:
                 f"text emissions (Docling cell-rich-table cluster)"
             )
 
+        if dense_index_pages:
+            chunks.extend(
+                self._emit_dense_index_page_chunks(
+                    doc=doc,
+                    dense_pages=dense_index_pages,
+                    doc_hash=doc_hash,
+                    source_file=source_file,
+                    file_type=file_type,
+                    page_dims=page_dims,
+                    page_offset=page_offset,
+                )
+            )
+            chunks.sort(key=lambda ch: ch.metadata.page_number if ch.metadata else 0)
+
         # Fill next_text_snippet (skip chunks that don't have a
         # semantic_context — e.g. v2.9 hybrid_chunker_pagesplit emits
         # don't carry one because they lack the dc.contextualize
         # input).
-        for i in range(len(chunks) - 1):
-            ctx = chunks[i].semantic_context
+        for i, ch in enumerate(chunks):
+            ctx = ch.semantic_context
             if ctx is None:
                 continue
-            ctx.next_text_snippet = chunks[i + 1].content[:CONTEXT_SNIPPET_LENGTH]
-
+            ctx.prev_text_snippet = (
+                chunks[i - 1].content[-CONTEXT_SNIPPET_LENGTH:] if i > 0 else None
+            )
+            ctx.next_text_snippet = (
+                chunks[i + 1].content[:CONTEXT_SNIPPET_LENGTH]
+                if i < len(chunks) - 1
+                else None
+            )
         return chunks
+
+    def _emit_dense_index_page_chunks(
+        self,
+        doc: Any,
+        dense_pages: set[int],
+        doc_hash: str,
+        source_file: str,
+        file_type: "FileType",
+        page_dims: Dict[int, Tuple[float, float]],
+        page_offset: int = 0,
+    ) -> List["IngestionChunk"]:
+        chunks: List[IngestionChunk] = []
+
+        clean_name = Path(source_file).stem.replace("_", " ") if source_file else "Document"
+        for raw_page in sorted(dense_pages):
+            index_items = _docling_document_index_items_for_page(doc, raw_page)
+            if index_items:
+                items = index_items
+                lines = [
+                    line
+                    for item in index_items
+                    for line in _docling_document_index_lines(item)
+                ]
+            else:
+                items = _docling_text_items_for_page(doc, raw_page)
+                lines = [
+                    _docling_item_text(item)
+                    for item in items
+                    if _docling_item_text(item)
+                ]
+            text = _sanitize_toc_index_text("\n".join(lines))
+            if not text:
+                continue
+            out_page = raw_page + page_offset
+            page_w, page_h = page_dims.get(out_page, page_dims.get(raw_page, (612.0, 792.0)))
+            bbox = self._union_docling_item_bboxes(items, page_w, page_h)
+            title = "Index"
+            first_line = lines[0].strip().lower() if lines else ""
+            if "contents" in first_line:
+                title = "Contents"
+            hierarchy = HierarchyMetadata(
+                parent_heading=title,
+                breadcrumb_path=[clean_name, title, f"Page {out_page}"],
+                level=3,
+            )
+            parts = self._split_dense_index_text(text, max_chars=6000)
+            for idx, part in enumerate(parts):
+                breadcrumb = list(hierarchy.breadcrumb_path)
+                if len(parts) > 1:
+                    breadcrumb.append(f"Part {idx + 1}")
+                part_hierarchy = HierarchyMetadata(
+                    parent_heading=hierarchy.parent_heading,
+                    breadcrumb_path=breadcrumb,
+                    level=min(len(breadcrumb), 5),
+                )
+                chunk = create_text_chunk(
+                    doc_id=doc_hash,
+                    content=part,
+                    source_file=source_file,
+                    file_type=file_type,
+                    page_number=out_page,
+                    bbox=bbox,
+                    hierarchy=part_hierarchy,
+                    chunk_type=ChunkType.LIST_ITEM,
+                    page_width=int(page_w),
+                    page_height=int(page_h),
+                    extraction_method="hybrid_chunker_pageskip",
+                    position=self._next_chunk_position(),
+                    **self._intelligence_metadata,
+                )
+                chunk.metadata.refined_content = part
+                chunk.metadata.search_priority = "low"
+                chunk.semantic_context = SemanticContext(
+                    prev_text_snippet=None,
+                    next_text_snippet=None,
+                    parent_heading=part_hierarchy.parent_heading,
+                    breadcrumb_path=part_hierarchy.breadcrumb_path,
+                )
+                chunks.append(chunk)
+        return chunks
+
+    def _union_docling_item_bboxes(
+        self,
+        items: List[Any],
+        page_w: float,
+        page_h: float,
+    ) -> List[int]:
+        left, top, right, bottom = COORD_SCALE, COORD_SCALE, 0, 0
+        have_bbox = False
+        for item in items:
+            prov = getattr(item, "prov", None)
+            if not prov:
+                continue
+            first = prov[0] if isinstance(prov, list) else prov
+            bbox = getattr(first, "bbox", None)
+            if not bbox:
+                continue
+            x0 = int(float(getattr(bbox, "l", 0)) / page_w * COORD_SCALE)
+            y0 = int(float(getattr(bbox, "t", 0)) / page_h * COORD_SCALE)
+            x1 = int(float(getattr(bbox, "r", page_w)) / page_w * COORD_SCALE)
+            y1 = int(float(getattr(bbox, "b", page_h)) / page_h * COORD_SCALE)
+            left = min(left, max(0, min(COORD_SCALE, x0)))
+            top = min(top, max(0, min(COORD_SCALE, min(y0, y1))))
+            right = max(right, max(0, min(COORD_SCALE, x1)))
+            bottom = max(bottom, max(0, min(COORD_SCALE, max(y0, y1))))
+            have_bbox = True
+        if have_bbox and right > left and bottom > top:
+            return [left, top, right, bottom]
+        return [0, 0, COORD_SCALE, COORD_SCALE]
+
+    def _split_dense_index_text(self, text: str, max_chars: int) -> List[str]:
+        if len(text) <= max_chars:
+            return [text]
+        lines = [line for line in text.splitlines() if line.strip()]
+        parts: List[str] = []
+        current: List[str] = []
+        current_len = 0
+        for line in lines:
+            extra = len(line) + (1 if current else 0)
+            if current and current_len + extra > max_chars:
+                parts.append("\n".join(current).strip())
+                current = [line]
+                current_len = len(line)
+            else:
+                current.append(line)
+                current_len += extra
+        if current:
+            tail = "\n".join(current).strip()
+            if parts and len(tail) < 200:
+                parts[-1] = f"{parts[-1]}\n{tail}".strip()
+            else:
+                parts.append(tail)
+        return parts or [text]
 
     def _generate_chunk_id(self, doc_hash: str, page_no: int, index: int) -> str:
         """Generate a deterministic chunk ID."""

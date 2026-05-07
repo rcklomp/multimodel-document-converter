@@ -20,6 +20,23 @@ def test_code_not_treated_as_noise(tmp_path):
     assert p._is_noise_content(code) is False
 
 
+def test_long_body_text_not_treated_as_heading_noise(tmp_path):
+    p = _make_processor(tmp_path)
+    text = (
+        "Index entries and table of contents rows can be much longer than a "
+        "valid heading, especially after OCR fallback on dense Docling cells."
+    )
+
+    assert len(text) > 80
+    assert p._is_noise_content(text) is False
+
+
+def test_page_number_only_still_treated_as_noise(tmp_path):
+    p = _make_processor(tmp_path)
+    assert p._is_noise_content("285") is True
+    assert p._is_noise_content("Page 285") is True
+
+
 def test_mixed_prose_and_code_chunking(tmp_path):
     from mmrag_v2.schema.ingestion_schema import ChunkType
 
