@@ -8,13 +8,11 @@ This folder uses a three-layer documentation structure so a new coding session c
    - current project state
    - active models/endpoints, without secrets
    - current quality baseline
-   - immediate next work
+   - immediate next work and per-phase status
 
-2. `docs/PROGRESS_CHECKLIST.md`
-   - executable task checklist
-   - per-workstream status
-   - commands to reproduce checks
-   - handoff protocol
+2. `docs/PLAN_V2.9.md`
+   - active plan; phase-level execution detail
+   - per-phase status and Done-when contracts
 
 3. `AGENTS.md`
    - hard project invariants
@@ -28,7 +26,7 @@ This folder uses a three-layer documentation structure so a new coding session c
    - design decisions and acceptance thresholds
    - quality gates used to decide pass/fail
 
-Read `docs/ARCHITECTURE.md` when changing core pipeline behavior. Read the SRS only as historical v2.5 context; if it conflicts with `AGENTS.md`, `docs/DECISIONS.md`, or `docs/ARCHITECTURE.md`, the current docs win. **Current canonical baseline is `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`** — when a metric appears in both a layer-1 status doc and a dated snapshot, the latest snapshot is canonical (per `docs/AGENT_GOVERNANCE.md` Canonicality Rule).
+Read `docs/ARCHITECTURE.md` when changing core pipeline behavior. Read the SRS only as historical v2.5 context; if it conflicts with `AGENTS.md`, `docs/DECISIONS.md`, or `docs/ARCHITECTURE.md`, the current docs win. **Current canonical baseline is `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`** (last shipped tag is v2.8.0; v2.9 is in progress). When a metric appears in both a layer-1 status doc and a dated snapshot, the latest snapshot is canonical (per `docs/AGENT_GOVERNANCE.md` Canonicality Rule). The `docs/archive/PROGRESS_CHECKLIST.md` historical task log is kept for archaeology only — current task state lives in `docs/PROJECT_STATUS.md` (archived 2026-05-07).
 
 ## Layer Model
 
@@ -58,15 +56,17 @@ Compact project status. These files should be updated whenever a session changes
 
 ### Layer 2: Work Logs And Execution
 
-Operational checklists, commands, and historical notes.
+Operational commands and historical notes.
 
-- `docs/PROGRESS_CHECKLIST.md`
+- `docs/PLAN_V2.9.md` — **active plan** (Phase 1 closed 2026-05-07 in commit `df91061`; Phase 2 is current)
 - `docs/TESTING.md`
 - `docs/CONVERSION_PROFILES.md`
-- `docs/PLAN_V2.9_DRAFT_PROMPT.md` — prompt for drafting `docs/PLAN_V2.9.md` (next execution cycle)
+- `docs/archive/PROGRESS_CHECKLIST.md` — historical executable task log (archived 2026-05-07; current task state moved into `PROJECT_STATUS.md`)
+- `docs/archive/PLAN_V2.9_DRAFT_PROMPT.md` — historical prompt that produced the v2.9 plan; archived 2026-05-07 because the plan it produced is the active document
+- `docs/archive/ACCEPTANCE_ORDER_PROMPT.md` — historical v2.7.x acceptance prompt; archived 2026-05-07
 - `docs/archive/PLAN_V2.8_PRODUCTION_GAPS.md` — **SHIPPED 2026-05-04** (annotated tag `v2.8.0` on `645ab2b`); retained for historical context
 - `docs/archive/PLAN_DOCLING_POSTPROCESSOR.md` — shipped 2026-05-03; folded into v2.8 (post-Docling sanity pass + `digital_literature` profile)
-- `docs/archive/` — completed plans (`PLAN_V2.7_DOCUMENT_UNDERSTANDING.md`, `PLAN_HYBRID_CHUNKER_MIGRATION.md`) and historical notes
+- `docs/archive/` — other completed plans (`PLAN_V2.7_DOCUMENT_UNDERSTANDING.md`, `PLAN_HYBRID_CHUNKER_MIGRATION.md`) and historical notes
 
 ## Update Rules
 
@@ -74,6 +74,5 @@ Operational checklists, commands, and historical notes.
 - If a completion claim or evidence claim changes, apply `docs/AGENT_GOVERNANCE.md`.
 - If adding documentation, obey the documentation budget in `docs/AGENT_GOVERNANCE.md`.
 - If the quality baseline changes, create or update a dated `docs/QUALITY_SNAPSHOT_*.md`.
-- If task status changes, update `docs/PROGRESS_CHECKLIST.md`.
-- If the recommended next step changes, update `docs/PROJECT_STATUS.md`.
+- If task status or recommended next step changes, update `docs/PROJECT_STATUS.md`.
 - Do not bury current-state information in chat history only.

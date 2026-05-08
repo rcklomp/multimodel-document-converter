@@ -3,9 +3,12 @@
 **Status:** Draft v2.0 (2026-05-06) — post-retraction recovery plan
 **Owner:** ingestion pipeline
 **Successor to:** `docs/archive/PLAN_V2.8_PRODUCTION_GAPS.md` (shipped 2026-05-04, tag `v2.8.0` on `645ab2b`)
-**Related:** `docs/PROJECT_STATUS.md`, `docs/PROGRESS_CHECKLIST.md`,
+**Related:** `docs/PROJECT_STATUS.md`,
 `docs/QUALITY_GATES.md`, `docs/DECISIONS.md`, `docs/ARCHITECTURE.md`,
-`docs/AGENT_GOVERNANCE.md`, `AGENTS.md`, `CHANGELOG.md`
+`docs/AGENT_GOVERNANCE.md`, `AGENTS.md`, `CHANGELOG.md`,
+`docs/archive/PROGRESS_CHECKLIST.md` (historical task log; archived
+2026-05-07 — read remaining `PROGRESS_CHECKLIST.md` references in
+this plan as pointers to that archived file)
 
 ---
 
@@ -182,11 +185,11 @@ Current recovery sequence:
 
 | Current phase | Purpose | Status scope |
 |---|---|---|
-| Phase 0 | Establish current strict-gate baseline from the 2026-05-06 snapshot and current working tree | `implemented` once docs/tests agree |
-| Phase 1 | TOC/index page-loss closure contract | active blocker |
-| Phase 2 | Re-verify already-shipped v2.9 fixes under strict gate | pending Phase 1 outputs |
-| Phase 3 | Resolve `IMAGE_DESCRIPTION_UNUSABLE` policy/model behavior | pending page-loss closure |
-| Phase 4 | Resolve localized hard failures (Combat, Adedeji, Devlin, Earthship, Firearms, KI_En_ChatGPT) | pending page-loss closure |
+| Phase 0 | Establish current strict-gate baseline from the 2026-05-06 snapshot and current working tree | `complete` |
+| Phase 1 | TOC/index page-loss closure contract | `complete` (2026-05-07, commit `df91061`) |
+| Phase 2 | Re-verify already-shipped v2.9 fixes under strict gate | `complete` (2026-05-08, verification only — see `docs/QUALITY_SNAPSHOT_2026-05-08_v2.9_phase2_after.md`) |
+| Phase 3 | Resolve `IMAGE_DESCRIPTION_UNUSABLE` policy/model behavior | active |
+| Phase 4 | Resolve localized hard failures (Combat, Adedeji, Devlin, Earthship, Firearms, KI_En_ChatGPT) — Phase 2 added Firearms HEADING coverage and chunk-count drift to scope | active |
 | Phase 5 | Broad reconversion, enrichment, Qdrant drop/recreate, AFTER snapshot | blocked until Phases 1-4 pass strict gate |
 
 ---
@@ -253,7 +256,20 @@ these historical phases.
 
 ---
 
-### Phase 1 — TOC/index page-loss closure contract
+### Phase 1 — TOC/index page-loss closure contract — `complete` 2026-05-07 (commit `df91061`)
+
+> **Closure summary.** Dense-index router via Docling
+> `document_index` label fast-path + `MmragChunkingSerializerProvider(skip_pages=...)`;
+> dedicated grid-traversal emitter with two-layer dedup (byte-equal
+> cell collapse + entry-boundary regex split) producing
+> `extraction_method="hybrid_chunker_pageskip"`; three layered
+> empty-text-chunk guards. Full Kimothi (258 pages) reports
+> `AUDIT_PASS / UNIVERSAL_PASS / HYGIENE_PASS`; Ayeva back-index
+> probe per-page chars 76–105 % of source PDF text (closes prior
+> −30 % token variance). Test suite **628 passed, 14 skipped**.
+> Static `recovery_page_coverage` guard passes; 0 SIGALRM fires
+> on any tested document. The phase body below is retained as
+> historical execution detail.
 
 **What:** Close the strict-gate `MISSING_PAGES` class before any
 new broad conversion, cloud VLM enrichment, Qdrant refresh, tag, or
@@ -433,7 +449,21 @@ than our serializer/filter chain.
 
 ---
 
-### Phase 2 — Re-verify shipped v2.9 fixes under strict gate
+### Phase 2 — Re-verify shipped v2.9 fixes under strict gate — `complete` 2026-05-08
+
+> **Closure summary.** Verification only — no production code edits.
+> All five contracts green: chunk_id uniqueness (5,749 chunks / 0
+> dupes), HARRY refiner-suppressed + acceptance fixture (2 passed,
+> not skipped), Combat refiner-engaged (109 refined chunks, 0
+> edit-ratio spam), Ayeva CodeFormulaV2 (`code_indentation_fidelity=0.9693`),
+> Firearms profile route-flip verified. Smoke baseline 11/11
+> `GATE_PASS + UNIVERSAL_PASS`. Phase 1 invariants hold across every
+> conversion. Step 4 used a split acceptance: route-flip mechanism
+> verified as Phase 2 contract; HEADING coverage and chunk-count
+> drift carried forward to Phase 4. Full evidence in
+> `docs/QUALITY_SNAPSHOT_2026-05-08_v2.9_phase2_after.md`.
+
+
 
 **What:** After Phase 1 produces page-loss-clean outputs, re-verify
 the fixes that already shipped on `main`. This phase is verification,

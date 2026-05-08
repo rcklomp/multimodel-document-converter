@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-05-06
+Last updated: 2026-05-08
 
 Purpose: fast orientation for a new coding session. Read this before deeper project docs.
 
@@ -25,6 +25,44 @@ work" below).
 
 ### v2.9 in-flight fixes (committed)
 
+- **Phase 2 closed (2026-05-08, verification-only)** — re-verified the
+  four shipped v2.9 fixes under the strict gate after Phase 1 outputs.
+  All five contract checks green: chunk_id uniqueness across 5,749
+  chunks (0 dupes); HARRY refiner-suppressed (`refinement_applied=false`
+  on all 651 text chunks) AND HARRY postprocessor acceptance fixture
+  (2 passed, not skipped, with `HARRY_ACCEPTANCE_JSONL=...`); Combat
+  refiner-engaged (109 refined chunks, 0 edit-ratio spam, smart-route
+  fired); Ayeva CodeFormulaV2 lane (`code_indentation_fidelity=0.9693`,
+  `[CODE-ENRICH] Enabled Docling code enrichment` per batch); Firearms
+  route-flip verified (`profile_type=scanned/scanned_degraded`).
+  Smoke baseline 11/11 `GATE_PASS + UNIVERSAL_PASS`. Phase 1
+  invariants hold across every conversion (0 SIGALRM, 0
+  `recovery_page_coverage`, 0 empty text chunks). See
+  `docs/QUALITY_SNAPSHOT_2026-05-08_v2.9_phase2_after.md` and the
+  Config Provenance block recorded there.
+
+  *Carried forward to Phase 4* (split decision documented in the
+  Phase 2 snapshot): Firearms HEADING coverage 72 % (target ≥ 0.80)
+  and chunk-count drift 1690 → 2183 (+29 %). The Phase 4 commit
+  `3fbce7a` route-flip mechanism succeeded, but the OCR/shadow lane
+  on the new profile emits more chunks per page than the v2.8
+  baseline; this is fix work for Phase 4 alongside Combat p66 /
+  Adedeji p301 / KI EPUB.
+- **Phase 1 closed (2026-05-07, commit `df91061`)** — dense-index page
+  router + empty-chunk safety net. `_classify_dense_index_pages`
+  trusts Docling's `document_index` label and routes those pages
+  around HybridChunker via `MmragChunkingSerializerProvider(skip_pages=...)`;
+  a dedicated grid-traversal emitter with two-layer dedup (byte-equal
+  cell collapse + entry-boundary regex split) produces
+  `extraction_method="hybrid_chunker_pageskip"` chunks with no
+  `recovery_page_coverage` and no SIGALRM fires. Three layered guards
+  drop empty text chunks (oversize-breaker, finalize stage,
+  JSONL-write loop) so the strict-gate `empty_text_chunks` invariant
+  holds under full-document conversion. Full Kimothi (258 pages)
+  reports `AUDIT_PASS / UNIVERSAL_PASS / HYGIENE_PASS`; Ayeva back-
+  index probe reports per-page chars 76–105 % of source PDF text
+  layer (closes the prior −30 % token-variance regression). Test
+  suite: **628 passed, 14 skipped**.
 - **chunk_id collision fix** — per-document monotonic ``position``
   hashed into the chunk-id seed; v2.8's 427 within-file dupes
   collapse to zero on a fresh broad reconversion.
@@ -58,17 +96,22 @@ work" below).
 
 ### Open work for v2.9
 
-- **MISSING_PAGES on TOC / index pages.** Affects ~18 of the 26
-  QA_FAIL docs. Frontmatter pages 5–12 (TOC, contents, brief
-  contents) and back-matter index pages produce zero output chunks.
-  Removing the ``DocItemLabel.DOCUMENT_INDEX`` filter at chunker time
-  partially helped; a deeper Docling- or pipeline-side filter is
-  still dropping the rest. The next phase is the binding
-  ``docs/PLAN_V2.9.md`` current Phase 1 contract: re-baseline after removal
-  of final-stage recovery, trace one failing page through Docling raw
-  → serializer → HybridChunker → final filters, then run targeted
-  page-window probes before any broad reconversion or VLM spend.
-  Unblocking this brings most of the failed docs to QA_PASS.
+- **~~MISSING_PAGES on TOC / index pages~~** — closed by Phase 1
+  (commit `df91061`, 2026-05-07). Broad-doc re-verification across
+  the 18 originally-failing docs is folded into Phase 5.
+- **~~Phase 2: re-verify shipped fixes under strict gate~~** — closed
+  2026-05-08 (verification only). See
+  `docs/QUALITY_SNAPSHOT_2026-05-08_v2.9_phase2_after.md`.
+- **Phase 3 active: `IMAGE_DESCRIPTION_UNUSABLE` policy/model.**
+  All Phase 2 conversions ran with `--vision-provider none`, so
+  every image chunk has `image_placeholder_ratio=1.0`. Phase 3 owns
+  the calibration of "complete but terse" VLM descriptions vs
+  hard-fail. Plan in `docs/PLAN_V2.9.md` Phase 3.
+- **Phase 4 active: localized strict-gate hard failures.**
+  Original scope: Combat p66 / Adedeji p301 / KI EPUB / Devlin /
+  Earthship / Firearms re-evaluation. Phase 2 added: Firearms
+  HEADING coverage 72 % → ≥ 0.80 and chunk-count drift +29 % → ±2 %.
+  Plan in `docs/PLAN_V2.9.md` Phase 4.
 - **Combat Aircraft p66.** The squadron-roster table chunk still
   contains the corrupted typography that the OCR-failure regex
   doesn't quite match (em-dash run shorter than the 6-in-a-row
@@ -142,8 +185,8 @@ been removed.
 
 | Area | v2.8 baseline | v2.9 working state | Strict-gate PASS? |
 |---|---|---|---|
-| `Ayeva_Python_Patterns` | FAIL CODE, `indentation_fidelity=0.83`, profile=`digital_literature` | profile=`technical_manual`, `indentation_fidelity=0.96` | FAIL — MISSING_PAGES on frontmatter (TOC) |
-| `Sekar_MCP_Standard` | FAIL | dedup + reconv lifted indentation | FAIL — MISSING_PAGES |
+| `Ayeva_Python_Patterns` | FAIL CODE, `indentation_fidelity=0.83`, profile=`digital_literature` | profile=`technical_manual`, `indentation_fidelity=0.96` | TOC MISSING_PAGES closed by Phase 1; CODE indentation pending Phase 2 (CodeFormulaV2 lane) |
+| `Sekar_MCP_Standard` | FAIL | dedup + reconv lifted indentation | TOC MISSING_PAGES closed by Phase 1; pending broad re-verification |
 | chunk_id collisions corpus-wide | 427 within-file dupes | 0 | (gate clean) |
 | Refiner smart-routing | HARRY hammered qwen-plus | HARRY `refinement_applied=0`; Combat `refinement_applied=90` | (gate clean) |
 | Image enrichment | ~5,500 placeholders | 4,329 enriched / 46 hard_fallback (1.0% corpus rate) | mostly clean; short descriptions still flag a few docs |
@@ -153,8 +196,9 @@ been removed.
 
 ### Open issues blocking the strict-gate ship
 
-- TOC/index page-drop in 18 docs (frontmatter pages 5–12 and
-  back-matter index pages produce zero chunks).
+- ~~TOC/index page-drop in 18 docs~~ closed by Phase 1
+  (commit `df91061`, 2026-05-07). Broad-doc re-verification deferred
+  to Phase 5.
 - Combat p66 table chunk still has corrupted typography (em-dash
   run just under threshold).
 - Short VLM descriptions (<20 chars) flag a few docs as having
@@ -176,12 +220,14 @@ been removed.
 ## Active Engineering Direction
 
 v2.9 development continues. The 10+ root-cause fixes already on
-`main` are kept (chunk_id, refiner routing, cross-page split,
-page-scoped dedup/merge, corruption interceptor extension, full-page
-defer, enrichment content-field). Remaining work to actually tag
-`v2.9.0`: close the TOC/index page-drop, the Combat p66 corruption,
-the short-VLM-description gate calibration, and the localized doc
-audits — then refresh `mmrag_v2_8` from the v2.9 corpus.
+`main` are kept, plus the Phase 1 dense-index router (commit
+`df91061`) which closes the TOC/index page-drop class. Remaining
+work to actually tag `v2.9.0`: complete Phase 2 (re-verify shipped
+fixes under strict gate, especially Ayeva CodeFormulaV2 +
+indentation), Phase 3 (short-VLM-description gate calibration),
+Phase 4 (Combat p66 corruption + localized doc audits), then
+Phase 5 broad reconversion + refresh `mmrag_v2_8` from the v2.9
+corpus.
 
 The broader UIR refactor (canonical PdfConversionPlan →
 UniversalDocument → ElementProcessor → chunks per CLAUDE.md) remains
@@ -193,7 +239,8 @@ PCWorld VLM evidence remains valid: raw text-reading detections 36.5% → 22.2%,
 
 Reverse-chronological. Each entry's evidence files are tracked. The `[Folded into 2.8.0]` items still appear in chronological CHANGELOG entries but the consolidated v2.8 closure is the canonical artifact.
 
-- **PLAN_V2.8 (production gaps + broad reconversion + Qdrant re-ingestion):** SHIPPED 2026-05-04. 7 commits on main `5b0e13d → 645ab2b`. Test suite **596 passed, 2 skipped, 0 failed**. Smoke **11/11 GATE_PASS + 11/11 UNIVERSAL_PASS**. Broad reconversion 34/34 PDF/EPUB exit=0. `mmrag_v2_8` Qdrant collection: 22,137 / 22,160 unique embeddable chunks. See `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md` and `CHANGELOG.md` `[2.8.0]`.
+- **PLAN_V2.9 Phase 1 (TOC/index page-loss closure):** `complete` (2026-05-07, commit `df91061`). Dense-index page router via Docling `document_index` label fast path + `MmragChunkingSerializerProvider(skip_pages=...)`; dedicated grid-traversal emitter with two-layer dedup; three layered empty-text-chunk guards (oversize-breaker, finalize stage, JSONL-write loop). Full Kimothi (258 pages) reports `AUDIT_PASS / UNIVERSAL_PASS / HYGIENE_PASS`; Ayeva back-index probe per-page chars 76–105 % of source PDF text (closes prior −30 % token variance). Test suite **628 passed, 14 skipped, 0 failed**. Static `recovery_page_coverage` guard passes. SIGALRM did not fire on any tested document.
+- **PLAN_V2.8 (production gaps + broad reconversion + Qdrant re-ingestion):** SHIPPED 2026-05-04. 7 commits on main `5b0e13d → 645ab2b`. Test suite **596 passed, 2 skipped, 0 failed** (at v2.8 ship; current main is 628). Smoke **11/11 GATE_PASS + 11/11 UNIVERSAL_PASS**. Broad reconversion 34/34 PDF/EPUB exit=0. `mmrag_v2_8` Qdrant collection: 22,137 / 22,160 unique embeddable chunks. See `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md` and `CHANGELOG.md` `[2.8.0]`.
 - Post-Docling Sanity Pass + `digital_literature` profile (folded into v2.8): `complete` (2026-05-03, commits `3bdbe0f`, `2f51816`, `379a733`). Reading-order y-sort, drop-cap promotion, label-leak filter, OCR gating, `digital_literature` profile + scorer + strategy.
 - Contextual Retrieval (Anthropic approach): `complete` (2026-05-01). Embed-time `build_contextualized_text(...)` with breadcrumb + heading + neighbor context, AGENT-CONTEXTUAL-01..07 invariants, AST-level drift guard, byte-stable `--no-contextual` rollback flag.
 - Refactor Boundary Closeout: `complete` (2026-05-01). Removed `BatchProcessor.set_intelligence_metadata` deprecated `[V2.8-COMPAT]` API; added typed-policy round-trip drift insurance test.
@@ -204,17 +251,19 @@ Reverse-chronological. Each entry's evidence files are tracked. The `[Folded int
 
 ## Immediate Next Work
 
-Follow `docs/PLAN_V2.9_DRAFT_PROMPT.md` to draft `docs/PLAN_V2.9.md`, then execute its phases.
+`docs/PLAN_V2.9.md` is the active plan; the draft prompt that produced
+it has been archived (`docs/archive/PLAN_V2.9_DRAFT_PROMPT.md`).
 
-v2.9 priority sequence (per the prompt's §2):
+Phase status (per Plan §3 sequence):
 
-1. VLM enrichment of `mmrag_v2_8` Qdrant collection (highest user impact).
-2. Refiner smart-routing fix in `cli.py:686`.
-3. ProfileClassifier rule 0c tightening (Ayeva → CodeFormulaV2 recovery).
-4. Firearms heading regression (respect `AGENT-SPATIAL-20`; route fix preferred).
-5. Within-file chunk_id collision fix in `_generate_chunk_id`.
-6. Local VLM comparison (Workstream A — direct dependency for #1).
-7. Remote CodeFormulaV2 inference target (only if code-heavy reconversions become routine).
+| Phase | Scope | Status |
+|---|---|---|
+| Phase 0 | Establish strict-gate baseline | `complete` |
+| Phase 1 | TOC/index page-loss closure | `complete` (2026-05-07, `df91061`) |
+| Phase 2 | Re-verify shipped fixes under strict gate | `complete` (2026-05-08, verification only — see `QUALITY_SNAPSHOT_2026-05-08_v2.9_phase2_after.md`) |
+| Phase 3 | Resolve `IMAGE_DESCRIPTION_UNUSABLE` | active |
+| Phase 4 | Localized strict-gate hard failures (Combat p66, Adedeji p301, KI EPUB, Firearms HEADING + chunk-count drift carried from Phase 2) | active |
+| Phase 5 | Broad reconversion + Qdrant refresh + AFTER snapshot | blocked on Phases 3-4 |
 
 ## Must-Respect Constraints
 

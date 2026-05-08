@@ -85,15 +85,16 @@ Companion docs:
 ## 💾 4. AGENT MEMORY & CONTEXT PROTOCOL
 1. Start sessions with the indexed handoff path:
    - `docs/PROJECT_STATUS.md`
-   - `docs/PROGRESS_CHECKLIST.md`
    - `docs/README.md`
+   - `docs/PLAN_V2.9.md` (active plan)
+   - `docs/archive/PROGRESS_CHECKLIST.md` (historical task log only — task state moved into `PROJECT_STATUS.md` on 2026-05-07)
 2. Use the three-layer documentation model:
    - Layer 0 contracts: this file, `CLAUDE.md`, `docs/AGENT_GOVERNANCE.md`, `docs/DECISIONS.md`, `docs/QUALITY_GATES.md`, `docs/ARCHITECTURE.md`, SRS.
    - Layer 1 current state: `docs/PROJECT_STATUS.md`, dated quality snapshots.
-   - Layer 2 execution: `docs/PROGRESS_CHECKLIST.md`, `docs/TESTING.md`, plans, run logs, archive.
+   - Layer 2 execution: `docs/PLAN_V2.9.md`, `docs/TESTING.md`, run logs, archive.
 3. Cross-check nontrivial changes against `docs/ARCHITECTURE.md` for UIR compliance.
 4. Before marking a task complete or expanding docs, apply `docs/AGENT_GOVERNANCE.md`.
-5. When finishing a task, update `docs/PROGRESS_CHECKLIST.md`; update `docs/PROJECT_STATUS.md` if the next recommended step changed; create/update a dated quality snapshot if quality numbers changed.
+5. When finishing a task, update `docs/PROJECT_STATUS.md` (current state + recommended next step) and create/update a dated quality snapshot if quality numbers changed.
 
 ---
 
@@ -115,16 +116,16 @@ Companion docs:
 **QA policy:** All profiles use the standard 10% token variance tolerance. See `docs/QUALITY_GATES.md`.
 
 ### Priority TODOs (Open — v2.9 scope)
-Source: `docs/PLAN_V2.9_DRAFT_PROMPT.md` §2 (priorities 1-7). Top items:
-1. VLM enrichment of the `mmrag_v2_8` Qdrant collection (~5,500 image chunks have placeholder descriptions because v2.8 broad reconversion ran with `--vision-provider none`).
-2. Refiner smart-routing fix (`cli.py:686` config-default ignores `has_encoding_corruption`).
-3. ProfileClassifier rule 0c tightening (Ayeva mis-routed to `digital_literature`, suppresses CodeFormulaV2 → 0.83 vs 0.85 gate).
-4. Firearms heading regression — but FIX MUST RESPECT `AGENT-SPATIAL-20`; either re-route via `profile_classifier.py` (preferred) or propose explicit AGENT-SPATIAL-20 amendment.
-5. Within-file chunk_id collision fix (`_generate_chunk_id` should include position index; 427 dupes across the v2.8 corpus).
-6. Local VLM comparison (Workstream A — direct dependency for #1).
-7. Remote CodeFormulaV2 inference target (only if code-heavy reconversions become routine).
-5. Re-ingest to Qdrant after all documents pass.
-6. Establish per-category blind-test baselines for all document categories in the smoke test matrix.
+Source: `docs/PLAN_V2.9.md` (active plan; per-phase status in `docs/PROJECT_STATUS.md`). Original prompt that produced the plan is preserved at `docs/archive/PLAN_V2.9_DRAFT_PROMPT.md`. Snapshot of v2.9 progress:
+
+- Phase 0 (baseline) — `complete`.
+- Phase 1 (TOC/index page-loss closure) — `complete` 2026-05-07 (commit `df91061`).
+- Phase 2 (re-verify shipped fixes under strict gate) — active. Items: chunk_id uniqueness, refiner smart-routing on HARRY/Combat, Ayeva CodeFormulaV2 + `indentation_fidelity ≥ 0.85`, Firearms scanned-profile + HEADING ≥ 0.80, HARRY digital_literature acceptance fixture.
+- Phase 3 (`IMAGE_DESCRIPTION_UNUSABLE` policy/model) — blocked on Phase 2.
+- Phase 4 (Combat p66, Adedeji p301, KI EPUB) — blocked on Phase 2.
+- Phase 5 (broad reconversion + Qdrant refresh + AFTER snapshot) — blocked on Phases 1-4.
+
+Deferred to v2.10 per `docs/PLAN_V2.9.md` §2 Non-Goals: local VLM comparison (Workstream A); remote CodeFormulaV2 inference target.
 
 ### Recently Completed (Do Not Reopen)
 1. `--force-ocr` override is implemented.

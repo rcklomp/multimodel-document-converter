@@ -4,20 +4,21 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## Read First
 1. `docs/PROJECT_STATUS.md`
-2. `docs/PROGRESS_CHECKLIST.md`
-3. `AGENTS.md`
-4. `docs/README.md`
-5. `docs/AGENT_GOVERNANCE.md`
-6. `docs/DECISIONS.md`
-7. `docs/TESTING.md`
-8. `docs/QUALITY_GATES.md`
-9. `docs/ARCHITECTURE.md`
-10. `docs/archive/SRS_Multimodal_Ingestion_V2.5.md`
+2. `AGENTS.md`
+3. `docs/README.md`
+4. `docs/AGENT_GOVERNANCE.md`
+5. `docs/DECISIONS.md`
+6. `docs/TESTING.md`
+7. `docs/QUALITY_GATES.md`
+8. `docs/ARCHITECTURE.md`
+9. `docs/PLAN_V2.9.md` (active plan)
+10. `docs/archive/PROGRESS_CHECKLIST.md` (historical execution log; archived 2026-05-07 — current task state lives in `PROJECT_STATUS.md`)
+11. `docs/archive/SRS_Multimodal_Ingestion_V2.5.md`
 
 Use the three-layer docs model:
 - Layer 0 contracts: invariants, governance, decisions, architecture, quality gates.
 - Layer 1 current state: project status and quality snapshots.
-- Layer 2 execution: progress checklist, tests, plans, and archive.
+- Layer 2 execution: tests, active plan, and archive (per-task history lives in `docs/archive/PROGRESS_CHECKLIST.md`).
 
 ## Engineering Principles
 

@@ -24,6 +24,28 @@ work). Schema version stays **2.7.0** (no chunk-shape change). The
 `v2.9.0` git tag is **not** present.
 
 ### Added
+- **Phase 1 (TOC/index page-loss closure) — committed 2026-05-07 in `df91061`**
+  (`tests/test_hybrid_chunker_dense_page_router.py`,
+  `tests/test_toc_index_page_contract.py` env-gated): dense-index
+  page router via Docling's `document_index` label fast path +
+  `MmragChunkingSerializerProvider(skip_pages=...)` so HybridChunker
+  never tokenizes those pages; dedicated grid-traversal emitter with
+  two-layer dedup (byte-equal cell collapse + entry-boundary regex
+  split `(?<=\d)\s+(?=[A-Za-z])`) producing
+  `extraction_method="hybrid_chunker_pageskip"`. Three layered
+  empty-text-chunk safety nets prevent the strict-gate
+  `empty_text_chunks` invariant from ever tripping
+  (`_apply_oversize_breaker` filters empty parts; finalize stage
+  drops empty text chunks before `IngestionMetadata` write;
+  JSONL-write loop skips text rows whose content was zeroed by the
+  technical-manual line-stripper sanitiser). 120 s SIGALRM kept as
+  a load-bearing safety net, downgraded to ERROR with
+  should-not-fire wording. Validation: full Kimothi (258 pages)
+  reports `AUDIT_PASS / UNIVERSAL_PASS / HYGIENE_PASS`; Ayeva
+  back-index probe reports per-page chars 76–105 % of source PDF
+  text (closes prior −30 % token variance). Test suite **628 passed,
+  14 skipped, 0 failed**. Static `recovery_page_coverage` guard
+  passes; SIGALRM did not fire on any tested document.
 - **Phase 1 chunk_id collision fix**
   (`tests/test_chunk_id_collision_v29.py`, 4 new tests): the schema
   factory `_generate_chunk_id` now hashes a per-document monotonic

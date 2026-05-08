@@ -64,7 +64,7 @@ A workstream may be marked `complete` only when:
 2. Evidence is durable (`tracked` or `snapshot`).
 3. Known limitations are documented.
 4. Required local/cloud comparisons are completed or explicitly removed from scope.
-5. `PROJECT_STATUS.md`, `PROGRESS_CHECKLIST.md`, and snapshots agree.
+5. `PROJECT_STATUS.md` and snapshots agree (per-task history lives in `docs/archive/PROGRESS_CHECKLIST.md`; current task state belongs in `PROJECT_STATUS.md`).
 6. A fresh coding session can reproduce the claim without chat history.
 
 Never mark complete when evidence is ignored, provider-specific but generalized, local validation is pending, or a qualitative task was checked only with generic tests.
@@ -99,19 +99,18 @@ Before finalizing nontrivial work, check:
 Keep docs useful by limiting growth:
 
 - `docs/PROJECT_STATUS.md`: target <=150 lines.
-- `docs/PROGRESS_CHECKLIST.md`: target <=350 lines.
 - `docs/AGENT_GOVERNANCE.md`: target <=140 lines.
+- `docs/archive/PROGRESS_CHECKLIST.md` is the historical task log; do not grow it (archived 2026-05-07).
 - Dated snapshots: create only when quality state changes materially.
 - Archive stale plans instead of duplicating them.
 
-When adding more than 50 lines of documentation, remove, consolidate, or archive stale detail unless the new content is a durable contract. Current state belongs in `PROJECT_STATUS.md`; task state belongs in `PROGRESS_CHECKLIST.md`; evidence belongs in dated snapshots.
+When adding more than 50 lines of documentation, remove, consolidate, or archive stale detail unless the new content is a durable contract. Current state and task state both belong in `PROJECT_STATUS.md`; evidence belongs in dated snapshots; per-task history lives in `docs/archive/PROGRESS_CHECKLIST.md`.
 
 ## Canonicality Rule (added 2026-05-04)
 
 When a metric (e.g. `indentation_fidelity`, `encoding_artifacts`,
-`ctrl_chunks`) appears in BOTH a layer-1 status doc (`PROJECT_STATUS.md`,
-`PROGRESS_CHECKLIST.md`) AND a layer-2 dated snapshot, **the latest
-dated snapshot is canonical.** The current canonical baseline is named
+`ctrl_chunks`) appears in BOTH a layer-1 status doc (`PROJECT_STATUS.md`)
+AND a layer-2 dated snapshot, **the latest dated snapshot is canonical.** The current canonical baseline is named
 in `PROJECT_STATUS.md` "Active Baseline" (the first bullet).
 
 When v2.N work supersedes a metric reported in a prior snapshot or
