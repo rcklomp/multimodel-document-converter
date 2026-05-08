@@ -478,6 +478,64 @@ def detect_text_reading(response: str) -> bool:
     if len(actual_caps) > 2:
         return True
 
+    # Pattern 7: smart-quote variants. Pattern 4 catches ASCII quotes only;
+    # qwen3-vl-plus sometimes returns curly quotes (U+201C/D, U+2018/9) or
+    # guillemets (U+00AB/BB, U+2039/A) which slip through. Same length
+    # threshold logic as Pattern 4.
+    if re.search(
+        r"[“‘«‹]"
+        r"[A-Za-z0-9]"
+        r"[^”’»›]{1,}"
+        r"[”’»›]",
+        response,
+    ):
+        return True
+
+    # Pattern 8: markdown emphasis around capitalized phrases (`*Alan Wake*`,
+    # `**Foo Bar**`). At least one capital + 3+ chars between the asterisks
+    # filters out incidental `*emphasis*` of common words while catching the
+    # proper-noun-reading shape observed in real VLM output.
+    if re.search(r"\*{1,2}[A-Z][\w\s\-:]{2,}\*{1,2}", response):
+        return True
+
+    # Pattern 9: parenthesized comma-list of three or more items where most
+    # items are Capitalized words, dotted identifiers, or camelCase tokens —
+    # UI label dumps, YAML field-name lists, settings-menu enumerations.
+    # Two-step check protects legitimate descriptions like "(top, middle,
+    # bottom)" or "(red, blue, green)" which carry no capital/dot/camelCase.
+    _paren_list = re.search(
+        r"\(\s*([\w.][\w. ]*(?:\s*,\s*[\w.][\w. ]*){2,})\s*\)", response
+    )
+    if _paren_list:
+        items = [s.strip() for s in _paren_list.group(1).split(",")]
+        code_shape = sum(
+            1
+            for it in items
+            if it
+            and (it[0].isupper() or "." in it or re.search(r"[a-z][A-Z]", it))
+        )
+        if code_shape >= 3:
+            return True
+
+    # Pattern 10: any URL or domain-with-path in the description body —
+    # `https://x.y/z`, bare `fave.co/4n4knLo`. URLs in descriptions are
+    # always text-reading; the visual contains them, not the description.
+    if re.search(
+        r"\bhttps?://\S+|\b[a-z][a-z0-9-]+\.[a-z]{2,}/[A-Za-z0-9_\-./?=&%#]+",
+        response,
+    ):
+        return True
+
+    # Pattern 11: three or more DISTINCT dotted identifiers in the body
+    # (e.g. apiVersion, spec.containers.name, ports.containerPort). One or
+    # two might be legitimate technical context for an architecture diagram;
+    # three+ distinct dotted tokens is field-list transcription.
+    _dotted_idents = set(
+        re.findall(r"\b[a-z][a-zA-Z0-9]*\.[a-zA-Z][\w.]*\b", response)
+    )
+    if len(_dotted_idents) >= 3:
+        return True
+
     return False
 
 

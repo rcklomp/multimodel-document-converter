@@ -204,6 +204,72 @@ class TestDetectTextReading:
         response = "Technical SCHEMATIC showing ASSEMBLY process"
         assert not detect_text_reading(response)
 
+    # =========================================================================
+    # Phase 3 Step 0 empirical leak fixtures (qwen3-vl-plus, 2026-05-08)
+    # — strengthening Patterns 7-11 closes the leak classes that slipped past
+    # the prior validator on real cloud output.
+    # =========================================================================
+
+    def test_smart_quote_variants_are_caught(self):
+        """Curly quotes / guillemets bypass the ASCII-quote pattern."""
+        # PCWorld p24 leak: search-term encoded with curly quotes.
+        leaked = 'Screenshot showing search results for “alan” with four games.'
+        assert detect_text_reading(leaked)
+        leaked = "Screenshot of «Compose» button highlighted in sidebar."
+        assert detect_text_reading(leaked)
+
+    def test_markdown_emphasis_proper_nouns_caught(self):
+        """Markdown italics around proper nouns transcribe text via formatting."""
+        # PCWorld p24 leak class.
+        leaked = "Game library showing *Alan Wake*, *Alan Wake Remastered*, and *American Nightmare*."
+        assert detect_text_reading(leaked)
+
+    def test_parenthesized_label_list_caught(self):
+        """Parenthesized comma-lists of capitalized labels are UI text-reading."""
+        # PCWorld p26 leak: Gmail sidebar folders listed in parens.
+        leaked = (
+            "Software interface showing sidebar navigation with labeled folders "
+            "(Inbox, Starred, Snoozed, Sent, Drafts)."
+        )
+        assert detect_text_reading(leaked)
+
+    def test_url_in_description_caught(self):
+        """Bare URLs / domain-with-path in description are always text-reading."""
+        # PCWorld p9 leak: hyperlink rendered in the visual.
+        leaked = "Text block with paragraph formatting and a hyperlink (fave.co/4n4knLo)."
+        assert detect_text_reading(leaked)
+        # https variant for completeness.
+        leaked = "Diagram with a callout pointing to https://example.com/docs."
+        assert detect_text_reading(leaked)
+
+    def test_dotted_identifier_list_caught(self):
+        """Three+ distinct dotted identifiers = field-list transcription."""
+        # Hao p75 leak: YAML field names enumerated in description.
+        leaked = (
+            "System schematic showing labeled fields and arrows pointing to key "
+            "parameters (apiVersion, kind, metadata.name, spec.containers.name, "
+            "image, ports.containerPort)."
+        )
+        assert detect_text_reading(leaked)
+
+    def test_strengthened_patterns_do_not_overfire_on_legitimate_visuals(self):
+        """Negative shapes — strengthening must not reject genuine visual descriptions."""
+        legitimate = [
+            "A line chart with two trend lines on a grid.",
+            "Photograph of a laptop on a wooden desk under warm lighting.",
+            "Diagram showing two boxes connected by an arrow.",
+            "Bar chart with colored bars, axes, and category labels.",
+            # Parenthesized list of lowercase positional words must NOT fire (Pattern 9
+            # protects via the capital/dot/camelCase filter).
+            "Diagram with three nodes (top, middle, bottom) arranged horizontally.",
+            "Color palette swatch (red, green, blue) on white background.",
+            # A single dotted identifier in technical context is allowed (Pattern 11
+            # requires three+ distinct).
+            "Architecture diagram showing module.method as the entry point.",
+        ]
+        for r in legitimate:
+            assert not detect_text_reading(r), f"False positive: {r!r}"
+
 
 class TestValidateVLMResponse:
     """Test cases for validate_vlm_response() function."""
