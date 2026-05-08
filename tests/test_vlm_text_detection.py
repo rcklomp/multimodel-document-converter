@@ -270,6 +270,69 @@ class TestDetectTextReading:
         for r in legitimate:
             assert not detect_text_reading(r), f"False positive: {r!r}"
 
+    # =========================================================================
+    # Phase 3 Step 0 v2 empirical leak fixtures (qwen3-vl-plus, 2026-05-09)
+    # — strengthening Patterns 0/0b/12/13/14 closes leak classes that slipped
+    # past Patterns 7-11. Each fixture is the actual leaked phrase from the
+    # real flagged chunk.
+    # =========================================================================
+
+    def test_provided_image_meta_caught(self):
+        """Prompt/asset meta-references via 'the provided image' frame."""
+        # PCWorld p31 / p45 leak: response opens with prompt-echo language.
+        leaked = "The provided image is a mostly blank white field with a thin vertical strip."
+        assert detect_text_reading(leaked)
+
+    def test_instructional_self_reference_caught(self):
+        """'Therefore, per the rules' / 'following the instructions' shapes."""
+        # PCWorld p31 / p45 leak: model reasons about the prompt.
+        leaked = "A mostly blank field. Therefore, per the rules: this is not a diagram."
+        assert detect_text_reading(leaked)
+        leaked = "Following the instructions, this image lacks a structured diagram."
+        assert detect_text_reading(leaked)
+
+    def test_class_noun_followed_by_list_caught(self):
+        """'columns for prompts, reference trajectories, ...' — Adedeji p187."""
+        leaked = (
+            "Table of evaluation metrics with columns for prompts, reference "
+            "trajectories, responses, latency, failure status, predicted "
+            "trajectories, and scores."
+        )
+        assert detect_text_reading(leaked)
+
+    def test_list_followed_by_class_noun_caught(self):
+        """'Group, Name, Status, ... columns' — Hao p182."""
+        leaked = (
+            "Table showing Group, Name, Status, Status Name, Type, Node, Start "
+            "Time, and Operation columns with status indicators."
+        )
+        assert detect_text_reading(leaked)
+
+    def test_unicode_flow_arrows_caught(self):
+        """'(Input → LLM → Output)' — Adedeji p35."""
+        leaked = "Diagram with green section showing a linear flow (Input → LLM → Output)."
+        assert detect_text_reading(leaked)
+
+    def test_strengthened_v2_patterns_do_not_overfire(self):
+        """Negative shapes for the v2 additions — must not reject legitimate descriptions."""
+        legitimate = [
+            # Lowercase comma-list of 3 colors with no class-noun anchor.
+            "A flag with red, white, and blue stripes arranged horizontally.",
+            # 'columns' but the list is 2 items + adjective, not a label list.
+            "Bar chart with two columns showing measured and expected values.",
+            # 'fields' as a regular plural noun, not a structural label list.
+            "Photograph of green fields under a clear blue sky.",
+            # 'labels' as part of natural prose without an enumerated list.
+            "Diagram with axis labels and a legend in the lower right corner.",
+            # Single ASCII arrow in technical context — should NOT fire (Pattern 14
+            # requires 2+ ASCII arrows).
+            "Code-flow diagram showing input -> output as a single transformation.",
+            # Pre-existing legitimate shape — re-asserted to guard against regression.
+            "Bar chart with colored bars, axes, and category labels.",
+        ]
+        for r in legitimate:
+            assert not detect_text_reading(r), f"False positive: {r!r}"
+
 
 class TestValidateVLMResponse:
     """Test cases for validate_vlm_response() function."""

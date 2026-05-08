@@ -357,8 +357,24 @@ def detect_text_reading(response: str) -> bool:
         "this page discusses",
         "the page contains",
         "this page contains",
+        # Prompt/asset meta-references (model echoing its own prompt framing).
+        # Phase 3 Step 0 surfaced these on PCWorld p31 + p45.
+        "the provided image",
+        "the provided picture",
+        "the provided figure",
+        "the provided photo",
     ]
     if any(t in response_lower for t in meta_terms):
+        return True
+
+    # Pattern 0b: Instructional self-reference. Catches "per the rules",
+    # "following the instructions", "according to the prompt", etc. — the
+    # model reasoning about the prompt instead of describing the visual.
+    if re.search(
+        r"\b(?:per|following|according to)\s+(?:the\s+)?"
+        r"(?:rules?|instructions?|prompt|guidelines?|criteria)\b",
+        response_lower,
+    ):
         return True
 
     # Pattern 1: "The text says/reads..." patterns
@@ -534,6 +550,49 @@ def detect_text_reading(response: str) -> bool:
         re.findall(r"\b[a-z][a-zA-Z0-9]*\.[a-zA-Z][\w.]*\b", response)
     )
     if len(_dotted_idents) >= 3:
+        return True
+
+    # Pattern 12: class-noun followed by a 4+ comma-separated list (column
+    # / field / label enumerations). Phase 3 Step 0 leak shape: "columns
+    # for prompts, reference trajectories, responses, latency, ..." —
+    # Adedeji p187. The class-noun anchor + 4-item floor protects natural
+    # prose like "data for users, orders, and products" (3 items) and
+    # "colored bars, axes, and category labels" (3 items where 'labels' is
+    # part of a compound noun, not a structural pointer to the list).
+    _CLASS_NOUNS = (
+        r"columns?|rows?|fields?|headers?|labels?|categories|tabs?|"
+        r"options?|metrics?|parameters?|attributes?|properties|sections?"
+    )
+    if re.search(
+        rf"\b(?:{_CLASS_NOUNS})\s+"
+        r"(?:for|with|of|are|named|labeled|including|are:|named:)?\s*"
+        r"(?:[a-zA-Z][\w\- ]{0,30}\s*,\s*){3,}"
+        r"(?:and\s+)?[a-zA-Z][\w\- ]{0,30}\b",
+        response,
+    ):
+        return True
+
+    # Pattern 13: 4+ comma-separated items followed by a class-noun. Phase 3
+    # Step 0 leak shape: "showing Group, Name, Status, ... columns" — Hao
+    # p182. Mirror of Pattern 12 with the structural noun as the suffix.
+    # 4-item floor for the same reason as Pattern 12.
+    if re.search(
+        r"(?:[a-zA-Z][\w\- ]{0,30}\s*,\s*){3,}"
+        r"(?:and\s+)?[a-zA-Z][\w\- ]{0,30}\s+"
+        rf"(?:{_CLASS_NOUNS})\b",
+        response,
+    ):
+        return True
+
+    # Pattern 14: flow arrows in the description body. Unicode arrow glyphs
+    # ALWAYS indicate the model is transcribing flow chains with their
+    # labels (the visual structure of a flow can be described without
+    # rendering the arrow character). ASCII arrow forms (->, =>) are
+    # softer signals; only fire on 2+ since they can appear singly in
+    # legitimate technical context.
+    if re.search(r"[→⟶⇒⟹↦↪➡]", response):
+        return True
+    if len(re.findall(r"->|=>", response)) >= 2:
         return True
 
     return False
