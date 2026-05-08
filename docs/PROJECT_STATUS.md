@@ -106,7 +106,8 @@ work" below).
   All Phase 2 conversions ran with `--vision-provider none`, so
   every image chunk has `image_placeholder_ratio=1.0`. Phase 3 owns
   the calibration of "complete but terse" VLM descriptions vs
-  hard-fail. Plan in `docs/PLAN_V2.9.md` Phase 3.
+  hard-fail. Execution plan in `docs/PLAN_V2.9__STEP3.md`
+  (master-plan summary in `docs/PLAN_V2.9.md` Phase 3).
 - **Phase 4 active: localized strict-gate hard failures.**
   Original scope: Combat p66 / Adedeji p301 / KI EPUB / Devlin /
   Earthship / Firearms re-evaluation. Phase 2 added: Firearms

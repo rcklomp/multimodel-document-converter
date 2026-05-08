@@ -58,7 +58,9 @@ Compact project status. These files should be updated whenever a session changes
 
 Operational commands and historical notes.
 
-- `docs/PLAN_V2.9.md` — **active plan** (Phase 1 closed 2026-05-07 in commit `df91061`; Phase 2 is current)
+- `docs/PLAN_V2.9.md` — **active master plan** (Phase 1 closed 2026-05-07 in `df91061`; Phase 2 closed 2026-05-08 in `29a7242`; Phase 3 active)
+- `docs/PLAN_V2.9__STEP3.md` — Phase 3 execution sub-plan (split out 2026-05-08 for review-isolation; the master plan's Phase 3 section is the summary)
+- `docs/QUALITY_SNAPSHOT_2026-05-08_v2.9_phase2_after.md` — Phase 2 closure snapshot (Config Provenance + per-step results)
 - `docs/TESTING.md`
 - `docs/CONVERSION_PROFILES.md`
 - `docs/archive/PROGRESS_CHECKLIST.md` — historical executable task log (archived 2026-05-07; current task state moved into `PROJECT_STATUS.md`)

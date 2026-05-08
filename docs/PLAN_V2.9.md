@@ -188,7 +188,7 @@ Current recovery sequence:
 | Phase 0 | Establish current strict-gate baseline from the 2026-05-06 snapshot and current working tree | `complete` |
 | Phase 1 | TOC/index page-loss closure contract | `complete` (2026-05-07, commit `df91061`) |
 | Phase 2 | Re-verify already-shipped v2.9 fixes under strict gate | `complete` (2026-05-08, verification only — see `docs/QUALITY_SNAPSHOT_2026-05-08_v2.9_phase2_after.md`) |
-| Phase 3 | Resolve `IMAGE_DESCRIPTION_UNUSABLE` policy/model behavior | active |
+| Phase 3 | Resolve `IMAGE_DESCRIPTION_UNUSABLE` policy/model behavior — execution plan in `docs/PLAN_V2.9__STEP3.md` | active |
 | Phase 4 | Resolve localized hard failures (Combat, Adedeji, Devlin, Earthship, Firearms, KI_En_ChatGPT) — Phase 2 added Firearms HEADING coverage and chunk-count drift to scope | active |
 | Phase 5 | Broad reconversion, enrichment, Qdrant drop/recreate, AFTER snapshot | blocked until Phases 1-4 pass strict gate |
 
@@ -492,6 +492,13 @@ outputs generated after Phase 1. Audit-only PASS is not sufficient.
 ---
 
 ### Phase 3 — Resolve `IMAGE_DESCRIPTION_UNUSABLE`
+
+> **Execution plan: `docs/PLAN_V2.9__STEP3.md`** (split out 2026-05-08
+> for review-isolation and history clarity). The body below is the
+> master-plan summary; the sub-plan has the full step breakdown,
+> pre-flights, acceptance signals, and review history.
+
+
 
 **What:** Decide and implement the strict-gate handling for terse but
 valid VLM responses such as `Venn diagram.` or `Line chart.`. This is
