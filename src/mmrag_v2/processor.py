@@ -2635,7 +2635,10 @@ class V2DocumentProcessor:
             )
             yield pending
 
-        # Store final state for batch processing (REQ-STATE: breadcrumb continuity)
+        # Store final state for batch processing (REQ-STATE: breadcrumb continuity).
+        # Phase 4 Step 4: also persist `_last_hybrid_heading` so the next batch's
+        # V2DocumentProcessor (created fresh) can resume heading carry-forward.
+        state.last_hybrid_heading = getattr(self, "_last_hybrid_heading", None)
         self._final_state = state.get_state_copy()
 
         # Only flush cache if we own the vision manager (not external)
@@ -2675,6 +2678,25 @@ class V2DocumentProcessor:
         import signal
 
         _chunker_timeout = 120  # seconds per batch; fall back if exceeded
+
+        # Phase 4 Step 4: seed `_last_hybrid_heading` from the prior batch's
+        # state so heading carry-forward survives V2DocumentProcessor
+        # re-instantiation between batches. Without this, batches that
+        # start before the next section_header lose all heading attribution
+        # (Firearms: 84 pages with zero parent_heading clustered at batch
+        # boundaries).
+        if not getattr(self, "_last_hybrid_heading", None):
+            seeded = (
+                self._initial_state.last_hybrid_heading
+                if self._initial_state is not None
+                else None
+            )
+            if seeded:
+                self._last_hybrid_heading = seeded
+                logger.info(
+                    "[HYBRID-CHUNKER] Seeded last_hybrid_heading from prior batch state: %r",
+                    seeded,
+                )
 
         chunker_kwargs: Dict[str, Any] = {
             "tokenizer": "sentence-transformers/all-MiniLM-L6-v2",

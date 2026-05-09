@@ -196,6 +196,11 @@ class ContextStateV2:
     hierarchy_stack: List[HierarchyLevel] = field(default_factory=list)
     current_header_level: int = 0
     _page_first_heading: Dict[int, str] = field(default_factory=dict)
+    # Phase 4 Step 4: last heading observed by the HybridChunker path,
+    # carried across V2DocumentProcessor batches (each batch creates a
+    # fresh processor instance, so a stateful attribute on `self` would
+    # reset; this field hands the heading through `initial_state`).
+    last_hybrid_heading: Optional[str] = None
 
     # LEGACY COMPATIBILITY: These properties expose the old interface
     @property
@@ -486,6 +491,7 @@ class ContextStateV2:
             hierarchy_stack=copied_stack,
             current_header_level=self.current_header_level,
             _page_first_heading=dict(self._page_first_heading),
+            last_hybrid_heading=self.last_hybrid_heading,
         )
 
     def reset(self) -> None:
