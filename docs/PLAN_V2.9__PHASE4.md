@@ -263,7 +263,49 @@ No CodeFormulaV2 enablement required. Original Step 5 assessment (carry to v2.10
 
 ---
 
-## Step 6 — KI EPUB label/universal failure — sign-off or fix
+## Step 6 — KI EPUB label/universal failure — DEFER to v2.10 (sign-off pending) ⏸ 2026-05-09
+
+**Status:** Diagnostic complete; decision is DEFER pending explicit user sign-off.
+
+**Evidence (`output/KI_En_ChatGPT_Praktische_Gids/ingestion.jsonl`):**
+
+| Failure | Value | Limit | Class |
+|---|---:|---:|---|
+| `within_page_text_dupe_excess` | 279 | 0 (UNIVERSAL_FAIL) | Hard fail |
+| `orphan_label_ratio` | 0.426 | 0.25 | Hard fail |
+| `text_short_<30` | 585 / 1210 (48 %) | — | Structural |
+| `code_indentation_fidelity` | 0.000 | 0.90 | Structural |
+| `bbox_missing` | 1210 / 1210 (100 %) | — | EPUB has no layout |
+| `page_coverage` | 1 (all chunks on page 1) | — | EPUB has no pagination |
+
+**Root cause:** Not a one-off bug. The EPUB extraction lane has no
+pagination (everything lands on page 1), no bbox synthesis, no
+deduplication of redundant micro-fragments, and no heading
+propagation across sections. The existing 1210 chunks are mostly
+short orphan labels with massive within-page duplication — the
+strict-gate failures are symptomatic of a structural EPUB
+extraction gap, not a localised defect.
+
+**Why defer rather than fix in Phase 4:**
+
+- The fix is structural (new EPUB pagination logic, dedup pass,
+  schema relaxation for non-paginated formats, heading
+  propagation) — not surgical.
+- Phase 4 scope is "localised strict-gate hard failures" — this
+  is a whole-extraction-lane workstream.
+- v2.10 backlog is the canonical home per `docs/PLAN_V2.9.md`
+  §5 Out-of-Scope; the Phase 4 master rule explicitly permits
+  deferral with explicit user sign-off.
+- Pre-existing per `docs/QUALITY_SNAPSHOT_2026-05-06_v2.9_strict_gate.md`.
+
+**Sign-off requested.** If the user signs off, this entry moves to
+`docs/PROJECT_STATUS.md` v2.10 backlog as
+`KI_EPUB_EXTRACTION_LANE_REWRITE` with the metrics above as the
+acceptance baseline. If the user wants Phase 4 to fix it, scope
+expands by ~5–10 days for the EPUB lane rewrite (no estimate yet
+on the full design; that's the first task).
+
+
 
 **Why:** Plan §3 Phase 4 explicitly permits deferral only with user sign-off. This step is the sign-off gate. Investigation has not yet started in Phase 4.
 
