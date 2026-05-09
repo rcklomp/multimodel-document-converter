@@ -121,28 +121,51 @@ work" below).
   for the Step 4 retry harness; behavior diff is identical across the
   13 documented leak fixtures and the 604-description Phase 3 corpus,
   benchmark delta +1.3 %, pytest `678 passed, 14 skipped`.
-  **Steps 4-5 (retry harness + end-to-end verification) carried
-  forward to next iteration.**
-- **Phase 4 active: localized strict-gate hard failures.**
-  Original scope: Combat p66 / Adedeji p301 / KI EPUB / Devlin /
-  Earthship / Firearms re-evaluation. Phase 2 added: Firearms
-  HEADING coverage 72 % → ≥ 0.80 and chunk-count drift +29 % → ±2 %.
-  Plan in `docs/PLAN_V2.9.md` Phase 4.
-- **Combat Aircraft p66.** The squadron-roster table chunk still
-  contains the corrupted typography that the OCR-failure regex
-  doesn't quite match (em-dash run shorter than the 6-in-a-row
-  threshold). Down from 5 corrupt chunks to 1.
-- **Short VLM descriptions.** The strict gate's 20-char minimum
-  flags terse-but-valid responses like ``"Venn diagram."`` Several
-  docs hit single-digit miss counts; either lower the threshold or
-  accept short descriptions when ``vision_status="complete"``.
-- **Specific-doc audits.** Adedeji p301 table corruption,
-  Devlin/Earthship/Firearms each have distinct audit-script
-  failures that need case-by-case investigation. KI_En_ChatGPT
-  EPUB has a pre-existing LABEL orphan ratio.
+- **Phase 3 Step 4 retry harness shipped (2026-05-09, `649c952`).**
+  VLM detail-retry on short-on-complex chunks. 5 of 10 documented
+  targets resolved by retry (Hao p35-1, p139, p355, p364; Adedeji
+  p227); 5 hard_fallback with `complex_asset_short_response_after_retry`
+  sentinel (F4-exempt). Strict gate `IMAGE_DESCRIPTION_UNUSABLE = 0`
+  across all 3 enriched JSONLs. Snapshot updated at
+  `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase3_vlm_baseline.md`
+  §9. Phase 3 closed.
+- **Phase 4: localized strict-gate hard failures — closed pending
+  two sign-offs (2026-05-09 / 2026-05-10).** Plan and closure
+  evidence: `docs/PLAN_V2.9__PHASE4.md` and
+  `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase4_after.md`.
+  - Step 1 — `qa_full_conversion.py --source-pdf` documented as
+    canonical strict-gate command (`611805d`).
+  - Step 2 — Adedeji p298-316 source-PDF back-index fallback
+    (`afbbaa6`); 0 TABLE_CORRUPTION, 0 LOCALIZED_CORRUPTION at
+    full 320-page scale.
+  - Step 3 — Combat p66 chunk-level corruption filter at finalize
+    boundary (`6719460`); 0 false positives across 3,709 chunks.
+  - Step 4 (fix) — cross-batch heading carry-forward (`b429cb5`);
+    correct in unit tests + small probe; doesn't apply to Firearms
+    (OCR-routed). The Path A profile-scoped HEADING gate relaxation
+    (`5e58e6e`) was overfit threshold tuning and was reverted in
+    `cbd7fb4`. Firearms HEADING continues to FAIL the strict
+    `>= 0.80` gate. **DEFERRED to v2.10 as
+    `OCR_PATH_HEADING_PROPAGATION` — sign-off pending.**
+  - Step 5 — Adedeji `code_indentation_fidelity` 0.886 → 0.9032
+    (cascade win from Step 2; no separate fix needed).
+  - Step 6 — KI EPUB structural failures (no pagination, no bbox,
+    heavy dedup excess). **DEFERRED to v2.10 as
+    `KI_EPUB_EXTRACTION_LANE_REWRITE` — sign-off pending.**
+  - Tests: 736 passed, 14 skipped (was 685 at Phase 3 close,
+    +51 net new across Phase 4).
+- **Open Phase 4 sign-offs (block v2.9 tag).**
+  1. `OCR_PATH_HEADING_PROPAGATION` — Firearms HEADING coverage
+     0.722 vs 0.80 floor. Defect: OCR/element-by-element path
+     doesn't promote Docling section_header items into
+     `ContextStateV2.hierarchy_stack` (probe data in
+     `PLAN_V2.9__PHASE4.md` Step 4).
+  2. `KI_EPUB_EXTRACTION_LANE_REWRITE` — EPUB lane structural
+     gaps (acceptance baseline in `PLAN_V2.9__PHASE4.md` Step 6).
 - **Qdrant ``mmrag_v2_8`` re-ingest.** The collection currently
   contains v2.8.0 ingest data only; not refreshed for v2.9 because
-  v2.9 isn't shippable yet.
+  v2.9 isn't shippable yet (Phase 5 owns the broad reconversion +
+  Qdrant migration once both Phase 4 sign-offs land).
 
 ## Active Baseline
 

@@ -450,6 +450,41 @@ ingest into `mmrag_v2_9`.
 - The 17 sister `*_v2` per-doc collections are user-owned and out of
   scope.
 
+## No gate weakening to make a failing run pass (v2.9 Phase 4 Step 4, 2026-05-09)
+
+**Decision:** When a strict-gate assertion fails on a real, identifiable
+defect that is out of surgical scope, the only permitted close paths are
+(a) fix the defect or (b) defer with explicit user sign-off. **Gate
+weakening — even when profile-scoped or sparseness-conditional — is not
+a permitted close path** when its purpose is to make the failing run
+pass without fixing the underlying defect.
+
+**Rationale:**
+- v2.9 Phase 4 Step 4 briefly shipped a profile-scoped HEADING-coverage
+  relaxation (`5e58e6e`): `>= 0.70` for `{scanned, digital_magazine}` when
+  `unique_headings/text_chunks <= 0.05`. Both thresholds were
+  reverse-engineered from Firearms (0.028 / scanned) vs Hao + Adedeji
+  (0.22 / 0.17 / technical_manual). The change made Firearms PASS without
+  fixing the underlying OCR-path heading propagation bug.
+- This violated `CLAUDE.md` "Test Contract Integrity" and the user's
+  QA-policy memory ("no global threshold relaxation"). Profile-scoping
+  doesn't satisfy the rule — the operative principle is "don't weaken
+  assertions to make a failing run pass," not "don't weaken globally."
+- Reverted in `cbd7fb4`. Firearms HEADING re-deferred to v2.10 as
+  `OCR_PATH_HEADING_PROPAGATION` with sign-off pending, parallel to the
+  existing Step 6 KI EPUB deferral pattern (`KI_EPUB_EXTRACTION_LANE_REWRITE`).
+
+**Operationalization:**
+- A threshold change is overfit if you can describe it as "picked so
+  doc X is on side A and docs Y, Z are on side B." If yes, refuse.
+- `tune per profile only with documented before/after evidence` (the
+  pre-existing `QUALITY_GATES.md` line) applies to empirical metrics
+  like `oversize_ratio` whose appropriate value depends on document
+  shape — NOT to pass/fail floors that signal "this defect is unfixed."
+- The deferral pattern (move to v2.10 backlog with acceptance baseline,
+  request explicit user sign-off, leave the strict gate failing) is
+  the canonical close path for "real defect, out of scope" cases.
+
 ## Chunk Size Governance
 **Decision:** Chunk length is governed per profile and verified with acceptance metrics; no universal hard min/max.
 
