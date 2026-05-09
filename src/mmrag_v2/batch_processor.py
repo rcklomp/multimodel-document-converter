@@ -3183,21 +3183,16 @@ class BatchProcessor:
             # text chunks exceeding the 1500-char gate.
             export_chunks = self._apply_oversize_breaker(export_chunks, max_chars=1500)
 
+            # Export-level hygiene for technical manuals must run before
+            # metadata so chunks zeroed by page-number/control-char cleanup
+            # are dropped at the same boundary as every other empty text row.
+            export_chunks = self._apply_technical_manual_export_sanitizer(export_chunks)
+
             # Final guard: drop any text chunk that ended up empty after
             # all upstream sanitisers/dedup/breaker passes. The strict gate's
             # empty_text_chunks invariant (UNIVERSAL_FAIL) cannot tolerate
             # even one such chunk; this catches every upstream path at once.
-            _pre_empty = len(export_chunks)
-            export_chunks = [
-                c for c in export_chunks
-                if c.modality != Modality.TEXT or (c.content and c.content.strip())
-            ]
-            _empty_dropped = _pre_empty - len(export_chunks)
-            if _empty_dropped:
-                logger.info(
-                    f"[FINALIZE] Dropped {_empty_dropped} empty text chunk(s) "
-                    f"before JSONL write (UNIVERSAL_FAIL safety net)"
-                )
+            export_chunks = self._drop_empty_text_chunks_before_metadata(export_chunks)
 
             # v2.9 Phase 1 (followup): final-stage dedup by chunk_id. The
             # per-document position counter eliminates the bulk of v2.8's
@@ -3273,26 +3268,6 @@ class BatchProcessor:
                         logger.debug(f"[FINALIZE] Processed {idx}/{len(export_chunks)} chunks")
 
                     chunk_dict = self._sanitize_chunk_for_export(chunk)
-
-                    # Safety net: final JSONL-level hygiene for technical manuals.
-                    # This catches rare cases where recovery/splitting re-introduces digit-only lines
-                    # after earlier passes (page headers, running footers).
-                    try:
-                        if (
-                            chunk_dict.get("modality") == "text"
-                            and chunk_dict.get("metadata", {}).get("profile_type")
-                            == "technical_manual"
-                            and chunk_dict.get("metadata", {}).get("chunk_type") != ChunkType.CODE
-                        ):
-                            c = chunk_dict.get("content") or ""
-                            c2 = self._strip_control_chars(c)
-                            c2 = self._remove_standalone_page_number_lines(c2)
-                            c2 = self._remove_all_digit_only_lines(c2)
-                            c2 = self._fix_linebreak_hyphenation(c2)
-                            if c2 != c:
-                                chunk_dict["content"] = c2
-                    except Exception:
-                        pass
 
                     # ============================================================
                     # REQ-ASSET-01: STRICT FILENAME-METADATA ASSERTION
@@ -3407,21 +3382,6 @@ class BatchProcessor:
                             if not vr.is_valid:
                                 meta["vision_validation_issues"] = vr.issues
                         chunk_dict["metadata"] = meta
-
-                    # Final-final guard: skip text chunks whose content was
-                    # zeroed by the technical_manual JSONL-level sanitiser
-                    # above (control-char strip, page-number/digit-only line
-                    # removal). Writing them would trigger UNIVERSAL_FAIL
-                    # on empty_text_chunks and is never a valid retrieval row.
-                    if (
-                        chunk_dict.get("modality") == "text"
-                        and not (chunk_dict.get("content") or "").strip()
-                    ):
-                        logger.debug(
-                            "[FINALIZE] Skipping write of empty text chunk "
-                            f"{chunk_dict.get('chunk_id')}"
-                        )
-                        continue
 
                     json_line = json.dumps(chunk_dict, ensure_ascii=False)
                     write_buffer.append(json_line)
@@ -3999,6 +3959,76 @@ class BatchProcessor:
         import re
 
         return re.sub(r"(?m)^\s*\d{1,4}\s*$\n?", "", text).strip("\n")
+
+    def _sanitize_technical_manual_export_content(self, text: str) -> Optional[str]:
+        """Return export-safe technical-manual text, or None if hygiene zeroes it."""
+        cleaned = self._strip_control_chars(text or "")
+        cleaned = self._remove_standalone_page_number_lines(cleaned)
+        cleaned = self._remove_all_digit_only_lines(cleaned)
+        cleaned = self._fix_linebreak_hyphenation(cleaned)
+        if not cleaned.strip():
+            return None
+        return cleaned
+
+    def _apply_technical_manual_export_sanitizer(
+        self,
+        chunks: List[IngestionChunk],
+    ) -> List[IngestionChunk]:
+        """
+        Apply the final technical-manual export sanitizer before metadata is written.
+
+        The JSONL writer used to zero content in the serialized dict and rely on a
+        late write-loop skip. Returning None here makes the zeroed-content condition
+        explicit and lets the finalize boundary account for dropped chunks.
+        """
+        out: List[IngestionChunk] = []
+        dropped = 0
+        for ch in chunks:
+            if (
+                ch.modality != Modality.TEXT
+                or not ch.metadata
+                or ch.metadata.profile_type != "technical_manual"
+                or ch.metadata.chunk_type == ChunkType.CODE
+            ):
+                out.append(ch)
+                continue
+
+            original = ch.content or ""
+            sanitized = self._sanitize_technical_manual_export_content(original)
+            if sanitized is None:
+                dropped += 1
+                logger.info(
+                    "[FINALIZE] tech-manual sanitiser drop: "
+                    f"chunk_id={ch.chunk_id} page={ch.metadata.page_number}"
+                )
+                continue
+            if sanitized != original:
+                ch.content = sanitized
+            out.append(ch)
+
+        if dropped:
+            logger.info(
+                f"[FINALIZE] Dropped {dropped} technical_manual text chunk(s) "
+                f"zeroed by export sanitiser before metadata write"
+            )
+        return out
+
+    def _drop_empty_text_chunks_before_metadata(
+        self,
+        chunks: List[IngestionChunk],
+    ) -> List[IngestionChunk]:
+        """Canonical finalize boundary: no empty text chunk reaches metadata/write."""
+        filtered = [
+            c for c in chunks
+            if c.modality != Modality.TEXT or (c.content and c.content.strip())
+        ]
+        dropped = len(chunks) - len(filtered)
+        if dropped:
+            logger.info(
+                f"[FINALIZE] Dropped {dropped} empty text chunk(s) "
+                f"before JSONL write (UNIVERSAL_FAIL safety net)"
+            )
+        return filtered
 
     def _reflow_flat_code(self, text: str) -> str:
         """

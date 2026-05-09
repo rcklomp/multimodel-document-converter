@@ -147,11 +147,7 @@ def test_finalize_drops_empty_text_chunks_before_jsonl_write():
     content (after all upstream sanitisers/dedup/breaker passes) must be
     dropped before JSONL write so the strict-gate empty_text_chunks
     invariant (UNIVERSAL_FAIL) holds. Regression for Kimothi page 253."""
-    from mmrag_v2.schema.ingestion_schema import (
-        ChunkType,
-        HierarchyMetadata,
-        Modality,
-    )
+    from mmrag_v2.schema.ingestion_schema import HierarchyMetadata
 
     bp = _make_batch_processor()
     valid = create_text_chunk(
@@ -182,12 +178,55 @@ def test_finalize_drops_empty_text_chunks_before_jsonl_write():
     emptied.content = ""
 
     chunks = [valid, blank, emptied]
-    # Replicate the finalize-stage filter (line ~3186 of process_pdf).
-    filtered = [
-        c for c in chunks
-        if c.modality != Modality.TEXT or (c.content and c.content.strip())
-    ]
+    filtered = bp._drop_empty_text_chunks_before_metadata(chunks)
     assert filtered == [valid], "empty/whitespace-only text chunks must be dropped"
+
+
+def test_technical_manual_export_sanitizer_drops_zeroed_chunk_upstream():
+    """Technical-manual export hygiene must signal digit-only/page-number
+    content as a dropped chunk before the JSONL write loop.
+
+    This replaces the former write-loop skip for chunks whose serialized
+    content was silently zeroed by the technical-manual line stripper.
+    """
+    from mmrag_v2.schema.ingestion_schema import ChunkType, HierarchyMetadata
+
+    bp = _make_batch_processor()
+    valid = create_text_chunk(
+        doc_id=bp._doc_hash,
+        content="Back-index entry with useful text\n253",
+        source_file="t.pdf",
+        file_type=FileType.PDF,
+        page_number=253,
+        hierarchy=HierarchyMetadata(breadcrumb_path=["Doc", "Index"], level=2),
+        profile_type="technical_manual",
+    )
+    zeroed = create_text_chunk(
+        doc_id=bp._doc_hash,
+        content="253\n254",
+        source_file="t.pdf",
+        file_type=FileType.PDF,
+        page_number=253,
+        hierarchy=HierarchyMetadata(breadcrumb_path=["Doc", "Index"], level=2),
+        profile_type="technical_manual",
+    )
+    code = create_text_chunk(
+        doc_id=bp._doc_hash,
+        content="253\n254",
+        source_file="t.pdf",
+        file_type=FileType.PDF,
+        page_number=253,
+        hierarchy=HierarchyMetadata(breadcrumb_path=["Doc", "Index"], level=2),
+        chunk_type=ChunkType.CODE,
+        content_classification="code",
+        profile_type="technical_manual",
+    )
+
+    result = bp._apply_technical_manual_export_sanitizer([valid, zeroed, code])
+
+    assert result == [valid, code]
+    assert valid.content == "Back-index entry with useful text"
+    assert code.content == "253\n254"
 
 
 def test_oversize_split_drops_empty_trailing_part():
