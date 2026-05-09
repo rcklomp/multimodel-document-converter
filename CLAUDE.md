@@ -98,10 +98,15 @@ bash scripts/smoke_multiprofile.sh
 bash scripts/acceptance_technical_manual.sh
 python scripts/evaluate_technical_manual_gates.py output/<run_name>/ingestion.jsonl --doc-class auto
 
-# Universal invariant check on any single output:
+# Canonical full strict-gate on any single output (use --source-pdf when available
+# so blank source pages do not count as MISSING_PAGES failures):
+python scripts/qa_full_conversion.py output/<run_name>/ingestion.jsonl \
+  --source-pdf data/<category>/<file>.pdf
+
+# Lighter universal invariant check (no blank-page awareness — advisory only):
 python scripts/qa_universal_invariants.py output/<run_name>/ingestion.jsonl
 ```
-Look for explicit `GATE_PASS` / `GATE_FAIL` and `UNIVERSAL_PASS` / `UNIVERSAL_FAIL` in output.
+Look for explicit `GATE_PASS` / `GATE_FAIL` and `UNIVERSAL_PASS` / `UNIVERSAL_FAIL` in output, and `QA_PASS` / `QA_WARN` / `QA_FAIL` from `qa_full_conversion.py`. The strict-gate command is `qa_full_conversion.py --source-pdf` (per Phase 4 Step 1, 2026-05-09); the no-flag form reports phantom MISSING_PAGES failures on docs with blank-source pages.
 
 ## Runtime Architecture
 - CLI entry: `src/mmrag_v2/cli.py` (`process`, `batch`, `version`, `check`).

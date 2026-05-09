@@ -103,3 +103,21 @@ Hard fails:
 
 These must be zero. No profile-specific waivers.
 
+### Canonical Single-Doc Strict Gate (Phase 4 Step 1, 2026-05-09)
+For per-document validation use `scripts/qa_full_conversion.py --source-pdf`:
+
+```
+python scripts/qa_full_conversion.py output/<run>/ingestion.jsonl \
+  --source-pdf data/<category>/<file>.pdf
+```
+
+It runs the full chain (`qa_conversion_audit`, `qa_universal_invariants`,
+`qa_ingestion_hygiene`, `qa_semantic_fidelity`) plus blank-page-aware
+deterministic checks. Reports `QA_PASS` / `QA_WARN` / `QA_FAIL`.
+
+**Why `--source-pdf` is canonical:** without it, blank source pages
+(common in books and magazines as verso/section dividers) get reported
+as `MISSING_PAGES` failures even though they correctly have no chunks.
+With `--source-pdf`, those pages are classified as `MISSING_PAGES_BLANK`
+(info, not failure) by checking the source PDF for actual content.
+
