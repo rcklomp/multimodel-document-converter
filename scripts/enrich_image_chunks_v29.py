@@ -62,6 +62,14 @@ _CLOUD_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
 _PLACEHOLDER_PREFIX = "[Figure on page"
 _FSYNC_EVERY = 50  # fsync the tmp file every N enrichments
+SHORT_DESC_THRESHOLD_CHARS = 20
+SHORT_RESPONSE_SENTINEL = "complex_asset_short_response_after_retry"
+_DETAIL_RETRY_COMPLEXITIES = {"complex", "text_heavy"}
+_DETAIL_RETRY_SUFFIX = (
+    "Provide a detailed description of the visual layout, components, color "
+    "scheme, and their spatial relationships. Do not transcribe or paraphrase "
+    "any text from the image."
+)
 
 logger = logging.getLogger("enrich_v29")
 
@@ -73,8 +81,18 @@ class EnrichmentStats:
     placeholder_chunks: int = 0
     enriched: int = 0
     hard_fallback: int = 0
+    detail_retry_attempted: int = 0
+    detail_retry_resolved: int = 0
+    detail_retry_hard_fallback: int = 0
     skipped_already_complete: int = 0
     api_call_seconds: float = 0.0
+
+
+@dataclass(frozen=True)
+class DetailRetryResult:
+    triggered: bool = False
+    resolved: bool = False
+    hard_fallback: bool = False
 
 
 def _is_placeholder(value: Optional[str]) -> bool:
@@ -84,6 +102,138 @@ def _is_placeholder(value: Optional[str]) -> bool:
     if not value:
         return True
     return value.lstrip().startswith(_PLACEHOLDER_PREFIX)
+
+
+def _build_detail_retry_prompt() -> str:
+    """Build the one-shot detail retry prompt from the visual-only base."""
+    from mmrag_v2.vision.vision_prompts import VISUAL_ONLY_PROMPT
+
+    return f"{VISUAL_ONLY_PROMPT.rstrip()}\n\n{_DETAIL_RETRY_SUFFIX}"
+
+
+def _is_short_description(value: Optional[str]) -> bool:
+    if not value:
+        return True
+    stripped = value.strip()
+    return (
+        len(stripped) < SHORT_DESC_THRESHOLD_CHARS
+        and "layout" not in stripped.lower()
+    )
+
+
+def _description_from_record(rec: Dict[str, Any]) -> str:
+    md = rec.get("metadata") or {}
+    return (
+        md.get("visual_description")
+        or rec.get("visual_description")
+        or rec.get("content")
+        or ""
+    )
+
+
+def _write_visual_description(rec: Dict[str, Any], description: str) -> None:
+    md = rec.setdefault("metadata", {})
+    rec["content"] = description
+    rec["visual_description"] = description
+    md["visual_description"] = description
+    md["refined_content"] = description
+
+
+def _mark_hard_fallback(
+    rec: Dict[str, Any],
+    reason: str,
+    *,
+    retry_attempted: bool = False,
+) -> None:
+    md = rec.setdefault("metadata", {})
+    md["vision_status"] = "hard_fallback"
+    md["vision_error"] = reason
+    md["vision_provider_used"] = _CLOUD_MODEL
+    if retry_attempted:
+        md["vision_detail_retry_attempted"] = True
+
+
+def _needs_detail_retry(rec: Dict[str, Any], output_dir: Path) -> bool:
+    """Return True for complete, short descriptions on complex assets."""
+    if rec.get("modality") != "image":
+        return False
+    md = rec.get("metadata") or {}
+    vision_status = md.get("vision_status") or rec.get("vision_status")
+    if vision_status != "complete":
+        return False
+    if md.get("vision_detail_retry_attempted"):
+        return False
+    description = _description_from_record(rec)
+    if _is_placeholder(description) or not _is_short_description(description):
+        return False
+
+    from mmrag_v2.vision.asset_complexity import classify_asset_complexity
+
+    result = classify_asset_complexity(rec, output_dir=output_dir)
+    return result.complexity in _DETAIL_RETRY_COMPLEXITIES
+
+
+def _maybe_retry_for_detail(
+    rec: Dict[str, Any],
+    vision_manager: Any,
+    image: Any,
+    output_dir: Path,
+) -> DetailRetryResult:
+    """Retry once when a complex asset got a valid but too-terse response."""
+    if not _needs_detail_retry(rec, output_dir):
+        return DetailRetryResult()
+
+    md = rec.setdefault("metadata", {})
+    prompt = _build_detail_retry_prompt()
+    chunk_id = rec.get("chunk_id")
+    logger.info("Detail retry for short complex image chunk %s", chunk_id)
+    md["vision_detail_retry_attempted"] = True
+    md["vision_attempts"] = int(md.get("vision_attempts") or 0) + 1
+
+    try:
+        response = vision_manager._provider.describe_image(  # script-owned direct call
+            image,
+            prompt,
+        )
+    except Exception as exc:
+        logger.warning("Detail retry VLM call failed for chunk %s: %s", chunk_id, exc)
+        _mark_hard_fallback(
+            rec,
+            SHORT_RESPONSE_SENTINEL,
+            retry_attempted=True,
+        )
+        return DetailRetryResult(triggered=True, hard_fallback=True)
+
+    from mmrag_v2.vision.vision_prompts import validate_vlm_response
+
+    validation = validate_vlm_response(response)
+    if (
+        validation.is_valid
+        and len(validation.cleaned_response.strip()) >= SHORT_DESC_THRESHOLD_CHARS
+    ):
+        description = validation.cleaned_response
+        _write_visual_description(rec, description)
+        md["vision_status"] = "complete"
+        md["vision_provider_used"] = _CLOUD_MODEL
+        md.pop("vision_error", None)
+        md.pop("vision_validation_issues", None)
+        logger.info(
+            "Detail retry resolved chunk %s with %d chars",
+            chunk_id,
+            len(description.strip()),
+        )
+        return DetailRetryResult(triggered=True, resolved=True)
+
+    issues = validation.issues if validation.issues else ["short response"]
+    logger.info(
+        "Detail retry exhausted for chunk %s: %s",
+        chunk_id,
+        ", ".join(issues),
+    )
+    _mark_hard_fallback(rec, SHORT_RESPONSE_SENTINEL, retry_attempted=True)
+    if not validation.is_valid:
+        md["vision_validation_issues"] = issues
+    return DetailRetryResult(triggered=True, hard_fallback=True)
 
 
 def _resolve_api_key() -> str:
@@ -148,8 +298,8 @@ def _enrich_one(
     rec: Dict[str, Any],
     vision_manager: Any,
     output_dir: Path,
-) -> tuple[Dict[str, Any], bool]:
-    """Enrich one image chunk in place. Returns (record, success)."""
+) -> tuple[Dict[str, Any], bool, DetailRetryResult]:
+    """Enrich one image chunk in place. Returns (record, success, detail_retry)."""
     from PIL import Image  # local import to avoid cost in dry-run
 
     md = rec.setdefault("metadata", {})
@@ -164,7 +314,7 @@ def _enrich_one(
         md["vision_status"] = "hard_fallback"
         md["vision_error"] = "missing asset_ref.file_path"
         md["vision_provider_used"] = _CLOUD_MODEL
-        return rec, False
+        return rec, False, DetailRetryResult()
 
     full_path = (output_dir / asset_path).resolve()
     if not full_path.exists():
@@ -176,7 +326,7 @@ def _enrich_one(
         md["vision_status"] = "hard_fallback"
         md["vision_error"] = f"asset not found: {asset_path}"
         md["vision_provider_used"] = _CLOUD_MODEL
-        return rec, False
+        return rec, False, DetailRetryResult()
 
     try:
         image = Image.open(full_path).convert("RGB")
@@ -190,7 +340,7 @@ def _enrich_one(
         md["vision_status"] = "hard_fallback"
         md["vision_error"] = f"image load failed: {exc}"
         md["vision_provider_used"] = _CLOUD_MODEL
-        return rec, False
+        return rec, False, DetailRetryResult()
 
     page_number = md.get("page_number") or rec.get("page_number") or 1
     semantic_context = rec.get("semantic_context") or {}
@@ -221,7 +371,7 @@ def _enrich_one(
         md["vision_status"] = "hard_fallback"
         md["vision_error"] = f"vlm error: {exc}"
         md["vision_provider_used"] = _CLOUD_MODEL
-        return rec, False
+        return rec, False, DetailRetryResult()
 
     elapsed = time.perf_counter() - t0
 
@@ -235,7 +385,7 @@ def _enrich_one(
         md["vision_error"] = description
         md["vision_provider_used"] = _CLOUD_MODEL
         md["vision_attempts"] = int(md.get("vision_attempts") or 0) + 1
-        return rec, False
+        return rec, False, DetailRetryResult()
 
     # Per IngestionChunk schema, ``content`` is the canonical
     # "Text content or VLM description" field. For image chunks the
@@ -244,10 +394,7 @@ def _enrich_one(
     # → semantic_fidelity gate read the residual placeholder and
     # reported image_placeholder_ratio=1.0 even though the metadata
     # had real descriptions. Fix: write to all three positions.
-    rec["content"] = description
-    rec["visual_description"] = description
-    md["visual_description"] = description
-    md["refined_content"] = description
+    _write_visual_description(rec, description)
     md["vision_status"] = "complete"
     md["vision_provider_used"] = _CLOUD_MODEL
     md["vision_attempts"] = int(md.get("vision_attempts") or 0) + 1
@@ -256,7 +403,52 @@ def _enrich_one(
     logger.debug(
         "Enriched %s in %.2fs", rec.get("chunk_id"), elapsed
     )
-    return rec, True
+    detail_retry = _maybe_retry_for_detail(rec, vision_manager, image, output_dir)
+    return rec, md.get("vision_status") == "complete", detail_retry
+
+
+def _retry_existing_complete_short_description(
+    rec: Dict[str, Any],
+    vision_manager: Any,
+    output_dir: Path,
+) -> tuple[Dict[str, Any], DetailRetryResult]:
+    """Retry an already-complete short description if the complexity gate requires it."""
+    if not _needs_detail_retry(rec, output_dir):
+        return rec, DetailRetryResult()
+
+    from PIL import Image  # local import to avoid cost in dry-run
+
+    md = rec.setdefault("metadata", {})
+    asset_ref = rec.get("asset_ref") or md.get("asset_ref") or {}
+    asset_path = asset_ref.get("file_path")
+    if not asset_path:
+        _mark_hard_fallback(
+            rec,
+            "missing asset_ref.file_path",
+            retry_attempted=True,
+        )
+        return rec, DetailRetryResult(triggered=True, hard_fallback=True)
+
+    full_path = (output_dir / asset_path).resolve()
+    if not full_path.exists():
+        _mark_hard_fallback(
+            rec,
+            f"asset not found: {asset_path}",
+            retry_attempted=True,
+        )
+        return rec, DetailRetryResult(triggered=True, hard_fallback=True)
+
+    try:
+        image = Image.open(full_path).convert("RGB")
+    except Exception as exc:
+        _mark_hard_fallback(
+            rec,
+            f"image load failed: {exc}",
+            retry_attempted=True,
+        )
+        return rec, DetailRetryResult(triggered=True, hard_fallback=True)
+
+    return rec, _maybe_retry_for_detail(rec, vision_manager, image, output_dir)
 
 
 def _enrich_jsonl(
@@ -273,7 +465,7 @@ def _enrich_jsonl(
         stats.placeholder_chunks,
         stats.skipped_already_complete,
     )
-    if dry_run or stats.placeholder_chunks == 0:
+    if dry_run:
         return stats
 
     output_dir = jsonl_path.parent
@@ -309,10 +501,28 @@ def _enrich_jsonl(
                         or _is_placeholder(visual_description)
                     )
                     if needs_enrich:
-                        rec, ok = _enrich_one(rec, vision_manager, output_dir)
+                        rec, ok, detail_retry = _enrich_one(
+                            rec,
+                            vision_manager,
+                            output_dir,
+                        )
                         if ok:
                             stats.enriched += 1
                         else:
+                            stats.hard_fallback += 1
+                    else:
+                        rec, detail_retry = _retry_existing_complete_short_description(
+                            rec,
+                            vision_manager,
+                            output_dir,
+                        )
+                    if detail_retry.triggered:
+                        stats.detail_retry_attempted += 1
+                    if detail_retry.resolved:
+                        stats.detail_retry_resolved += 1
+                    if detail_retry.hard_fallback:
+                        stats.detail_retry_hard_fallback += 1
+                        if not needs_enrich:
                             stats.hard_fallback += 1
                 out_fh.write(json.dumps(rec) + "\n")
                 written_lines += 1
@@ -338,10 +548,13 @@ def _enrich_jsonl(
 
     os.replace(tmp_path, jsonl_path)
     logger.info(
-        "%s: enriched=%d hard_fallback=%d",
+        "%s: enriched=%d hard_fallback=%d detail_retry=%d resolved=%d retry_hard_fallback=%d",
         jsonl_path,
         stats.enriched,
         stats.hard_fallback,
+        stats.detail_retry_attempted,
+        stats.detail_retry_resolved,
+        stats.detail_retry_hard_fallback,
     )
     return stats
 
@@ -407,6 +620,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         grand_total.placeholder_chunks += stats.placeholder_chunks
         grand_total.enriched += stats.enriched
         grand_total.hard_fallback += stats.hard_fallback
+        grand_total.detail_retry_attempted += stats.detail_retry_attempted
+        grand_total.detail_retry_resolved += stats.detail_retry_resolved
+        grand_total.detail_retry_hard_fallback += stats.detail_retry_hard_fallback
         grand_total.skipped_already_complete += stats.skipped_already_complete
 
     print()
@@ -421,6 +637,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not args.dry_run:
         print(f"  enriched (this run):    {grand_total.enriched}")
         print(f"  hard fallback:          {grand_total.hard_fallback}")
+        print(f"  detail retries:         {grand_total.detail_retry_attempted}")
+        print(f"  detail retry resolved:  {grand_total.detail_retry_resolved}")
+        print(f"  detail retry fallback:  {grand_total.detail_retry_hard_fallback}")
     if failed_files:
         print(f"  FAILED files:           {len(failed_files)}")
         for f in failed_files:
