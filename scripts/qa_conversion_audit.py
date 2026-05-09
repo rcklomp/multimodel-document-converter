@@ -835,30 +835,13 @@ def print_report(r: AuditResult, path: Path) -> bool:
 
     # --- HEADING --- (skipped for forms)
     heading_coverage = r.text_with_heading / max(r.text_chunks, 1)
-    # Phase 4 Step 4 Path A: anchor-sparse documents (magazine-style technical
-    # manuals where Docling detects few section headers per chunk) get a
-    # relaxed >=0.70 coverage gate. The sparseness signal is profile-scoped:
-    # only `technical_manual` docs with unique_headings / text_chunks <= 0.05
-    # qualify. Hao / Adedeji are NOT sparse (ratios 0.22 / 0.17) and keep the
-    # >=0.80 gate. Empirical: Firearms = 31 / 1094 = 0.028 — sparse.
-    sparse_ratio = r.unique_headings / max(r.text_chunks, 1)
-    # Profile-scoped: only `scanned` and `digital_magazine` documents are
-    # eligible. These are the document classes where Docling's heading
-    # detector legitimately misses anchors due to layout (OCR'd magazines,
-    # photo-essay layouts). `technical_manual` / `academic_whitepaper` /
-    # `scanned_degraded` keep the strict gate.
-    _SPARSE_PROFILES = {"scanned", "digital_magazine"}
-    is_anchor_sparse = (
-        r.profile_type in _SPARSE_PROFILES and sparse_ratio <= 0.05
-    )
-    coverage_floor = 0.70 if is_anchor_sparse else 0.80
     if is_form:
         print(f"  HEADING:     SKIP [form]")
     else:
         heading_ok = (
             r.long_headings == 0
             and r.multi_sentence_headings == 0
-            and heading_coverage >= coverage_floor
+            and heading_coverage >= 0.80
             and r.suspicious_headings == 0
         )
         if heading_coverage >= 0.90:
@@ -870,8 +853,7 @@ def print_report(r: AuditResult, path: Path) -> bool:
         frag_label = "OK" if r.heading_fragmentation <= 0.40 else "HIGH"
         heading_label = "PASS" if heading_ok else "FAIL"
         print(f"  HEADING:     {heading_label}")
-        cov_note = " [anchor-sparse, floor=0.70]" if is_anchor_sparse else ""
-        print(f"    coverage: {r.text_with_heading}/{r.text_chunks} ({heading_coverage:.0%}) [{cov_label}]{cov_note}")
+        print(f"    coverage: {r.text_with_heading}/{r.text_chunks} ({heading_coverage:.0%}) [{cov_label}]")
         print(f"    unique headings: {r.unique_headings} (fragmentation: {r.heading_fragmentation:.0%}) [{frag_label}]")
         if r.text_without_heading:
             print(f"    null_headings: {r.text_without_heading}")

@@ -220,20 +220,13 @@ The Firearms heading distribution is genuinely sparse:
 
 The clusters of zero-heading pages match the document's natural anatomy: it is a magazine-style firearms reference with sparse "Data:" anchors between large illustration / step-by-step sections. Many runs of pages **legitimately have no heading available** because Docling didn't detect one (sparse anchors) and the prior page also had no heading (the prior page is also in the same gap).
 
-**Decision: Path A shipped.** Profile-scoped + sparseness-conditional gate relaxation in `scripts/qa_conversion_audit.py`. The `scanned` and `digital_magazine` profiles get a HEADING coverage floor of `>= 0.70` instead of `>= 0.80` — but only when `unique_headings / text_chunks <= 0.05`. Firearms (scanned, sparse-ratio 0.028) passes; Hao + Adedeji (both technical_manual, ratios 0.22 / 0.17) keep the strict gate. **Global default stays at `>= 0.80`.**
+**Decision request: pick one.**
 
-**Empirical verification:**
+- **Path A — accept the gap and relax the threshold for the routed profile.** Per Phase 4 plan §4 Path B, update `qa_conversion_audit.py` to allow `coverage ≥ 0.70` for `technical_manual` profile when `unique_headings / chunks ≤ 0.05` (anchor-sparse documents). Firearms passes; non-sparse technical manuals (Hao, Adedeji) keep the ≥ 0.80 gate. **Do not weaken the global gate.**
+- **Path B — synthesize page-anchor headings.** When a batch has a chunk on a new page with no heading detected, synthesize a heading from the page header text (e.g. "Page 82 — Remington" inferred from the page footer). This is a deeper fix; risks introducing non-genuine "headings" to retrieval.
+- **Path C — give up on Firearms HEADING and document with explicit user sign-off** (per the plan's deferral rule).
 
-| Doc | Profile | Sparse ratio | Coverage | Gate floor | Result |
-|---|---|---:|---:|---:|---|
-| Firearms | scanned | 0.028 | 0.722 | 0.70 | PASS (was FAIL) |
-| Hao | technical_manual | 0.22 | 1.000 | 0.80 | PASS (unchanged) |
-| Adedeji | technical_manual | 0.17 | 1.000 | 0.80 | PASS (unchanged) |
-| (synthetic dense scanned) | scanned | 0.20 | 0.75 | 0.80 | FAIL (relaxation does NOT apply when not sparse) |
-
-Tests: 741 passed (was 736; +5 new in `test_heading_anchor_sparse_gate.py` covering eligible profiles, non-sparse rejection, below-floor rejection).
-
-**Underlying root cause (documented for future investigation):** Firearms uses the `scanned` profile, which routes through the OCR/element-by-element pipeline rather than HybridChunker. The carry-forward fix from `b429cb5` covers HybridChunker only. The element-by-element heading propagation (`state.update_on_heading`) doesn't promote all detected headings on Firearms — looks like Docling's `section_header` items are sometimes mis-labeled or the OCR cascade replaces text without preserving heading context. Probe data: `dc.meta.headings` IS rich on every page (`('A Note on Reassembly', 'MARLIN MODEL 336', ..., 'Disassembly:')`) but the JSONL chunks emit with `extraction_method='ocr'` and zero `parent_heading`. Fixing the OCR-path heading propagation is a deeper, separate workstream — out of Phase 4 surgical scope.
+**My recommendation:** Path A. The gap is structural to the document, not a bug we can fix without inventing data. Profile-scoped relaxation matches the v2.9 governance principle of "tune per profile only with documented before/after evidence" (`docs/QUALITY_GATES.md` §Acceptance Workflow #5).
 
 **Status of underlying fix:** the cross-batch carry-forward is shipped and helps general cases. Tests: 736 passed (was 731; +5 new in `test_heading_carryforward_across_batches.py`). Even if Firearms coverage doesn't pass without profile-scoped relaxation, the fix prevents the same regression from hitting future technical-manual conversions where successive batches DO span the same heading section.
 

@@ -103,27 +103,6 @@ Hard fails:
 
 These must be zero. No profile-specific waivers.
 
-### HEADING coverage gate — anchor-sparse profile relaxation (Phase 4 Step 4, 2026-05-09)
-For `scanned` and `digital_magazine` profiles only, when the document is
-**anchor-sparse** (`unique_headings / text_chunks <= 0.05`), the
-HEADING coverage floor relaxes from `>= 0.80` to `>= 0.70`.
-
-The relaxation does NOT apply to `technical_manual`, `academic_whitepaper`,
-`scanned_degraded`, or any other profile. Hao (technical_manual,
-sparse-ratio 0.22) and Adedeji (technical_manual, sparse-ratio 0.17) are
-not affected — both keep the strict gate. Firearms (scanned, sparse-ratio
-0.028) and similar magazine-style PDFs newly pass the gate at their
-natural ceiling.
-
-Rationale: scanned/magazine layouts legitimately have sparse heading
-anchors (the document's natural structure), and Docling's heading
-detector has limited recall on these layouts. Relaxing only when
-sparseness is empirically present (not by profile alone) prevents the
-gate from becoming a free pass.
-
-When the relaxed gate applies, the audit script prints
-`[anchor-sparse, floor=0.70]` next to the coverage line for visibility.
-
 ### Canonical Single-Doc Strict Gate (Phase 4 Step 1, 2026-05-09)
 For per-document validation use `scripts/qa_full_conversion.py --source-pdf`:
 
