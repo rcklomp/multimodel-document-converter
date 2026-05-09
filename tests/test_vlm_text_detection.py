@@ -12,6 +12,7 @@ import pytest
 
 from mmrag_v2.vision.vision_prompts import (
     STRICTER_VISUAL_PROMPT,
+    _detect_first_match,
     detect_text_reading,
     sanitize_text_reading_response,
     validate_vlm_response,
@@ -183,6 +184,8 @@ class TestDetectTextReading:
         """Empty response should pass (handled by validate_vlm_response)."""
         assert not detect_text_reading("")
         assert not detect_text_reading(None)
+        assert _detect_first_match("") is None
+        assert _detect_first_match(None) is None
 
     def test_allowed_technical_abbreviations(self):
         """Technical abbreviations in caps should be allowed."""
@@ -203,6 +206,25 @@ class TestDetectTextReading:
         """Two ALL CAPS words should be allowed."""
         response = "Technical SCHEMATIC showing ASSEMBLY process"
         assert not detect_text_reading(response)
+
+    def test_diagnostic_first_match_returns_pattern_name(self):
+        """Diagnostic variant should identify the first firing pattern."""
+        cases = [
+            (
+                "The provided image is a mostly blank white field with a thin vertical strip.",
+                "P0_meta_terms",
+            ),
+            (
+                "Text block with paragraph formatting and a hyperlink (fave.co/4n4knLo).",
+                "P10_url_or_domain",
+            ),
+            (
+                "Diagram with green section showing a linear flow (Input → LLM → Output).",
+                "P14_flow_arrows",
+            ),
+        ]
+        for response, expected in cases:
+            assert _detect_first_match(response) == expected
 
     # =========================================================================
     # Phase 3 Step 0 empirical leak fixtures (qwen3-vl-plus, 2026-05-08)

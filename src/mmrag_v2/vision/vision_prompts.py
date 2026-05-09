@@ -36,7 +36,8 @@ Author: Senior Document Intelligence Engineer
 Date: 2026-01-05
 """
 
-from typing import Optional
+import re
+from typing import Callable, Optional
 
 # ============================================================================
 # VISUAL-ONLY PROMPT (Strict Mode)
@@ -359,30 +360,7 @@ _NON_BRAND_TITLECASE: frozenset[str] = frozenset({
 })
 
 
-def detect_text_reading(response: str) -> bool:
-    """
-    Detect if VLM response contains text transcription instead of visual description.
-
-    Returns True if text reading is detected (response should be rejected).
-    Returns False if response is a valid visual description (acceptable).
-
-    Args:
-        response: VLM response text
-
-    Returns:
-        True if text transcription detected, False otherwise
-    """
-    import re
-
-    if not response:
-        return False
-
-    response_lower = response.lower()
-
-    # We allow high-level typographic/layout descriptions (e.g., "two-column layout",
-    # "numbered list", "dense typographic layout"), but we reject anything that
-    # looks like quoting/reading/paraphrasing specific words.
-
+def _check_meta_terms(response: str, response_lower: str) -> bool:
     # Pattern 0: Meta-language that violates visual-only constraints.
     # Keep this phrase-based (not word-based) to avoid false positives such as
     # "PDF document layout" or "text-only page".
@@ -415,30 +393,34 @@ def detect_text_reading(response: str) -> bool:
         "the provided figure",
         "the provided photo",
     ]
-    if any(t in response_lower for t in meta_terms):
-        return True
+    return any(t in response_lower for t in meta_terms)
 
+
+def _check_instructional_self_ref(response: str, response_lower: str) -> bool:
     # Pattern 0b: Instructional self-reference. Catches "per the rules",
     # "following the instructions", "according to the prompt", etc. — the
     # model reasoning about the prompt instead of describing the visual.
-    if re.search(
+    return bool(re.search(
         r"\b(?:per|following|according to)\s+(?:the\s+)?"
         r"(?:rules?|instructions?|prompt|guidelines?|criteria)\b",
         response_lower,
-    ):
-        return True
+    ))
 
+
+def _check_text_says(response: str, response_lower: str) -> bool:
     # Pattern 1: "The text says/reads..." patterns
-    if re.search(
+    return bool(re.search(
         r"\b(text|caption|label|title|heading)\s+(?:that\s+)?(says?|reads?|indicates?|states?|identif(?:y|ies))\b",
         response_lower,
-    ):
-        return True
+    ))
 
+
+def _check_text_that_reads(response: str, response_lower: str) -> bool:
     # Pattern 1b: "text that reads ..." / "label that reads ..."
-    if re.search(r"\b(text|caption|label|title|heading)\s+that\s+reads?\b", response_lower):
-        return True
+    return bool(re.search(r"\b(text|caption|label|title|heading)\s+that\s+reads?\b", response_lower))
 
+
+def _check_visible_caption_label(response: str, response_lower: str) -> bool:
     # Pattern 1c: Reading visible captions/labels without "says/reads".
     if re.search(r"\bcaption\s+identif(?:y|ies|ying)\b", response_lower):
         return True
@@ -507,64 +489,76 @@ def detect_text_reading(response: str) -> bool:
         response,
     ):
         return True
+    return False
 
+
+def _check_written_on(response: str, response_lower: str) -> bool:
     # Pattern 2: "written on" patterns
-    if "written on" in response_lower:
-        return True
+    return "written on" in response_lower
 
+
+def _check_text_visible(response: str, response_lower: str) -> bool:
     # Pattern 3: "text visible" patterns
-    if re.search(r"\btext\s+visible\b", response_lower):
-        return True
+    return bool(re.search(r"\btext\s+visible\b", response_lower))
 
+
+def _check_quoted_visible_words(response: str, response_lower: str) -> bool:
     # Pattern 4: Any quoted visible words are likely transcription. The prompt
     # explicitly forbids quoting image text, so reject even short quoted spans.
-    if re.search(r'["\'][A-Za-z0-9][^"\']{1,}["\']', response):
-        return True
+    return bool(re.search(r'["\'][A-Za-z0-9][^"\']{1,}["\']', response))
 
+
+def _check_excessive_quotes(response: str, response_lower: str) -> bool:
     # Pattern 4b: Excessive quotes (more than 2 pairs = transcription)
     quote_count = response.count('"') + response.count("'")
-    if quote_count > 4:  # More than 2 pairs
-        return True
+    return quote_count > 4  # More than 2 pairs
 
+
+def _check_long_quoted_strings(response: str, response_lower: str) -> bool:
     # Pattern 5: Long quoted strings (>20 chars) indicate transcription
     quoted_strings = re.findall(r'["\'](.{20,})["\']', response)
-    if quoted_strings:
-        return True
+    return bool(quoted_strings)
 
+
+def _check_long_allcaps_heading(response: str, response_lower: str) -> bool:
     # Pattern 5b: Looks like copied headings (long ALLCAPS line) - often OCR/VLM reading.
     # Keep small abbreviations allowed (handled below).
-    if re.search(r"^[A-Z0-9 ,./\\-]{25,}$", response.strip()):
-        return True
+    return bool(re.search(r"^[A-Z0-9 ,./\\-]{25,}$", response.strip()))
 
+
+def _check_multiple_allcaps_words(response: str, response_lower: str) -> bool:
     # Pattern 6: Multiple ALL CAPS words (>2) may indicate transcription
     # But allow common technical abbreviations
     caps_words = re.findall(r"\b[A-Z]{2,}\b", response)
     # Filter out common abbreviations
     technical_abbrevs = {"PDF", "OCR", "RGB", "DPI", "USA", "UK", "EU", "NATO", "USAF", "RAF"}
     actual_caps = [w for w in caps_words if w not in technical_abbrevs]
-    if len(actual_caps) > 2:
-        return True
+    return len(actual_caps) > 2
 
+
+def _check_smart_quotes(response: str, response_lower: str) -> bool:
     # Pattern 7: smart-quote variants. Pattern 4 catches ASCII quotes only;
     # qwen3-vl-plus sometimes returns curly quotes (U+201C/D, U+2018/9) or
     # guillemets (U+00AB/BB, U+2039/A) which slip through. Same length
     # threshold logic as Pattern 4.
-    if re.search(
+    return bool(re.search(
         r"[“‘«‹]"
         r"[A-Za-z0-9]"
         r"[^”’»›]{1,}"
         r"[”’»›]",
         response,
-    ):
-        return True
+    ))
 
+
+def _check_markdown_emphasis(response: str, response_lower: str) -> bool:
     # Pattern 8: markdown emphasis around capitalized phrases (`*Alan Wake*`,
     # `**Foo Bar**`). At least one capital + 3+ chars between the asterisks
     # filters out incidental `*emphasis*` of common words while catching the
     # proper-noun-reading shape observed in real VLM output.
-    if re.search(r"\*{1,2}[A-Z][\w\s\-:]{2,}\*{1,2}", response):
-        return True
+    return bool(re.search(r"\*{1,2}[A-Z][\w\s\-:]{2,}\*{1,2}", response))
 
+
+def _check_parenthesized_label_list(response: str, response_lower: str) -> bool:
     # Pattern 9: parenthesized comma-list of three or more items where most
     # items are Capitalized words, dotted identifiers, or camelCase tokens —
     # UI label dumps, YAML field-name lists, settings-menu enumerations.
@@ -583,16 +577,20 @@ def detect_text_reading(response: str) -> bool:
         )
         if code_shape >= 3:
             return True
+    return False
 
+
+def _check_url_or_domain(response: str, response_lower: str) -> bool:
     # Pattern 10: any URL or domain-with-path in the description body —
     # `https://x.y/z`, bare `fave.co/4n4knLo`. URLs in descriptions are
     # always text-reading; the visual contains them, not the description.
-    if re.search(
+    return bool(re.search(
         r"\bhttps?://\S+|\b[a-z][a-z0-9-]+\.[a-z]{2,}/[A-Za-z0-9_\-./?=&%#]+",
         response,
-    ):
-        return True
+    ))
 
+
+def _check_dotted_identifiers(response: str, response_lower: str) -> bool:
     # Pattern 11: three or more DISTINCT dotted identifiers in the body
     # (e.g. apiVersion, spec.containers.name, ports.containerPort). One or
     # two might be legitimate technical context for an architecture diagram;
@@ -600,9 +598,10 @@ def detect_text_reading(response: str) -> bool:
     _dotted_idents = set(
         re.findall(r"\b[a-z][a-zA-Z0-9]*\.[a-zA-Z][\w.]*\b", response)
     )
-    if len(_dotted_idents) >= 3:
-        return True
+    return len(_dotted_idents) >= 3
 
+
+def _check_class_noun_list_prefix(response: str, response_lower: str) -> bool:
     # Pattern 12: class-noun followed by a 4+ comma-separated list (column
     # / field / label enumerations). Phase 3 Step 0 leak shape: "columns
     # for prompts, reference trajectories, responses, latency, ..." —
@@ -611,28 +610,30 @@ def detect_text_reading(response: str) -> bool:
     # "colored bars, axes, and category labels" (3 items where 'labels' is
     # part of a compound noun, not a structural pointer to the list).
     # Class-noun string is module-level (_CLASS_NOUNS) so the regex builds
-    # once, not per call.
-    if re.search(
+    # once.
+    return bool(re.search(
         rf"\b(?:{_CLASS_NOUNS})\s+"
         r"(?:for|with|of|are|named|labeled|including|are:|named:)?\s*"
         r"(?:[a-zA-Z][\w\- ]{0,30}\s*,\s*){3,}"
         r"(?:and\s+)?[a-zA-Z][\w\- ]{0,30}\b",
         response,
-    ):
-        return True
+    ))
 
+
+def _check_class_noun_list_suffix(response: str, response_lower: str) -> bool:
     # Pattern 13: 4+ comma-separated items followed by a class-noun. Phase 3
     # Step 0 leak shape: "showing Group, Name, Status, ... columns" — Hao
     # p182. Mirror of Pattern 12 with the structural noun as the suffix.
     # 4-item floor for the same reason as Pattern 12.
-    if re.search(
+    return bool(re.search(
         r"(?:[a-zA-Z][\w\- ]{0,30}\s*,\s*){3,}"
         r"(?:and\s+)?[a-zA-Z][\w\- ]{0,30}\s+"
         rf"(?:{_CLASS_NOUNS})\b",
         response,
-    ):
-        return True
+    ))
 
+
+def _check_flow_arrows(response: str, response_lower: str) -> bool:
     # Pattern 14: flow arrows in the description body. Unicode arrow glyphs
     # ALWAYS indicate the model is transcribing flow chains with their
     # labels (the visual structure of a flow can be described without
@@ -641,9 +642,10 @@ def detect_text_reading(response: str) -> bool:
     # legitimate technical context.
     if re.search(r"[→⟶⇒⟹↦↪➡]", response):
         return True
-    if len(re.findall(r"->|=>", response)) >= 2:
-        return True
+    return len(re.findall(r"->|=>", response)) >= 2
 
+
+def _check_class_noun_parenthesized_list(response: str, response_lower: str) -> bool:
     # Pattern 15: class-noun followed immediately by a parenthesized 4+
     # comma-list. Phase 3 Step 0 v3 leak shapes that slipped past Pattern 9
     # (capital/dot/camelCase content filter) and Pattern 12 (\s+ between
@@ -651,40 +653,43 @@ def detect_text_reading(response: str) -> bool:
     #   "labeled fields (apiVersion, kind, metadata, data)" — Hao p93
     #   "labeled processing stages (data collection/preparation, ...)" — Hao p28
     # 4-item floor protects "(top, middle, bottom)" 3-item shapes.
-    if re.search(
+    return bool(re.search(
         rf"\b(?:{_CLASS_NOUNS})\s*\(\s*"
         r"[\w][\w\- /]*"
         r"(?:\s*,\s*[\w][\w\- /]*){3,}"
         r"\s*\)",
         response,
-    ):
-        return True
+    ))
 
+
+def _check_parenthesized_reference(response: str, response_lower: str) -> bool:
     # Pattern 16: chapter / figure / section / page reference in parentheses.
     # Phase 3 Step 0 v3 leak shape: "(ch 12-13)" — Hao p34. Reading numbered
     # references off a diagram is text-transcription regardless of how short
     # the parenthesized content is.
-    if re.search(
+    return bool(re.search(
         r"\(\s*(?:ch|chap|chapter|fig|figure|sec|section|p|pg|page|vol|volume)"
         r"\.?\s*\d+(?:\.\d+)*(?:\s*[-–—]\s*\d+(?:\.\d+)*)?\s*\)",
         response,
         re.IGNORECASE,
-    ):
-        return True
+    ))
 
+
+def _check_named_flow_chain(response: str, response_lower: str) -> bool:
     # Pattern 17: data-flow chain with named stages — "from X through Y to Z
     # and W". Phase 3 Step 0 v3 leak shape: "through Prometheus to
     # Alertmanager and Grafana" — Hao p111. The brand/component names ARE
     # the labels in a flow diagram; describing the visual structure does not
     # require naming each stage. Requires three-or-more chained Capitalized
     # tokens to avoid firing on simple "from A to B" descriptions.
-    if re.search(
+    return bool(re.search(
         r"\b(?:from|through|via|to|between)\s+[A-Z][A-Za-z0-9_\-]+"
         r"(?:\s+(?:through|to|via|and|then|into|toward)\s+[A-Z][A-Za-z0-9_\-]+){2,}",
         response,
-    ):
-        return True
+    ))
 
+
+def _check_brand_density(response: str, response_lower: str) -> bool:
     # Pattern 18: density of distinct mid-sentence Capitalized tokens. Phase
     # 3 Step 0 v4 residual leak shape: brand/product/component names
     # scattered through prose ("Prometheus ... Alertmanager ... Grafana ...
@@ -714,11 +719,66 @@ def detect_text_reading(response: str) -> bool:
             if len(_t) < 3:
                 continue
             _mid_caps.add(_t)
-    if len(_mid_caps) >= 4:
-        return True
+    return len(_mid_caps) >= 4
 
-    return False
 
+_PATTERNS: list[tuple[str, Callable[[str, str], bool]]] = [
+    ("P0_meta_terms", _check_meta_terms),
+    ("P0b_instructional", _check_instructional_self_ref),
+    ("P1_text_says", _check_text_says),
+    ("P1b_text_that_reads", _check_text_that_reads),
+    ("P1c_visible_caption_label", _check_visible_caption_label),
+    ("P2_written_on", _check_written_on),
+    ("P3_text_visible", _check_text_visible),
+    ("P4_quoted_visible_words", _check_quoted_visible_words),
+    ("P4b_excessive_quotes", _check_excessive_quotes),
+    ("P5_long_quoted_strings", _check_long_quoted_strings),
+    ("P5b_long_allcaps_heading", _check_long_allcaps_heading),
+    ("P6_multiple_allcaps_words", _check_multiple_allcaps_words),
+    ("P7_smart_quotes", _check_smart_quotes),
+    ("P8_markdown_emphasis", _check_markdown_emphasis),
+    ("P9_parenthesized_label_list", _check_parenthesized_label_list),
+    ("P10_url_or_domain", _check_url_or_domain),
+    ("P11_dotted_identifiers", _check_dotted_identifiers),
+    ("P12_class_noun_list_prefix", _check_class_noun_list_prefix),
+    ("P13_class_noun_list_suffix", _check_class_noun_list_suffix),
+    ("P14_flow_arrows", _check_flow_arrows),
+    ("P15_class_noun_parenthesized_list", _check_class_noun_parenthesized_list),
+    ("P16_parenthesized_reference", _check_parenthesized_reference),
+    ("P17_named_flow_chain", _check_named_flow_chain),
+    ("P18_brand_density", _check_brand_density),
+]
+
+
+def _detect_first_match(response: str) -> Optional[str]:
+    """Return the first text-reading pattern name that fires, or None."""
+    if not response:
+        return None
+
+    response_lower = response.lower()
+    for name, check in _PATTERNS:
+        if check(response, response_lower):
+            return name
+    return None
+
+
+def detect_text_reading(response: str) -> bool:
+    """
+    Detect if VLM response contains text transcription instead of visual description.
+
+    Returns True if text reading is detected (response should be rejected).
+    Returns False if response is a valid visual description (acceptable).
+
+    Args:
+        response: VLM response text
+
+    Returns:
+        True if text transcription detected, False otherwise
+    """
+    # We allow high-level typographic/layout descriptions (e.g., "two-column layout",
+    # "numbered list", "dense typographic layout"), but we reject anything that
+    # looks like quoting/reading/paraphrasing specific words.
+    return _detect_first_match(response) is not None
 
 def sanitize_text_reading_response(response: str) -> str:
     """

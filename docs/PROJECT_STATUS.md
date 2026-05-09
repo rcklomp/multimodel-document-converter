@@ -115,8 +115,14 @@ work" below).
   description rule, plus 15 regression tests
   (`tests/test_qa_image_gate_calibration.py`). Step 1 baseline doc
   at `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase3_vlm_baseline.md`.
-  pytest 645 → 672 passing (+27). **Steps 4-5 (retry harness +
-  end-to-end verification) carried forward to next iteration.**
+  pytest 645 → 672 passing (+27). **A1 follow-up implemented
+  2026-05-09:** `detect_text_reading()` now delegates through a
+  module-scope pattern table with `_detect_first_match()` diagnostics
+  for the Step 4 retry harness; behavior diff is identical across the
+  13 documented leak fixtures and the 604-description Phase 3 corpus,
+  benchmark delta +1.3 %, pytest `678 passed, 14 skipped`.
+  **Steps 4-5 (retry harness + end-to-end verification) carried
+  forward to next iteration.**
 - **Phase 4 active: localized strict-gate hard failures.**
   Original scope: Combat p66 / Adedeji p301 / KI EPUB / Devlin /
   Earthship / Firearms re-evaluation. Phase 2 added: Firearms
