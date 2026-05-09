@@ -95,6 +95,20 @@ logger = logging.getLogger(__name__)
 
 _INDEX_REF_RE = re.compile(r"\b\d{1,4}(,\s*\d{1,4}){2,}\b")
 _TOC_LEADER_RE = re.compile(r"\.{2,}\s*\d{1,4}\s*$")
+# Single-page back-index entry shape (e.g. "Argilla platform for A/B testing, 157" or
+# "evolution to Agentic RAG, 45-55"). Used to detect Adedeji-style back-index pages
+# whose entries each carry a single page or page-range — these escape _INDEX_REF_RE
+# (which requires 3+ comma-separated page numbers per entry).
+_BACK_INDEX_ENTRY_RE = re.compile(
+    r"^\s*[A-Za-z][^,\n]{1,80}?,\s*\d{1,4}(\s*[-,]\s*\d{1,4})*\s*$"
+)
+# Page footer/header marker on back-index pages: "280 | Index" or "Index | 281".
+_BACK_INDEX_MARKER_RE = re.compile(
+    r"^(\d{1,4}\s*\|\s*Index|Index\s*\|\s*\d{1,4}|Index)\s*$"
+)
+_BACK_INDEX_MIN_LINES = 20
+_BACK_INDEX_RATIO = 0.65
+_BACK_INDEX_RATIO_WITH_MARKER = 0.50
 # Back-index entries within a Docling DocumentIndex cell are separated by a
 # single space between the previous entry's trailing digit and the next
 # entry's leading letter. Splitting on this boundary lets us dedup at entry
@@ -265,6 +279,85 @@ def _sanitize_toc_index_text(text: str) -> str:
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
+
+
+def _extract_pdf_page_lines(pdf_path: Optional[Path], page_no: int) -> List[str]:
+    """Return non-empty lines from source-PDF page via pypdfium2.
+
+    Used by `_classify_dense_back_index_pages_by_source` and the source-PDF
+    fallback emitter to bypass Docling's layout extraction on pages where it
+    silently mangles dense back-index content.
+    """
+    if pdf_path is None:
+        return []
+    try:
+        import pypdfium2 as pdfium
+    except ImportError:
+        return []
+    try:
+        pdf = pdfium.PdfDocument(str(pdf_path))
+    except Exception:
+        return []
+    try:
+        if page_no < 1 or page_no > len(pdf):
+            return []
+        text = pdf[page_no - 1].get_textpage().get_text_bounded() or ""
+        return [line for line in text.splitlines() if line.strip()]
+    except Exception:
+        return []
+    finally:
+        try:
+            pdf.close()
+        except Exception:
+            pass
+
+
+def _is_back_index_page_by_lines(lines: List[str]) -> bool:
+    """True when source-PDF lines match a typical back-index page shape.
+
+    Detects the Adedeji-style back-index that escapes Docling's
+    `document_index` label: dense lines of `Topic, page` entries with the
+    "<n> | Index" page marker. Threshold tuned on Adedeji p298-316 (positive)
+    vs Adedeji body / Hao body / Kimothi back-index (negative; Kimothi is
+    handled by the Docling label and stays out of this fallback).
+    """
+    n_lines = len(lines)
+    if n_lines < _BACK_INDEX_MIN_LINES:
+        return False
+    n_idx = sum(1 for line in lines if _BACK_INDEX_ENTRY_RE.match(line.strip()))
+    ratio = n_idx / n_lines
+    if ratio >= _BACK_INDEX_RATIO:
+        return True
+    has_marker = any(_BACK_INDEX_MARKER_RE.match(line.strip()) for line in lines)
+    return ratio >= _BACK_INDEX_RATIO_WITH_MARKER and has_marker
+
+
+def _classify_dense_back_index_pages_by_source(
+    pdf_path: Optional[Path],
+    total_pages: int,
+    exclude: set[int],
+) -> set[int]:
+    """Detect back-index pages by source-PDF content shape.
+
+    Runs after `_classify_dense_index_pages` for pages it didn't catch.
+    Uses pypdfium2 to read clean source-PDF text, sidestepping any
+    Docling layout corruption.
+
+    Args:
+        pdf_path: Source PDF path; if None, returns an empty set.
+        total_pages: Total page count of the document (1-indexed range).
+        exclude: Pages already classified by Docling-based detection; skipped.
+    """
+    if pdf_path is None or total_pages < 1:
+        return set()
+    found: set[int] = set()
+    for page_no in range(1, total_pages + 1):
+        if page_no in exclude:
+            continue
+        lines = _extract_pdf_page_lines(pdf_path, page_no)
+        if _is_back_index_page_by_lines(lines):
+            found.add(page_no)
+    return found
 
 
 # ============================================================================
@@ -2293,6 +2386,9 @@ class V2DocumentProcessor:
         print(f"✓ Docling conversion complete in {_elapsed:.1f}s", flush=True)
         logger.info(f"Docling conversion completed in {_elapsed:.1f}s")
 
+        # Reset cross-call state for the dense-index per-element table skip set.
+        self._dense_index_pages_skip_table = set()
+
         element_indices: Dict[str, int] = {"figure": 0, "table": 0}
         text_buffer: List[str] = []
 
@@ -2386,6 +2482,7 @@ class V2DocumentProcessor:
                     file_type=file_type,
                     page_dims=page_dims,
                     page_offset=self._page_offset,
+                    pdf_path=file_path if file_type == FileType.PDF else None,
                 )
                 logger.info(
                     f"[HYBRID-CHUNKER] Produced {len(_hybrid_text_chunks)} text chunks"
@@ -2566,6 +2663,7 @@ class V2DocumentProcessor:
         file_type: "FileType",
         page_dims: Dict[int, Tuple[float, float]],
         page_offset: int = 0,
+        pdf_path: Optional[Path] = None,
     ) -> List["IngestionChunk"]:
         """Process text elements using Docling's HybridChunker.
 
@@ -2583,6 +2681,30 @@ class V2DocumentProcessor:
             "max_tokens": 350,  # ~1400 chars — keeps chunks under the 1500-char oversize gate
         }
         dense_index_pages = _classify_dense_index_pages(doc)
+        # Phase 4 Step 2: source-PDF fallback for back-index pages that escape
+        # the Docling-based classifier (Adedeji 298-316 ship without the
+        # `document_index` label and produce silently-truncated or visibly
+        # corrupted text chunks under HybridChunker).
+        total_pages = len(page_dims) if page_dims else 0
+        source_back_index_pages = _classify_dense_back_index_pages_by_source(
+            pdf_path=pdf_path,
+            total_pages=total_pages,
+            exclude=dense_index_pages,
+        )
+        if source_back_index_pages:
+            logger.info(
+                "[HYBRID-CHUNKER] Source-PDF back-index detection added page(s): %s",
+                sorted((page + page_offset) for page in source_back_index_pages),
+            )
+            dense_index_pages = dense_index_pages | source_back_index_pages
+        # Stash dense_index_pages so the per-element table/image emitter
+        # downstream can skip emission on these pages (otherwise Docling's
+        # corrupted table chunk for Adedeji p301 still leaks through).
+        # Use GLOBAL page numbers because `_process_element_v2` checks
+        # against `batch_page_no + page_offset`.
+        self._dense_index_pages_skip_table = {
+            page + page_offset for page in dense_index_pages
+        }
         if dense_index_pages:
             logger.info(
                 "[HYBRID-CHUNKER] Routing dense TOC/index page(s) around "
@@ -2900,6 +3022,8 @@ class V2DocumentProcessor:
                     file_type=file_type,
                     page_dims=page_dims,
                     page_offset=page_offset,
+                    pdf_path=pdf_path,
+                    source_text_only_pages=source_back_index_pages,
                 )
             )
             chunks.sort(key=lambda ch: ch.metadata.page_number if ch.metadata else 0)
@@ -2931,26 +3055,37 @@ class V2DocumentProcessor:
         file_type: "FileType",
         page_dims: Dict[int, Tuple[float, float]],
         page_offset: int = 0,
+        pdf_path: Optional[Path] = None,
+        source_text_only_pages: Optional[set[int]] = None,
     ) -> List["IngestionChunk"]:
         chunks: List[IngestionChunk] = []
+        source_text_only_pages = source_text_only_pages or set()
 
         clean_name = Path(source_file).stem.replace("_", " ") if source_file else "Document"
         for raw_page in sorted(dense_pages):
-            index_items = _docling_document_index_items_for_page(doc, raw_page)
-            if index_items:
-                items = index_items
-                lines = [
-                    line
-                    for item in index_items
-                    for line in _docling_document_index_lines(item)
-                ]
-            else:
+            if raw_page in source_text_only_pages:
+                # Source-PDF fallback: Docling's layout extraction silently
+                # truncates or visibly corrupts these pages; pypdfium2 yields
+                # clean text. We still need item bboxes for spatial metadata,
+                # so collect any text items the layout did emit on this page.
                 items = _docling_text_items_for_page(doc, raw_page)
-                lines = [
-                    _docling_item_text(item)
-                    for item in items
-                    if _docling_item_text(item)
-                ]
+                lines = _extract_pdf_page_lines(pdf_path, raw_page)
+            else:
+                index_items = _docling_document_index_items_for_page(doc, raw_page)
+                if index_items:
+                    items = index_items
+                    lines = [
+                        line
+                        for item in index_items
+                        for line in _docling_document_index_lines(item)
+                    ]
+                else:
+                    items = _docling_text_items_for_page(doc, raw_page)
+                    lines = [
+                        _docling_item_text(item)
+                        for item in items
+                        if _docling_item_text(item)
+                    ]
             text = _sanitize_toc_index_text("\n".join(lines))
             if not text:
                 continue
@@ -2967,6 +3102,11 @@ class V2DocumentProcessor:
                 level=3,
             )
             parts = self._split_dense_index_text(text, max_chars=6000)
+            extraction_method = (
+                "hybrid_chunker_pageskip_source_pdf"
+                if raw_page in source_text_only_pages
+                else "hybrid_chunker_pageskip"
+            )
             for idx, part in enumerate(parts):
                 breadcrumb = list(hierarchy.breadcrumb_path)
                 if len(parts) > 1:
@@ -2987,7 +3127,7 @@ class V2DocumentProcessor:
                     chunk_type=ChunkType.LIST_ITEM,
                     page_width=int(page_w),
                     page_height=int(page_h),
-                    extraction_method="hybrid_chunker_pageskip",
+                    extraction_method=extraction_method,
                     position=self._next_chunk_position(),
                     **self._intelligence_metadata,
                 )
@@ -3466,6 +3606,12 @@ class V2DocumentProcessor:
             )
 
         elif "table" in label_lower:
+            # Phase 4 Step 2: skip table emission on dense back-index pages
+            # routed through `_emit_dense_index_page_chunks` — Docling's table
+            # extraction on these pages produces page-corrupted output (e.g.
+            # Adedeji p301: 9-chunk repetition loop).
+            if page_no in getattr(self, "_dense_index_pages_skip_table", set()):
+                return
             element_indices["table"] += 1
             asset_name = ASSET_PATTERN.format(
                 doc_hash=doc_hash,
