@@ -32,6 +32,8 @@ from __future__ import annotations
 
 from typing import Any, Set
 
+from pydantic import Field
+
 from docling_core.transforms.chunker.hierarchical_chunker import (
     ChunkingDocSerializer,
     ChunkingSerializerProvider,
@@ -137,7 +139,12 @@ class MmragChunkingDocSerializer(ChunkingDocSerializer):
     """ChunkingDocSerializer with the label-leak-suppressing picture serializer."""
 
     picture_serializer: Any = MmragMarkdownPictureSerializer()
-    skip_pages: set[int] = set()
+    # default_factory rather than `set()` literal: ChunkingDocSerializer is a
+    # Pydantic BaseModel which deep-copies the literal default per instance,
+    # so the literal form is safe in practice — but the factory form is the
+    # idiomatic Pydantic v2 spelling and protects against future migration
+    # to a non-Pydantic base.
+    skip_pages: set[int] = Field(default_factory=set)
     params: MarkdownParams = MarkdownParams(
         image_mode=ImageRefMode.PLACEHOLDER,
         image_placeholder="",

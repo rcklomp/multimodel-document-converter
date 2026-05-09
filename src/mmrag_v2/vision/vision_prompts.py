@@ -308,6 +308,17 @@ STRICTER_VISUAL_PROMPT = VISUAL_ONLY_PROMPT
 # ============================================================================
 
 
+# Class-noun anchor for Patterns 12, 13, and 15 — structural noun classes
+# that signal "the items in this list are labels, not visual elements"
+# (column headers, field names, menu options, etc.). Module-level so the
+# regex string is constructed once, not per detect_text_reading call.
+_CLASS_NOUNS: str = (
+    r"columns?|rows?|fields?|headers?|labels?|categories|tabs?|"
+    r"options?|metrics?|parameters?|attributes?|properties|sections?|"
+    r"stages?|phases?|steps?|modules?|blocks?|nodes?"
+)
+
+
 # Pattern 18 exclusion list. Capitalized words that DO appear legitimately
 # in visual descriptions and must NOT count toward the brand-density
 # threshold. Includes: visual-description nouns (Diagram, Chart),
@@ -599,11 +610,8 @@ def detect_text_reading(response: str) -> bool:
     # prose like "data for users, orders, and products" (3 items) and
     # "colored bars, axes, and category labels" (3 items where 'labels' is
     # part of a compound noun, not a structural pointer to the list).
-    _CLASS_NOUNS = (
-        r"columns?|rows?|fields?|headers?|labels?|categories|tabs?|"
-        r"options?|metrics?|parameters?|attributes?|properties|sections?|"
-        r"stages?|phases?|steps?|modules?|blocks?|nodes?"
-    )
+    # Class-noun string is module-level (_CLASS_NOUNS) so the regex builds
+    # once, not per call.
     if re.search(
         rf"\b(?:{_CLASS_NOUNS})\s+"
         r"(?:for|with|of|are|named|labeled|including|are:|named:)?\s*"
@@ -683,12 +691,17 @@ def detect_text_reading(response: str) -> bool:
     # Helm" — Hao p111; "Lenovo ThinkPad ... PCMak ... Cinebench" — PCWorld
     # p50). Each mid-sentence Capitalized token that's NOT a common
     # visual-description vocabulary word AND NOT a sentence-initial position
-    # is a candidate text-reading transcription. Threshold of four DISTINCT
-    # such tokens admits "Photo with Notre Dame and Eiffel Tower" (legit
-    # visual identification of two landmarks) while flagging dense
-    # label-transcription. Length ≥3 filters out single-letter and 2-letter
-    # technical abbreviations (UI, AI, etc.) that are already covered by
-    # Pattern 6's allowlist.
+    # is a candidate text-reading transcription.
+    #
+    # Threshold of four DISTINCT non-vocabulary mid-sentence tokens. Single
+    # or paired brand references ("Photo of a Sony camera"; "Map of Boston
+    # near Cambridge") slip through unchallenged. Dense label runs
+    # (4+ tokens) fire — INCLUDING dense landmark naming under strict
+    # Source Sanctity reading; the AGENTS.md "Identity through Content"
+    # principle treats landmark identification as text-reading, so the
+    # pattern is correct to flag it. Length ≥3 filters out single-letter
+    # and 2-letter technical abbreviations (UI, AI, etc.) that Pattern 6's
+    # allowlist already handles.
     _sentences = re.split(r"(?<=[.!?])\s+", response)
     _mid_caps: set[str] = set()
     for _sent in _sentences:

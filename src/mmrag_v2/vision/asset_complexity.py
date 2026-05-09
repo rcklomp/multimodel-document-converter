@@ -24,7 +24,6 @@ description does not).
 """
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -175,8 +174,7 @@ def classify_asset_complexity(
         return AssetComplexityResult(
             complexity="simple",
             reason=(
-                f"bbox_area={area:.2f}; "
-                f"asset_size={size if size is not None else 'NA'}; "
+                f"bbox_area={area_str}; asset_size={size_str}; "
                 "small bbox + tiny/unknown file"
             ),
             bbox_area_fraction=area,
