@@ -561,7 +561,8 @@ def detect_text_reading(response: str) -> bool:
     # part of a compound noun, not a structural pointer to the list).
     _CLASS_NOUNS = (
         r"columns?|rows?|fields?|headers?|labels?|categories|tabs?|"
-        r"options?|metrics?|parameters?|attributes?|properties|sections?"
+        r"options?|metrics?|parameters?|attributes?|properties|sections?|"
+        r"stages?|phases?|steps?|modules?|blocks?|nodes?"
     )
     if re.search(
         rf"\b(?:{_CLASS_NOUNS})\s+"
@@ -593,6 +594,47 @@ def detect_text_reading(response: str) -> bool:
     if re.search(r"[→⟶⇒⟹↦↪➡]", response):
         return True
     if len(re.findall(r"->|=>", response)) >= 2:
+        return True
+
+    # Pattern 15: class-noun followed immediately by a parenthesized 4+
+    # comma-list. Phase 3 Step 0 v3 leak shapes that slipped past Pattern 9
+    # (capital/dot/camelCase content filter) and Pattern 12 (\s+ between
+    # class-noun and list, no parens accepted):
+    #   "labeled fields (apiVersion, kind, metadata, data)" — Hao p93
+    #   "labeled processing stages (data collection/preparation, ...)" — Hao p28
+    # 4-item floor protects "(top, middle, bottom)" 3-item shapes.
+    if re.search(
+        rf"\b(?:{_CLASS_NOUNS})\s*\(\s*"
+        r"[\w][\w\- /]*"
+        r"(?:\s*,\s*[\w][\w\- /]*){3,}"
+        r"\s*\)",
+        response,
+    ):
+        return True
+
+    # Pattern 16: chapter / figure / section / page reference in parentheses.
+    # Phase 3 Step 0 v3 leak shape: "(ch 12-13)" — Hao p34. Reading numbered
+    # references off a diagram is text-transcription regardless of how short
+    # the parenthesized content is.
+    if re.search(
+        r"\(\s*(?:ch|chap|chapter|fig|figure|sec|section|p|pg|page|vol|volume)"
+        r"\.?\s*\d+(?:\.\d+)*(?:\s*[-–—]\s*\d+(?:\.\d+)*)?\s*\)",
+        response,
+        re.IGNORECASE,
+    ):
+        return True
+
+    # Pattern 17: data-flow chain with named stages — "from X through Y to Z
+    # and W". Phase 3 Step 0 v3 leak shape: "through Prometheus to
+    # Alertmanager and Grafana" — Hao p111. The brand/component names ARE
+    # the labels in a flow diagram; describing the visual structure does not
+    # require naming each stage. Requires three-or-more chained Capitalized
+    # tokens to avoid firing on simple "from A to B" descriptions.
+    if re.search(
+        r"\b(?:from|through|via|to|between)\s+[A-Z][A-Za-z0-9_\-]+"
+        r"(?:\s+(?:through|to|via|and|then|into|toward)\s+[A-Z][A-Za-z0-9_\-]+){2,}",
+        response,
+    ):
         return True
 
     return False

@@ -333,6 +333,72 @@ class TestDetectTextReading:
         for r in legitimate:
             assert not detect_text_reading(r), f"False positive: {r!r}"
 
+    # =========================================================================
+    # Phase 3 Step 0 v3 empirical leak fixtures (qwen3-vl-plus, 2026-05-09)
+    # — Patterns 15-17 close additional leak classes surfaced by the v3
+    # enrichment pass against the c23d3f6+a879e85 strengthened validator.
+    # =========================================================================
+
+    def test_class_noun_with_parenthesized_label_list_caught(self):
+        """'labeled fields (apiVersion, kind, metadata, data)' — Hao p93."""
+        leaked = (
+            "Text-based schematic of a Kubernetes ConfigMap YAML definition "
+            "showing labeled fields (apiVersion, kind, metadata, data) with "
+            "explanatory annotations."
+        )
+        assert detect_text_reading(leaked)
+
+    def test_class_noun_with_parenthesized_lowercase_phrase_list_caught(self):
+        """'stages (data collection/preparation, ...)' — Hao p28."""
+        leaked = (
+            "System schematic showing a linear sequence of six labeled "
+            "processing stages (data collection/preparation, data versioning, "
+            "model training, model evaluation, model validation, model "
+            "deployment) enclosed in a container."
+        )
+        assert detect_text_reading(leaked)
+
+    def test_chapter_reference_in_parens_caught(self):
+        """'(ch 12-13)' — Hao p34. Numbered chapter / figure / section refs."""
+        leaked = (
+            "Workflow diagram with components labeled (ch 12-13) and color-coded sections."
+        )
+        assert detect_text_reading(leaked)
+        # Variants
+        assert detect_text_reading("Diagram (chapter 5) showing the architecture.")
+        assert detect_text_reading("Photograph (figure 3-4) of the apparatus.")
+        assert detect_text_reading("Schematic (section 7.2) of the controller.")
+
+    def test_named_flow_chain_caught(self):
+        """'through Prometheus to Alertmanager and Grafana' — Hao p111."""
+        leaked = (
+            "System schematic showing data flow from two applications through "
+            "Prometheus to Alertmanager and Grafana, alongside Helm command-"
+            "line configuration."
+        )
+        assert detect_text_reading(leaked)
+
+    def test_v3_patterns_do_not_overfire(self):
+        """Negative shapes for v3 patterns."""
+        legitimate = [
+            # 3-item parenthesized lowercase positional list — Pattern 15's
+            # 4-item floor protects this.
+            "Diagram with three sections (top, middle, bottom) arranged horizontally.",
+            # 'fields' as everyday noun without parenthesized label list.
+            "Photograph of green fields stretching to the horizon.",
+            # Single capitalized stage name in flow — Pattern 17 requires 3+ chain.
+            "Diagram showing data flow from input to Output stage.",
+            # Two-stage flow — Pattern 17 requires 3+, so this is allowed.
+            "Process moves from start to finish across two boxes.",
+            # Generic chapter-like word without the abbreviation pattern.
+            "Diagram showing chapters of a book on a shelf.",
+            # Page reference using the full word "page" outside parens — not the
+            # parenthesized abbrev shape.
+            "Photo of a magazine open to a page about technology.",
+        ]
+        for r in legitimate:
+            assert not detect_text_reading(r), f"False positive: {r!r}"
+
 
 class TestValidateVLMResponse:
     """Test cases for validate_vlm_response() function."""
