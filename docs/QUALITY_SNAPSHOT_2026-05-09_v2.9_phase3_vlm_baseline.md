@@ -1,9 +1,11 @@
 # Quality Snapshot 2026-05-09 — v2.9 Phase 3 VLM Baseline
 
-> **Status: Draft.** Phase 3 Step 1 deliverable — empirical baseline
-> for VLM gate calibration. Authored after Source Sanctity validator
-> hardening (commits `c23d3f6`, `a879e85`, `f224aad`, plus a v4
-> Pattern-18 follow-up — 18 detection patterns total) and against
+> **Status: Phase 3 closed (2026-05-09).** Originally Phase 3 Step 1
+> deliverable — empirical baseline for VLM gate calibration. Now also
+> records Step 4 (retry harness, commit `649c952`) outcome in §9.
+> Source Sanctity validator hardening shipped across commits
+> `c23d3f6`, `a879e85`, `f224aad`, plus a v4 Pattern-18 follow-up
+> (18 detection patterns total). Step 4 retry harness shipped after
 > the Phase 3 Step 0 v5 enrichment (corpus shipped to qwen3-vl-plus
 > on 2026-05-09).
 
@@ -227,6 +229,63 @@ short-description chunks above — Step 4's retry harness target set.
   on broad-corpus data.** This corpus is small (3 docs); broad-data
   confirmation may reveal pattern over-fire on document shapes not
   represented here (academic papers, literature, scanned).
+
+## 9. Step 4 outcome — VLM detail-retry harness
+
+Implementation: `scripts/enrich_image_chunks_v29.py` —
+`_maybe_retry_for_detail()` plus the existing-complete reset path.
+Tests: `tests/test_enrich_retry_harness.py` (6 cases). Commit `649c952`.
+
+**Behavior:**
+- Trigger: `vision_status == complete` AND
+  `len(visual_description.strip()) < 20` AND
+  `classify_asset_complexity != simple` AND
+  `vision_detail_retry_attempted` not already set.
+- Retry prompt: `VISUAL_ONLY_PROMPT` + a one-line detail clause
+  (no text-transcription loophole).
+- Retry budget: 1 attempt per chunk lifetime (idempotent flag prevents
+  re-fire across enrichment runs).
+- Failure path: short-or-leaking response → `vision_status =
+  hard_fallback`, `vision_error = complex_asset_short_response_after_retry`,
+  `vision_provider_used = qwen3-vl-plus` preserved per F4 contract.
+
+**Cloud verification on the 10 documented short-on-complex targets:**
+
+| chunk | doc / page | original | after retry | outcome |
+|---|---|---|---:|---|
+| `70930ff6f3a8_029_image_…` | Hao p29 | `System schematic.` | short | hard_fallback |
+| `70930ff6f3a8_035_image_10cf54b…` | Hao p35 (1) | `System schematic.` | rich | RESOLVED |
+| `70930ff6f3a8_035_image_a07a733…` | Hao p35 (2) | `System schematic.` | short | hard_fallback |
+| `70930ff6f3a8_139_image_…` | Hao p139 | `System schematic.` | rich | RESOLVED |
+| `70930ff6f3a8_310_image_…` | Hao p310 | `System schematic.` | short | hard_fallback |
+| `70930ff6f3a8_355_image_4a8caad6` | Hao p355 | `Line chart.` | 313 chars | RESOLVED |
+| `70930ff6f3a8_364_image_…` | Hao p364 | `Interface panel.` | dense-text-acknowledgment | RESOLVED |
+| `70930ff6f3a8_460_image_…` | Hao p460 | `System schematic.` | short | hard_fallback |
+| `131b7b54c411_227_image_…` | Adedeji p227 | `System schematic.` | rich | RESOLVED |
+| `ae1c6740af40_098_image_…` | PCWorld p98 | `Logo-style graphic.` | short | hard_fallback |
+
+**5 RESOLVED / 5 HARD_FALLBACK** — exactly the calibrated mid-confidence
+outcome the gate is designed for. The 5 resolved chunks pass strict gate
+on first reading; the 5 hard_fallbacks are F4-exempt
+(`vision_status=hard_fallback` + `vision_error` + `vision_provider_used`
+all present).
+
+**Strict gate after Step 4:**
+
+| doc | IMAGE_DESCRIPTION_UNUSABLE before | after | other QA failures (unrelated) |
+|---|---:|---:|---|
+| Hao | 8 / 252 (3.2 %) | **0** | MISSING_PAGES (5, Phase 4); ASSET_TINY warning (2) |
+| Adedeji | 1 / 128 (0.8 %) | **0** | MISSING_PAGES (4, Phase 4); TABLE_CORRUPTION p301; code_indentation_fidelity 0.886 |
+| PCWorld | 1 / 224 (0.4 %) | **0** | none — full QA_PASS |
+
+The remaining failures on Hao + Adedeji are pre-existing Phase 4
+workstreams (dense-page coverage, table corruption, code-indent —
+none introduced by Step 4 and none related to image enrichment).
+
+**Tests:** 685 passed, 14 skipped (full suite). 6 new in
+`test_enrich_retry_harness.py` cover: trigger-on-complex, no-trigger-on-simple,
+hard-fallback-after-retry, Source-Sanctity-rejection-after-retry,
+budget-cap, and the existing-complete reset path.
 
 ---
 
