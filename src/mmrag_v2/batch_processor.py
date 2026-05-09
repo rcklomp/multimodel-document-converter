@@ -32,6 +32,7 @@ import hashlib
 import io
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
@@ -3188,6 +3189,11 @@ class BatchProcessor:
             # are dropped at the same boundary as every other empty text row.
             export_chunks = self._apply_technical_manual_export_sanitizer(export_chunks)
 
+            # Phase 4 Step 3: drop chunks whose content matches strict-gate
+            # corruption patterns (Combat p66 magazine-font garble; mirrors the
+            # qa_full_conversion.py LOCALIZED_CORRUPTION detector).
+            export_chunks = self._drop_corrupted_chunks_before_metadata(export_chunks)
+
             # Final guard: drop any text chunk that ended up empty after
             # all upstream sanitisers/dedup/breaker passes. The strict gate's
             # empty_text_chunks invariant (UNIVERSAL_FAIL) cannot tolerate
@@ -4012,6 +4018,76 @@ class BatchProcessor:
                 f"zeroed by export sanitiser before metadata write"
             )
         return out
+
+    # Phase 4 Step 3: shared corruption patterns matching the strict-gate
+    # detector in scripts/qa_full_conversion.py. The set is intentionally
+    # narrow — magazine-PDF font corruption produces these very specific
+    # artifacts; sane prose never matches.
+    _CHUNK_CORRUPTION_PATTERNS = (
+        re.compile(r"[—]{6,}"),         # 6+ em-dashes in a row
+        re.compile(r"[™]{2,}"),         # repeated trademark symbols
+        re.compile(r"[CS]{10,}"),            # 10+ Cs/Ss in a row
+        re.compile(r"\b[BSQ][0-9]th"),       # garbled ordinals (B5th, S3th, ...)
+        re.compile(r"\bFe35\b"),
+        re.compile(r"\bF1SC\b"),
+        re.compile(r"\bNCOCOC\b"),
+    )
+
+    @classmethod
+    def _is_corrupted_chunk_content(cls, content: str) -> bool:
+        """Detect known unrecoverable extraction-time corruption shapes.
+
+        Mirrors the strict-gate `LOCALIZED_CORRUPTION` detector in
+        scripts/qa_full_conversion.py so chunks that would fail the gate
+        are dropped at the finalize boundary instead of leaking into the
+        JSONL. Replacement-char ratio gate matches the gate's 0.005 threshold.
+        """
+        if not content:
+            return False
+        n = len(content)
+        if content.count("�") / max(1, n) > 0.005:
+            return True
+        return any(p.search(content) for p in cls._CHUNK_CORRUPTION_PATTERNS)
+
+    def _drop_corrupted_chunks_before_metadata(
+        self,
+        chunks: List[IngestionChunk],
+    ) -> List[IngestionChunk]:
+        """Drop text/table chunks whose content matches strict-gate corruption patterns.
+
+        Combat Aircraft p66 is the canonical example: the source PDF has
+        font/encoding corruption that no extraction logic can recover, so
+        Docling's table extractor produces a chunk like
+        ``'le See Se ee ee ee ... US AirForce Academy,Colorado—“C—si‘“—;s‘“‘“...'``.
+        Phase 4 Step 3 quarantines such chunks at the finalize boundary
+        instead of letting them ship into the corpus.
+        """
+        filtered: List[IngestionChunk] = []
+        dropped: List[IngestionChunk] = []
+        for chunk in chunks:
+            if chunk.modality not in (Modality.TEXT, Modality.TABLE):
+                filtered.append(chunk)
+                continue
+            if self._is_corrupted_chunk_content(chunk.content or ""):
+                dropped.append(chunk)
+                continue
+            filtered.append(chunk)
+        if dropped:
+            page_counts: Dict[int, int] = {}
+            for c in dropped:
+                page = getattr(c.metadata, "page_number", None)
+                if page is not None:
+                    page_counts[page] = page_counts.get(page, 0) + 1
+            page_summary = ", ".join(
+                f"p{page}={count}" for page, count in sorted(page_counts.items())
+            )
+            logger.warning(
+                "[FINALIZE] Dropped %d corrupted chunk(s) before JSONL write "
+                "(strict-gate LOCALIZED_CORRUPTION quarantine; pages: %s)",
+                len(dropped),
+                page_summary or "n/a",
+            )
+        return filtered
 
     def _drop_empty_text_chunks_before_metadata(
         self,
