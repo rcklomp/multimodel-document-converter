@@ -131,7 +131,7 @@ work" below).
   §9. Phase 3 closed.
 - **Phase 4: localized strict-gate hard failures — closed pending
   two sign-offs (2026-05-09 / 2026-05-10).** Plan and closure
-  evidence: `docs/PLAN_V2.9__PHASE4.md` and
+  evidence: `docs/archive/PLAN_V2.9__PHASE4.md` and
   `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase4_after.md`.
   - Step 1 — `qa_full_conversion.py --source-pdf` documented as
     canonical strict-gate command (`611805d`).
@@ -159,9 +159,9 @@ work" below).
      0.722 vs 0.80 floor. Defect: OCR/element-by-element path
      doesn't promote Docling section_header items into
      `ContextStateV2.hierarchy_stack` (probe data in
-     `PLAN_V2.9__PHASE4.md` Step 4).
+     `docs/archive/PLAN_V2.9__PHASE4.md` Step 4).
   2. `KI_EPUB_EXTRACTION_LANE_REWRITE` — EPUB lane structural
-     gaps (acceptance baseline in `PLAN_V2.9__PHASE4.md` Step 6).
+     gaps (acceptance baseline in `docs/archive/PLAN_V2.9__PHASE4.md` Step 6).
 - **Qdrant ``mmrag_v2_8`` re-ingest.** The collection currently
   contains v2.8.0 ingest data only; not refreshed for v2.9 because
   v2.9 isn't shippable yet (Phase 5 owns the broad reconversion +

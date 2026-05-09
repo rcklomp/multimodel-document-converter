@@ -188,8 +188,8 @@ Current recovery sequence:
 | Phase 0 | Establish current strict-gate baseline from the 2026-05-06 snapshot and current working tree | `complete` |
 | Phase 1 | TOC/index page-loss closure contract | `complete` (2026-05-07, commit `df91061`) |
 | Phase 2 | Re-verify already-shipped v2.9 fixes under strict gate | `complete` (2026-05-08, verification only — see `docs/QUALITY_SNAPSHOT_2026-05-08_v2.9_phase2_after.md`) |
-| Phase 3 | Resolve `IMAGE_DESCRIPTION_UNUSABLE` policy/model behavior — execution plan in `docs/PLAN_V2.9__STEP3.md` | `complete` (2026-05-09, commits `649c952` + `51e897b`) |
-| Phase 4 | Resolve localized hard failures (Combat, Adedeji, Devlin, Earthship, Firearms, KI_En_ChatGPT) — Phase 2 added Firearms HEADING coverage and chunk-count drift to scope. Closure evidence in `docs/PLAN_V2.9__PHASE4.md` and `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase4_after.md`. | `closed pending two sign-offs` (2026-05-09 / 2026-05-10): Firearms HEADING (`OCR_PATH_HEADING_PROPAGATION`) and KI EPUB (`KI_EPUB_EXTRACTION_LANE_REWRITE`) both deferred to v2.10 |
+| Phase 3 | Resolve `IMAGE_DESCRIPTION_UNUSABLE` policy/model behavior — execution plan in `docs/archive/PLAN_V2.9__STEP3.md` | `complete` (2026-05-09, commits `649c952` + `51e897b`) |
+| Phase 4 | Resolve localized hard failures (Combat, Adedeji, Devlin, Earthship, Firearms, KI_En_ChatGPT) — Phase 2 added Firearms HEADING coverage and chunk-count drift to scope. Closure evidence in `docs/archive/PLAN_V2.9__PHASE4.md` and `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase4_after.md`. | `closed pending two sign-offs` (2026-05-09 / 2026-05-10): Firearms HEADING (`OCR_PATH_HEADING_PROPAGATION`) and KI EPUB (`KI_EPUB_EXTRACTION_LANE_REWRITE`) both deferred to v2.10 |
 | Phase 5 | Broad reconversion, enrichment, Qdrant drop/recreate, AFTER snapshot | blocked until both Phase 4 sign-offs land |
 
 ---
@@ -493,7 +493,7 @@ outputs generated after Phase 1. Audit-only PASS is not sufficient.
 
 ### Phase 3 — Resolve `IMAGE_DESCRIPTION_UNUSABLE`
 
-> **Execution plan: `docs/PLAN_V2.9__STEP3.md`** (split out 2026-05-08
+> **Execution plan: `docs/archive/PLAN_V2.9__STEP3.md`** (split out 2026-05-08
 > for review-isolation and history clarity). The body below is the
 > master-plan summary; the sub-plan has the full step breakdown,
 > pre-flights, acceptance signals, and review history.
@@ -529,7 +529,7 @@ gate/model behavior, not extraction.
 
 **Closure summary:** Steps 1, 2, 3, 5 shipped; Steps 4 + 6 deferred to v2.10 as
 `OCR_PATH_HEADING_PROPAGATION` (Firearms HEADING) and `KI_EPUB_EXTRACTION_LANE_REWRITE`.
-Detailed closure plan + evidence in `docs/PLAN_V2.9__PHASE4.md` and
+Detailed closure plan + evidence in `docs/archive/PLAN_V2.9__PHASE4.md` and
 `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase4_after.md`. The original posture
 table below is preserved for historical context; closure delta is documented
 in the sub-plan.

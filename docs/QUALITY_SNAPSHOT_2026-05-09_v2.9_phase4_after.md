@@ -65,13 +65,13 @@ Before Step 4: 72.2 % coverage (304/1094 chunks lack `parent_heading`), gate FAI
 - The fix doesn't move the Firearms metric because Firearms is OCR-routed (`extraction_method='ocr'`), not HybridChunker-routed. The OCR-path heading propagation has a separate, deeper bug.
 - Path A profile-scoped gate relaxation was briefly shipped (`5e58e6e`) and reverted (`cbd7fb4`) because the threshold tuning was overfit. The `<= 0.05` sparseness ratio and the `{scanned, digital_magazine}` profile set were reverse-engineered to make Firearms pass while leaving Hao / Adedeji alone — exactly the kind of gate weakening the contracts forbid.
 
-**Deferral request:** move to v2.10 backlog as `OCR_PATH_HEADING_PROPAGATION`. Acceptance baseline: Firearms HEADING coverage = 0.722 = the natural ceiling under the current OCR-path bug. Probe data documenting the bug is in `PLAN_V2.9__PHASE4.md` Step 4. Strict gate is **unchanged** — Firearms continues to FAIL the global `>= 0.80` HEADING gate; the deferral acknowledges that, it does not paper over it.
+**Deferral request:** move to v2.10 backlog as `OCR_PATH_HEADING_PROPAGATION`. Acceptance baseline: Firearms HEADING coverage = 0.722 = the natural ceiling under the current OCR-path bug. Probe data documenting the bug is in `docs/archive/PLAN_V2.9__PHASE4.md` Step 4. Strict gate is **unchanged** — Firearms continues to FAIL the global `>= 0.80` HEADING gate; the deferral acknowledges that, it does not paper over it.
 
 ## 4. v2.10 carry-forward backlog
 
 These items moved to the v2.10 backlog from Phase 4:
 
-1. **`KI_EPUB_EXTRACTION_LANE_REWRITE`** (Step 6) — full EPUB lane: pagination, bbox synthesis, dedup, heading propagation. Acceptance baseline: `output/KI_En_ChatGPT_Praktische_Gids/ingestion.jsonl` metrics in `PLAN_V2.9__PHASE4.md` Step 6.
+1. **`KI_EPUB_EXTRACTION_LANE_REWRITE`** (Step 6) — full EPUB lane: pagination, bbox synthesis, dedup, heading propagation. Acceptance baseline: `output/KI_En_ChatGPT_Praktische_Gids/ingestion.jsonl` metrics in `docs/archive/PLAN_V2.9__PHASE4.md` Step 6.
 2. **`OCR_PATH_HEADING_PROPAGATION`** — Firearms element-by-element/OCR path emits chunks with `extraction_method='ocr'` and `parent_heading=None` despite Docling having rich `dc.meta.headings`. Probe data: every Firearms page p80-95 has 5+ headings in dc.meta but JSONL chunks emit zero. Root cause likely in `_process_element_v2`'s `state.update_on_heading` not catching all Docling section_header item shapes, or OCR cascade replacing text without preserving heading metadata.
 
 ## 5. Acceptance gate status
@@ -103,7 +103,7 @@ Per `docs/PLAN_V2.9.md` §4 Acceptance Gate, before tagging v2.9.0:
 ## 7. Outstanding decisions
 
 1. **Firearms HEADING deferral sign-off (Step 4).** Underlying defect: OCR-path heading propagation. Deferral to v2.10 as `OCR_PATH_HEADING_PROPAGATION`. Acceptance baseline = current 0.722 coverage. Strict gate stays `>= 0.80` global; Firearms continues to FAIL it until the OCR-path bug is fixed.
-2. **KI EPUB deferral sign-off (Step 6).** Acceptance baseline metrics in `PLAN_V2.9__PHASE4.md` Step 6 for the v2.10 follow-up.
+2. **KI EPUB deferral sign-off (Step 6).** Acceptance baseline metrics in `docs/archive/PLAN_V2.9__PHASE4.md` Step 6 for the v2.10 follow-up.
 3. **Phase 5 readiness.** With Steps 1, 2, 3, 5 closed and Steps 4 + 6 deferred-with-pending-sign-off, Phase 5 (broad reconversion + Qdrant migration + VLM enrichment + AFTER snapshot) becomes the next workstream once both deferrals are signed off.
 
 ## 8. Honest accounting (added 2026-05-09 after user challenged "are you overfitting?")

@@ -11,7 +11,7 @@
 
 **Predecessors:**
 - Phase 2 closed `29a7242` (2026-05-08).
-- Phase 3 plan `docs/PLAN_V2.9__STEP3.md` v3 committed `90e95fe`.
+- Phase 3 plan `docs/archive/PLAN_V2.9__STEP3.md` v3 committed `90e95fe`.
 - Source Sanctity hardened across 3 commits surfacing 13 leak classes
   on real qwen3-vl-plus output.
 
