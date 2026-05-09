@@ -2,9 +2,10 @@
 
 > **Status: Draft.** Phase 3 Step 1 deliverable — empirical baseline
 > for VLM gate calibration. Authored after Source Sanctity validator
-> hardening (commits `c23d3f6`, `a879e85`, `f224aad` — 17 detection
-> patterns total) and against the Phase 3 Step 0 v4 enrichment
-> (corpus shipped to qwen3-vl-plus on 2026-05-09).
+> hardening (commits `c23d3f6`, `a879e85`, `f224aad`, plus a v4
+> Pattern-18 follow-up — 18 detection patterns total) and against
+> the Phase 3 Step 0 v5 enrichment (corpus shipped to qwen3-vl-plus
+> on 2026-05-09).
 
 **Predecessors:**
 - Phase 2 closed `29a7242` (2026-05-08).
@@ -162,6 +163,7 @@ classes on real qwen3-vl-plus output:
 | `c23d3f6` | P7-P11 | smart-quote variants, markdown emphasis, parenthesized capital/dot/camelCase lists, URLs, dotted identifiers |
 | `a879e85` | P0/P0b/P12-P14 | "the provided image" meta, "per the rules" instructional self-reference, list-with-class-noun (both directions), Unicode flow arrows |
 | `f224aad` | P15-P17 + class-noun list extension + dotted-decimal numbering | class-noun + parenthesized 4+ list, chapter/figure/section refs in parens, named-flow chain ("through X to Y to Z") |
+| follow-up (this snapshot) | P18 | mid-sentence Capitalized token density (4+ distinct non-vocab tokens) — closes the brand-name-in-prose residual class flagged on review |
 
 `tests/test_vlm_text_detection.py` baseline grew from 32 → 49 passed
 (every new pattern carries an empirical fixture from a real flagged
@@ -174,19 +176,19 @@ cycles, the validator did not produce any documented false-positive
 rejections of legitimate visual descriptions. Negative-shape tests
 on each round verified known legitimate phrasings still pass.
 
-### Documented residual: 3-item Capitalized-phrase comma-list
+### Documented residual class — closed by Pattern 18 follow-up
 
-Codex round 3 surfaced one shape that resists tight regex
-discrimination: `Traditional MLOps components, Monitoring and
-tracking, and LLMops extension` (Hao p34 layer beyond the
-chapter-ref leak). Every regex tested for "3+ Capitalized multi-word
-items in comma-list" over-fires on legitimate visual layout
-descriptions ("Box A, Box B, Box C") because the syntactic
-discrimination is too thin. **Tracked as Phase 4 / v2.10 follow-up:**
-asset-complexity-aware retry (Step 4) is the cleaner fix — when a
-complex asset's description matches a "comma-list of capitalized
-multi-word items" pattern, retry with a stricter prompt, fall to
-hard_fallback if retry also produces the shape.
+The originally-deferred residual was "3-item Capitalized-phrase
+comma-list" (Hao p34's `Traditional MLOps components, Monitoring
+and tracking, and LLMops extension`). User-facing review (2026-05-09)
+correctly pushed back on the deferral: 11 chunks across all three
+docs carried similar real text-reading shapes (config field names,
+brand-name prose runs, product-name dumps) that strict Source
+Sanctity must reject. Pattern 18 (mid-sentence Capitalized token
+density: 4+ distinct non-vocab tokens, sentence-initial position
+excluded) closes the class. The corresponding 11 chunks were reset
+to `pending` and re-enriched in v5; final corpus has **0 residual
+leaks** under the strengthened detector.
 
 ### Strict-gate behavior on enriched corpus
 

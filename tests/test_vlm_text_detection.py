@@ -378,6 +378,78 @@ class TestDetectTextReading:
         )
         assert detect_text_reading(leaked)
 
+    # =========================================================================
+    # Phase 3 Step 0 v4 RESIDUAL leak fixtures (qwen3-vl-plus, 2026-05-09)
+    # — Pattern 18 closes the dense-brand-token-density class that v1-v3
+    # patterns missed. These are the 10 chunks documented in §7 of the
+    # Phase 3 baseline snapshot, sampled to one fixture per leak shape.
+    # =========================================================================
+
+    def test_dense_brand_token_density_caught(self):
+        """4+ distinct mid-sentence Capitalized non-vocab tokens = transcription."""
+        # Hao p182 leak: config field names from a Kubernetes manifest.
+        leaked = (
+            "System schematic of resource configuration settings showing "
+            "labeled fields for replica count (Min/Max), CPU resources "
+            "(Requests/Limits), and Memory."
+        )
+        assert detect_text_reading(leaked)
+
+    def test_brand_names_in_prose_caught(self):
+        """Hao p363 leak: Prometheus + monitoring tool labels."""
+        leaked = (
+            "Text-based alert notification of a Prometheus monitoring alert "
+            "showing labeled fields (Labels, Annotations), a severity "
+            "indicator, and Grafana dashboard reference."
+        )
+        assert detect_text_reading(leaked)
+
+    def test_product_names_in_prose_caught(self):
+        """PCWorld p70 leak: Qualcomm + Dell + benchmark names."""
+        leaked = (
+            "Text block describing battery life test results for Qualcomm "
+            "hardware and Dell Plus 14 2-in-1 laptop, referencing PCMark and "
+            "Cinebench benchmarks."
+        )
+        assert detect_text_reading(leaked)
+
+    def test_pipeline_stage_names_caught(self):
+        """Adedeji p277 leak: pipeline stage names in prose."""
+        leaked = (
+            "System schematic with boxed components showing a feedback loop "
+            "from Metrics through Anomaly detection to Insights, "
+            "Optimization, and Automated remediation."
+        )
+        assert detect_text_reading(leaked)
+
+    def test_dense_brand_pattern_does_not_overfire(self):
+        """Pattern 18 must not reject legitimate visual descriptions.
+
+        Tests use: descriptions that mention 0-3 novel Capitalized tokens
+        (allowed); descriptions whose Capitalized tokens are all in the
+        common-vocabulary exclusion list (allowed); sentence-initial
+        Capitalization on a brand-like word in a short description (the
+        first-token-of-each-sentence carve-out applies).
+        """
+        legitimate = [
+            # 0 novel-cap tokens
+            "A line chart with two trend lines on a grid.",
+            # 1 novel-cap token (single brand reference is allowed — would be
+            # caught by Pattern 6/Pattern 17 only if other shapes hit too).
+            "Photograph of a Sony camera on a wooden desk.",
+            # All Capitalized tokens are in the common-vocabulary list.
+            "System schematic showing Top, Middle, and Bottom layers with "
+            "Red, Green, and Blue highlights.",
+            # Brand-like word at sentence start (excluded as sentence-initial).
+            "Prometheus is a metric collection tool. The diagram shows "
+            "a clean architecture.",
+            # Legitimate technical description — re-asserted to guard against
+            # regression on prior layers.
+            "Bar chart with colored bars, axes, and category labels.",
+        ]
+        for r in legitimate:
+            assert not detect_text_reading(r), f"False positive: {r!r}"
+
     def test_v3_patterns_do_not_overfire(self):
         """Negative shapes for v3 patterns."""
         legitimate = [

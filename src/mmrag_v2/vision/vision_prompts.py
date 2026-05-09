@@ -308,6 +308,46 @@ STRICTER_VISUAL_PROMPT = VISUAL_ONLY_PROMPT
 # ============================================================================
 
 
+# Pattern 18 exclusion list. Capitalized words that DO appear legitimately
+# in visual descriptions and must NOT count toward the brand-density
+# threshold. Includes: visual-description nouns (Diagram, Chart),
+# positional / color words (Top, Red), structural elements (Box, Arrow),
+# common discourse markers when they happen to start a clause, and
+# CamelCase abbreviations technical-abbrevs misses. Maintained as a
+# module constant so future additions are reviewable.
+_NON_BRAND_TITLECASE: frozenset[str] = frozenset({
+    # Articles, demonstratives, pronouns
+    "A", "An", "The", "This", "That", "These", "Those", "It", "Its",
+    "Their", "Each", "Both", "Some", "Any", "Such",
+    # Sentence connectors / common starters
+    "And", "Or", "But", "Not", "No", "Yes",
+    "In", "On", "At", "By", "From", "To", "For", "With", "As", "Of",
+    "If", "When", "While", "After", "Before", "During", "Between",
+    "Above", "Below", "Across", "Around", "Within", "Without", "Through",
+    "Top", "Bottom", "Left", "Right", "Middle", "Center", "Centre",
+    # Visual-description nouns
+    "Diagram", "Photograph", "Photo", "Schematic", "Chart", "Graph",
+    "Bar", "Line", "Pie", "Image", "Picture", "Figure", "Table",
+    "Screenshot", "Illustration", "Sketch", "Drawing", "Map",
+    "System", "Process", "Architecture", "Layout", "Flow", "Workflow",
+    "Section", "Component", "Components", "Sections",
+    # Visual structural elements
+    "Box", "Boxes", "Arrow", "Arrows", "Node", "Nodes",
+    "Edge", "Edges", "Layer", "Layers", "Panel", "Panels",
+    "Block", "Blocks", "Stage", "Stages", "Step", "Steps",
+    "Chain", "Module", "Modules",
+    # Colors
+    "Black", "White", "Red", "Blue", "Green", "Yellow",
+    "Orange", "Gray", "Grey", "Purple", "Pink", "Brown",
+    "Color", "Colored", "Colour", "Coloured",
+    # Technical / generic
+    "Text", "Input", "Output", "Data", "Code",
+    "Detailed", "Simple", "Complex",
+    # Prepositions and helpers people sometimes capitalize mid-sentence
+    "Including", "Showing", "Containing", "Featuring",
+})
+
+
 def detect_text_reading(response: str) -> bool:
     """
     Detect if VLM response contains text transcription instead of visual description.
@@ -635,6 +675,33 @@ def detect_text_reading(response: str) -> bool:
         r"(?:\s+(?:through|to|via|and|then|into|toward)\s+[A-Z][A-Za-z0-9_\-]+){2,}",
         response,
     ):
+        return True
+
+    # Pattern 18: density of distinct mid-sentence Capitalized tokens. Phase
+    # 3 Step 0 v4 residual leak shape: brand/product/component names
+    # scattered through prose ("Prometheus ... Alertmanager ... Grafana ...
+    # Helm" — Hao p111; "Lenovo ThinkPad ... PCMak ... Cinebench" — PCWorld
+    # p50). Each mid-sentence Capitalized token that's NOT a common
+    # visual-description vocabulary word AND NOT a sentence-initial position
+    # is a candidate text-reading transcription. Threshold of four DISTINCT
+    # such tokens admits "Photo with Notre Dame and Eiffel Tower" (legit
+    # visual identification of two landmarks) while flagging dense
+    # label-transcription. Length ≥3 filters out single-letter and 2-letter
+    # technical abbreviations (UI, AI, etc.) that are already covered by
+    # Pattern 6's allowlist.
+    _sentences = re.split(r"(?<=[.!?])\s+", response)
+    _mid_caps: set[str] = set()
+    for _sent in _sentences:
+        _toks = re.findall(r"\b[A-Z][a-z][a-zA-Z0-9_\-]+\b", _sent)
+        # Drop the first token (sentence-initial Capitalization is grammatical).
+        _toks = _toks[1:]
+        for _t in _toks:
+            if _t in _NON_BRAND_TITLECASE:
+                continue
+            if len(_t) < 3:
+                continue
+            _mid_caps.add(_t)
+    if len(_mid_caps) >= 4:
         return True
 
     return False
