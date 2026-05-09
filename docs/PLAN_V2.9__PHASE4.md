@@ -86,7 +86,15 @@ conda run -n mmrag-v2 python scripts/qa_full_conversion.py \
 
 ---
 
-## Step 2 — Adedeji p301: dense-back-index detection by content shape
+## Step 2 — Adedeji p301: dense-back-index detection by content shape ✅ shipped 2026-05-09 (`afbbaa6`)
+
+**Result:** Source-PDF content-shape detection added. Adedeji p298-316 (full 19-page back-index) now routes through `_emit_dense_index_page_chunks` with a source-PDF text fallback. Full 320-page conversion confirms:
+- 0 TABLE_CORRUPTION, 0 LOCALIZED_CORRUPTION (was 1 + 1).
+- 0 corruption-phrase repetitions across 1095 chunks (was 9 on p301 alone).
+- code_indentation_fidelity 0.886 → **0.9032** (crosses the 0.90 gate — see Step 5 below, this is a side-effect cascade win).
+- 712 tests pass (was 685; +27 new in `test_dense_back_index_detector.py`).
+
+
 
 **Why:** Phase 1's dense-index router relies on Docling's `document_index` label. Adedeji p301 is a textbook back-index page that Docling did not label as such, so the router did not fire. The result: all 9 emitted chunks carry the same `'talent and culture, 246-250 vision and leadership ...'` repetition — page-level garbage.
 
@@ -226,7 +234,13 @@ If Step 4a shows the headings are genuinely undetectable from the source PDF (e.
 
 ---
 
-## Step 5 — Adedeji code_indentation_fidelity 0.886 — assess and route
+## Step 5 — Adedeji code_indentation_fidelity 0.886 — closed by Step 2 cascade ✅ resolved 2026-05-09
+
+**Result:** Step 2 unintentionally closes this. The flat-code shape on p299 (see Phase 3 hygiene log: `'agent operations (see AgentOps (age collaborative reasoning, 173 distributed collaboration, 124-134 A2A protocol for delegation, 130-134 MCP protocol for tools,'`) was a back-index entry mis-classified as code. With the back-index now routed through `_emit_dense_index_page_chunks`, that chunk is emitted as `list_item`, removing it from the code denominator. Result: code_indentation_fidelity **0.886 → 0.9032** on the full 320-page Adedeji conversion (`output/probe_phase4_adedeji_full/`).
+
+No CodeFormulaV2 enablement required. Original Step 5 assessment (carry to v2.10) is moot.
+
+
 
 **Why:** Phase 2 carry-forward. Active config has CodeFormulaV2 disabled. Decision Amendment 2026-05-03 permits selective enablement based on cheap code-evidence detection. Adedeji has 35 code chunks with 0.886 fidelity (one flat-code chunk on p299 is the visible failure shape).
 
