@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-05-08
+Last updated: 2026-05-09
 
 Purpose: fast orientation for a new coding session. Read this before deeper project docs.
 
@@ -102,12 +102,21 @@ work" below).
 - **~~Phase 2: re-verify shipped fixes under strict gate~~** — closed
   2026-05-08 (verification only). See
   `docs/QUALITY_SNAPSHOT_2026-05-08_v2.9_phase2_after.md`.
-- **Phase 3 active: `IMAGE_DESCRIPTION_UNUSABLE` policy/model.**
-  All Phase 2 conversions ran with `--vision-provider none`, so
-  every image chunk has `image_placeholder_ratio=1.0`. Phase 3 owns
-  the calibration of "complete but terse" VLM descriptions vs
-  hard-fail. Execution plan in `docs/PLAN_V2.9__STEP3.md`
-  (master-plan summary in `docs/PLAN_V2.9.md` Phase 3).
+- **Phase 3 Steps 1-3 implemented (2026-05-09).** Source Sanctity
+  validator hardened across 3 commits surfacing 13 leak classes on
+  real qwen3-vl-plus output (`c23d3f6`, `a879e85`, `f224aad`); 604
+  image chunks across 3 docs (Hao 252, Adedeji 128, PCWorld 224)
+  enriched cleanly at 0 % hard-fallback rate. Asset-complexity
+  classifier shipped in `src/mmrag_v2/vision/asset_complexity.py`
+  with 12 unit tests. Gate calibration shipped on both
+  `qa_full_conversion.py` (`_is_blankish_visual_description`) and
+  `qa_semantic_fidelity.py` (`is_placeholder_image_or_table`) with
+  the F4 hard-fallback exemption and complexity-aware short-
+  description rule, plus 15 regression tests
+  (`tests/test_qa_image_gate_calibration.py`). Step 1 baseline doc
+  at `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase3_vlm_baseline.md`.
+  pytest 645 → 672 passing (+27). **Steps 4-5 (retry harness +
+  end-to-end verification) carried forward to next iteration.**
 - **Phase 4 active: localized strict-gate hard failures.**
   Original scope: Combat p66 / Adedeji p301 / KI EPUB / Devlin /
   Earthship / Firearms re-evaluation. Phase 2 added: Firearms
@@ -262,7 +271,7 @@ Phase status (per Plan §3 sequence):
 | Phase 0 | Establish strict-gate baseline | `complete` |
 | Phase 1 | TOC/index page-loss closure | `complete` (2026-05-07, `df91061`) |
 | Phase 2 | Re-verify shipped fixes under strict gate | `complete` (2026-05-08, verification only — see `QUALITY_SNAPSHOT_2026-05-08_v2.9_phase2_after.md`) |
-| Phase 3 | Resolve `IMAGE_DESCRIPTION_UNUSABLE` | active |
+| Phase 3 | Resolve `IMAGE_DESCRIPTION_UNUSABLE` | Steps 1-3 complete (2026-05-09); Steps 4-5 active — retry harness + end-to-end |
 | Phase 4 | Localized strict-gate hard failures (Combat p66, Adedeji p301, KI EPUB, Firearms HEADING + chunk-count drift carried from Phase 2) | active |
 | Phase 5 | Broad reconversion + Qdrant refresh + AFTER snapshot | blocked on Phases 3-4 |
 

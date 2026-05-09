@@ -16,7 +16,7 @@ import argparse
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 LABEL_RE = re.compile(r"^[A-Z][A-Za-z0-9/&()' .,-]{1,50}:?$")
@@ -39,7 +39,31 @@ def is_label_like(s: str) -> bool:
     return True
 
 
-def is_placeholder_image_or_table(content: str) -> bool:
+def is_placeholder_image_or_table(
+    content: str,
+    chunk: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Phase 3 Step 3 (companion to qa_full_conversion's gate):
+    detect placeholder image/table content with the F4 hard-fallback
+    exemption when chunk metadata is supplied.
+
+    Backward-compatible: when ``chunk`` is None, falls through to the
+    pre-Phase-3 string-only logic (table calls do this).
+    """
+    # F4 hard-fallback exemption: an image chunk with vision_status=
+    # "hard_fallback" AND both vision_error and vision_provider_used
+    # recorded is a documented no-VLM-signal state, NOT a placeholder
+    # row. The placeholder-shaped canonical content is the contract;
+    # the gate must not double-count it.
+    if chunk is not None:
+        meta = chunk.get("metadata") or {}
+        if (
+            meta.get("vision_status") == "hard_fallback"
+            and (meta.get("vision_error") or "").strip()
+            and (meta.get("vision_provider_used") or "").strip()
+        ):
+            return False
+
     t = (content or "").strip().lower()
     if not t:
         return True
@@ -92,8 +116,12 @@ def main() -> int:
     tables = [r for r in rows if r.get("modality") == "table"]
     texts = [r for r in rows if r.get("modality") == "text"]
 
+    # Pass the chunk to the image check so the F4 hard-fallback exemption
+    # applies. Tables don't have a vision pipeline; the chunk-less call is
+    # backward-compatible and behaves as before.
     image_placeholders = sum(
-        1 for r in images if is_placeholder_image_or_table(r.get("content") or "")
+        1 for r in images
+        if is_placeholder_image_or_table(r.get("content") or "", chunk=r)
     )
     table_placeholders = sum(
         1 for r in tables if is_placeholder_image_or_table(r.get("content") or "")

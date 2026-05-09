@@ -1,6 +1,6 @@
 # Plan: v2.9 Phase 3 — `IMAGE_DESCRIPTION_UNUSABLE` resolution
 
-**Status:** Draft v3 (post-third-pass review, 2026-05-08).
+**Status:** v3 — Steps 1-3 implemented 2026-05-09. Step 1 baseline at `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase3_vlm_baseline.md`. Steps 4-5 carried forward to next iteration.
 **Master plan:** `docs/PLAN_V2.9.md` Phase 3.
 **Predecessors:** Phase 1 closed `df91061` (2026-05-07); Phase 2 closed `29a7242` (2026-05-08).
 **Phase nature:** Gate calibration + VLM retry. Real cloud spend (~$15-30 expected).

@@ -116,14 +116,56 @@ def _normalized_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip())
 
 
-def _is_blankish_visual_description(text: str) -> bool:
+def _is_blankish_visual_description(
+    text: str,
+    chunk: Optional[dict[str, Any]] = None,
+    output_dir: Optional[Path] = None,
+) -> bool:
+    """Phase 3 Step 3: complexity-aware blankish check.
+
+    Hard-fallback exemption (F4 contract): when a chunk has
+    ``vision_status="hard_fallback"`` AND both ``vision_error`` and
+    ``vision_provider_used`` set, the description is a documented
+    no-VLM-signal state, not a missing description; exempt from
+    blankish checks.
+
+    Complexity-aware short-description rule (replaces the prior flat
+    ``len < 20 and "layout" not in t.lower()`` rule):
+    - simple asset → short description acceptable, NOT blankish.
+    - complex / text_heavy asset → short description IS blankish.
+
+    The plain-text backward-compatible call (no ``chunk``) preserves
+    the original behavior so existing callers keep working.
+    """
+    # F4 hard-fallback exemption FIRST — placeholder-shaped content is
+    # the contract on hard_fallback chunks, not a fault.
+    if chunk is not None:
+        meta = chunk.get("metadata") or {}
+        if (
+            meta.get("vision_status") == "hard_fallback"
+            and (meta.get("vision_error") or "").strip()
+            and (meta.get("vision_provider_used") or "").strip()
+        ):
+            return False
+
     t = (text or "").strip()
     if not t:
         return True
     if PLACEHOLDER_VISUAL_RE.search(t):
         return True
+
+    # Short-description complexity gate.
     if len(t) < 20 and "layout" not in t.lower():
-        return True
+        if chunk is None:
+            # Backward-compat: no chunk → fall back to flat short rule.
+            return True
+        try:
+            from mmrag_v2.vision.asset_complexity import classify_asset_complexity
+        except ImportError:  # pragma: no cover — editable install always present.
+            return True
+        complexity = classify_asset_complexity(chunk, output_dir=output_dir).complexity
+        # simple asset → short description allowed; otherwise short = blankish.
+        return complexity != "simple"
     return False
 
 
@@ -395,6 +437,7 @@ def _image_issues(
     chunks: list[dict[str, Any]],
     max_hard_fallback_ratio: float,
     require_image_descriptions: bool,
+    output_dir: Optional[Path] = None,
 ) -> list[Issue]:
     issues: list[Issue] = []
     images = list(_iter_modality(chunks, "image"))
@@ -414,13 +457,24 @@ def _image_issues(
             meta.get("visual_description") or chunk.get("visual_description") or ""
         )
         vision_status = meta.get("vision_status") or chunk.get("vision_status")
-        if PLACEHOLDER_IMAGE_RE.search(content):
+        # F4 hard-fallback exemption: a chunk with vision_status="hard_fallback"
+        # AND both vision_error and vision_provider_used recorded is a
+        # documented no-VLM-signal state, NOT a placeholder row. Skip the
+        # placeholder-content tally so the gate doesn't double-count it.
+        is_documented_hard_fallback = (
+            vision_status == "hard_fallback"
+            and bool((meta.get("vision_error") or "").strip())
+            and bool((meta.get("vision_provider_used") or "").strip())
+        )
+        if PLACEHOLDER_IMAGE_RE.search(content) and not is_documented_hard_fallback:
             placeholder_content += 1
         if vision_status == "hard_fallback":
             hard_fallback += 1
         if vision_status == "pending":
             pending += 1
-        if _is_blankish_visual_description(visual_description):
+        if _is_blankish_visual_description(
+            visual_description, chunk=chunk, output_dir=output_dir
+        ):
             missing_visual += 1
             if len(examples) < 5:
                 examples.append(
@@ -659,6 +713,7 @@ def main() -> int:
             chunks,
             args.max_hard_fallback_ratio,
             not args.no_require_image_descriptions,
+            output_dir=jsonl_path.parent,
         )
     )
     issues.extend(_asset_issues(jsonl_path, chunks))
