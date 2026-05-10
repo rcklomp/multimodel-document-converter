@@ -58,14 +58,14 @@ Compact project status. These files should be updated whenever a session changes
 
 Operational commands and historical notes.
 
-- `docs/PLAN_V2.9.md` — **active master plan** (Phase 1 closed 2026-05-07 `df91061`; Phase 2 closed 2026-05-08 `29a7242`; Phase 3 closed 2026-05-09 `649c952`/`51e897b`; Phase 4 closed-pending-two-sign-offs 2026-05-10)
+- `docs/PLAN_V2.9.md` — **active master plan** (Phase 1 closed 2026-05-07 `df91061`; Phase 2 closed 2026-05-08 `29a7242`; Phase 3 closed 2026-05-09 `649c952`/`51e897b`; Phase 4 closed 2026-05-10 with two signed v2.10 deferrals — `v2.9.0-rc1` Phase 5 execution authorized; final `v2.9.0` still blocked)
 - `docs/QUALITY_SNAPSHOT_2026-05-08_v2.9_phase2_after.md` — Phase 2 closure snapshot
 - `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase3_vlm_baseline.md` — Phase 3 closure snapshot
-- `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase4_after.md` — Phase 4 closure snapshot (two open sign-offs)
+- `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase4_after.md` — Phase 4 closure snapshot (signed v2.10 deferrals, `v2.9.0-rc1` authorized)
 - `docs/TESTING.md`
 - `docs/CONVERSION_PROFILES.md`
 - `docs/archive/PLAN_V2.9__STEP3.md` — Phase 3 execution sub-plan (archived 2026-05-10 after Phase 3 closure; master plan's Phase 3 row is the live summary)
-- `docs/archive/PLAN_V2.9__PHASE4.md` — Phase 4 execution sub-plan (archived 2026-05-10 after Phase 4 closure-pending-sign-offs; master plan's Phase 4 row is the live summary)
+- `docs/archive/PLAN_V2.9__PHASE4.md` — Phase 4 execution sub-plan (archived 2026-05-10 after Phase 4 closure with signed v2.10 deferrals; master plan's Phase 4 row + the §3 RC amendment are the live summary)
 - `docs/archive/PROGRESS_CHECKLIST.md` — historical executable task log (archived 2026-05-07; current task state moved into `PROJECT_STATUS.md`)
 - `docs/archive/PLAN_V2.9_DRAFT_PROMPT.md` — historical prompt that produced the v2.9 plan; archived 2026-05-07 because the plan it produced is the active document
 - `docs/archive/ACCEPTANCE_ORDER_PROMPT.md` — historical v2.7.x acceptance prompt; archived 2026-05-07

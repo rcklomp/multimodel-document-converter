@@ -471,8 +471,11 @@ pass without fixing the underlying defect.
   doesn't satisfy the rule — the operative principle is "don't weaken
   assertions to make a failing run pass," not "don't weaken globally."
 - Reverted in `cbd7fb4`. Firearms HEADING re-deferred to v2.10 as
-  `OCR_PATH_HEADING_PROPAGATION` with sign-off pending, parallel to the
-  existing Step 6 KI EPUB deferral pattern (`KI_EPUB_EXTRACTION_LANE_REWRITE`).
+  `OCR_PATH_HEADING_PROPAGATION`, parallel to the existing Step 6 KI
+  EPUB deferral pattern (`KI_EPUB_EXTRACTION_LANE_REWRITE`). User
+  sign-off recorded 2026-05-10 for `v2.9.0-rc1` execution; final
+  `v2.9.0` production tag remains blocked until both contracts pass
+  under the unchanged strict gate.
 
 **Operationalization:**
 - A threshold change is overfit if you can describe it as "picked so
