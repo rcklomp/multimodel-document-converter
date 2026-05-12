@@ -10,7 +10,13 @@
 > Predecessors:
 > - `docs/QUALITY_SNAPSHOT_2026-05-11_v2.9_strict_gate_full_corpus.md` (BEFORE — 9 PASS / 8 WARN / 17 FAIL)
 > - `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase4_after.md` (Phase 4 close, 736 tests)
-> - `docs/QUALITY_SNAPSHOT_2026-05-10_v2.9_phase5_attempt.md` (Phase 5 attempt at 30/34 fresh outputs)
+> - `docs/archive/quality_snapshots/v2.9_in_progress/QUALITY_SNAPSHOT_2026-05-10_v2.9_phase5_attempt.md` (Phase 5 attempt at 30/34 fresh outputs; moved to archive during 2026-05-12 sanitization)
+>
+> **Revision 2026-05-12** — post-creation audit fixed three drifts vs.
+> the original 2026-05-11 file: §5 vision-status counts replaced with
+> precise corpus numbers, §7 collection note updated to reflect
+> post-RC1 cleanup of 16 sister `*_v2` collections, predecessor link
+> repointed to archive. See §10 "Revision log".
 
 ## 1. Headline numbers
 
@@ -108,15 +114,24 @@ signed deferral.
 
 ## 5. Image-chunk vision-status corpus snapshot
 
+Precise counts captured 2026-05-12 from the 34 canonical JSONLs
+(`output/<doc>/ingestion.jsonl`, `modality == "image"`):
+
 | Status | Count | Notes |
 |---|---:|---|
-| Total image chunks across 34 docs | ~4,379 | — |
-| `vision_status="complete"` | ~4,200+ | Real qwen3-vl-plus descriptions |
-| `vision_status="hard_fallback"` (F4 sentinel) | ~150 | Complex assets where VLM legitimately could not produce > 20 chars after detail-retry; F4-exempt per Phase 3 contract |
+| Total image chunks across 34 docs | **4,379** | — |
+| `vision_status="complete"` | **4,257** (97.2 %) | Real qwen3-vl-plus descriptions |
+| `vision_status="hard_fallback"` (F4 sentinel) | **122** (2.8 %) | Complex assets where VLM legitimately could not produce > 20 chars after detail-retry; F4-exempt per Phase 3 contract |
 | `vision_status="pending"` | **0** | Goal 7 of `docs/PLAN_V2.9.md` met |
 
-(Counts approximate pending final Qdrant rebuild; precise values
-will be locked in the §7 Qdrant counts.)
+Devlin Phase H catch-up (2026-05-12): the original Phase H batch on
+2026-05-11 ran on Cronin / Nagasubramanian / Sekar / Chaubal but
+not on Devlin, leaving 67 Devlin image chunks at `vision_status=pending`.
+The catch-up enriched all 67 (53 complete + 14 hard_fallback / F4),
+bringing corpus pending to 0. Devlin's strict-gate row is unchanged
+(QA_FAIL on `HYBRID_CHUNKER_HEADING_PROPAGATION`; signed deferral #3
+is independent of vision-status). See §7 for the Qdrant-payload
+implication.
 
 ## 6. Test suite provenance
 
@@ -152,8 +167,24 @@ Final Qdrant state:
 | Distance | Cosine |
 | Storage | On-disk (mmap) per `on_disk: true` + `on_disk_payload: true` |
 
-The 17 sister `*_v2` per-doc collections from earlier experiments
-remain user-owned and out of scope for `v2.9.0-rc1` ship.
+Post-RC1 collection cleanup (2026-05-12): the 16 sister `*_v2`
+per-doc collections from earlier experiments were dropped during
+sanitization; `mmrag_v2_8` is now the sole collection in the local
+Qdrant instance (`get_collections` → 1 collection, status green).
+
+**Known Qdrant payload staleness — Devlin** (deferred re-ingest):
+The Devlin Phase H catch-up (2026-05-12) re-enriched 67 image
+chunks in `output/Devlin_LLM_Agents/ingestion.jsonl` to
+`vision_status=complete` (53) + `hard_fallback` (14) with real VLM
+descriptions, but `mmrag_v2_8` was rebuilt **before** that catch-up
+ran. The Qdrant vectors for those 67 points are correct (the
+image-embedding pipeline does not depend on `visual_description`),
+but the payload fields `visual_description`, `vision_status`,
+`vision_attempts`, and `vision_detail_retry_attempted` carry the
+pre-catch-up values. Retrieval recall on image text is therefore
+moderately degraded for Devlin only. A targeted Devlin re-ingest
+(~50 min) is deferred as a v2.10 housekeeping item; it does not
+block any signed `v2.9.0-rc1` contract.
 
 ## 8. Empirical lessons captured this cycle
 
@@ -196,3 +227,15 @@ that pre-date this cycle and remain v2.10+.
 Each item has a documented root cause, acceptance baseline, and
 diagnostic note (where applicable) ready for the v2.10 implementation
 phase.
+
+v2.10 housekeeping (non-blocking for `v2.9.0-rc1`):
+- Targeted re-ingest of `Devlin_LLM_Agents` into `mmrag_v2_8` so the
+  payload metadata matches the post-catch-up JSONL (vectors already
+  correct; see §7).
+
+## 10. Revision log
+
+| Date | Change |
+|---|---|
+| 2026-05-11 | Initial RC1 AFTER snapshot at v2.9.0-rc1 close. |
+| 2026-05-12 | (a) Predecessor link to `phase5_attempt.md` repointed to archive (file moved during sanitization). (b) §5 vision-status counts replaced with precise figures (4,379 / 4,257 / 122 / 0) and Devlin Phase H catch-up documented. (c) §7 collection note updated to reflect drop of 16 sister `*_v2` collections; documented Devlin Qdrant payload staleness. (d) §9 added Devlin re-ingest as v2.10 housekeeping. |
