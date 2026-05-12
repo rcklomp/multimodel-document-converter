@@ -3,9 +3,10 @@
 > **Status:** `v2.9.0-rc1` ship state. Strict gate reports **26
 > PASS / 0 WARN / 8 FAIL** across the 34-doc canonical corpus, with
 > all 8 FAILs covered by signed v2.10 deferrals (`docs/DECISIONS.md`
-> "v2.9.0-rc1 Signed Deferrals (2026-05-11 close-out)"). Final
-> `v2.9.0` production tag remains blocked until each deferred
-> contract passes under the unchanged strict gate.
+> "v2.9.0-rc1 Signed Deferrals (2026-05-11 close-out)").
+> `v2.9.0-rc1` is the v2.9 ship state; no intermediate `v2.9.0`
+> final tag is planned. The 8 deferrals carry forward as v2.10
+> production-tag blockers under the unchanged strict gate.
 >
 > Predecessors:
 > - `docs/QUALITY_SNAPSHOT_2026-05-11_v2.9_strict_gate_full_corpus.md` (BEFORE — 9 PASS / 8 WARN / 17 FAIL)
@@ -259,3 +260,4 @@ v2.10 housekeeping (non-blocking for `v2.9.0-rc1`):
 | 2026-05-11 | Initial RC1 AFTER snapshot at v2.9.0-rc1 close. |
 | 2026-05-12 | (a) Predecessor link to `phase5_attempt.md` repointed to archive (file moved during sanitization). (b) §5 vision-status counts replaced with precise figures (4,379 / 4,257 / 122 / 0) and Devlin Phase H catch-up documented. (c) §7 collection note updated to reflect drop of 16 sister `*_v2` collections; documented Devlin Qdrant payload staleness. (d) §9 added Devlin re-ingest as v2.10 housekeeping. |
 | 2026-05-12 (later) | `scripts/search_qdrant.py` patched in place to align with the current `mmrag_v2_8` collection: added `--model` CLI flag (default `llava`) and lowered `MIN_SCORE` 0.55 → 0.20 to match llava's text-on-text cosine distribution. §9 housekeeping rewritten: the open v2.10 item is **re-tuning these defaults again after the v2.10 collection rebuild**, plus moving the hard-coded Dashscope API key out of source. |
+| 2026-05-12 (terminology) | Removed the "Final `v2.9.0` production tag remains blocked" framing from the header (and from `src/mmrag_v2/version.py`, `docs/PLAN_V2.9.md`, `docs/DECISIONS.md` §"v2.9.0-rc1 Signed Deferrals"). Clarified that `v2.9.0-rc1` IS the v2.9 ship state — no intermediate `v2.9.0` final tag is planned — and the 8 signed deferrals carry forward as v2.10 production-tag blockers. This matches the existing `docs/DECISIONS.md` line "Each item above is a v2.10 production-tag blocker" and `docs/PLAN_V2.10_DRAFT_PROMPT.md`'s opening assumption ("Repository state at the start of v2.10: v2.9.0-rc1 has shipped"). |

@@ -86,12 +86,13 @@ Companion docs:
 1. Start sessions with the indexed handoff path:
    - `docs/PROJECT_STATUS.md`
    - `docs/README.md`
-   - `docs/PLAN_V2.9.md` (active plan)
+   - `docs/PLAN_V2.10_DRAFT_PROMPT.md` (next-cycle plan-writing prompt until `docs/PLAN_V2.10.md` exists)
+   - `docs/PLAN_V2.9.md` (v2.9 execution history through the rc1 scope cut)
    - `docs/archive/PROGRESS_CHECKLIST.md` (historical task log only — task state moved into `PROJECT_STATUS.md` on 2026-05-07)
 2. Use the three-layer documentation model:
    - Layer 0 contracts: this file, `CLAUDE.md`, `docs/AGENT_GOVERNANCE.md`, `docs/DECISIONS.md`, `docs/QUALITY_GATES.md`, `docs/ARCHITECTURE.md`, SRS.
    - Layer 1 current state: `docs/PROJECT_STATUS.md`, dated quality snapshots.
-   - Layer 2 execution: `docs/PLAN_V2.9.md`, `docs/TESTING.md`, run logs, archive.
+   - Layer 2 execution: active/draft plan docs, `docs/TESTING.md`, run logs, archive.
 3. Cross-check nontrivial changes against `docs/ARCHITECTURE.md` for UIR compliance.
 4. Before marking a task complete or expanding docs, apply `docs/AGENT_GOVERNANCE.md`.
 5. When finishing a task, update `docs/PROJECT_STATUS.md` (current state + recommended next step) and create/update a dated quality snapshot if quality numbers changed.
@@ -100,8 +101,8 @@ Companion docs:
 
 ## 📍 5. CURRENT STATE & DIRECTIVES (May 2026)
 
-**Engine version:** `v2.8.0` (schema version `2.7.0` — de-aliased in v2.8; the chunk-shape contract is unchanged since v2.7).
-**Phase:** v2.8.0 SHIPPED 2026-05-04 (annotated tag on `645ab2b`). v2.9 planning underway. Current canonical baseline: `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`.
+**Engine version:** `v2.9.0-rc1` (schema version `2.7.0` — de-aliased in v2.8; the chunk-shape contract is unchanged since v2.7).
+**Phase:** `v2.9.0-rc1` is the v2.9 ship state (tag on `3e06d1b`, pushed to GitHub, 2026-05-12). No intermediate `v2.9.0` final tag is planned; the 8 signed deferrals carry forward as v2.10 production-tag blockers (`docs/DECISIONS.md` "v2.9.0-rc1 Signed Deferrals (2026-05-11 close-out)"). Post-tag hygiene/version/search-default commits on `main` include `e60f70f` and later. Current canonical baseline: `docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`.
 
 **Active architecture decisions:**
 - PDF extraction pathway is determined by structural integrity pre-flight tests, not semantic profile. See `docs/DECISIONS.md` — "Structural Pathology over Semantic Profiling".
@@ -115,17 +116,21 @@ Companion docs:
 
 **QA policy:** All profiles use the standard 10% token variance tolerance. See `docs/QUALITY_GATES.md`.
 
-### Priority TODOs (Open — v2.9 scope)
-Source: `docs/PLAN_V2.9.md` (active plan; per-phase status in `docs/PROJECT_STATUS.md`). Original prompt that produced the plan is preserved at `docs/archive/PLAN_V2.9_DRAFT_PROMPT.md`. Snapshot of v2.9 progress:
+### Priority TODOs (Open — v2.10 planning scope)
+Source: `docs/PLAN_V2.10_DRAFT_PROMPT.md` and the RC1 AFTER snapshot. `docs/PLAN_V2.9.md` is retained as v2.9 execution history through the rc1 scope cut; the original v2.9 prompt is preserved at `docs/archive/PLAN_V2.9_DRAFT_PROMPT.md`.
 
-- Phase 0 (baseline) — `complete`.
-- Phase 1 (TOC/index page-loss closure) — `complete` 2026-05-07 (commit `df91061`).
-- Phase 2 (re-verify shipped fixes under strict gate) — active. Items: chunk_id uniqueness, refiner smart-routing on HARRY/Combat, Ayeva CodeFormulaV2 + `indentation_fidelity ≥ 0.85`, Firearms scanned-profile + HEADING ≥ 0.80, HARRY digital_literature acceptance fixture.
-- Phase 3 (`IMAGE_DESCRIPTION_UNUSABLE` policy/model) — blocked on Phase 2.
-- Phase 4 (Combat p66, Adedeji p301, KI EPUB) — blocked on Phase 2.
-- Phase 5 (broad reconversion + Qdrant refresh + AFTER snapshot) — blocked on Phases 1-4.
+The next task is to create `docs/PLAN_V2.10.md` from `docs/PLAN_V2.10_DRAFT_PROMPT.md`. The plan must close the 8 signed v2.10 deferral classes (which carry forward as v2.10 production-tag blockers — no intermediate `v2.9.0` final tag is planned):
 
-Deferred to v2.10 per `docs/PLAN_V2.9.md` §2 Non-Goals: local VLM comparison (Workstream A); remote CodeFormulaV2 inference target.
+1. `OCR_PATH_HEADING_PROPAGATION` — Firearms.
+2. `KI_EPUB_EXTRACTION_LANE_REWRITE` — KI EPUB.
+3. `HYBRID_CHUNKER_HEADING_PROPAGATION` — Devlin.
+4. `CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION` — Python_Cookbook and part of Python_Distilled.
+5. `B4B_FULL_DOC_PICTURE_DEDUP` — Earthship and part of Python_Distilled.
+6. `TEXT_INTEGRITY_SCOUT_FULL_DOC_SENSITIVITY` — Fluent_Python.
+7. `TEXT_LABEL_TOC_DENSE_INDEX_ROUTER_MISS` — Chaubal p11.
+8. Devlin `mmrag_v2_8` payload re-ingest housekeeping is non-blocking but should be considered with the v2.10 Qdrant/retrieval validation scope.
+
+Existing non-goals to re-evaluate during v2.10 planning: local VLM comparison (NuMarkdown-8B reachability), remote CodeFormulaV2 inference target, broader UIR refactor, HybridChunker per-item token guard, and rendered-region-crop magazine image quality.
 
 ### Recently Completed (Do Not Reopen)
 1. `--force-ocr` override is implemented.

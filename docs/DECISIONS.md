@@ -473,9 +473,10 @@ pass without fixing the underlying defect.
 - Reverted in `cbd7fb4`. Firearms HEADING re-deferred to v2.10 as
   `OCR_PATH_HEADING_PROPAGATION`, parallel to the existing Step 6 KI
   EPUB deferral pattern (`KI_EPUB_EXTRACTION_LANE_REWRITE`). User
-  sign-off recorded 2026-05-10 for `v2.9.0-rc1` execution; final
-  `v2.9.0` production tag remains blocked until both contracts pass
-  under the unchanged strict gate.
+  sign-off recorded 2026-05-10 for `v2.9.0-rc1` execution. (Superseded
+  by the 2026-05-11 close-out below — both contracts, plus 6 additional
+  classes, now carry forward as v2.10 production-tag blockers; no
+  intermediate `v2.9.0` final tag is planned.)
 
 **Operationalization:**
 - A threshold change is overfit if you can describe it as "picked so
@@ -497,8 +498,10 @@ match a real, named defect class with documented rationale per the
 Retrieval-Value Test (`docs/DECISIONS.md`) and the "No gate weakening"
 rule above. The strict gate is NOT relaxed; each affected doc continues
 to FAIL the gate. The deferrals authorize tagging `v2.9.0-rc1`
-specifically; final `v2.9.0` production tag remains blocked until each
-contract passes under the unchanged gate.
+specifically; `v2.9.0-rc1` is the v2.9 ship state and no intermediate
+`v2.9.0` final tag is planned. The 8 deferrals carry forward as v2.10
+production-tag blockers under the unchanged gate (see §"Signed deferral
+list" line: "Each item above is a v2.10 production-tag blocker").
 
 **Rationale for expanding to 8 deferrals:**
 - The 2026-05-11 corpus-wide work moved strict-gate state from

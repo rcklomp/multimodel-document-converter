@@ -21,11 +21,12 @@ __schema_version__ = "2.7.0"
 # strict-gate corpus close (9 PASS / 8 WARN / 17 FAIL →
 # 26 PASS / 0 WARN / 8 FAIL; all 8 FAILs are signed v2.10
 # deferrals per docs/DECISIONS.md "v2.9.0-rc1 Signed Deferrals").
-# Final v2.9.0 production tag blocked until each of the 8
-# deferrals (Firearms HEADING, KI EPUB, Devlin HEADING,
-# cross-page-split misattribution on Python_Cookbook /
-# Python_Distilled, TextIntegrityScout full-doc sensitivity on
-# Fluent_Python, text-label-TOC on Chaubal p11, full-doc picture
-# dedup on Earthship) passes the unchanged strict gate.
+# v2.9.0-rc1 is the v2.9 ship state; no intermediate v2.9.0 final
+# tag is planned. The 8 deferrals (Firearms HEADING, KI EPUB,
+# Devlin HEADING, cross-page-split misattribution on
+# Python_Cookbook / Python_Distilled, TextIntegrityScout full-doc
+# sensitivity on Fluent_Python, text-label-TOC on Chaubal p11,
+# full-doc picture dedup on Earthship) carry forward as v2.10
+# production-tag blockers under the unchanged strict gate.
 # See docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md.
 __engine_version__ = "2.9.0-rc1"

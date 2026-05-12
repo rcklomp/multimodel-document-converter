@@ -1,12 +1,53 @@
 # Project Status
 
-Last updated: 2026-05-11
+Last updated: 2026-05-12
 
 Purpose: fast orientation for a new coding session. Read this before deeper project docs.
 
 ## Current Objective
 
-**v2.9 IN PROGRESS — NOT SHIPPED. `v2.9.0-rc1` EXECUTION APPROVED.**
+**`v2.9.0-rc1` SHIPPED 2026-05-12** — tag `v2.9.0-rc1` on commit
+`3e06d1b`, pushed to GitHub. `v2.9.0-rc1` is the v2.9 ship state;
+**no intermediate `v2.9.0` final tag is planned**. The 8 signed
+deferrals from the close-out carry forward as **v2.10 production-tag
+blockers**. See `docs/DECISIONS.md` "v2.9.0-rc1 Signed Deferrals
+(2026-05-11 close-out)" for the named list.
+
+**Strict-gate state at RC1:** 26 PASS / 0 WARN / 8 FAIL out of 34
+(12 `QA_PASS` + 14 `QA_PASS_WITH_ADVISORIES`). All 8 FAILs are signed
+v2.10 deferrals. Test suite: **806 passed, 14 skipped, 0 failed**.
+
+**Qdrant `mmrag_v2_8`:** 30,461 points, status green (25,691 text +
+4,379 image + 391 table). Rebuilt 2026-05-12 from the 34 canonical
+post-recovery JSONLs via local Ollama llava (4096-dim, 10h15m wall
+time). Sole collection in the local Qdrant — 16 sister `*_v2`
+per-doc collections dropped during post-RC1 sanitization.
+
+**Active canonical baseline:**
+[`docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`](QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md)
+(revised 2026-05-12 for vision-status precision, Qdrant collection
+cleanup, Devlin Phase H catch-up, search-tool default re-tune
+housekeeping, and Option-1 v2.9.0-final terminology cleanup; see
+§10 Revision log).
+
+**Next cycle:** v2.10. Planning seed at
+[`docs/PLAN_V2.10_DRAFT_PROMPT.md`](PLAN_V2.10_DRAFT_PROMPT.md);
+authoring `docs/PLAN_V2.10.md` is the next-session task.
+
+---
+
+## v2.9 Execution History (through 2026-05-12)
+
+The phase-by-phase narrative that produced the RC1 close-out is
+preserved below as execution history. **Authoritative ship state is
+in §Current Objective above**; the close-out snapshot §2 "Phases
+shipped in this cycle" is the canonical summary. The blow-by-blow
+below is kept for archaeology only.
+
+---
+
+### v2.9 origins (Phase 0)
+
 A v2.9.0 tag was created on
 2026-05-05 against a 32/34 AUDIT_PASS reading from
 `scripts/qa_conversion_audit.py` alone, then deleted on 2026-05-06
@@ -16,14 +57,14 @@ silently merged into adjacent pages; Combat p4 lost full-page
 imagery; Combat p66 emitted 73 byte-equal corrupted-table copies;
 Phase 5b enrichment never updated the canonical ``content`` field).
 
-The v2.9 cycle has landed real bug fixes on `main` (see "v2.9 in-flight
+The v2.9 cycle landed real bug fixes on `main` (see "v2.9 in-flight
 fixes" below) and adopted a stricter four-gate acceptance via
 ``scripts/qa_full_conversion.py`` (see ``docs/TESTING.md``). Phase 4
 closed on 2026-05-10 with explicit user sign-off to defer two defects
 to v2.10: Firearms `OCR_PATH_HEADING_PROPAGATION` and KI EPUB
 `KI_EPUB_EXTRACTION_LANE_REWRITE`. Phase 5a (broad reconversion, 34/34
 fresh JSONLs) and Phase 5b (cloud VLM enrichment, 4,269 complete /
-113 hard_fallback / 0 pending) are complete.
+113 hard_fallback / 0 pending) completed before the RC1 close.
 
 **2026-05-11 update.** The first full-corpus strict-gate run
 (`scripts/qa_full_conversion.py --source-pdf --allow-warnings`)
@@ -170,14 +211,15 @@ backfilled. 10 new B3 regression tests in
 **770 passed**, 14 skipped, 0 failed (+10 net new vs B2 close;
 +34 cumulative vs Phase 4 close baseline of 736).
 
-Final `v2.9.0` remains blocked. **`v2.9.0-rc1` ship state achieved
-2026-05-11.** AFTER snapshot at
-`docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`. Per
-`docs/DECISIONS.md` "v2.9.0-rc1 Signed Deferrals (2026-05-11
+**`v2.9.0-rc1` ship state achieved 2026-05-11; tag landed 2026-05-12.**
+AFTER snapshot at `docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`.
+Per `docs/DECISIONS.md` "v2.9.0-rc1 Signed Deferrals (2026-05-11
 close-out)", the RC ships with 8 signed v2.10 deferrals (Firearms,
 KI EPUB, Devlin, Python_Cookbook, Python_Distilled, Fluent_Python,
-Chaubal, Earthship) covering all 8 remaining QA_FAIL rows. Strict
-gate state: **26 PASS / 0 WARN / 8 FAIL** (12 `QA_PASS` + 14
+Chaubal, Earthship) covering all 8 remaining QA_FAIL rows. No
+intermediate `v2.9.0` final tag is planned; the 8 deferrals carry
+forward as v2.10 production-tag blockers. Strict gate state:
+**26 PASS / 0 WARN / 8 FAIL** (12 `QA_PASS` + 14
 `QA_PASS_WITH_ADVISORIES`).
 
 Phases shipped in this cycle: B1 (TOC U+FFFD sanitizer + exemption),
@@ -187,17 +229,20 @@ detection), Phase D iconography lane, Phase E (Combat blank-asset +
 gibberish-table), Phase G (QA_PASS_WITH_ADVISORIES variant), Phase H
 (targeted re-enrichment).
 
-**Phase I Qdrant rebuild complete (2026-05-12 09:14).**
+**Phase I Qdrant rebuild complete (2026-05-12).**
 `mmrag_v2_8` dropped (was 22,446 v2.8 points) and recreated from the
 34 canonical post-recovery JSONLs via
 `scripts/rebuild_mmrag_v2_8_for_rc1.py`. Final state: status=green,
 `points_count=30,461` (exact match to source: 25,691 text + 4,379
 image + 391 table), `indexed_vectors_count=30,213`, vector dim 4096
-(llava). Wall time 10h15m on local Ollama. The 17 sister `*_v2`
-per-doc collections from earlier experiments remain user-owned and
-out of scope.
+(llava). Wall time 10h15m on local Ollama. The 16 sister `*_v2`
+per-doc collections from earlier experiments were dropped during
+post-RC1 sanitization; `mmrag_v2_8` is now the sole collection.
 
-`v2.9.0-rc1` tag is the final remaining Phase I step.
+**`v2.9.0-rc1` tag landed 2026-05-12** on commit `3e06d1b`, pushed to
+GitHub. Post-tag hygiene commits (`51f4b37` sanitization, `e60f70f`
+version bump, `10e94d1` + `4fa871c` + `665a76c` snapshot/search-tool
+follow-ups) are on `main`.
 
 ### v2.9 in-flight fixes (committed)
 
@@ -372,9 +417,10 @@ out of scope.
 ## Active Baseline
 
 - **`docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`** (current
-  RC ship state — 26/34 PASS / 0 WARN / 8 FAIL; tag `v2.9.0-rc1`
-  on commit `3e06d1b`; final `v2.9.0` blocked by 8 signed v2.10
-  deferrals).
+  v2.9 ship state — 26/34 PASS / 0 WARN / 8 FAIL; tag `v2.9.0-rc1`
+  on commit `3e06d1b`. No intermediate `v2.9.0` final tag is planned;
+  the 8 signed deferrals carry forward as v2.10 production-tag
+  blockers).
 - **`docs/QUALITY_SNAPSHOT_2026-05-11_v2.9_strict_gate_full_corpus.md`**
   (BEFORE state for the RC1 cycle — 9 PASS / 8 WARN / 17 FAIL on the
   first full-corpus strict-gate run).
@@ -417,48 +463,53 @@ Observed behavior:
 
 ## Current Quality Summary
 
-Source of truth: `docs/QUALITY_SNAPSHOT_2026-05-06_v2.9_strict_gate.md`.
+Source of truth: [`docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`](QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md)
+(RC1 AFTER, revised 2026-05-12).
 
-**Strict-gate (`scripts/qa_full_conversion.py`) pre-Phase-5 baseline:
-5 PASS / 3 WARN / 26 FAIL out of 34.** This is stale for ship
-purposes; Phase 5 broad reconversion must produce the RC evidence.
+**Strict-gate (`scripts/qa_full_conversion.py --source-pdf --allow-warnings`)
+at RC1 close-out: 26 PASS / 0 WARN / 8 FAIL out of 34.** All 8 FAILs
+are signed v2.10 deferrals per `docs/DECISIONS.md`. PASS breakdown:
+12 `QA_PASS` + 14 `QA_PASS_WITH_ADVISORIES` (the documented PASS
+variant introduced in Phase G; see `docs/QUALITY_GATES.md` "Advisory
+Warning Classes").
 
-The v2.8.0 SHIPPED state remains the active baseline:
-30/34 canonical PASS under the older `qa_conversion_audit.py`-only
-gate; smoke matrix 11/11; `mmrag_v2_8` Qdrant collection from the
-v2.8 ingest. The v2.9 fixes on `main` are real but the corpus does
-not yet meet the strict-gate ship criteria, and the v2.9.0 tag has
-been removed.
+**Image enrichment:** 4,379 image chunks, 4,257 `vision_status=complete`
+(97.2 %), 122 `vision_status=hard_fallback` with F4 sentinel (2.8 %),
+0 pending. Devlin Phase H catch-up ran 2026-05-12 (the original
+Phase H on 2026-05-11 missed Devlin's 67 pending chunks).
 
-### v2.9 progress vs ship gate
+**Test suite:** 806 passed, 14 skipped, 0 failed (was 736 at Phase 4
+close; +70 net regression tests across the RC1 cycle phases).
 
-| Area | v2.8 baseline | v2.9 working state | Strict-gate PASS? |
-|---|---|---|---|
-| `Ayeva_Python_Patterns` | FAIL CODE, `indentation_fidelity=0.83`, profile=`digital_literature` | profile=`technical_manual`, Phase 2 `indentation_fidelity=0.9693`; Phase 4 Adedeji cascade win also verified code gate behavior | Phase 5 broad reconversion must re-verify |
-| `Sekar_MCP_Standard` | FAIL | dedup + reconv lifted indentation | Phase 5 broad reconversion must re-verify |
-| chunk_id collisions corpus-wide | 427 within-file dupes | 0 | (gate clean) |
-| Refiner smart-routing | HARRY hammered qwen-plus | HARRY `refinement_applied=0`; Combat `refinement_applied=90` | (gate clean) |
-| Image enrichment | ~5,500 placeholders | 4,382 image chunks processed; acceptance test passes; hard_fallback rate under 5% corpus ceiling | Phase 5b gate clean |
-| Combat p66 corruption | 73 byte-equal dupes + 40k-char corrupted table | Phase 4 finalize-boundary chunk filter drops corrupted table chunks; unrelated image chunks remain | Phase 5 broad reconversion must re-verify |
-| Combat p4 omission (full-page image only) | page lost | image chunk emitted, enriched | (gate clean) |
-| HARRY chapter-intro page silent merge (p29, p54, …) | 13 pages lost | per-page split fixes coverage | WARN only (short VLM responses on a few terse images) |
+### Open work — v2.10 production-tag blockers
 
-### Open issues blocking final `v2.9.0`
+Per `docs/DECISIONS.md` "v2.9.0-rc1 Signed Deferrals (2026-05-11
+close-out)", the 8 deferrals listed below carry forward as v2.10
+production-tag blockers. No intermediate `v2.9.0` final tag is planned.
 
-- ~~TOC/index page-drop in 18 docs~~ closed by Phase 1
-  (commit `df91061`, 2026-05-07). Broad-doc re-verification deferred
-  to Phase 5.
-- Firearms `OCR_PATH_HEADING_PROPAGATION`: HEADING coverage 0.722 vs
-  0.80 floor. Signed v2.10 deferral; allowed only in `v2.9.0-rc1`.
-- KI EPUB `KI_EPUB_EXTRACTION_LANE_REWRITE`: structural EPUB lane
-  failure and `UNIVERSAL_FAIL`. Signed v2.10 deferral; allowed only
-  in `v2.9.0-rc1`.
-- Phase 5c Qdrant refresh is blocked because local Qdrant is down and
-  Docker access could not be approved in this environment. RC AFTER
-  snapshot and `v2.9.0-rc1` tag remain gated on `mmrag_v2_8`
-  drop/recreate plus point-count verification.
+1. `OCR_PATH_HEADING_PROPAGATION` — Firearms.
+2. `KI_EPUB_EXTRACTION_LANE_REWRITE` — KI EPUB.
+3. `HYBRID_CHUNKER_HEADING_PROPAGATION` — Devlin.
+4. `CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION` — Python_Cookbook + part of Python_Distilled.
+5. `B4B_FULL_DOC_PICTURE_DEDUP` — Earthship + part of Python_Distilled.
+6. `TEXT_INTEGRITY_SCOUT_FULL_DOC_SENSITIVITY` — Fluent_Python.
+7. `TEXT_LABEL_TOC_DENSE_INDEX_ROUTER_MISS` — Chaubal p11.
+8. (No 8th class — items 4 and 5 each cover two docs; the deferral
+   list has 8 *rows* across 7 named classes.)
+
+v2.10 housekeeping (non-blocking; see snapshot §9):
+- Devlin re-ingest into `mmrag_v2_8` so payload metadata matches the
+  post-catch-up JSONL (vectors already correct).
+- Re-tune `scripts/search_qdrant.py` `--model` default and `MIN_SCORE`
+  floor once v2.10 rebuilds the collection with a (possibly different)
+  embedder.
+- Move the hard-coded Dashscope API key out of
+  [`scripts/search_qdrant.py:40`](../scripts/search_qdrant.py#L40)
+  into an env var and rotate the leaked key on the provider side.
 
 ### Already-known followups (not v2.9 scope)
+
+Carry forward to v2.10 planning:
 
 - **Local NuMarkdown-8B-Thinking-mlx-8bits VLM lane.** Cloud-only
   for v2.9 enrichment; re-evaluate when network reachability returns.
@@ -466,24 +517,23 @@ been removed.
   expose `RemoteCodeFormulaOptions` / `ApiCodeFormulaOptions`. v2.9
   uses client-local CPU inference (~27 s/page on Apple Silicon).
 - **HybridChunker per-item token guard.** Requires upstream Docling.
+- **Broader UIR refactor** (canonical PdfConversionPlan →
+  UniversalDocument → ElementProcessor → chunks per CLAUDE.md).
+- **Magazine rendered-region-crop architecture** for composite layouts.
 
 ## Active Engineering Direction
 
-v2.9 development continues on an RC track. The 10+ root-cause fixes
-already on `main` are kept, plus the Phase 1 dense-index router
-(commit `df91061`) and Phase 2-4 fixes documented in the snapshots.
-Immediate work: restore local Qdrant/Docker access, then run the
-`mmrag_v2_8` drop/recreate and ingest the 30,356-unique-chunk v2.9
-corpus. After point-count verification, author the RC AFTER snapshot.
-Final `v2.9.0` is not reachable until the Firearms and KI EPUB
-deferrals are fixed or the production contract is explicitly amended
-in a separate governance decision.
+`v2.9.0-rc1` has shipped. The active engineering task is **drafting
+`docs/PLAN_V2.10.md`** from the seed prompt at
+[`docs/PLAN_V2.10_DRAFT_PROMPT.md`](PLAN_V2.10_DRAFT_PROMPT.md). The
+plan must structure the close of the 8 deferrals (above), the v2.10
+housekeeping items, and the carry-forward followups, with explicit
+acceptance baselines per item and a strict-gate target state.
 
-The broader UIR refactor (canonical PdfConversionPlan →
-UniversalDocument → ElementProcessor → chunks per CLAUDE.md) remains
-the longer-term direction.
-
-PCWorld VLM evidence remains valid: raw text-reading detections 36.5% → 22.2%, zero measured Combat-style hallucinations, blind-set 87.5% final-valid. See `tests/fixtures/blind_set_manifest.json`.
+PCWorld VLM evidence from the RC1 cycle remains valid: raw
+text-reading detections 36.5 % → 22.2 %, zero measured Combat-style
+hallucinations, blind-set 87.5 % final-valid. See
+`tests/fixtures/blind_set_manifest.json`.
 
 ## Recently Completed
 

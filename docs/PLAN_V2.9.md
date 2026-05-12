@@ -1,6 +1,6 @@
 # Plan: v2.9 — Strict-Gate Full-Corpus Recovery
 
-**Status:** `v2.9.0-rc1` CLOSED 2026-05-12 (commit `3e06d1b`, tag `v2.9.0-rc1` local). Final `v2.9.0` production tag remains blocked by 8 signed v2.10 deferrals — see `docs/DECISIONS.md` "v2.9.0-rc1 Signed Deferrals (2026-05-11 close-out)". This plan is RETAINED as the execution history for the v2.9.0-rc1 cycle; v2.10 work will get a separate `docs/PLAN_V2.10.md`.
+**Status:** `v2.9.0-rc1` CLOSED 2026-05-12 (commit `3e06d1b`, tag `v2.9.0-rc1` local). `v2.9.0-rc1` is the v2.9 ship state; no separate `v2.9.0` final tag is planned. The 8 signed deferrals carry forward as v2.10 production-tag blockers — see `docs/DECISIONS.md` "v2.9.0-rc1 Signed Deferrals (2026-05-11 close-out)". This plan is RETAINED as the execution history for the v2.9.0-rc1 cycle; v2.10 work will get a separate `docs/PLAN_V2.10.md`.
 **Owner:** ingestion pipeline
 **Predecessor:** `docs/archive/PLAN_V2.9_2026-05-06_strict_gate_recovery.md` (previous active plan, archived 2026-05-11 after first full-corpus strict-gate run revealed a wider failure surface than the previous plan anticipated)
 **BEFORE state:** `docs/QUALITY_SNAPSHOT_2026-05-11_v2.9_strict_gate_full_corpus.md` (9 PASS / 8 WARN / 17 FAIL)

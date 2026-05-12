@@ -18,9 +18,10 @@ The converter extracts text, images, and tables from complex documents while pre
 > AFTER snapshot:
 > [`docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`](docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md).
 >
-> Final `v2.9.0` production tag remains blocked until each of the
-> 8 v2.10 deferrals (Firearms, KI EPUB, Devlin, Python_Cookbook,
-> Python_Distilled, Fluent_Python, Chaubal, Earthship) passes under
+> `v2.9.0-rc1` is the v2.9 ship state; no intermediate `v2.9.0`
+> final tag is planned. The 8 signed deferrals (Firearms, KI EPUB,
+> Devlin, Python_Cookbook, Python_Distilled, Fluent_Python, Chaubal,
+> Earthship) carry forward as v2.10 production-tag blockers under
 > the unchanged strict gate.
 
 ---
