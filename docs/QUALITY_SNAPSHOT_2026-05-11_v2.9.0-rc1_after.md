@@ -232,6 +232,27 @@ v2.10 housekeeping (non-blocking for `v2.9.0-rc1`):
 - Targeted re-ingest of `Devlin_LLM_Agents` into `mmrag_v2_8` so the
   payload metadata matches the post-catch-up JSONL (vectors already
   correct; see §7).
+- `scripts/search_qdrant.py` semantic search is broken against
+  `mmrag_v2_8` out of the box (smoke-tested 2026-05-12). Root cause:
+  the embed model is hard-coded to `nomic-embed-text` (768-dim,
+  [scripts/search_qdrant.py:46](scripts/search_qdrant.py#L46)) while
+  `mmrag_v2_8` was built with `llava` (4096-dim) — Qdrant rejects
+  with `HTTP 400` on dimension mismatch. Secondary issue:
+  `MIN_SCORE = 0.55` ([scripts/search_qdrant.py:36](scripts/search_qdrant.py#L36))
+  is calibrated for nomic-style embedders; llava produces 0.25–0.40
+  on relevant text-vs-text matches, so even after the dimension fix
+  the default filter strips all results before reranking runs.
+  Fix scope: add `--model` CLI flag (default `llava`), pipe it
+  through `embed()`, and lower `MIN_SCORE` default to `~0.20` (with
+  comment explaining the llava calibration). `--list`, `--page`,
+  and `--stats` modes work today; only the search path needs the
+  fix. Acceptance: `python scripts/search_qdrant.py "what is MCP"
+  -c mmrag_v2_8 -n 3` returns the Sekar MCP chapter 3.4.3 chunks
+  at the top.
+- Same script carries a hard-coded Alibaba Dashscope API key in
+  source ([scripts/search_qdrant.py:40](scripts/search_qdrant.py#L40)).
+  Move to an env var (e.g. `DASHSCOPE_API_KEY`) and rotate the key
+  on the provider side, since it's already in git history.
 
 ## 10. Revision log
 
@@ -239,3 +260,4 @@ v2.10 housekeeping (non-blocking for `v2.9.0-rc1`):
 |---|---|
 | 2026-05-11 | Initial RC1 AFTER snapshot at v2.9.0-rc1 close. |
 | 2026-05-12 | (a) Predecessor link to `phase5_attempt.md` repointed to archive (file moved during sanitization). (b) §5 vision-status counts replaced with precise figures (4,379 / 4,257 / 122 / 0) and Devlin Phase H catch-up documented. (c) §7 collection note updated to reflect drop of 16 sister `*_v2` collections; documented Devlin Qdrant payload staleness. (d) §9 added Devlin re-ingest as v2.10 housekeeping. |
+| 2026-05-12 (later) | §9 housekeeping expanded: added `scripts/search_qdrant.py` semantic-search fix (embed-model hard-code + `MIN_SCORE` calibration) and hard-coded Dashscope API-key cleanup. Fix smoke-tested locally, then reverted to keep `v2.9.0-rc1` untouched; will be applied in v2.10. |
