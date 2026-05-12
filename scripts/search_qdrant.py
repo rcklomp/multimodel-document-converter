@@ -33,7 +33,11 @@ RED = "\033[31m"
 RESET = "\033[0m"
 BLUE = "\033[34m"
 
-MIN_SCORE = 0.55
+# Default cosine-score floor. Calibrated for llava embeddings on text
+# queries, which produce 0.25–0.40 on relevant text matches (vs. ~0.55+
+# for text-only embedders like nomic-embed-text). Override with
+# `--min-score` if a different embed model is used.
+MIN_SCORE = 0.20
 
 # Reranker config (Alibaba Dashscope)
 RERANK_MODEL = "qwen3-rerank"
@@ -378,6 +382,9 @@ def main():
     parser.add_argument("--min-score", type=float, default=MIN_SCORE, help="Minimum relevance")
     parser.add_argument("--qdrant-url", default="http://localhost:6333")
     parser.add_argument("--ollama-url", default="http://localhost:11434")
+    parser.add_argument("--model", default="llava",
+                        help="Ollama embed model (must match the model the collection was built with; "
+                             "mmrag_v2_8 was built with llava)")
     args = parser.parse_args()
 
     # Resolve collection name from partial match
@@ -429,7 +436,7 @@ def main():
     query = args.query
     targets = [resolved_collection] if resolved_collection else [c["name"] for c in list_collections(args.qdrant_url)]
 
-    vector = embed(query, ollama_url=args.ollama_url)
+    vector = embed(query, model=args.model, ollama_url=args.ollama_url)
     use_rerank = not args.no_rerank
 
     if not args.json:

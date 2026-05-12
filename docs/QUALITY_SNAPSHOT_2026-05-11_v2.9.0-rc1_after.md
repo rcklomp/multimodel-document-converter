@@ -232,27 +232,25 @@ v2.10 housekeeping (non-blocking for `v2.9.0-rc1`):
 - Targeted re-ingest of `Devlin_LLM_Agents` into `mmrag_v2_8` so the
   payload metadata matches the post-catch-up JSONL (vectors already
   correct; see §7).
-- `scripts/search_qdrant.py` semantic search is broken against
-  `mmrag_v2_8` out of the box (smoke-tested 2026-05-12). Root cause:
-  the embed model is hard-coded to `nomic-embed-text` (768-dim,
-  [scripts/search_qdrant.py:46](scripts/search_qdrant.py#L46)) while
-  `mmrag_v2_8` was built with `llava` (4096-dim) — Qdrant rejects
-  with `HTTP 400` on dimension mismatch. Secondary issue:
-  `MIN_SCORE = 0.55` ([scripts/search_qdrant.py:36](scripts/search_qdrant.py#L36))
-  is calibrated for nomic-style embedders; llava produces 0.25–0.40
-  on relevant text-vs-text matches, so even after the dimension fix
-  the default filter strips all results before reranking runs.
-  Fix scope: add `--model` CLI flag (default `llava`), pipe it
-  through `embed()`, and lower `MIN_SCORE` default to `~0.20` (with
-  comment explaining the llava calibration). `--list`, `--page`,
-  and `--stats` modes work today; only the search path needs the
-  fix. Acceptance: `python scripts/search_qdrant.py "what is MCP"
-  -c mmrag_v2_8 -n 3` returns the Sekar MCP chapter 3.4.3 chunks
-  at the top.
-- Same script carries a hard-coded Alibaba Dashscope API key in
-  source ([scripts/search_qdrant.py:40](scripts/search_qdrant.py#L40)).
-  Move to an env var (e.g. `DASHSCOPE_API_KEY`) and rotate the key
-  on the provider side, since it's already in git history.
+- **Re-tune `scripts/search_qdrant.py` defaults after the v2.10
+  collection rebuild.** On 2026-05-12 the script was patched to
+  align with the current `mmrag_v2_8` (built with `llava`, 4096-dim):
+  added `--model` CLI flag with default `llava`, and lowered
+  `MIN_SCORE` from `0.55` → `0.20` because llava text-vs-text cosine
+  scores land at 0.25–0.40 (vs. ~0.55+ for nomic-style text
+  embedders). If v2.10 rebuilds the corpus collection with a
+  different embedder (e.g. `nomic-embed-text`, `bge-m3`, or a hybrid
+  text+image split-vector setup), the `--model` default and the
+  `MIN_SCORE` floor in [scripts/search_qdrant.py:36](scripts/search_qdrant.py#L36)
+  must be re-tuned to match the new embedder's score distribution.
+  Acceptance: `python scripts/search_qdrant.py "what is MCP" -c
+  <v2.10 collection> -n 3` returns topically-correct chunks with
+  the default `--min-score`.
+- Hard-coded Alibaba Dashscope API key in
+  [scripts/search_qdrant.py:40](scripts/search_qdrant.py#L40) (already
+  in git history). Move to an env var (e.g. `DASHSCOPE_API_KEY`)
+  and rotate the key on the provider side — revoking the leaked one
+  is the only way to actually neutralize it.
 
 ## 10. Revision log
 
@@ -260,4 +258,4 @@ v2.10 housekeeping (non-blocking for `v2.9.0-rc1`):
 |---|---|
 | 2026-05-11 | Initial RC1 AFTER snapshot at v2.9.0-rc1 close. |
 | 2026-05-12 | (a) Predecessor link to `phase5_attempt.md` repointed to archive (file moved during sanitization). (b) §5 vision-status counts replaced with precise figures (4,379 / 4,257 / 122 / 0) and Devlin Phase H catch-up documented. (c) §7 collection note updated to reflect drop of 16 sister `*_v2` collections; documented Devlin Qdrant payload staleness. (d) §9 added Devlin re-ingest as v2.10 housekeeping. |
-| 2026-05-12 (later) | §9 housekeeping expanded: added `scripts/search_qdrant.py` semantic-search fix (embed-model hard-code + `MIN_SCORE` calibration) and hard-coded Dashscope API-key cleanup. Fix smoke-tested locally, then reverted to keep `v2.9.0-rc1` untouched; will be applied in v2.10. |
+| 2026-05-12 (later) | `scripts/search_qdrant.py` patched in place to align with the current `mmrag_v2_8` collection: added `--model` CLI flag (default `llava`) and lowered `MIN_SCORE` 0.55 → 0.20 to match llava's text-on-text cosine distribution. §9 housekeeping rewritten: the open v2.10 item is **re-tuning these defaults again after the v2.10 collection rebuild**, plus moving the hard-coded Dashscope API key out of source. |
