@@ -371,21 +371,25 @@ out of scope.
 
 ## Active Baseline
 
-- **`docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`** (active baseline —
-  v2.8.0 SHIPPED state; 30/34 canonical PASS under the v2.8-era
-  audit-only gate. The "superseded" banner that was added during
-  the v2.9 attempt has been removed since v2.9 has not shipped.)
-- **`docs/QUALITY_SNAPSHOT_2026-05-06_v2.9_strict_gate.md`** (working
-  snapshot — strict-gate state of the v2.9 in-progress corpus,
-  documents PASS/WARN/FAIL per doc with specific failure codes).
-- **`docs/QUALITY_SNAPSHOT_2026-05-10_v2.9_phase5_attempt.md`** (current
-  Phase 5 execution snapshot — 34/34 fresh conversions and Phase 5b
-  enrichment pass; Qdrant refresh blocked by local service access).
-- `docs/QUALITY_SNAPSHOT_2026-05-04_v2.9_after.md` REMOVED — that file
-  asserted "32/34 PASS" against the loose gate and has been
-  superseded by the strict-gate snapshot.
-- `docs/QUALITY_SNAPSHOT_2026-05-03.md` (v2.8 Phase 0 BEFORE state).
-- `docs/archive/quality_snapshots/...` historical snapshots (preserved).
+- **`docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`** (current
+  RC ship state — 26/34 PASS / 0 WARN / 8 FAIL; tag `v2.9.0-rc1`
+  on commit `3e06d1b`; final `v2.9.0` blocked by 8 signed v2.10
+  deferrals).
+- **`docs/QUALITY_SNAPSHOT_2026-05-11_v2.9_strict_gate_full_corpus.md`**
+  (BEFORE state for the RC1 cycle — 9 PASS / 8 WARN / 17 FAIL on the
+  first full-corpus strict-gate run).
+- **`docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`** (v2.8.0 SHIPPED
+  reference baseline; 30/34 canonical PASS under the v2.8-era
+  audit-only gate).
+- `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase4_after.md` (Phase 4
+  close state with 2 signed deferrals; full-corpus strict gate not
+  yet run at that point; superseded by 2026-05-11 BEFORE).
+- `docs/archive/quality_snapshots/v2.9_in_progress/` —
+  v2.9-in-progress snapshots from 2026-05-06 / 05-08 / 05-09 phase3 /
+  05-10 phase5 attempt (kept for execution-history archaeology;
+  not current-state docs).
+- `docs/archive/quality_snapshots/QUALITY_SNAPSHOT_2026-05-03.md`
+  (v2.8 Phase 0 BEFORE state, archived 2026-05-12).
 
 `tests/test_docling_postprocessor_acceptance.py` (HARRY pages 13-30
 reading-order fixture) is the binding regression test.
