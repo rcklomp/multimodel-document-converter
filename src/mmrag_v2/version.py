@@ -16,14 +16,16 @@ scattering across the codebase.
 # chunk_id for cross-version mapping must rebuild from v2.9 outputs.
 __schema_version__ = "2.7.0"
 
-# Engine/runtime version. v2.8.0 is the most recent shipped tag.
-# A v2.9.0 tag was attempted on 2026-05-05 and removed on 2026-05-06
-# after a user-driven QA review surfaced defects the loose gate had
-# missed; v2.9 is in progress on `main` but no v2.9.0 git tag exists.
-# The version string below reads `2.9.0-dev` to reflect that the
-# code on `main` carries the v2.9 in-flight fixes (chunk_id, refiner
-# routing, cross-page split, page-scoped dedup/merge, corruption
-# interceptor extension, full-page defer, enrichment content-field)
-# without claiming a release.
-# See docs/QUALITY_SNAPSHOT_2026-05-06_v2.9_strict_gate.md.
-__engine_version__ = "2.9.0-dev"
+# Engine/runtime version. v2.8.0 was the prior shipped tag.
+# v2.9.0-rc1 tagged 2026-05-12 on commit 3e06d1b after the
+# strict-gate corpus close (9 PASS / 8 WARN / 17 FAIL →
+# 26 PASS / 0 WARN / 8 FAIL; all 8 FAILs are signed v2.10
+# deferrals per docs/DECISIONS.md "v2.9.0-rc1 Signed Deferrals").
+# Final v2.9.0 production tag blocked until each of the 8
+# deferrals (Firearms HEADING, KI EPUB, Devlin HEADING,
+# cross-page-split misattribution on Python_Cookbook /
+# Python_Distilled, TextIntegrityScout full-doc sensitivity on
+# Fluent_Python, text-label-TOC on Chaubal p11, full-doc picture
+# dedup on Earthship) passes the unchanged strict gate.
+# See docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md.
+__engine_version__ = "2.9.0-rc1"
