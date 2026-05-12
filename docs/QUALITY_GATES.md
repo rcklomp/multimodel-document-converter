@@ -121,3 +121,50 @@ as `MISSING_PAGES` failures even though they correctly have no chunks.
 With `--source-pdf`, those pages are classified as `MISSING_PAGES_BLANK`
 (info, not failure) by checking the source PDF for actual content.
 
+### Advisory Warning Classes (Phase G, 2026-05-11)
+
+The strict gate emits `QA_PASS_WITH_ADVISORIES` (a documented PASS
+variant — counts as PASS toward the v2.9.0-rc1 32/34 contract) when
+**all** of the following hold:
+
+1. Zero `FAIL`-severity issues.
+2. Every `WARN`-severity issue's code is in the
+   `_ALLOWED_ADVISORY_WARN_CODES` set in
+   `scripts/qa_full_conversion.py`.
+3. For the conditional code `VISION_HARD_FALLBACK_RATE`: every
+   `hard_fallback` image chunk in the corpus must carry the F4
+   sentinel `complex_asset_short_response_after_retry`. A
+   non-F4-sentinelled hard_fallback indicates a real defect (asset
+   missing, API failure, validator rejection) and continues to block
+   PASS.
+
+Allowed advisory codes and their rationale (per `docs/DECISIONS.md`
+"Retrieval-Value Test"):
+
+| Code | Rationale | Conditional? |
+|---|---|---|
+| `ASSET_TINY` | Publisher icon-class assets (<1 KB). Per the Retrieval-Value Test these are low-retrieval-value but valid; their presence in the JSONL is informational. | No |
+| `PAGE_COUNT_UNKNOWN` | EPUB documents have no PDF-style page count. The EPUB lane provides a virtual page mapping via chunk order. | No |
+| `SCRIPT_ADVISORY_FAIL` | `qa_semantic_fidelity.py` exit 0 indicates the script itself classified the issue as advisory only (e.g., `code_indentation_fidelity` below 0.90 on a doc whose profile makes that floor inappropriate). | No |
+| `VISION_HARD_FALLBACK_RATE` | Hard-fallback rate > 5 % when ALL hard_fallbacks have the F4 sentinel — documented "VLM legitimately can't describe this" cases (complex assets with terse responses after the Phase 3 detail-retry). | Yes (F4 condition above) |
+
+The PASS variant is parallel to the SCAN0013 form-aware variant
+(`GATE_PASS [form: ...]`) — both are explicit governance allowances
+that let the strict gate accept documented edge cases without
+weakening core checks.
+
+**Adding a new advisory code requires:**
+1. Adding the code to `_ALLOWED_ADVISORY_WARN_CODES`.
+2. Documenting it in this section with explicit rationale tied to
+   the Retrieval-Value Test or another DECISIONS.md governance rule.
+3. A regression test in `tests/test_qa_advisory_promotion.py`
+   pinning the positive (code is advisory) and negative (different
+   code is not) classifications.
+4. If conditional, a regression test verifying the condition fires.
+
+**Anti-pattern explicitly forbidden:** adding a code to the
+allowed-advisory set as a way to silence a `FAIL` that should be
+fixed. The set is for code-classes whose `WARN` severity already
+reflects "informational, not blocking" — the promotion makes the
+gate's final status agree with the code-classification.
+

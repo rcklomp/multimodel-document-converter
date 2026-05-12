@@ -56,6 +56,7 @@ class DoclingPdfAdapter:
         ) = self._load_docling_classes()
 
         options = PdfPipelineOptions()
+        self._prefer_mps_accelerator(options)
         options.images_scale = self.plan.images_scale
         options.generate_page_images = self.plan.generate_page_images
         options.generate_picture_images = self.plan.generate_picture_images
@@ -118,6 +119,34 @@ class DoclingPdfAdapter:
         )
         logger.info("[DOCLING-ADAPTER] Created cached DocumentConverter")
         return self._converter
+
+    @staticmethod
+    def _mps_available() -> bool:
+        try:
+            import torch  # type: ignore
+
+            return bool(
+                hasattr(torch.backends, "mps")
+                and torch.backends.mps.is_available()
+            )
+        except Exception:
+            return False
+
+    def _prefer_mps_accelerator(self, options: Any) -> None:
+        if not hasattr(options, "accelerator_options") or not self._mps_available():
+            return
+        try:
+            from docling.datamodel.pipeline_options import (
+                AcceleratorDevice,
+                AcceleratorOptions,
+            )
+
+            options.accelerator_options = AcceleratorOptions(
+                device=AcceleratorDevice.MPS
+            )
+            logger.info("[DOCLING-ADAPTER] Using Apple Silicon MPS accelerator")
+        except Exception as exc:
+            logger.debug("[DOCLING-ADAPTER] MPS accelerator option unavailable: %s", exc)
 
     def convert(self, pdf_path: str | Path) -> Any:
         """Convert a PDF path through the cached Docling converter.

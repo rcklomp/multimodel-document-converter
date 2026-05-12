@@ -14,15 +14,35 @@ set -uo pipefail
 LOG="output/_convert_books.log"
 : >"$LOG"
 now() { date "+%Y-%m-%d %H:%M:%S"; }
+trap 'echo "$(now) ABORT interrupted" | tee -a "$LOG"; exit 130' INT TERM
+
+if [ "${MMRAG_ALLOW_LEGACY_SHELL_RUNNER:-0}" != "1" ]; then
+  echo "ERROR: scripts/convert_books.sh is disabled for v2.9 Phase 5."
+  echo "Use: conda run -n mmrag-v2 python scripts/convert_books_v29.py"
+  echo "Reason: nested shell execution makes torch report mps=False on Apple Silicon."
+  exit 2
+fi
 
 PASS=0
 FAIL=0
+FAIL_FAST="${MMRAG_CONVERT_FAIL_FAST:-1}"
+ONLY=",${MMRAG_CONVERT_ONLY:-},"
 
 convert() {
   local src="$1"
   local name="$2"
   local batch_size="${3:-10}"
   local outdir="output/$name"
+
+  if [ "$ONLY" != ",," ]; then
+    case "$ONLY" in
+      *,"$name",*) ;;
+      *)
+        echo "$(now) SKIP $name (MMRAG_CONVERT_ONLY)" | tee -a "$LOG"
+        return 0
+        ;;
+    esac
+  fi
 
   # Always reconvert — never skip stale outputs
   if [ -d "$outdir" ]; then
@@ -37,9 +57,14 @@ convert() {
   # has_encoding_corruption=True (v2.9 Phase 2).
   # Use ``conda run -n mmrag-v2`` so this script works whether the env
   # is activated in the calling shell or not.
+  # Keep the converter attached to the terminal. Redirecting this command's
+  # stdout/stderr makes Docling's image-classification path select CPU on
+  # Apple Silicon and can stall on the first HARRY batch; PTY-attached runs
+  # use MPS and complete normally. The phase log records doc-level status.
+  DOCLING_DEVICE="${DOCLING_DEVICE:-mps}" \
   conda run -n mmrag-v2 --no-capture-output python -m mmrag_v2.cli process \
     "$src" -o "$outdir" -b "$batch_size" \
-    --vision-provider none --no-cache >>"$LOG" 2>&1
+    --vision-provider none --no-cache
   local exit_code=$?
 
   if [ $exit_code -eq 0 ] && [ -f "$outdir/ingestion.jsonl" ]; then
@@ -49,6 +74,10 @@ convert() {
   else
     echo "$(now) FAIL $name (exit=$exit_code)" | tee -a "$LOG"
     FAIL=$((FAIL + 1))
+    if [ "$FAIL_FAST" = "1" ]; then
+      echo "$(now) ABORT fail-fast after $name" | tee -a "$LOG"
+      exit "$exit_code"
+    fi
   fi
 }
 

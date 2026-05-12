@@ -276,6 +276,19 @@ def _classify_dense_index_pages(doc: Any) -> set[int]:
 def _sanitize_toc_index_text(text: str) -> str:
     marker = re.compile(r",\s*\d+\s*=")
     cleaned = marker.sub(" ", text or "")
+    # Plan v2.9 Phase B1: many publisher TOC templates render dotted
+    # leaders via a `.` glyph that lacks a ToUnicode mapping. Docling
+    # then emits U+FFFD (replacement char) runs in those regions
+    # (e.g. "About the Author ��������� xxix"). The TOC entry's
+    # title and page number remain readable; the leader region is
+    # cosmetic. Collapse U+FFFD runs (with surrounding whitespace)
+    # into a single space so:
+    #   1. Downstream corruption detectors (qa_conversion_audit,
+    #      qa_universal_invariants) do not flag the chunk as
+    #      irreparably corrupt.
+    #   2. Retrieval sees a clean "title ... page" surface form
+    #      instead of "title ��� page".
+    cleaned = re.sub(r"[ \t]*�[� \t]*", " ", cleaned)
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
@@ -3050,6 +3063,35 @@ class V2DocumentProcessor:
             )
             chunks.sort(key=lambda ch: ch.metadata.page_number if ch.metadata else 0)
 
+        # Plan v2.9 Phase B3 (2026-05-11): section-header-only pages.
+        # HybridChunker treats `section_header` Docling items as heading
+        # metadata to be propagated into the breadcrumbs of subsequent
+        # text chunks. On pages whose ONLY content is one or more
+        # section_header items (chapter divider / part-opener pages,
+        # e.g. Devlin p170 "II — Building Intelligent Foundations"),
+        # no text chunk is emitted at all and the strict gate reports
+        # MISSING_PAGES even though the heading is high-retrieval-value
+        # signal (it answers queries like "where does Part II start?").
+        # Per the Retrieval-Value Test (`docs/DECISIONS.md`), emit one
+        # text chunk for each such page using the concatenated heading
+        # text as content. Tagged `hybrid_chunker_section_header_page`
+        # so the chunks are traceable and so the B1 corruption-quarantine
+        # exemption pattern (extraction_method-scoped) can extend here if
+        # ever needed.
+        section_header_only_chunks = self._emit_section_header_only_page_chunks(
+            doc=doc,
+            existing_chunks=chunks,
+            dense_index_pages=dense_index_pages,
+            doc_hash=doc_hash,
+            source_file=source_file,
+            file_type=file_type,
+            page_dims=page_dims,
+            page_offset=page_offset,
+        )
+        if section_header_only_chunks:
+            chunks.extend(section_header_only_chunks)
+            chunks.sort(key=lambda ch: ch.metadata.page_number if ch.metadata else 0)
+
         # Fill next_text_snippet (skip chunks that don't have a
         # semantic_context — e.g. v2.9 hybrid_chunker_pagesplit emits
         # don't carry one because they lack the dc.contextualize
@@ -3163,6 +3205,132 @@ class V2DocumentProcessor:
                 )
                 chunks.append(chunk)
         return chunks
+
+    def _emit_section_header_only_page_chunks(
+        self,
+        doc: Any,
+        existing_chunks: List["IngestionChunk"],
+        dense_index_pages: set[int],
+        doc_hash: str,
+        source_file: str,
+        file_type: "FileType",
+        page_dims: Dict[int, Tuple[float, float]],
+        page_offset: int = 0,
+    ) -> List["IngestionChunk"]:
+        """Plan v2.9 Phase B3: emit one chunk for each page whose only
+        Docling items are `section_header` (a chapter / part divider
+        page).
+
+        Skips pages already covered by another chunk (the hybrid_chunker
+        main pass or the dense-index emitter). Skips pages with any
+        non-heading text items (those go through the normal hybrid_chunker
+        path and any chunk drop on them is a separate defect to be
+        diagnosed, not papered over here). Skips pages in
+        `dense_index_pages` (already handled by
+        `_emit_dense_index_page_chunks`).
+
+        See `docs/DECISIONS.md` "Retrieval-Value Test" for the principle:
+        a section_header on a chapter-divider page is high-retrieval-value
+        signal (answers "where does Chapter / Part X start?"), so we
+        emit the chunk rather than mark the page blank-equivalent.
+        """
+        if not hasattr(doc, "iterate_items"):
+            return []
+
+        # Compute pages already covered.
+        covered_pages: set[int] = set()
+        for ch in existing_chunks:
+            md = getattr(ch, "metadata", None)
+            page_no = getattr(md, "page_number", None)
+            if page_no is not None:
+                covered_pages.add(int(page_no))
+
+        # Group Docling items per (raw) page number, classifying labels.
+        # raw_page is the doc-local page index; out_page adds page_offset.
+        items_per_page: Dict[int, List[Any]] = {}
+        for item, _level in doc.iterate_items():
+            raw_page = _docling_item_page_no(item)
+            if raw_page is None:
+                continue
+            if not _docling_item_text(item):
+                continue
+            items_per_page.setdefault(raw_page, []).append(item)
+
+        clean_name = (
+            Path(source_file).stem.replace("_", " ") if source_file else "Document"
+        )
+
+        emitted: List[IngestionChunk] = []
+        for raw_page in sorted(items_per_page.keys()):
+            out_page = raw_page + page_offset
+            if out_page in covered_pages:
+                continue
+            if raw_page in dense_index_pages:
+                # Already handled by the dense-index emitter; if a
+                # leaked dense-index doc-chunk caused the gap, that's
+                # a separate defect.
+                continue
+
+            items = items_per_page[raw_page]
+            labels = {_docling_item_label(it) for it in items}
+            # Only fire when every item on this page is a heading-style
+            # label. Mixed-content pages (text + section_header) are out
+            # of scope; their chunk drop is the cross-page-split defect
+            # being diagnosed in Phase B3 Step 3.
+            if not labels.issubset({"section_header", "title"}):
+                continue
+
+            heading_lines = [_docling_item_text(it) for it in items]
+            heading_lines = [ln for ln in heading_lines if ln]
+            if not heading_lines:
+                continue
+            content = "\n".join(heading_lines)
+
+            page_w, page_h = page_dims.get(
+                out_page, page_dims.get(raw_page, (612.0, 792.0))
+            )
+            bbox = self._union_docling_item_bboxes(items, page_w, page_h)
+
+            # The page heading is its own breadcrumb anchor.
+            primary_heading = heading_lines[0]
+            hierarchy = HierarchyMetadata(
+                parent_heading=primary_heading,
+                breadcrumb_path=[clean_name, primary_heading, f"Page {out_page}"],
+                level=2,
+            )
+            chunk = create_text_chunk(
+                doc_id=doc_hash,
+                content=content,
+                source_file=source_file,
+                file_type=file_type,
+                page_number=out_page,
+                bbox=bbox,
+                hierarchy=hierarchy,
+                chunk_type=ChunkType.HEADING,
+                page_width=int(page_w),
+                page_height=int(page_h),
+                extraction_method="hybrid_chunker_section_header_page",
+                position=self._next_chunk_position(),
+                **self._intelligence_metadata,
+            )
+            chunk.metadata.refined_content = content
+            chunk.metadata.search_priority = "high"
+            chunk.semantic_context = SemanticContext(
+                prev_text_snippet=None,
+                next_text_snippet=None,
+                parent_heading=primary_heading,
+                breadcrumb_path=hierarchy.breadcrumb_path,
+            )
+            emitted.append(chunk)
+
+        if emitted:
+            logger.info(
+                "[HYBRID-CHUNKER] Emitted %d section-header-only page chunk(s) "
+                "for pages: %s",
+                len(emitted),
+                sorted(int(ch.metadata.page_number) for ch in emitted),
+            )
+        return emitted
 
     def _union_docling_item_bboxes(
         self,

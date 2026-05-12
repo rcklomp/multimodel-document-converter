@@ -83,6 +83,30 @@ def _strip_c0_controls(value: Optional[str]) -> Optional[str]:
     return _CTRL_RUN_PATTERN.sub(sep, value)
 
 
+# Plan v2.9 Phase B1 (extended 2026-05-11): U+FFFD is the Unicode
+# replacement character — by definition an unrenderable glyph that the
+# extractor could not map to a real codepoint. It cannot carry semantic
+# content. Universal collapse of `�+` runs (with surrounding
+# whitespace) to a single space prevents downstream corruption gates
+# from flagging cosmetic font-mapping anomalies (e.g. dotted-leader
+# regions on publisher TOC templates) and improves retrieval/display
+# quality on any chunk that survives extraction with replacement
+# characters embedded. Real content corruption that emits OTHER
+# signatures (CIDFont placeholders /C211, /uni escapes, em-dash runs,
+# C/S filler runs) is unaffected and continues to be caught by
+# `validators.corruption_interceptor.has_encoding_artifacts` and
+# `is_irreparably_corrupt`.
+_REPLACEMENT_CHAR_RUN_PATTERN = re.compile(r"[ \t]*�[� \t]*")
+
+
+def _collapse_replacement_chars(value: Optional[str]) -> Optional[str]:
+    if value is None or not isinstance(value, str):
+        return value
+    if "�" not in value:
+        return value
+    return _REPLACEMENT_CHAR_RUN_PATTERN.sub(" ", value)
+
+
 # ============================================================================
 # ENUMS
 # ============================================================================
@@ -524,8 +548,11 @@ class ChunkMetadata(BaseModel):
     @field_validator("refined_content", "visual_description", mode="before")
     @classmethod
     def strip_control_chars_from_optional_text(cls, v: Optional[str]) -> Optional[str]:
-        """Prevent extraction-layer control characters from leaking to JSONL."""
-        return _strip_c0_controls(v)
+        """Prevent extraction-layer control characters and U+FFFD replacement
+        characters from leaking to JSONL. See `_collapse_replacement_chars`
+        for the replacement-char rationale (Plan v2.9 Phase B1 extension,
+        2026-05-11)."""
+        return _collapse_replacement_chars(_strip_c0_controls(v))
 
 
 # ============================================================================
@@ -572,8 +599,10 @@ class IngestionChunk(BaseModel):
     @field_validator("content", mode="before")
     @classmethod
     def strip_control_chars_from_content(cls, v: str) -> str:
-        """Text chunks must not emit C0/DEL control characters."""
-        cleaned = _strip_c0_controls(v)
+        """Text chunks must not emit C0/DEL control characters or U+FFFD
+        replacement characters. See `_collapse_replacement_chars` for the
+        replacement-char rationale (Plan v2.9 Phase B1 extension, 2026-05-11)."""
+        cleaned = _collapse_replacement_chars(_strip_c0_controls(v))
         return cleaned if cleaned is not None else ""
 
     @computed_field
@@ -795,8 +824,8 @@ def create_text_chunk(
 
     TEXT chunks get HIGH search priority (OCR text is ground truth for RAG).
     """
-    content = _strip_c0_controls(content) or ""
-    refined_content = _strip_c0_controls(refined_content)
+    content = _collapse_replacement_chars(_strip_c0_controls(content)) or ""
+    refined_content = _collapse_replacement_chars(_strip_c0_controls(refined_content))
     chunk_id = _generate_chunk_id(doc_id, content, page_number, "text", position)
 
     # Ensure hierarchy has level calculated

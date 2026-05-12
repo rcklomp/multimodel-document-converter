@@ -1,12 +1,13 @@
 # Project Status
 
-Last updated: 2026-05-09
+Last updated: 2026-05-11
 
 Purpose: fast orientation for a new coding session. Read this before deeper project docs.
 
 ## Current Objective
 
-**v2.9 IN PROGRESS — NOT SHIPPED.** A v2.9.0 tag was created on
+**v2.9 IN PROGRESS — NOT SHIPPED. `v2.9.0-rc1` EXECUTION APPROVED.**
+A v2.9.0 tag was created on
 2026-05-05 against a 32/34 AUDIT_PASS reading from
 `scripts/qa_conversion_audit.py` alone, then deleted on 2026-05-06
 after a user-driven review surfaced multiple defects that the
@@ -17,11 +18,186 @@ Phase 5b enrichment never updated the canonical ``content`` field).
 
 The v2.9 cycle has landed real bug fixes on `main` (see "v2.9 in-flight
 fixes" below) and adopted a stricter four-gate acceptance via
-``scripts/qa_full_conversion.py`` (see ``docs/TESTING.md``). Under
-that gate the post-enrichment corpus reports
-**5 PASS / 3 WARN / 26 FAIL out of 34**. v2.9 is not eligible for
-shipping until the remaining failure modes are closed (see "Open
-work" below).
+``scripts/qa_full_conversion.py`` (see ``docs/TESTING.md``). Phase 4
+closed on 2026-05-10 with explicit user sign-off to defer two defects
+to v2.10: Firearms `OCR_PATH_HEADING_PROPAGATION` and KI EPUB
+`KI_EPUB_EXTRACTION_LANE_REWRITE`. Phase 5a (broad reconversion, 34/34
+fresh JSONLs) and Phase 5b (cloud VLM enrichment, 4,269 complete /
+113 hard_fallback / 0 pending) are complete.
+
+**2026-05-11 update.** The first full-corpus strict-gate run
+(`scripts/qa_full_conversion.py --source-pdf --allow-warnings`)
+reported **9 PASS / 8 WARN / 17 FAIL out of 34**. Only 2 of the 17
+FAILs are the signed Phase 4 deferrals; the other 15 are
+previously-unmeasured failure classes. The previous v2.9 plan
+(`docs/archive/PLAN_V2.9_2026-05-06_strict_gate_recovery.md`) has
+been archived and replaced with a new
+[`docs/PLAN_V2.9.md`](PLAN_V2.9.md) recovery plan organized around
+nine work-streams (Phase A diagnostic → I tag). Phase A is complete
+(`docs/PHASE_A_MISSING_PAGES_DIAGNOSTIC.md`): the MISSING_PAGES
+surface decomposes into four distinct sub-classes (B1 TOC
+quarantine over-fire, B2 "intentionally left blank" disclaimer,
+B3 short-text page filter, B4 image-only page chunk-drop). Phase B
+sub-classes proceed in smallest-cost-first order.
+
+**Phase B1 closed (2026-05-11).** Three-layer fix: universal
+U+FFFD collapse at chunk-creation chokepoint
+(`_collapse_replacement_chars` in
+`mmrag_v2.schema.ingestion_schema`); producer-site sanitizer
+retained in `_sanitize_toc_index_text` (cleans text before
+dense-index splitting); two-site BatchProcessor exemption for
+`hybrid_chunker_pageskip*` chunks as defense-in-depth for
+non-U+FFFD signatures. The sanitizer was widened from TOC-only
+to corpus-wide on 2026-05-11 after architectural review flagged
+the narrower scope as borderline overfit. Reconverts of Cronin,
+Nagasubramanian, Sekar, Chaubal: 62 missing pages → 7 (89 %
+reduction; full TOC class closed). All four now report
+`AUDIT_PASS` + `UNIVERSAL_PASS` + `LOCALIZED_CORRUPTION = 0` with
+HEADING ≥ 99 %. Residual missing pages (Nagasubramanian p2,
+Sekar p2/p159/p228/p247, Chaubal p4/p11) are sub-class C/A and
+fold into B3/B4 scope. 13 regression tests in
+`tests/test_corruption_quarantine_toc_exemption.py` + 1 updated
+in `tests/test_finalization_bridge.py`. Test suite: **750 passed,
+14 skipped, 0 failed** (was 736 at Phase 4 close, +14 net new).
+
+**Phase B2 closed (2026-05-11).** Gate-side fix:
+`scripts/qa_full_conversion.py:_is_intentionally_blank_text`
+recognizes the "This page intentionally left blank" boilerplate
+(with a 120-char structural length cap to reject false positives).
+Greenhouse_Design: p3/p11/p23 now classified as
+MISSING_PAGES_BLANK (INFO/acceptable). 10 regression tests in
+`tests/test_qa_intentionally_blank_pages.py`. Test suite: 760
+passed, 14 skipped, 0 failed (+10 net new vs B1 close).
+
+**Phase B4.a closed (2026-05-11).** Two-rule gate-side detector in
+`scripts/qa_full_conversion.py`: `_page_render_is_near_blank` (mean>245
+AND std<20 AND text<200) plus `_page_is_no_text_image_only_placeholder`
+(text_len==0 AND images>=1 AND mean>250). Catches publisher-template
+placeholder pages with 0 false positives on 15-page real-content
+sample. **Python_Distilled: 697 → 4 missing (694 reclassified as
+MISSING_PAGES_BLANK INFO)**, Devlin p2/p264 closed, Chaubal p4
+closed. 17 regression tests in `tests/test_qa_near_blank_render.py`.
+Test suite: **787 passed**, 14 skipped, 0 failed.
+
+**Phase H closed Cronin (2026-05-11).** Targeted re-enrichment of
+4 docs (Cronin / Nagasubramanian / Sekar / Chaubal — the B1+B3
+reconvert outputs with pending image chunks). 170 image chunks ×
+~3 s/call ≈ 8 min. 157 enriched + 13 hard_fallback (7.6 %; F4
+sentinel applies). Result: **Cronin → QA_PASS** (full strict gate
+green); Nagasubramanian / Sekar → QA_WARN (was FAIL); Chaubal stays
+QA_FAIL on its 1 remaining missing page (p11, sub-class A/B4
+residual).
+
+**Phase D iconography lane closed (2026-05-11).**
+`src/mmrag_v2/vision/asset_complexity.py` adds a `tiny bbox`
+iconography lane (bbox <1 % of page → `simple` complexity
+regardless of file size). Hybrid_electric_vehicles "Logo icon." now
+correctly classifies as simple-asset-acceptable description, flipping
+the doc from QA_FAIL → QA_WARN. Corpus probe: 216/4031 image chunks
+have bbox<1 %; all 14 with short descriptions are legitimate
+icon-class. AIOS p8 "Bar chart.0 to 1.0." remains FAIL (5 % bbox,
+genuinely complex; retry-harness issue under investigation).
+2 regression tests in `tests/test_asset_complexity.py`.
+
+**Phase G advisory-warning allowance closed (2026-05-11).**
+`scripts/qa_full_conversion.py` now emits
+`QA_PASS_WITH_ADVISORIES` (a documented PASS variant, parallel to
+the SCAN0013 `GATE_PASS [form: ...]` pattern) when all WARN issues
+are in the documented advisory set: `ASSET_TINY`,
+`PAGE_COUNT_UNKNOWN`, `SCRIPT_ADVISORY_FAIL` (unconditional);
+`VISION_HARD_FALLBACK_RATE` (conditional: every hard_fallback must
+carry the F4 sentinel `complex_asset_short_response_after_retry`).
+Corpus probe confirms 100 % F4 coverage on the 5 docs with that
+WARN (Jungjun, Kimothi, Bourne, Nagasubramanian, Sekar — total
+25 hard_fallback chunks, all F4). 11 regression tests in
+`tests/test_qa_advisory_promotion.py`. Allowance documented in
+`docs/QUALITY_GATES.md` "Advisory Warning Classes".
+
+**Cumulative strict-gate state after B1+B2+B3+B4.a+D+G+H
+(2026-05-11):**
+
+| State | PASS | WARN | FAIL | Tests |
+|---|---:|---:|---:|---:|
+| 2026-05-11 BEFORE (first full-corpus run) | 9 | 8 | 17 | 736 |
+| After all current Phase B/D/G/H work | **24** | **0** | **10** | **804** |
+| Net delta | **+15** | **−8** | **−7** | **+68** |
+
+PASS=24 breaks down as 11 pure `QA_PASS` + 13 `QA_PASS_WITH_ADVISORIES`.
+Goal 1 (v2.9.0-rc1) requires 32/34 PASS-class; **8 more docs need
+closure** to reach the RC target. The 10 remaining FAILs:
+
+| Class | Docs | Path |
+|---|---|---|
+| Signed v2.10 deferral | Firearms, KI_En | Out of scope ✓ |
+| In-flight Phase E reconvert | Combat | Producer-side blank-asset filter widened to std<10; reconvert running |
+| Phase D residual | AIOS p8 | Retry-harness bug suspected; deferral candidate |
+| Phase C | Devlin | HEADING 72% (HybridChunker-path); deferral candidate parallel to Firearms |
+| B3.b cross-page-split (deferred) | Python_Cookbook (4 pages) | v2.10 sign-off needed |
+| B3.b + B4.b mixed | Python_Distilled (4 pages: 1 absorbed, 3 image-only) | v2.10 sign-off needed |
+| New: TextIntegrityScout sensitivity (deferred) | Fluent_Python (6 pages) | v2.10 sign-off needed |
+| Chaubal p11 + Earthship p109 | 2 pages real image content | B4.b small surface fix |
+
+**Phase B3 closed with 3 signed v2.10 deferrals (2026-05-11).**
+Three sub-classes:
+- **B3.a (closed)**: `_emit_section_header_only_page_chunks` in
+  `src/mmrag_v2/processor.py` emits a chunk for pages whose only
+  Docling items are `section_header` / `title` (chapter dividers,
+  title pages). Reconverts: Devlin p170 ✓; Nagasubramanian p2 ✓;
+  Sekar p2/p159/p228/p247 ✓. **MISSING_PAGES=[] now on
+  Nagasubramanian and Sekar; AUDIT_PASS + UNIVERSAL_PASS on
+  both.**
+- **B3.b (deferred to v2.10 as
+  `CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION`)**: Bourne p209 URL/citation
+  list and Ayeva p4 dedication are absorbed into adjacent-page
+  chunks via the v2.9 cross-page-split with wrong `page_number`
+  attribution. Content present in corpus (just on the wrong
+  page); no band-aid backfill (would conflict with Phase 1's
+  `recovery_page_coverage` ban). Diagnostic:
+  `docs/PHASE_B3_CROSS_PAGE_SPLIT_DIAGNOSTIC.md`.
+- **B3.c (deferred to v2.10 as
+  `LOW_RETRIEVAL_VALUE_PAGE_TAXONOMY`)**: Greenhouse p2 (book-title
+  page) and Ayeva p4 (dedication, alternate classification).
+  Corpus-wide FP test on a candidate dedication regex matched
+  Greenhouse p25 — a legitimate Preface acknowledgment. Detector
+  cannot be made tight enough without overfit risk; the
+  Retrieval-Value Test (`docs/DECISIONS.md`) signed deferral
+  pattern applies.
+
+Added `docs/DECISIONS.md` "Retrieval-Value Test" governance:
+features that do not improve retrieval are omitted rather than
+backfilled. 10 new B3 regression tests in
+`tests/test_section_header_only_page_emit.py`. Test suite:
+**770 passed**, 14 skipped, 0 failed (+10 net new vs B2 close;
++34 cumulative vs Phase 4 close baseline of 736).
+
+Final `v2.9.0` remains blocked. **`v2.9.0-rc1` ship state achieved
+2026-05-11.** AFTER snapshot at
+`docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`. Per
+`docs/DECISIONS.md` "v2.9.0-rc1 Signed Deferrals (2026-05-11
+close-out)", the RC ships with 8 signed v2.10 deferrals (Firearms,
+KI EPUB, Devlin, Python_Cookbook, Python_Distilled, Fluent_Python,
+Chaubal, Earthship) covering all 8 remaining QA_FAIL rows. Strict
+gate state: **26 PASS / 0 WARN / 8 FAIL** (12 `QA_PASS` + 14
+`QA_PASS_WITH_ADVISORIES`).
+
+Phases shipped in this cycle: B1 (TOC U+FFFD sanitizer + exemption),
+B2 (intentionally-left-blank), B3 Step 2 (section-header-only page
+emission), B4.a (render-based + zero-text image-only blank
+detection), Phase D iconography lane, Phase E (Combat blank-asset +
+gibberish-table), Phase G (QA_PASS_WITH_ADVISORIES variant), Phase H
+(targeted re-enrichment).
+
+**Phase I Qdrant rebuild complete (2026-05-12 09:14).**
+`mmrag_v2_8` dropped (was 22,446 v2.8 points) and recreated from the
+34 canonical post-recovery JSONLs via
+`scripts/rebuild_mmrag_v2_8_for_rc1.py`. Final state: status=green,
+`points_count=30,461` (exact match to source: 25,691 text + 4,379
+image + 391 table), `indexed_vectors_count=30,213`, vector dim 4096
+(llava). Wall time 10h15m on local Ollama. The 17 sister `*_v2`
+per-doc collections from earlier experiments remain user-owned and
+out of scope.
+
+`v2.9.0-rc1` tag is the final remaining Phase I step.
 
 ### v2.9 in-flight fixes (committed)
 
@@ -69,7 +245,7 @@ work" below).
 - **Refiner smart-routing** — the config-default refiner only
   auto-enables when the diagnostic engine reports
   ``has_encoding_corruption=True``. ``--no-refiner`` no longer needed
-  in ``scripts/convert_books.sh``.
+  in the Phase 5 conversion runner.
 - **Cross-page DocChunk page-coverage split** — Docling's
   HybridChunker emits multi-page chunks; the chunker now emits one
   IngestionChunk per source page so chapter-intro pages aren't lost.
@@ -129,8 +305,8 @@ work" below).
   across all 3 enriched JSONLs. Snapshot updated at
   `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase3_vlm_baseline.md`
   §9. Phase 3 closed.
-- **Phase 4: localized strict-gate hard failures — closed pending
-  two sign-offs (2026-05-09 / 2026-05-10).** Plan and closure
+- **Phase 4: localized strict-gate hard failures — closed with signed
+  deferrals (2026-05-10).** Plan and closure
   evidence: `docs/archive/PLAN_V2.9__PHASE4.md` and
   `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase4_after.md`.
   - Step 1 — `qa_full_conversion.py --source-pdf` documented as
@@ -146,26 +322,52 @@ work" below).
     (`5e58e6e`) was overfit threshold tuning and was reverted in
     `cbd7fb4`. Firearms HEADING continues to FAIL the strict
     `>= 0.80` gate. **DEFERRED to v2.10 as
-    `OCR_PATH_HEADING_PROPAGATION` — sign-off pending.**
+    `OCR_PATH_HEADING_PROPAGATION` — user sign-off recorded
+    2026-05-10.**
   - Step 5 — Adedeji `code_indentation_fidelity` 0.886 → 0.9032
     (cascade win from Step 2; no separate fix needed).
   - Step 6 — KI EPUB structural failures (no pagination, no bbox,
     heavy dedup excess). **DEFERRED to v2.10 as
-    `KI_EPUB_EXTRACTION_LANE_REWRITE` — sign-off pending.**
+    `KI_EPUB_EXTRACTION_LANE_REWRITE` — user sign-off recorded
+    2026-05-10.**
   - Tests: 736 passed, 14 skipped (was 685 at Phase 3 close,
     +51 net new across Phase 4).
-- **Open Phase 4 sign-offs (block v2.9 tag).**
+- **Signed Phase 4 deferrals (allowed only for `v2.9.0-rc1`, still
+  block final `v2.9.0`).**
   1. `OCR_PATH_HEADING_PROPAGATION` — Firearms HEADING coverage
      0.722 vs 0.80 floor. Defect: OCR/element-by-element path
      doesn't promote Docling section_header items into
      `ContextStateV2.hierarchy_stack` (probe data in
-     `docs/archive/PLAN_V2.9__PHASE4.md` Step 4).
+     `docs/archive/PLAN_V2.9__PHASE4.md` Step 4). User signed off
+     v2.10 deferral on 2026-05-10.
   2. `KI_EPUB_EXTRACTION_LANE_REWRITE` — EPUB lane structural
-     gaps (acceptance baseline in `docs/archive/PLAN_V2.9__PHASE4.md` Step 6).
-- **Qdrant ``mmrag_v2_8`` re-ingest.** The collection currently
-  contains v2.8.0 ingest data only; not refreshed for v2.9 because
-  v2.9 isn't shippable yet (Phase 5 owns the broad reconversion +
-  Qdrant migration once both Phase 4 sign-offs land).
+     gaps (acceptance baseline in `docs/archive/PLAN_V2.9__PHASE4.md`
+     Step 6). User signed off v2.10 deferral on 2026-05-10.
+- **Phase 5a/5b broad corpus run (2026-05-10/11) — validated-local.**
+  A Python-native MPS-safe runner (`scripts/convert_books_v29.py`)
+  replaced the legacy shell runner for Phase 5. Fresh reconversion now
+  exists for **34/34** canonical corpus docs; the long-tail documents
+  (`Bourne_RAG_2024`, `Raieli_AI_Agents`, `Hao_ML_Platform`,
+  `Greenhouse_Design`) completed under the 10,800-second timeout.
+  The canonical corpus has **30,356 chunks / 30,356 unique chunk_ids**.
+  Phase 5b cloud `qwen3-vl-plus` enrichment processed 4,382 image
+  chunks; the env-gated acceptance test passed:
+  `RUN_V29_VLM_ACCEPTANCE=1 pytest tests/test_v29_image_enrichment_acceptance.py -q`
+  → `1 passed`.
+- **Phase 5c Qdrant refresh — blocked.** `localhost:6333` is not
+  reachable and Docker socket access is denied by the sandbox. The
+  required escalation to inspect/start the Qdrant container was
+  rejected by the platform usage limit, so `mmrag_v2_8` has **not**
+  been dropped or recreated. Qdrant remains the next blocker before
+  the RC AFTER snapshot and `v2.9.0-rc1` tag.
+- **Phase 5 runner update (2026-05-10).** Use
+  `conda run -n mmrag-v2 python scripts/convert_books_v29.py`.
+  `scripts/convert_books.sh` is disabled for Phase 5 because nested
+  shell execution makes torch report `mps=False` on Apple Silicon,
+  causing Docling to fall back to the stalled CPU path. The runner now
+  kills the full conversion process group on timeout so blocked-doc
+  retries fail cleanly, and it uses per-target lock files to prevent
+  two conversions from writing the same output directory concurrently.
 
 ## Active Baseline
 
@@ -176,6 +378,9 @@ work" below).
 - **`docs/QUALITY_SNAPSHOT_2026-05-06_v2.9_strict_gate.md`** (working
   snapshot — strict-gate state of the v2.9 in-progress corpus,
   documents PASS/WARN/FAIL per doc with specific failure codes).
+- **`docs/QUALITY_SNAPSHOT_2026-05-10_v2.9_phase5_attempt.md`** (current
+  Phase 5 execution snapshot — 34/34 fresh conversions and Phase 5b
+  enrichment pass; Qdrant refresh blocked by local service access).
 - `docs/QUALITY_SNAPSHOT_2026-05-04_v2.9_after.md` REMOVED — that file
   asserted "32/34 PASS" against the loose gate and has been
   superseded by the strict-gate snapshot.
@@ -210,8 +415,9 @@ Observed behavior:
 
 Source of truth: `docs/QUALITY_SNAPSHOT_2026-05-06_v2.9_strict_gate.md`.
 
-**Strict-gate (`scripts/qa_full_conversion.py`) post-enrichment:
-5 PASS / 3 WARN / 26 FAIL out of 34.**
+**Strict-gate (`scripts/qa_full_conversion.py`) pre-Phase-5 baseline:
+5 PASS / 3 WARN / 26 FAIL out of 34.** This is stale for ship
+purposes; Phase 5 broad reconversion must produce the RC evidence.
 
 The v2.8.0 SHIPPED state remains the active baseline:
 30/34 canonical PASS under the older `qa_conversion_audit.py`-only
@@ -224,28 +430,29 @@ been removed.
 
 | Area | v2.8 baseline | v2.9 working state | Strict-gate PASS? |
 |---|---|---|---|
-| `Ayeva_Python_Patterns` | FAIL CODE, `indentation_fidelity=0.83`, profile=`digital_literature` | profile=`technical_manual`, `indentation_fidelity=0.96` | TOC MISSING_PAGES closed by Phase 1; CODE indentation pending Phase 2 (CodeFormulaV2 lane) |
-| `Sekar_MCP_Standard` | FAIL | dedup + reconv lifted indentation | TOC MISSING_PAGES closed by Phase 1; pending broad re-verification |
+| `Ayeva_Python_Patterns` | FAIL CODE, `indentation_fidelity=0.83`, profile=`digital_literature` | profile=`technical_manual`, Phase 2 `indentation_fidelity=0.9693`; Phase 4 Adedeji cascade win also verified code gate behavior | Phase 5 broad reconversion must re-verify |
+| `Sekar_MCP_Standard` | FAIL | dedup + reconv lifted indentation | Phase 5 broad reconversion must re-verify |
 | chunk_id collisions corpus-wide | 427 within-file dupes | 0 | (gate clean) |
 | Refiner smart-routing | HARRY hammered qwen-plus | HARRY `refinement_applied=0`; Combat `refinement_applied=90` | (gate clean) |
-| Image enrichment | ~5,500 placeholders | 4,329 enriched / 46 hard_fallback (1.0% corpus rate) | mostly clean; short descriptions still flag a few docs |
-| Combat p66 corruption | 73 byte-equal dupes + 40k-char corrupted table | 1 corrupted table chunk; text dupes resolved | FAIL — LOCALIZED_CORRUPTION on the table |
+| Image enrichment | ~5,500 placeholders | 4,382 image chunks processed; acceptance test passes; hard_fallback rate under 5% corpus ceiling | Phase 5b gate clean |
+| Combat p66 corruption | 73 byte-equal dupes + 40k-char corrupted table | Phase 4 finalize-boundary chunk filter drops corrupted table chunks; unrelated image chunks remain | Phase 5 broad reconversion must re-verify |
 | Combat p4 omission (full-page image only) | page lost | image chunk emitted, enriched | (gate clean) |
 | HARRY chapter-intro page silent merge (p29, p54, …) | 13 pages lost | per-page split fixes coverage | WARN only (short VLM responses on a few terse images) |
 
-### Open issues blocking the strict-gate ship
+### Open issues blocking final `v2.9.0`
 
 - ~~TOC/index page-drop in 18 docs~~ closed by Phase 1
   (commit `df91061`, 2026-05-07). Broad-doc re-verification deferred
   to Phase 5.
-- Combat p66 table chunk still has corrupted typography (em-dash
-  run just under threshold).
-- Short VLM descriptions (<20 chars) flag a few docs as having
-  unusable image descriptions.
-- Adedeji p301 table corruption, Devlin / Earthship / Firearms
-  doc-specific audit script failures, KI_En_ChatGPT EPUB LABEL
-  pre-existing ratio.
-- Qdrant `mmrag_v2_8` not refreshed for v2.9 — still v2.8 ingest.
+- Firearms `OCR_PATH_HEADING_PROPAGATION`: HEADING coverage 0.722 vs
+  0.80 floor. Signed v2.10 deferral; allowed only in `v2.9.0-rc1`.
+- KI EPUB `KI_EPUB_EXTRACTION_LANE_REWRITE`: structural EPUB lane
+  failure and `UNIVERSAL_FAIL`. Signed v2.10 deferral; allowed only
+  in `v2.9.0-rc1`.
+- Phase 5c Qdrant refresh is blocked because local Qdrant is down and
+  Docker access could not be approved in this environment. RC AFTER
+  snapshot and `v2.9.0-rc1` tag remain gated on `mmrag_v2_8`
+  drop/recreate plus point-count verification.
 
 ### Already-known followups (not v2.9 scope)
 
@@ -258,15 +465,15 @@ been removed.
 
 ## Active Engineering Direction
 
-v2.9 development continues. The 10+ root-cause fixes already on
-`main` are kept, plus the Phase 1 dense-index router (commit
-`df91061`) which closes the TOC/index page-drop class. Remaining
-work to actually tag `v2.9.0`: complete Phase 2 (re-verify shipped
-fixes under strict gate, especially Ayeva CodeFormulaV2 +
-indentation), Phase 3 (short-VLM-description gate calibration),
-Phase 4 (Combat p66 corruption + localized doc audits), then
-Phase 5 broad reconversion + refresh `mmrag_v2_8` from the v2.9
-corpus.
+v2.9 development continues on an RC track. The 10+ root-cause fixes
+already on `main` are kept, plus the Phase 1 dense-index router
+(commit `df91061`) and Phase 2-4 fixes documented in the snapshots.
+Immediate work: restore local Qdrant/Docker access, then run the
+`mmrag_v2_8` drop/recreate and ingest the 30,356-unique-chunk v2.9
+corpus. After point-count verification, author the RC AFTER snapshot.
+Final `v2.9.0` is not reachable until the Firearms and KI EPUB
+deferrals are fixed or the production contract is explicitly amended
+in a separate governance decision.
 
 The broader UIR refactor (canonical PdfConversionPlan →
 UniversalDocument → ElementProcessor → chunks per CLAUDE.md) remains
@@ -300,9 +507,9 @@ Phase status (per Plan §3 sequence):
 | Phase 0 | Establish strict-gate baseline | `complete` |
 | Phase 1 | TOC/index page-loss closure | `complete` (2026-05-07, `df91061`) |
 | Phase 2 | Re-verify shipped fixes under strict gate | `complete` (2026-05-08, verification only — see `QUALITY_SNAPSHOT_2026-05-08_v2.9_phase2_after.md`) |
-| Phase 3 | Resolve `IMAGE_DESCRIPTION_UNUSABLE` | Steps 1-3 complete (2026-05-09); Steps 4-5 active — retry harness + end-to-end |
-| Phase 4 | Localized strict-gate hard failures (Combat p66, Adedeji p301, KI EPUB, Firearms HEADING + chunk-count drift carried from Phase 2) | active |
-| Phase 5 | Broad reconversion + Qdrant refresh + AFTER snapshot | blocked on Phases 3-4 |
+| Phase 3 | Resolve `IMAGE_DESCRIPTION_UNUSABLE` | `complete` (2026-05-09, commits `649c952` + `51e897b`) |
+| Phase 4 | Localized strict-gate hard failures (Combat p66, Adedeji p301, KI EPUB, Firearms HEADING + chunk-count drift carried from Phase 2) | `closed with signed deferrals` (2026-05-10) |
+| Phase 5 | Broad reconversion + Qdrant refresh + RC AFTER snapshot | `blocked in 5c` — 34/34 fresh outputs and Phase 5b VLM acceptance pass; Qdrant service unavailable |
 
 ## Must-Respect Constraints
 

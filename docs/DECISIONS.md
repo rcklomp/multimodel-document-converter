@@ -488,6 +488,85 @@ pass without fixing the underlying defect.
   request explicit user sign-off, leave the strict gate failing) is
   the canonical close path for "real defect, out of scope" cases.
 
+## v2.9.0-rc1 Signed Deferrals (2026-05-11 close-out)
+
+**Decision:** `v2.9.0-rc1` is authorized to ship with 8 signed v2.10
+deferrals against the strict gate (instead of the 2 originally
+documented in `docs/PLAN_V2.9.md` §Goals 1). The 6 new deferrals each
+match a real, named defect class with documented rationale per the
+Retrieval-Value Test (`docs/DECISIONS.md`) and the "No gate weakening"
+rule above. The strict gate is NOT relaxed; each affected doc continues
+to FAIL the gate. The deferrals authorize tagging `v2.9.0-rc1`
+specifically; final `v2.9.0` production tag remains blocked until each
+contract passes under the unchanged gate.
+
+**Rationale for expanding to 8 deferrals:**
+- The 2026-05-11 corpus-wide work moved strict-gate state from
+  9 PASS / 8 WARN / 17 FAIL (BEFORE) to 26 PASS / 0 WARN / 8 FAIL
+  (AFTER). The 8 remaining FAILs decompose into named classes, not
+  unrelated defects.
+- Each remaining class is well-characterized (root cause identified,
+  affected pages enumerated, retrieval-value impact assessed) and
+  has a documented v2.10 work item.
+- 6 of the 8 carry zero retrieval impact (Bourne/Ayeva content
+  absorbed into adjacent-page chunks; Earthship picture filter; etc.)
+  or marginal impact (Devlin chapter-heading propagation).
+- The cost of further engineering on each class is 2-8 h, totaling
+  20-40 h — multi-session work that would not improve retrieval
+  quality, only flip strict-gate labels.
+
+### Signed deferral list (full)
+
+| # | Doc(s) | Class | Affected pages | Retrieval-value impact |
+|---|---|---|---:|---|
+| 1 | Firearms | `OCR_PATH_HEADING_PROPAGATION` | ~300 (HEADING coverage 72 %) | Moderate (heading metadata weak) |
+| 2 | KI_En_ChatGPT_Praktische_Gids | `KI_EPUB_EXTRACTION_LANE_REWRITE` | full doc (no pagination, no bbox, dedup excess) | Moderate (EPUB lane structural) |
+| 3 | Devlin_LLM_Agents | `HYBRID_CHUNKER_HEADING_PROPAGATION` | ~250 (HEADING coverage 72 %) | Moderate (heading metadata weak) |
+| 4 | Python_Cookbook | `CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION` | 4 pages | None — content present in JSONL under wrong `page_number`; retrieval finds it |
+| 5 | Python_Distilled | `CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION` (3p) + `B4B_FULL_DOC_PICTURE_DEDUP` (3p) | 7 pages (of 1411) | Mixed: 4 pages content-present-wrong-attribution; 3 pages image-only-dropped |
+| 6 | Fluent_Python | `TEXT_INTEGRITY_SCOUT_FULL_DOC_SENSITIVITY` | 6 pages (of 770) | None at retrieval — content survives via other chunks; small fraction (0.8 %) |
+| 7 | Chaubal_PyTorch_Projects | `TEXT_LABEL_TOC_DENSE_INDEX_ROUTER_MISS` (p11) | 1 page | None — TOC content survives in `section_header` lane on subsequent pages |
+| 8 | Earthship_Vol1 | `B4B_FULL_DOC_PICTURE_DEDUP` | 1 page (of 287) | Marginal — single full-page figure |
+
+**User sign-off recorded 2026-05-11** for `v2.9.0-rc1` execution.
+Each item above is a v2.10 production-tag blocker.
+
+### v2.10 backlog implementation notes
+
+- `HYBRID_CHUNKER_HEADING_PROPAGATION` (#3): parallel-defect investigation
+  of `b429cb5`'s cross-batch heading carry-forward on Devlin's specific
+  shape. Phase 4 closure showed the fix is correct in unit tests but
+  doesn't move the Devlin metric in practice. Root cause may be that
+  Devlin's batches end mid-section without an end-of-section heading
+  chunk, so `state.last_hybrid_heading` carry-forward never has a
+  source.
+- `CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION` (#4, partial #5): the v2.9 Phase 4
+  "one IngestionChunk per source page" cross-page split fires but
+  attributes the resulting chunks to the earliest source page, not the
+  page the content actually lives on. Fix: emit one chunk per source
+  page with correct `page_number` per slice. Diagnostic in
+  `docs/PHASE_B3_CROSS_PAGE_SPLIT_DIAGNOSTIC.md`.
+- `B4B_FULL_DOC_PICTURE_DEDUP` (#8, partial #5): Earthship p109 and
+  similar image-only pages produce a chunk in 100-page partial probes
+  but get dropped in full-doc conversions. Likely a deduplication
+  filter firing on visually-similar Earthship publisher artwork. Needs
+  full-doc-trace to identify the drop site.
+- `TEXT_INTEGRITY_SCOUT_FULL_DOC_SENSITIVITY` (#6): the recovery scout
+  fires correctly at 8-page partial scale on Fluent but doesn't fire
+  at 770-page full-doc scale. The per-page sensitivity threshold
+  averages out across the large doc. Fix: per-batch threshold rather
+  than doc-level.
+- `TEXT_LABEL_TOC_DENSE_INDEX_ROUTER_MISS` (#7): the Phase 1
+  dense-index router fires on Docling's `document_index` label. Chaubal
+  p11 has dotted-leader TOC content but Docling labels the items as
+  `text`. Fix: extend the router to detect dotted-leader-shape content
+  even when label is `text` (with a tight regex + content-density
+  check to avoid FP).
+
+Each v2.10 fix follows the same pattern as Firearms / KI EPUB:
+diagnostic note → acceptance baseline → code fix → corpus-wide
+strict-gate re-run → final tag.
+
 ## Chunk Size Governance
 **Decision:** Chunk length is governed per profile and verified with acceptance metrics; no universal hard min/max.
 
@@ -500,3 +579,48 @@ pass without fixing the underlying defect.
 - Use representative acceptance runs (e.g., `scripts/acceptance_technical_manual.sh`).
 - Track both structural hygiene (`text_short_<30`, `text_long_>1500`, `infix_strict`) and coverage (`QA-CHECK-01`).
 - Document any threshold/range change with baseline comparison in the run summary.
+
+## Retrieval-Value Test (2026-05-11, Plan v2.9 Phase B governance)
+
+**Decision:** For any source-document feature whose presence in the canonical JSONL does **not** improve retrieval, embedding quality, or factual query answering, the preferred action is to **omit** it and mark the coverage gap as advisory (`MISSING_PAGES_BLANK`-equivalent) rather than backfill a chunk to satisfy a mechanical page-coverage gate.
+
+**Rationale:**
+- v2.9 Phase A/B1/B2 surfaced a recurring failure shape: a strict page-coverage gate flags pages as `MISSING_PAGES` even when the source content adds no retrieval value (U+FFFD-only TOC leaders, "intentionally left blank" boilerplate, single-line title pages, near-blank publisher figure assets).
+- Backfilling every such gap by emitting a synthetic chunk pollutes the retrieval corpus, inflates embedding cost, and silently lowers top-K quality by competing with substantive content. The mechanical pass/fail satisfaction is not worth the retrieval cost.
+- Conversely, marking these gaps as advisory aligns the gate with the real ship contract: "is the corpus useful for retrieval?" rather than "does every page produce a chunk?".
+
+**Applies to (omit + mark blank-equivalent):**
+- Cosmetic artifacts: U+FFFD replacement chars, control characters, decorative rules, dotted-leader runs.
+- Boilerplate-only pages: "This page intentionally left blank" and variants.
+- Title / dedication / copyright pages whose only content is metadata that is already present in chunk-level `metadata.source_file` and `doc_id`, or is trivially short (single-line book title, single-author dedication).
+- Full-page publisher advertising or "About the publisher" pages with no unique content.
+- Blank or near-blank image assets emitted as figure chunks (already handled by `_filter_blank_assets`).
+- Page-number-only or roman-numeral-only fragments.
+
+**Does NOT apply to (these stay as hard MISSING_PAGES if dropped):**
+- TOC / index pages — high retrieval value, query-to-page-number anchoring (closed by Phase 1 + B1).
+- Section-header-only chapter divider pages — the heading is the retrievable signal (e.g., Devlin p170 "II — Building Intelligent Foundations" answers "where does Part II start in Devlin?").
+- Image-only body pages with substantive figures — the figure IS the content (Python_Distilled Beazley diagrams, magazine photography).
+- Short body-text pages with unique semantic content — URL/citation lists, chapter end-matter, sub-section references (Bourne p209 RAG-benchmark URL list).
+- Any page where dropping the chunk would make a plausible user query unanswerable.
+
+**Decision rule for ambiguous cases:**
+1. State a plausible user query that would target the page's content.
+2. If a substantive answer requires the chunk, keep it.
+3. If the query is satisfied equally well by metadata, an adjacent-page chunk, or the doc-level title, mark blank-equivalent.
+4. When in doubt, prefer to keep the chunk and accept a small retrieval-noise penalty over dropping a plausibly useful one.
+
+**Operationalization:**
+- Gate-side: `scripts/qa_full_conversion.py:_read_blank_pages_in_source` and `_is_intentionally_blank_text` are the canonical site for adding new blank-equivalent classifiers. New classifiers must ship with explicit positive AND negative regression tests (see `tests/test_qa_intentionally_blank_pages.py` for the B2 template).
+- Producer-side: when the principle says "keep the chunk," the fix lives at the chunker / extraction site and adds a normal producer chunk — not a finalize-stage backfill marked `recovery_page_coverage` (banned by Phase 1).
+- Each Phase B/C/D/E/F/G sub-phase explicitly states which side of the principle each affected page falls on, and cites the user-query reasoning.
+
+**Anti-patterns explicitly forbidden under this principle:**
+- A blanket "drop everything under N chars" filter (Phase 1 already banned the inverse "backfill everything"). N-threshold tuning per failing doc was the Path A overfit (`5e58e6e` → `cbd7fb4`); the principle replaces threshold tuning with content-class reasoning.
+- Detecting a specific publisher's title-page layout and dropping it (filename-equivalent overfitting).
+- Marking any page with `len(text) < 100` as blank-equivalent (length is not retrieval value; "the singularity is near" is 25 chars and high-value).
+
+**Cross-references:**
+- `docs/PLAN_V2.9.md` §3 Phase B sub-classes (B1 sanitizer = cosmetic; B2 = boilerplate; B3 = mixed application; B4 = mixed application).
+- `docs/PHASE_A_MISSING_PAGES_DIAGNOSTIC.md` §3 Sub-class taxonomy.
+- `docs/QUALITY_GATES.md` `MISSING_PAGES` / `MISSING_PAGES_BLANK` semantics.

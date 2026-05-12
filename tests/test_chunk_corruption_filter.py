@@ -33,6 +33,44 @@ def _bp() -> BatchProcessor:
 # ---------------------------------------------------------------------------
 
 
+def test_combat_p66_gibberish_signature_detected():
+    """Plan v2.9 Phase E refinement (2026-05-11): a >30K-char table
+    chunk with fewer than 10 four-letter words per 1K chars is
+    classified as gibberish. Combat p66 after the 2026-05-11
+    reconvert had this exact signature: 40568 chars, 363 four-letter
+    words = 8.9 w/k. Real tables in the corpus measured 20-54 w/k."""
+    # Synthesize a chunk that looks like the Combat p66 gibberish:
+    # ~30K of short-letter-with-punctuation patterns, with a few real
+    # words sprinkled in (squadron names that survived).
+    base = "| [il :   ltJ!  nf r!  Ill  r!·! l l:  .[lr!  Jl  1 ]1   r!'  Dl=  r!'  | "
+    real_words = " Aircraft Tail Code Squadron Force Wing Nineteenth Antonio Texas "
+    # Build to ~35K chars; embed real words sparsely (1 set per ~3K chars)
+    parts = []
+    while sum(len(p) for p in parts) < 35000:
+        parts.append(base * 30)
+        parts.append(real_words)
+    chunk_content = "".join(parts)
+    assert BatchProcessor._is_corrupted_chunk_content(chunk_content) is True
+
+
+def test_real_large_table_not_classified_gibberish():
+    """Negative-control: a legitimate large table with word_density
+    in the normal 20-54 w/k range must NOT trigger the structural
+    gibberish check. Modeled on CarOK p5 shape (~13K chars, 272
+    real 4+ letter words)."""
+    # Pad to >30K chars (over the length threshold) with realistic
+    # table content so word_density stays > 10 w/k.
+    rows = []
+    for i in range(800):
+        rows.append(
+            f"| Customer{i:03d} | Order{i:04d} | Product Description {i} | "
+            f"Quantity {i} | Total {i*100} EUR | Status Complete |"
+        )
+    content = "\n".join(rows)
+    assert len(content) > 30000
+    assert BatchProcessor._is_corrupted_chunk_content(content) is False
+
+
 @pytest.mark.parametrize(
     "content",
     [

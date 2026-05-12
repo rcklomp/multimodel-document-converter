@@ -77,6 +77,45 @@ class TestBlankAssetDetection:
         path = _create_blank_png(tmp_path / "table.png", width=1565, height=198)
         assert BatchProcessor._is_blank_asset(path) is True
 
+    def test_combat_p27_figure_36_shape_is_blank(self, tmp_path):
+        """Plan v2.9 Phase E regression: Combat_Aircraft_August_2025 p27
+        `figure_36` has mean=253, std=7.4 — a near-white image with a
+        faint watermark / compression noise above the prior std<5 cap.
+        After the threshold relaxation to std<10, this case is correctly
+        classified as blank."""
+        # Construct an image with mean ~253, std ~7 (faint watermark
+        # pattern on near-white background).
+        arr = np.full((100, 50, 3), 254, dtype=np.uint8)
+        # Add tiny watermark pixels
+        arr[50:55, 25:30] = 200
+        img = Image.fromarray(arr)
+        path = tmp_path / "combat_figure_36.png"
+        img.save(path, "PNG")
+        assert BatchProcessor._is_blank_asset(path) is True
+
+    def test_real_photo_with_low_brightness_is_not_blank(self, tmp_path):
+        """Negative-control: a dark photo (mean ~50, std ~30) must NOT
+        be classified as blank — its std exceeds the new threshold."""
+        rng = np.random.default_rng(seed=7)
+        arr = rng.integers(0, 100, (100, 50, 3), dtype=np.uint8)
+        img = Image.fromarray(arr)
+        path = tmp_path / "dark_photo.png"
+        img.save(path, "PNG")
+        assert BatchProcessor._is_blank_asset(path) is False
+
+    def test_near_white_but_clearly_content_is_not_blank(self, tmp_path):
+        """Negative-control: a near-white image with substantive content
+        variance (std=15) must NOT be classified as blank — its std
+        exceeds the new threshold even though the mean is high."""
+        rng = np.random.default_rng(seed=11)
+        # mean ~240, std ~15 — clearly textured even if light
+        arr = (rng.normal(loc=240, scale=15, size=(100, 50, 3))
+               .clip(0, 255).astype(np.uint8))
+        img = Image.fromarray(arr)
+        path = tmp_path / "textured.png"
+        img.save(path, "PNG")
+        assert BatchProcessor._is_blank_asset(path) is False
+
 
 # ---------------------------------------------------------------------------
 # Schema contract tests

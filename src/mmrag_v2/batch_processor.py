@@ -806,8 +806,15 @@ class BatchProcessor:
     def _is_blank_asset(path: Path) -> bool:
         """Check if an image asset is blank (all white/all black/empty).
 
-        Returns True if the image has near-zero variance (std < 5) and
-        mean is near 0 or 255, indicating a blank/empty rendered asset.
+        Returns True if the image has low variance (std < 10) and mean
+        is near 0 or 255, indicating a blank/empty rendered asset.
+
+        Plan v2.9 Phase E (2026-05-11): the std threshold was relaxed
+        from < 5 to < 10 to catch Combat_Aircraft_August_2025 p27
+        `figure_36` (mean=253, std=7.4) which has a faint watermark or
+        compression noise above the prior std<5 cap. Validated on 10
+        random Combat assets: all real-content assets have std ≥ 49,
+        so the wider band has zero FP on the audited sample.
         """
         try:
             from PIL import Image
@@ -817,7 +824,7 @@ class BatchProcessor:
                 arr = np.array(img.convert("L"))  # Grayscale
                 std = float(arr.std())
                 mean = float(arr.mean())
-                if std < 5.0 and (mean > 250.0 or mean < 5.0):
+                if std < 10.0 and (mean > 250.0 or mean < 5.0):
                     logger.debug(
                         f"[BLANK-ASSET] {path.name}: mean={mean:.1f}, std={std:.1f} → blank"
                     )
@@ -841,11 +848,26 @@ class BatchProcessor:
         clean = []
         quarantined = 0
         for c in chunks:
-            if (
-                c.modality == Modality.TEXT
-                and c.content
-                and has_encoding_artifacts(c.content)
+            if not (c.modality == Modality.TEXT and c.content):
+                clean.append(c)
+                continue
+            extraction_method = getattr(
+                getattr(c, "metadata", None), "extraction_method", None
+            )
+            # Phase 1 dense-index router output is structured TOC/index text
+            # extracted via the page-skip grid traversal. Source fonts in
+            # these tables often lack ToUnicode mappings for dotted-leader
+            # `.` glyphs, leaving U+FFFD (`�`) replacement characters in the
+            # content. has_encoding_artifacts() correctly flags those as
+            # corruption signatures, but quarantining the chunk discards the
+            # entire TOC entry. The Phase 1 router is the trusted producer
+            # for these chunks; exempt them. (Plan v2.9 B1, 2026-05-11.)
+            if extraction_method and extraction_method.startswith(
+                "hybrid_chunker_pageskip"
             ):
+                clean.append(c)
+                continue
+            if has_encoding_artifacts(c.content):
                 quarantined += 1
             else:
                 clean.append(c)
@@ -4041,13 +4063,35 @@ class BatchProcessor:
         scripts/qa_full_conversion.py so chunks that would fail the gate
         are dropped at the finalize boundary instead of leaking into the
         JSONL. Replacement-char ratio gate matches the gate's 0.005 threshold.
+
+        Plan v2.9 Phase E refinement (2026-05-11): a structural
+        gibberish-density check for large tables. A table chunk with
+        > 30 K characters AND fewer than 10 four-letter-or-longer
+        English-shape words per 1 K characters is by definition
+        gibberish (mostly broken-glyph noise around sparse real
+        tokens). Catches the Combat_Aircraft_August_2025 p66 squadron
+        roster after the 2026-05-11 reconvert produced a different
+        gibberish signature (no em-dashes / CS runs) than the
+        original Phase 4 Step 3 patterns target. Corpus probe: 0
+        false positives across 18 large table chunks (the other 17
+        legitimate tables have word_density 20-54 w/k chars).
         """
         if not content:
             return False
         n = len(content)
         if content.count("�") / max(1, n) > 0.005:
             return True
-        return any(p.search(content) for p in cls._CHUNK_CORRUPTION_PATTERNS)
+        if any(p.search(content) for p in cls._CHUNK_CORRUPTION_PATTERNS):
+            return True
+        # Structural gibberish check (length + word-density)
+        if n > 30000:
+            import re as _re
+            word_density = (
+                len(_re.findall(r"\b[A-Za-z]{4,}\b", content)) / (n / 1000.0)
+            )
+            if word_density < 10.0:
+                return True
+        return False
 
     def _drop_corrupted_chunks_before_metadata(
         self,
@@ -4066,6 +4110,19 @@ class BatchProcessor:
         dropped: List[IngestionChunk] = []
         for chunk in chunks:
             if chunk.modality not in (Modality.TEXT, Modality.TABLE):
+                filtered.append(chunk)
+                continue
+            extraction_method = getattr(
+                getattr(chunk, "metadata", None), "extraction_method", None
+            )
+            # Phase 1 dense-index router output (TOC/index chunks with
+            # publisher-template U+FFFD replacement-char artifacts in
+            # dotted-leader regions) must survive this finalize-stage
+            # quarantine for the same reason it must survive
+            # `_quarantine_corrupted_text_chunks`. (Plan v2.9 B1, 2026-05-11.)
+            if extraction_method and extraction_method.startswith(
+                "hybrid_chunker_pageskip"
+            ):
                 filtered.append(chunk)
                 continue
             if self._is_corrupted_chunk_content(chunk.content or ""):

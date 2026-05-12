@@ -36,6 +36,13 @@ _COORD_SCALE = 1000
 # separation at 0.15 (icon/small-figure boundary) and 0.50 (full-page
 # threshold).
 _SMALL_BBOX_AREA_MAX = 0.15
+_TINY_BBOX_AREA_MAX = 0.01  # Plan v2.9 Phase D (2026-05-11):
+# bbox < 1% of page is iconography (logos, certification marks,
+# rating glyphs, status icons). At this size the asset cannot carry
+# substantive content; a short description like "Logo icon." is
+# acceptable regardless of file-size signal. Corpus-wide probe:
+# 216/4031 image chunks (5.4%) fall under this threshold; 14 have
+# short descriptions and all 14 are legitimate icon-class assets.
 _LARGE_BBOX_AREA_MIN = 0.50
 
 # Asset disk-size thresholds. PNGs under 5 KB are almost always icons
@@ -168,8 +175,28 @@ def classify_asset_complexity(
             asset_size_bytes=size,
         )
 
-    # simple: small bbox AND tiny file (or unknown file). Both signals
-    # must agree before we treat short descriptions as acceptable.
+    is_tiny_bbox = area is not None and area < _TINY_BBOX_AREA_MAX
+
+    # simple (iconography lane): bbox < 1% of page is iconography
+    # (logos, certification marks, star ratings, status glyphs). At
+    # this size the asset cannot carry substantive content regardless
+    # of file size — accept short descriptions like "Logo icon." as
+    # adequate. (Plan v2.9 Phase D, 2026-05-11.)
+    if is_tiny_bbox:
+        return AssetComplexityResult(
+            complexity="simple",
+            reason=(
+                f"bbox_area={area_str}; asset_size={size_str}; "
+                "tiny bbox iconography lane (<1%)"
+            ),
+            bbox_area_fraction=area,
+            asset_size_bytes=size,
+        )
+
+    # simple (small bbox + tiny file lane): both signals must agree
+    # before we treat short descriptions as acceptable. This catches
+    # the legacy case of a small-but-not-tiny icon in a low-density
+    # asset (e.g., 2-5% bbox + 4KB file).
     if is_small_bbox and (is_tiny_file or size is None):
         return AssetComplexityResult(
             complexity="simple",

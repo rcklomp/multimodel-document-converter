@@ -195,10 +195,35 @@ class TestCorruptionQuarantineBridge:
         result = bp._quarantine_corrupted_text_chunks(chunks)
         assert len(result) == 1
 
-    def test_replacement_char_quarantined(self, tmp_path):
-        """Unicode replacement characters are quarantined."""
+    def test_replacement_char_collapsed_at_chunk_creation(self, tmp_path):
+        """Plan v2.9 Phase B1 extension (2026-05-11): U+FFFD replacement
+        characters are now collapsed at chunk-creation time by the
+        universal `_collapse_replacement_chars` validator in
+        `mmrag_v2.schema.ingestion_schema`. They no longer survive into
+        chunks that reach the BatchProcessor, so the quarantine sees
+        clean content and does NOT drop the chunk. The previous contract
+        (BP quarantine drops U+FFFD chunks) was correct for v2.8 but is
+        obsolete now that the producer cleans them universally.
+
+        The quarantine remains responsible for other corruption
+        signatures (CIDFont placeholders, em-dash/CS runs) \u2014 see
+        `test_em_dash_runs_quarantined` and the
+        `tests/test_corruption_quarantine_toc_exemption.py` suite for
+        the current contract."""
         bp = _build_bp(tmp_path)
         chunks = [_text_chunk("Text with \ufffd replacement char", page=1)]
+        # Verify the chunk arrived sanitized:
+        assert "\ufffd" not in chunks[0].content
+        result = bp._quarantine_corrupted_text_chunks(chunks)
+        # Now clean \u2192 no longer dropped by the quarantine.
+        assert len(result) == 1
+
+    def test_em_dash_runs_quarantined(self, tmp_path):
+        """Phase 4 Step 3 corruption signatures other than U+FFFD remain
+        the quarantine's responsibility. This pins the remaining contract
+        after the U+FFFD collapse was lifted into chunk creation."""
+        bp = _build_bp(tmp_path)
+        chunks = [_text_chunk("Squadron note \u2014\u2014\u2014\u2014\u2014\u2014|CCCCCCCCCC SSSSSSSSSS", page=1)]
         result = bp._quarantine_corrupted_text_chunks(chunks)
         assert len(result) == 0
 

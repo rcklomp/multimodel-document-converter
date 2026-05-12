@@ -69,6 +69,46 @@ def test_small_bbox_with_tiny_file_classified_simple(tmp_path):
     assert res.asset_size_bytes == 1000
 
 
+def test_tiny_bbox_iconography_lane_overrides_file_size(tmp_path):
+    """Plan v2.9 Phase D (2026-05-11): bbox area < 1 % of page is
+    iconography (logo, certification mark, status glyph). At this
+    size, the asset cannot carry substantive content regardless of
+    file size — the tiny-bbox lane fires before the size-based
+    decision. Regression for Hybrid_electric_vehicles p1 logo:
+    bbox 0.68 %, file 5963 bytes (just above the 5 KB tiny-file
+    cap)."""
+    asset = tmp_path / "logo.png"
+    asset.write_bytes(b"x" * 5963)  # 5.96 KB — would FAIL is_tiny_file
+    chunk = _chunk(bbox=(0, 0, 80, 80), asset_path="logo.png")  # 0.64 % area
+    res = classify_asset_complexity(chunk, output_dir=tmp_path)
+    assert res.complexity == "simple"
+    assert "tiny bbox iconography lane" in res.reason
+
+
+def test_tiny_bbox_iconography_lane_with_large_file(tmp_path):
+    """Boundary case: a tiny-bbox asset (<1 %) but with a >100 KB
+    file. The text_heavy branch fires FIRST on file size, so the
+    iconography lane does not override. This protects against
+    misleading-bbox tiny-thumbnail-of-large-asset cases."""
+    asset = tmp_path / "thumb.png"
+    asset.write_bytes(b"x" * 200_000)
+    chunk = _chunk(bbox=(0, 0, 80, 80), asset_path="thumb.png")
+    res = classify_asset_complexity(chunk, output_dir=tmp_path)
+    assert res.complexity == "text_heavy"
+
+
+def test_just_above_tiny_bbox_threshold_NOT_iconography(tmp_path):
+    """bbox at exactly 1 % is the boundary — must NOT fire the
+    iconography lane. A 1 % bbox is small but still capable of
+    showing a sub-figure."""
+    # 100 * 100 / (1000 * 1000) = 0.01 = exactly 1%
+    asset = tmp_path / "small_diagram.png"
+    asset.write_bytes(b"x" * 20_000)  # 20 KB
+    chunk = _chunk(bbox=(0, 0, 100, 100), asset_path="small_diagram.png")
+    res = classify_asset_complexity(chunk, output_dir=tmp_path)
+    assert res.complexity != "simple"
+
+
 def test_small_bbox_with_large_file_overrides_to_text_heavy(tmp_path):
     """small bbox but >100 KB file → text_heavy.
 

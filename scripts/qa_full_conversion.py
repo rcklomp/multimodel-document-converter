@@ -62,6 +62,33 @@ class Issue:
     message: str
 
 
+# Plan v2.9 Phase G (2026-05-11) — advisory-warning allowance.
+# WARN codes in this set are documented allowed-advisories per
+# `docs/QUALITY_GATES.md` "Advisory Warning Classes". When EVERY
+# remaining WARN issue's code is in this set AND there are zero
+# FAILs, the gate emits `QA_PASS_WITH_ADVISORIES` rather than
+# `QA_WARN`. The advisory warnings remain visible in the output for
+# operator awareness but do not block ship per Goal 1's "promote into
+# an explicit pass variant" provision.
+#
+# Codes are unconditional unless noted in the per-code check at
+# `_warn_is_documented_advisory`.
+_ALLOWED_ADVISORY_WARN_CODES = frozenset(
+    {
+        "ASSET_TINY",
+        "PAGE_COUNT_UNKNOWN",
+        "SCRIPT_ADVISORY_FAIL",
+        "VISION_HARD_FALLBACK_RATE",  # conditional: all hard_fallbacks must carry the F4 sentinel
+    }
+)
+
+# F4 sentinel from `scripts/enrich_image_chunks_v29.py` —
+# `SHORT_RESPONSE_SENTINEL`. A hard_fallback with this sentinel is a
+# documented "complex asset, VLM produced terse description after
+# retry" case — legitimate signal, not a defect.
+_F4_HARD_FALLBACK_SENTINEL = "complex_asset_short_response_after_retry"
+
+
 @dataclass
 class ScriptResult:
     name: str
@@ -182,6 +209,142 @@ def _read_pdf_page_count(path: Path) -> Optional[int]:
         return None
 
 
+_INTENTIONALLY_BLANK_PATTERN = re.compile(
+    r"this\s+page\s+(?:is\s+)?intentionally\s+left\s+blank",
+    re.IGNORECASE,
+)
+
+
+# Phase B4.a (2026-05-11) thresholds. The render-based blank check
+# fires when a page's rasterized pixel statistics indicate a
+# near-white surface (no substantive ink coverage) AND its text-layer
+# content is below a small cap. Empirically verified safe on the v2.9
+# 34-doc corpus: 0/15 real body-text content pages trigger; catches
+# Python_Distilled's ~697 publisher-template placeholder pages,
+# Devlin p2/p264, Chaubal p4, and similar near-blank pages with no
+# retrieval value.
+_RENDER_BLANK_MEAN_MIN = 245.0
+_RENDER_BLANK_STD_MAX = 20.0
+_RENDER_BLANK_TEXT_CAP = 200
+_RENDER_BLANK_DPI_SCALE = 0.5  # 36 dpi at default page size; ~10 ms/page
+_RENDER_BLANK_NO_TEXT_MEAN_MIN = 250.0  # stricter threshold for the
+# zero-text variant (`_page_is_no_text_image_only_placeholder`)
+# because removing the text-existence-as-signal requires a more
+# certain "this is white" mean.
+
+
+def _is_intentionally_blank_text(text: str) -> bool:
+    """Phase B2 (2026-05-11): some publisher templates emit chapter-
+    divider versos containing only the boilerplate "This page
+    intentionally left blank" (sometimes duplicated by a backing
+    layer). The gate's strict blank check (no text + no images + no
+    blocks) does not classify these pages as blank because the
+    boilerplate text is present. The pipeline correctly emits no
+    chunk for these pages (the content has no semantic value), so the
+    gate incorrectly flags them as MISSING_PAGES.
+
+    Recognize the boilerplate as blank-equivalent so the gate marks
+    these pages as advisory (MISSING_PAGES_BLANK) rather than a hard
+    MISSING_PAGES FAIL. The regex is restrictive enough to avoid
+    false positives: it requires the literal four-word phrase
+    "intentionally left blank" with optional "is" between "page" and
+    "intentionally", and the only matched text must be effectively
+    the boilerplate (≤ 2x the boilerplate length, indicating no
+    real content surrounds it).
+    """
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if not _INTENTIONALLY_BLANK_PATTERN.search(stripped):
+        return False
+    # Allow duplication (publisher backing-layer pattern) but reject
+    # pages where the boilerplate is just one detail among real text.
+    return len(stripped) <= 120
+
+
+def _page_render_stats(page: Any) -> Optional[tuple[float, float]]:
+    """Return (mean, std) of the rasterized page in grayscale, or
+    None when rendering fails."""
+    try:
+        import pymupdf  # type: ignore
+        import numpy as np  # type: ignore
+        from PIL import Image  # type: ignore
+        import io
+    except Exception:
+        return None
+    try:
+        matrix = pymupdf.Matrix(_RENDER_BLANK_DPI_SCALE, _RENDER_BLANK_DPI_SCALE)
+        pix = page.get_pixmap(matrix=matrix)
+        pil = Image.open(io.BytesIO(pix.tobytes("png"))).convert("L")
+        arr = np.array(pil)
+    except Exception:
+        return None
+    return float(arr.mean()), float(arr.std())
+
+
+def _page_render_is_near_blank(page: Any) -> bool:
+    """Phase B4.a (2026-05-11): rasterize the page at low DPI and
+    check whether the rendered pixels are near-white (high mean, low
+    standard deviation). Catches publisher-template placeholder pages
+    that have a single full-page image (so the text-only blank check
+    fails) but visually carry no content.
+
+    Empirically validated on the v2.9 corpus: zero false positives on
+    15 sampled real body-text content pages (Harry/Bourne/Cronin/
+    Adedeji/Combat); catches Python_Distilled's ~615 publisher
+    placeholder pages, Devlin p2/p264, and similar.
+
+    See `docs/DECISIONS.md` "Retrieval-Value Test": a page rendered
+    as near-white has no retrieval-relevant content; the few text
+    characters that may be present (page number, watermark) are
+    metadata, not content.
+    """
+    stats = _page_render_stats(page)
+    if stats is None:
+        return False
+    mean, std = stats
+    return mean > _RENDER_BLANK_MEAN_MIN and std < _RENDER_BLANK_STD_MAX
+
+
+def _page_is_no_text_image_only_placeholder(page: Any) -> bool:
+    """Phase B4.a refinement (2026-05-11): a stricter sibling of
+    `_page_render_is_near_blank`. Fires when the page has NO
+    text-layer content at all AND at least one image AND the render
+    mean is above `_RENDER_BLANK_NO_TEXT_MEAN_MIN` (250).
+
+    This catches Python_Distilled placeholder pages that sit at the
+    `_RENDER_BLANK_STD_MAX` boundary (std ~20-23). Because the
+    page has zero text-layer content, the std band can be widened
+    without risking real-content false positives: a true content
+    page would have text. Combined with the high mean, the rule
+    is principle-based (no retrieval signal: no text + nearly all
+    white pixels = placeholder).
+
+    Verified against real-content reference pages: all real body
+    pages sampled (Harry/Bourne/Cronin/Adedeji/Combat) have text
+    content, so the `text_len == 0` precondition excludes them.
+    Earthship p109 (real diagram, text_len=0, mean=128) is excluded
+    by the mean>250 precondition.
+    """
+    try:
+        text = (page.get_text("text") or "").strip()
+    except Exception:
+        return False
+    if text:
+        return False
+    try:
+        images = page.get_images(full=True)
+    except Exception:
+        images = []
+    if not images:
+        return False
+    stats = _page_render_stats(page)
+    if stats is None:
+        return False
+    mean, _std = stats
+    return mean > _RENDER_BLANK_NO_TEXT_MEAN_MIN
+
+
 def _read_blank_pages_in_source(path: Path) -> set[int]:
     """Return the set of source-PDF page numbers (1-based) that are
     genuinely empty — no extractable text, no images, no useful blocks.
@@ -190,6 +353,17 @@ def _read_blank_pages_in_source(path: Path) -> set[int]:
     as "missing chunks" would false-alarm the gate. We only fail the
     gate on pages that have real content in the source but no output
     chunk.
+
+    Phase B2 extension: also classify "intentionally left blank"
+    boilerplate-only pages as blank-equivalent (see
+    `_is_intentionally_blank_text`).
+
+    Phase B4.a extension (2026-05-11): also classify pages whose
+    rasterized render is near-white (no substantive ink coverage)
+    AND whose text-layer content is below `_RENDER_BLANK_TEXT_CAP`
+    chars as blank-equivalent. Catches publisher-template
+    placeholder pages with a single near-white full-page image (the
+    "697 Python_Distilled missing pages" class).
     """
     blank: set[int] = set()
     try:
@@ -209,6 +383,36 @@ def _read_blank_pages_in_source(path: Path) -> set[int]:
             # typical PyMuPDF output for blank pages.
             non_trivial_blocks = [b for b in blocks if isinstance(b, tuple) and len(b) >= 5 and (b[4] or "").strip()]
             if not text and not images and not non_trivial_blocks:
+                blank.add(idx + 1)
+                continue
+            # Phase B2: "intentionally left blank" boilerplate-only
+            # pages count as blank-equivalent. Images on such pages
+            # would be a publisher logo or page-number marker; ignore.
+            if not non_trivial_blocks and _is_intentionally_blank_text(text):
+                blank.add(idx + 1)
+                continue
+            # Even with non-trivial blocks, accept if the only block
+            # text is the boilerplate.
+            if non_trivial_blocks and all(
+                _is_intentionally_blank_text(b[4] or "")
+                for b in non_trivial_blocks
+            ) and _is_intentionally_blank_text(text):
+                blank.add(idx + 1)
+                continue
+            # Phase B4.a: render-based near-blank check. The page
+            # may have a full-page image (so `images` is non-empty)
+            # but the rendered pixels are nearly all white. Only
+            # apply when text-layer is below the cap so that a real
+            # text page with a coincidentally light background is
+            # not misclassified.
+            if len(text) < _RENDER_BLANK_TEXT_CAP and _page_render_is_near_blank(page):
+                blank.add(idx + 1)
+                continue
+            # Phase B4.a refinement: stricter zero-text + image-only
+            # placeholder check. Picks up the boundary cases the
+            # render-near-blank check misses (page placeholders that
+            # have a slightly higher std but still no real content).
+            if _page_is_no_text_image_only_placeholder(page):
                 blank.add(idx + 1)
     finally:
         doc.close()
@@ -613,6 +817,48 @@ def _print_script_results(results: list[ScriptResult]) -> None:
         print()
 
 
+def _warn_is_documented_advisory(
+    issue: Issue,
+    chunks: list[dict[str, Any]],
+) -> bool:
+    """Phase G (2026-05-11): return True when a WARN-level issue is
+    documented in `docs/QUALITY_GATES.md` "Advisory Warning Classes"
+    as an allowed advisory that does not block QA_PASS_WITH_ADVISORIES.
+
+    Most codes are unconditional. `VISION_HARD_FALLBACK_RATE` is the
+    exception: it is allowed-advisory ONLY when every hard_fallback
+    image chunk in the corpus carries the F4 sentinel
+    (`complex_asset_short_response_after_retry`). A
+    non-F4-sentinelled hard_fallback indicates a real defect (asset
+    file missing, VLM API failure, validator rejection) and continues
+    to block PASS.
+    """
+    if issue.severity != "WARN":
+        return False
+    if issue.code not in _ALLOWED_ADVISORY_WARN_CODES:
+        return False
+    if issue.code != "VISION_HARD_FALLBACK_RATE":
+        return True
+
+    # Conditional check for VISION_HARD_FALLBACK_RATE: every hard_fallback
+    # chunk must carry the F4 sentinel.
+    hard_fallback_chunks = [
+        c
+        for c in chunks
+        if c.get("modality") == "image"
+        and ((c.get("metadata") or {}).get("vision_status") == "hard_fallback")
+    ]
+    if not hard_fallback_chunks:
+        # No hard_fallbacks present yet a VISION_HARD_FALLBACK_RATE WARN
+        # was raised — defensively treat as non-advisory.
+        return False
+    for chunk in hard_fallback_chunks:
+        meta = chunk.get("metadata") or {}
+        if meta.get("vision_error") != _F4_HARD_FALLBACK_SENTINEL:
+            return False
+    return True
+
+
 def _print_issues(title: str, issues: list[Issue]) -> None:
     print(title)
     print("-" * len(title))
@@ -720,8 +966,26 @@ def main() -> int:
     issues.extend(_table_issues(chunks))
 
     fail_count = sum(1 for issue in issues if issue.severity == "FAIL")
-    warn_count = sum(1 for issue in issues if issue.severity == "WARN")
-    final_status = "QA_FAIL" if fail_count else ("QA_WARN" if warn_count else "QA_PASS")
+    warn_issues = [issue for issue in issues if issue.severity == "WARN"]
+    warn_count = len(warn_issues)
+    # Phase G: split WARNs into documented-allowed advisories vs. real.
+    # When fail_count == 0 AND every WARN is documented-advisory, the
+    # gate emits QA_PASS_WITH_ADVISORIES rather than QA_WARN per the
+    # `docs/QUALITY_GATES.md` "Advisory Warning Classes" allowance.
+    disallowed_warn_count = sum(
+        1
+        for issue in warn_issues
+        if not _warn_is_documented_advisory(issue, chunks)
+    )
+    advisory_warn_count = warn_count - disallowed_warn_count
+    if fail_count:
+        final_status = "QA_FAIL"
+    elif disallowed_warn_count:
+        final_status = "QA_WARN"
+    elif advisory_warn_count:
+        final_status = "QA_PASS_WITH_ADVISORIES"
+    else:
+        final_status = "QA_PASS"
 
     print("=" * 72)
     print("FULL CONVERSION QA")
@@ -748,7 +1012,7 @@ def main() -> int:
     print()
     print(f"{final_status}: failures={fail_count} warnings={warn_count}")
 
-    if final_status == "QA_PASS":
+    if final_status in ("QA_PASS", "QA_PASS_WITH_ADVISORIES"):
         return 0
     if final_status == "QA_WARN" and args.allow_warnings:
         return 0

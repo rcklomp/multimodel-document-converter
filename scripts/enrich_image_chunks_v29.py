@@ -266,11 +266,38 @@ def _resolve_api_key() -> str:
 
 def _iter_chunks(jsonl_path: Path) -> Iterator[Dict[str, Any]]:
     with jsonl_path.open() as fh:
-        for line in fh:
+        for line_number, line in enumerate(fh, 1):
             line = line.strip()
             if not line:
                 continue
-            yield json.loads(line)
+            try:
+                yield json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise json.JSONDecodeError(
+                    f"{jsonl_path}:{line_number}: {exc.msg}",
+                    exc.doc,
+                    exc.pos,
+                ) from exc
+
+
+def _validate_jsonl(path: Path, expected_lines: int) -> None:
+    actual_lines = 0
+    with path.open() as fh:
+        for line_number, line in enumerate(fh, 1):
+            if not line.strip():
+                continue
+            actual_lines += 1
+            try:
+                json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(
+                    f"{path}:{line_number}: invalid JSON after enrichment: {exc}"
+                ) from exc
+    if actual_lines != expected_lines:
+        raise RuntimeError(
+            f"{path}: line count mismatch after enrichment validation — "
+            f"parsed {actual_lines}, expected {expected_lines}"
+        )
 
 
 def _count_work(jsonl_path: Path) -> EnrichmentStats:
@@ -545,6 +572,11 @@ def _enrich_jsonl(
             f"line count mismatch — wrote {written_lines}, expected {expected_lines}; "
             f"left tmp at {failed_path}"
         )
+    try:
+        _validate_jsonl(tmp_path, expected_lines)
+    except Exception:
+        tmp_path.replace(failed_path)
+        raise
 
     os.replace(tmp_path, jsonl_path)
     logger.info(
