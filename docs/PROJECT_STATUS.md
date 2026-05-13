@@ -495,8 +495,9 @@ planned.
 2. `KI_EPUB_EXTRACTION_LANE_REWRITE` — KI EPUB.
 3. `HYBRID_CHUNKER_HEADING_PROPAGATION` — Devlin.
 
-**Phase 4 `validated-local` (2026-05-13). Code landed in the worktree,
-not yet committed to `main`. All Phase 4 charter criteria are met:
+**Phase 4 `validated-local` (2026-05-13; committed in `8effdfd` —
+"feat(v2.10): land Phase 2/3/4 — TextIntegrityScout + B4B picture
+dedup + cross-page-split"). All Phase 4 charter criteria are met:
 Cookbook & Distilled page-loss closed, smoke 11/11 GATE_PASS, full
 pytest green.**
 

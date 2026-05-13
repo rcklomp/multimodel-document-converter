@@ -1184,7 +1184,8 @@ bare-DocItem dereferencing, page_offset handling. Full pytest
   ``sys.modules`` before ``exec_module`` runs so the ``@dataclass``
   field-type resolution can find its own class's module.
 * No QA thresholds weakened.
-* Code landed in the worktree, not yet committed to `main`.
+* Committed on `main` in `8effdfd` ("feat(v2.10): land Phase 2/3/4
+  — TextIntegrityScout + B4B picture dedup + cross-page-split").
 
 ---
 
