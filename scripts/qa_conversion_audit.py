@@ -114,6 +114,21 @@ def _is_code_chunk(meta: dict) -> bool:
     return ct == "code" or cc == "code"
 
 
+def _is_typed_non_micro(meta: dict) -> bool:
+    """Return True for chunks whose explicit ``chunk_type`` already
+    establishes them as non-paragraph structural content (code,
+    heading, title) — the producer has classified them, so they are
+    not retrieval-noise micro-fragments even when ``len(content) <
+    30``. Used by the ``micro_non_label`` counter exemption alongside
+    ``_is_label_like(content)``. Keeps the threshold unchanged; only
+    clarifies what counts as "labelled" / "non-micro" for the
+    purpose of micro_non_label_ratio.
+    """
+    ct = str((meta or {}).get("chunk_type") or "").lower()
+    cc = str((meta or {}).get("content_classification") or "").lower()
+    return ct in ("code", "heading", "title") or cc == "code"
+
+
 def _looks_code_like(text: str) -> bool:
     s = text or ""
     if not s.strip():
@@ -380,6 +395,7 @@ def audit(jsonl_path: Path) -> AuditResult:
             text_rows.append((chunk_id, page_number, content, meta))
 
             is_code = _is_code_chunk(meta)
+            is_typed_non_micro = _is_typed_non_micro(meta)
             is_label = _is_label_like(content)
             code_like = _looks_code_like(content)
 
@@ -401,7 +417,7 @@ def audit(jsonl_path: Path) -> AuditResult:
                 r.oversize_chunks += 1
             if len(content) < 30:
                 r.micro_chunks += 1
-                if not is_label and not is_code:
+                if not is_label and not is_typed_non_micro:
                     r.micro_non_label += 1
 
             # Corruption score

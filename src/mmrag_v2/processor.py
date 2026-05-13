@@ -94,7 +94,7 @@ logger = logging.getLogger(__name__)
 
 
 _INDEX_REF_RE = re.compile(r"\b\d{1,4}(,\s*\d{1,4}){2,}\b")
-_TOC_LEADER_RE = re.compile(r"\.{2,}\s*\d{1,4}\s*$")
+_TOC_LEADER_RE = re.compile(r"(?:\.|�){2,}\s*\d{1,4}\s*$")
 # Single-page back-index entry shape (e.g. "Argilla platform for A/B testing, 157" or
 # "evolution to Agentic RAG, 45-55"). Used to detect Adedeji-style back-index pages
 # whose entries each carry a single page or page-range — these escape _INDEX_REF_RE
@@ -131,6 +131,249 @@ def _docling_item_page_no(item: Any) -> Optional[int]:
     first = prov[0] if isinstance(prov, list) else prov
     page_no = getattr(first, "page_no", None)
     return int(page_no) if page_no else None
+
+
+def _docling_item_prov_list(item: Any) -> List[Any]:
+    """Return all ProvenanceItem entries on a Docling item as a list."""
+    prov = getattr(item, "prov", None)
+    if not prov:
+        return []
+    return list(prov) if isinstance(prov, list) else [prov]
+
+
+CROSS_PAGE_CONTINUED_MARKER = "[CROSS_PAGE_CONTINUED]"
+
+
+# Stop-word leads that mark a short standalone chunk as a SYNTACTIC
+# CONTINUATION of its parent_heading rather than a new title or body
+# sentence. A title typed by Docling as ``label=text`` (so we receive
+# it as ``chunk_type=PARAGRAPH``) shows this shape when HybridChunker
+# slices a multi-page title across pages — the trailing slice starts
+# with a connector word like "and"/"of"/"the" because the head of
+# the title lives on the previous page (the chunk's parent_heading).
+# Used by ``_looks_like_subtitle_continuation`` to promote such
+# chunks to ``ChunkType.HEADING`` so they aren't counted as
+# retrieval-noise micro-fragments by the strict gate. Set is
+# deliberately small: only universal English stopwords that
+# (a) don't start a new sentence with terminal punctuation, and
+# (b) don't start an isolated noun-phrase title in normal English.
+_SUBTITLE_CONTINUATION_LEADS = frozenset({
+    "and", "or", "the", "a", "an", "of", "in", "to", "on", "at",
+    "by", "for", "with", "from", "into", "onto", "upon",
+})
+
+# Terminal characters that prove a chunk is a complete sentence /
+# clause / TOC-style trailing-page-number line, so the chunk is NOT
+# a subtitle continuation.
+_SUBTITLE_TERMINAL_CHARS = (".", "?", "!", ":", ";", ",")
+
+
+def _looks_like_subtitle_continuation(
+    content: str,
+    chunk_type: "ChunkType",
+    parent_heading: Optional[str],
+) -> bool:
+    """Return True iff a tentatively-PARAGRAPH chunk is structurally
+    a subtitle / title fragment that should be re-typed as HEADING.
+
+    Universal signals (all required):
+
+    * already a ``chunk_type=PARAGRAPH`` candidate (Docling
+      ``label=text`` produces this — nothing to do for code / list
+      / already-classified-heading items);
+    * 1 <= length < 30 characters;
+    * single line (no ``\\n``);
+    * no terminal sentence / clause punctuation in
+      ``_SUBTITLE_TERMINAL_CHARS``;
+    * has a non-empty ``parent_heading`` that is NOT identical to
+      the chunk's own content (anti-sentinel);
+    * the first alphabetic word is one of the
+      ``_SUBTITLE_CONTINUATION_LEADS`` stopwords (lowercase). This
+      is the signature of a title that was split across a page
+      boundary: the trailing slice starts mid-phrase
+      (``"... and the Sorcerer's Stone"``), not as a new sentence
+      or stand-alone noun-phrase title.
+
+    No filename / page-number / document-specific checks; purely
+    structural. Conservative: surveyed against the full v2.10 Phase
+    4 reconvert + smoke corpus only HarryPotter p7
+    ``"and the Sorcerer's Stone"`` qualifies — `Logo`, `Bar chart`,
+    `zip() function, 62, 314`, `[CROSS_PAGE_CONTINUED]`, and OCR-
+    junk fragments do not.
+    """
+    if chunk_type != ChunkType.PARAGRAPH:
+        return False
+    text = (content or "").strip()
+    if not text or len(text) >= 30:
+        return False
+    # We deliberately do NOT reject content with embedded ``\n``.
+    # Docling 2.86 produces multi-page title slices where the
+    # trailing slice looks like ``"and the Subtitle\nBY"`` — the
+    # ``BY`` is a downstream-trimmed structural fragment that
+    # ``_deduplicate_chunk_overlap`` removes by the time the chunk
+    # reaches the gate; the connector-lead + parent_heading +
+    # no-terminal-punct combination is already strong enough to
+    # discriminate without a ``\n`` check (verified against the
+    # full v2.10 reconvert + smoke corpus).
+    if text.endswith(_SUBTITLE_TERMINAL_CHARS):
+        return False
+    parent = str(parent_heading or "").strip()
+    if not parent or parent == text:
+        return False
+    match = re.match(r"^([A-Za-z]+)", text)
+    if not match:
+        return False
+    first_word = match.group(1).lower()
+    if first_word not in _SUBTITLE_CONTINUATION_LEADS:
+        return False
+    return True
+
+
+def _resolve_doc_item_text(item: Any, doc: Any) -> str:
+    """Return the actual text content of a Docling DocChunk doc_item.
+
+    In Docling 2.86 ``dc.meta.doc_items`` may yield bare ``DocItem``
+    references (no ``.text`` attribute) instead of the resolved
+    ``TextItem``. The real text lives at ``doc.texts[idx]`` for
+    self_refs like ``#/texts/12``. Try the in-place attribute first
+    (already-resolved item), then fall back to the reference lookup
+    against the parsed Docling document. Returns ``""`` if neither
+    path produces text.
+    """
+    text = getattr(item, "text", None)
+    if isinstance(text, str) and text:
+        return text
+    self_ref = getattr(item, "self_ref", None) or ""
+    if doc is not None and isinstance(self_ref, str) and self_ref.startswith("#/texts/"):
+        try:
+            idx = int(self_ref.rsplit("/", 1)[-1])
+        except ValueError:
+            return ""
+        texts = getattr(doc, "texts", None) or []
+        if 0 <= idx < len(texts):
+            resolved = texts[idx]
+            resolved_text = getattr(resolved, "text", None)
+            if isinstance(resolved_text, str):
+                return resolved_text
+    return ""
+
+
+def _split_doc_chunk_text_by_page(
+    dc: Any,
+    page_offset: int,
+    doc: Optional[Any] = None,
+) -> Dict[int, str]:
+    """Reconstruct per-page text contributions for a HybridChunker DocChunk.
+
+    Background: Docling text items can span multiple PDF pages and expose
+    that with a list of ``prov`` entries, each carrying ``page_no`` and
+    ``charspan`` (character offsets within the item's serialized text).
+    HybridChunker may also further slice such an item into multiple
+    DocChunks. The previous v2.9 cross-page split path attributed the
+    whole DocChunk to ``prov[0].page_no`` and broadcast the same text to
+    every page that contributed any item, then deduped per page —
+    causing the later page's content to be silently dropped or attributed
+    to the earlier page.
+
+    This helper aligns ``dc.text`` against each item's per-prov text
+    slice (via ``prov.charspan``) so each page receives only the portion
+    of ``dc.text`` that actually came from that page. Result keys are
+    global (per-batch local + ``page_offset``); values are the
+    non-empty reconstructed slice.
+
+    Pages whose ``prov.charspan`` does not overlap ``dc.text`` (the item
+    references them but THIS DocChunk does not include any of their
+    text — another DocChunk will) are NOT included in the result.
+
+    When ``doc`` is supplied, bare ``DocItem`` references (Docling 2.86
+    exposes these on ``dc.meta.doc_items`` instead of resolved
+    ``TextItem`` instances) are dereferenced against ``doc.texts`` so
+    their real text contributes to per-page slicing. Items whose text
+    is still empty after dereferencing (serializer-only contributors —
+    rare tables/captions) are silently skipped; the caller is
+    responsible for the "no contributor was sliceable" fallback so a
+    multi-page DocChunk never silently disappears.
+    """
+    dc_text = getattr(dc, "text", "") or ""
+    if not dc_text or not (getattr(dc, "meta", None) and getattr(dc.meta, "doc_items", None)):
+        return {}
+
+    per_page_parts: Dict[int, List[str]] = {}
+    dc_cursor = 0
+
+    for item in dc.meta.doc_items:
+        item_text = _resolve_doc_item_text(item, doc)
+        prov_list = _docling_item_prov_list(item)
+        if not prov_list:
+            continue
+
+        if not item_text:
+            # Serializer-only contributor (rare table/caption). No
+            # item.text to slice by charspan; skip and let the caller
+            # handle the "no real slice for any page" fallback if
+            # needed.
+            continue
+
+        sig_len = min(60, len(item_text))
+        item_sig = item_text[:sig_len]
+        item_pos_in_dc = dc_text.find(item_sig, dc_cursor)
+
+        if item_pos_in_dc >= 0:
+            item_actual_len = min(len(dc_text) - item_pos_in_dc, len(item_text))
+            for prov in prov_list:
+                p_raw = int(getattr(prov, "page_no", 0) or 0)
+                if not p_raw:
+                    continue
+                p_dst = p_raw + page_offset
+                charspan = getattr(prov, "charspan", None)
+                if charspan and len(charspan) >= 2:
+                    cs_start = max(0, min(item_actual_len, int(charspan[0])))
+                    cs_end = max(0, min(item_actual_len, int(charspan[1])))
+                else:
+                    cs_start, cs_end = 0, item_actual_len
+                if cs_end > cs_start:
+                    fragment = dc_text[item_pos_in_dc + cs_start : item_pos_in_dc + cs_end]
+                    if fragment.strip():
+                        per_page_parts.setdefault(p_dst, []).append(fragment)
+            dc_cursor = item_pos_in_dc + item_actual_len
+            continue
+
+        avail_in_dc = len(dc_text) - dc_cursor
+        if avail_in_dc <= 0:
+            continue
+        dc_sig_len = min(60, avail_in_dc)
+        dc_sig = dc_text[dc_cursor : dc_cursor + dc_sig_len]
+        dc_start_in_item = item_text.find(dc_sig)
+        if dc_start_in_item < 0:
+            continue
+
+        common_len = min(len(item_text) - dc_start_in_item, avail_in_dc)
+        for prov in prov_list:
+            p_raw = int(getattr(prov, "page_no", 0) or 0)
+            if not p_raw:
+                continue
+            p_dst = p_raw + page_offset
+            charspan = getattr(prov, "charspan", None)
+            if charspan and len(charspan) >= 2:
+                cs_start, cs_end = int(charspan[0]), int(charspan[1])
+            else:
+                cs_start, cs_end = 0, len(item_text)
+            ov_start = max(cs_start, dc_start_in_item)
+            ov_end = min(cs_end, dc_start_in_item + common_len)
+            if ov_end > ov_start:
+                dc_ov_start = dc_cursor + (ov_start - dc_start_in_item)
+                dc_ov_end = dc_cursor + (ov_end - dc_start_in_item)
+                fragment = dc_text[dc_ov_start:dc_ov_end]
+                if fragment.strip():
+                    per_page_parts.setdefault(p_dst, []).append(fragment)
+        dc_cursor += common_len
+
+    out: Dict[int, str] = {}
+    for page, fragments in per_page_parts.items():
+        joined = "".join(fragments).strip()
+        if joined:
+            out[page] = joined
+    return out
 
 
 def _docling_item_label(item: Any) -> str:
@@ -248,7 +491,7 @@ def _classify_dense_index_pages(doc: Any) -> set[int]:
         if page_no in dense_pages:
             continue
         text_items = stats["text_items"]
-        if text_items < 8:
+        if text_items < 5:
             continue
         index_score = (
             stats["index_refs"] * 3
@@ -268,6 +511,7 @@ def _classify_dense_index_pages(doc: Any) -> set[int]:
             )
             or (stats["index_refs"] >= 4 and stats["short_index_tokens"] >= 8)
             or (stats["toc_leaders"] >= 5 and signal_ratio >= 0.30)
+            or (stats["toc_leaders"] >= 4 and signal_ratio >= 0.80)
         ):
             dense_pages.add(page_no)
     return dense_pages
@@ -1672,6 +1916,33 @@ class V2DocumentProcessor:
             logger.debug(f"[TABLE-FALLBACK] Page {page_no}: VLM table fallback failed: {e}")
             return ""
 
+    @staticmethod
+    def _shadow_image_meets_threshold(
+        img_width: float,
+        img_height: float,
+        area_ratio: float,
+        *,
+        page_needs_coverage: bool,
+    ) -> bool:
+        """Return True if a candidate shadow image meets the
+        SHADOW-EXTRACTION emission threshold.
+
+        Standard threshold (REQ-MM-06): 300x300 OR area_ratio >= 40 %.
+
+        Page-coverage relaxation (PLAN_V2.10 Phase 3): when the page
+        has NO prior chunks, the size floor drops to 200x200 so mid-
+        size chapter-intro diagrams still emit and avoid landing as
+        MISSING_PAGES at the strict gate. The area floor stays at
+        40 % for that lane — thin banners and decorative dividers
+        remain filtered out.
+        """
+        if page_needs_coverage:
+            meets_size_threshold = img_width >= 200 and img_height >= 200
+        else:
+            meets_size_threshold = img_width >= 300 and img_height >= 300
+        meets_area_threshold = area_ratio >= 0.40
+        return meets_size_threshold or meets_area_threshold
+
     def _run_shadow_extraction(
         self,
         file_path: Path,
@@ -1685,6 +1956,7 @@ class V2DocumentProcessor:
         text_buffer: List[str],
         element_indices: Dict[str, int],
         docling_processed_pages: set,
+        pages_with_prior_chunks: Optional[set] = None,
     ) -> Generator[IngestionChunk, None, None]:
         """
         FIX 1: SHADOW EXTRACTION (REQ-MM-05/06/07)
@@ -1695,6 +1967,16 @@ class V2DocumentProcessor:
         THRESHOLD (SRS v2.4 STRICT):
         - 300x300 pixels OR
         - 40% of page area OR GREATER
+
+        PLAN_V2.10 Phase 3 (2026-05-12): page-coverage-conditional
+        relaxation. When `pages_with_prior_chunks` is supplied and the
+        page is NOT in that set (Docling and the main pipeline produced
+        nothing for it), the size threshold drops to 200x200 so mid-
+        sized chapter-intro diagrams (Python_Distilled pp 686/688/913:
+        453x258-290) still emit one image chunk and avoid landing as
+        MISSING_PAGES at the strict gate. The area floor stays at 40%
+        for that lane too — too-narrow icons and thin banners remain
+        filtered.
 
         This method runs AFTER Docling processing and extracts any
         visual elements that meet the threshold but weren't extracted
@@ -1769,16 +2051,36 @@ class V2DocumentProcessor:
 
                         # ================================================================
                         # REQ-MM-06: THRESHOLD CHECK - 300x300px OR 40% page area
+                        # PLAN_V2.10 Phase 3: when the page has NO prior chunks,
+                        # relax the size floor to 200x200 so mid-size
+                        # chapter-intro diagrams still emit. The area gate is
+                        # NOT relaxed — thin banners and decorative dividers
+                        # stay filtered out.
                         # ================================================================
-                        meets_size_threshold = img_width >= 300 and img_height >= 300
-                        meets_area_threshold = area_ratio >= 0.40
-
-                        if not (meets_size_threshold or meets_area_threshold):
+                        _page_needs_coverage = (
+                            pages_with_prior_chunks is not None
+                            and actual_page_no not in pages_with_prior_chunks
+                        )
+                        if not self._shadow_image_meets_threshold(
+                            img_width=img_width,
+                            img_height=img_height,
+                            area_ratio=area_ratio,
+                            page_needs_coverage=_page_needs_coverage,
+                        ):
                             logger.debug(
                                 f"[SHADOW-EXTRACTION] Page {actual_page_no}, img {img_idx}: "
                                 f"Below threshold ({img_width:.0f}x{img_height:.0f}, {area_ratio:.1%})"
                             )
                             continue
+                        if _page_needs_coverage and not (
+                            img_width >= 300 and img_height >= 300
+                        ) and area_ratio < 0.40:
+                            logger.info(
+                                f"[SHADOW-EXTRACTION][PAGE-COVERAGE] Page {actual_page_no}: "
+                                f"Emitting mid-size image ({img_width:.0f}x{img_height:.0f}, "
+                                f"{area_ratio:.1%}) under page-coverage threshold; page has "
+                                f"no prior chunks (PLAN_V2.10 Phase 3)."
+                            )
 
                         logger.info(
                             f"[SHADOW-EXTRACTION] Page {actual_page_no}: "
@@ -2559,6 +2861,22 @@ class V2DocumentProcessor:
 
         # V3.0.0: Pending context queue for IMAGE and TABLE next_text_snippet
         pending_visual_chunks: List[IngestionChunk] = []
+        # PLAN_V2.10 Phase 3: track pages with any chunk so SHADOW-EXTRACTION
+        # can use a page-coverage-aware threshold for pages Docling left
+        # entirely empty (Python_Distilled pp 686/688/913: mid-size diagrams
+        # that fall just below the standard 300x300 / 40% threshold but the
+        # rendered page is non-blank, so the strict gate flags it as
+        # MISSING_PAGES). The set is keyed on the absolute page number (i.e.
+        # batch_page_no + page_offset) so it lines up with the shadow path.
+        pages_with_prior_chunks: set[int] = set()
+        for hc in _hybrid_text_chunks:
+            _hc_pg = (
+                hc.metadata.page_number
+                if hc.metadata and hc.metadata.page_number
+                else None
+            )
+            if _hc_pg:
+                pages_with_prior_chunks.add(int(_hc_pg))
 
         for item_tuple in self._get_ordered_doc_items(doc):
             element, _ = item_tuple
@@ -2578,6 +2896,14 @@ class V2DocumentProcessor:
             ):
                 # V3.0.0: Deferred yield for IMAGE and TABLE chunks (pending context)
                 from .schema.ingestion_schema import Modality
+
+                _chunk_pg = (
+                    chunk.metadata.page_number
+                    if chunk.metadata and chunk.metadata.page_number
+                    else None
+                )
+                if _chunk_pg:
+                    pages_with_prior_chunks.add(int(_chunk_pg))
 
                 if chunk.modality in (Modality.IMAGE, Modality.TABLE):
                     # Hold IMAGE/TABLE chunk until next TEXT arrives
@@ -2627,6 +2953,7 @@ class V2DocumentProcessor:
             text_buffer=text_buffer,
             element_indices=element_indices,
             docling_processed_pages=set(page_images.keys()),
+            pages_with_prior_chunks=pages_with_prior_chunks,
         ):
             # Shadow chunks may also be IMAGE/TABLE, handle pending context
             from .schema.ingestion_schema import Modality
@@ -2823,61 +3150,99 @@ class V2DocumentProcessor:
             if not text or not text.strip():
                 continue
 
-            # v2.9: Detect cross-page DocChunks and split them so each
-            # source page produces at least one IngestionChunk.
-            # Docling's HybridChunker happily groups paragraphs from
-            # adjacent pages into a single semantic chunk (especially
-            # at chapter-intro pages where the chapter title + drop-cap
-            # + opening narrative on page N gets merged with the last
-            # paragraph of page N-1). We previously attributed the whole
-            # chunk to the first page, leaving page N entirely
-            # unrepresented in the output (HARRY p29, p54, p72, etc.).
-            #
-            # Strategy: walk the chunk's doc_items, grouping by page.
-            # If the chunk spans >1 page, emit one chunk per page with
-            # that page's items' text. Per-page bbox is the union of
-            # those items' bboxes.
-            _items_by_page: Dict[int, List[Any]] = {}
+            # v2.10 Phase 4: Detect cross-page DocChunks and split them
+            # so each contributing page receives its OWN per-page text
+            # (not a broadcast of the merged text). Two shapes trigger:
+            #   (a) Single Docling text item whose ``prov`` is a list
+            #       with multiple page_no entries (multi-page item; the
+            #       Python_Cookbook p127/p128 chapter-end shape). Each
+            #       prov has a ``charspan`` slicing the item's text per
+            #       page; HybridChunker may further slice this item
+            #       across multiple DocChunks. Attributing both DocChunks
+            #       to prov[0].page_no silently drops the later page.
+            #   (b) DocChunk aggregates several single-prov items each
+            #       on a different page (HARRY chapter-intro shape).
+            # Build the per-page item/prov map by walking ALL prov
+            # entries (not just prov[0]) so both shapes are detected.
+            _prov_by_page: Dict[int, List[Tuple[Any, Any]]] = {}
             if dc.meta and dc.meta.doc_items:
                 for _it in dc.meta.doc_items:
-                    if not hasattr(_it, "prov") or not _it.prov:
-                        continue
-                    _prov = _it.prov[0] if isinstance(_it.prov, list) else _it.prov
-                    _p = (getattr(_prov, "page_no", 1) or 1) + page_offset
-                    _items_by_page.setdefault(_p, []).append(_it)
+                    for _prov in _docling_item_prov_list(_it):
+                        _p_raw = int(getattr(_prov, "page_no", 0) or 0)
+                        if not _p_raw:
+                            continue
+                        _prov_by_page.setdefault(_p_raw + page_offset, []).append((_it, _prov))
 
             # Single-page case: original logic.
             page_no = 1
             bbox: Optional[List[int]] = None
             page_w, page_h = 612.0, 792.0
 
-            if len(_items_by_page) > 1:
-                # Multi-page DocChunk: Docling's HybridChunker is happy
-                # to merge content across page boundaries (especially
-                # at chapter intros). Attributing the merged chunk to
-                # only the first page leaves later pages with zero
-                # output — broken page-coverage invariant.
-                #
-                # Per-item .text is unreliable here because Docling
-                # serialises some items via the chunker's serializer
-                # rather than exposing .text directly, so the simpler
-                # robust fix is to emit ONE copy of the merged chunk
-                # per page, attributing each copy to a different
-                # page_number. Same semantic content; per-page bbox
-                # union for spatial accuracy. This preserves the
-                # chunker's narrative continuity while satisfying
-                # page coverage.
-                logger.info(
-                    f"[HYBRID-CHUNKER] Cross-page chunk split across "
-                    f"{sorted(_items_by_page.keys())}: emitting one copy per page"
-                )
-                for _ppage, _items in _items_by_page.items():
+            if len(_prov_by_page) > 1:
+                # Multi-page DocChunk: ask the helper for per-page text
+                # using prov.charspan slicing. The helper returns only
+                # pages whose charspan-sliced fragment overlaps
+                # ``dc.text``, so a multi-prov item whose dc.text
+                # actually lives on ONE page collapses to a single-page
+                # emission — at the correct page, not blindly prov[0].
+                # Items whose ``.text`` attribute is empty
+                # (serializer-only — code/table) are silently skipped
+                # by the helper; missing pages here mean "covered by
+                # some other DocChunk", not "lost" — so do NOT emit
+                # markers for them. Marker emission is reserved for
+                # the all-pages-unreconstructable emergency below.
+                per_page_text = _split_doc_chunk_text_by_page(dc, page_offset, doc=doc)
+                if not per_page_text:
+                    # Reconstruction yielded nothing for any
+                    # contributing page (every item was
+                    # serializer-only / unsliceable). Emit ONE
+                    # marker at the earliest contributing page only
+                    # — the marker is a single sentinel signalling
+                    # "this multi-page DocChunk had content that
+                    # couldn't be sliced", not a per-page coverage
+                    # claim. Emitting markers on every contributing
+                    # page falsely populates truly-blank source
+                    # pages (e.g. Python_Distilled p1-p3 cover /
+                    # imprint pages are 0-text in the PDF) and
+                    # excludes them from `MISSING_PAGES_BLANK`
+                    # classification, then trips
+                    # `micro_non_label_ratio` in tight-window smoke
+                    # tests.
+                    first_page = sorted(_prov_by_page.keys())[0]
+                    logger.warning(
+                        "[HYBRID-CHUNKER] Cross-page reconstruction "
+                        "returned nothing for pages %s; emitting one "
+                        "marker chunk at the earliest contributing "
+                        "page p%s",
+                        sorted(_prov_by_page.keys()),
+                        first_page,
+                    )
+                    per_page_text = {first_page: CROSS_PAGE_CONTINUED_MARKER}
+                else:
+                    missing_pages = sorted(
+                        set(_prov_by_page.keys()) - set(per_page_text.keys())
+                    )
+                    if missing_pages:
+                        logger.debug(
+                            "[HYBRID-CHUNKER] Cross-page partial "
+                            "reconstruction: pages %s contributed items "
+                            "but no charspan-sliceable text; relying on "
+                            "their other DocChunks for coverage",
+                            missing_pages,
+                        )
+                if len(per_page_text) > 1:
+                    logger.info(
+                        f"[HYBRID-CHUNKER] Cross-page chunk split across "
+                        f"{sorted(per_page_text.keys())}: emitting per-page text"
+                    )
+                for _ppage, _page_text in per_page_text.items():
+                    _prov_pairs = _prov_by_page.get(_ppage, [])
                     _bbox_l, _bbox_t, _bbox_r, _bbox_b = 1000, 1000, 0, 0
                     _have_bbox = False
                     _pw, _ph = page_dims.get(_ppage, (612.0, 792.0))
-                    for _it in _items:
-                        _ip = _it.prov[0] if isinstance(_it.prov, list) else _it.prov
-                        _ib = getattr(_ip, "bbox", None)
+                    _page_chunk_type = ChunkType.PARAGRAPH
+                    for _it, _prov in _prov_pairs:
+                        _ib = getattr(_prov, "bbox", None)
                         if _ib:
                             _x0 = int(float(getattr(_ib, "l", 0)) / _pw * COORD_SCALE)
                             _y0 = int(float(getattr(_ib, "t", 0)) / _ph * COORD_SCALE)
@@ -2888,13 +3253,44 @@ class V2DocumentProcessor:
                             _bbox_r = max(_bbox_r, max(0, min(COORD_SCALE, _x1)))
                             _bbox_b = max(_bbox_b, max(0, min(COORD_SCALE, max(_y0, _y1))))
                             _have_bbox = True
-                    # Per-page dedup: if dc.text was already emitted for
-                    # this page (overlapping cross-page chunks), skip.
+                        # Preserve item label as chunk_type so heading
+                        # / code / list_item items don't get mis-typed
+                        # as paragraph (which trips the strict gate's
+                        # micro_non_label_ratio when title/subtitle
+                        # text is short).
+                        _label_obj = getattr(_it, "label", "")
+                        _label_str = getattr(_label_obj, "value", _label_obj)
+                        _label_str = str(_label_str or "").lower()
+                        if _label_str == "code":
+                            _page_chunk_type = ChunkType.CODE
+                        elif _label_str == "list_item":
+                            if _page_chunk_type == ChunkType.PARAGRAPH:
+                                _page_chunk_type = ChunkType.LIST_ITEM
+                        elif "heading" in _label_str or "title" in _label_str:
+                            if _page_chunk_type == ChunkType.PARAGRAPH:
+                                _page_chunk_type = ChunkType.HEADING
+                    if _page_text == CROSS_PAGE_CONTINUED_MARKER:
+                        _emit_method = "hybrid_chunker_pagesplit_fallback"
+                    else:
+                        _emit_method = "hybrid_chunker_pagesplit"
+                    # v2.10 Phase 4: same subtitle-continuation
+                    # promotion as the single-page emit. The
+                    # parent_heading for the cross-page branch is
+                    # not tracked in the local breadcrumb (it uses
+                    # the doc-name root only), so use
+                    # `self._last_hybrid_heading` carry-forward
+                    # state as the parent-heading proxy — the
+                    # heading active when this DocChunk was emitted.
+                    _carryover_heading = getattr(self, "_last_hybrid_heading", None)
+                    if _looks_like_subtitle_continuation(
+                        _page_text, _page_chunk_type, _carryover_heading
+                    ):
+                        _page_chunk_type = ChunkType.HEADING
                     _page_seen2 = _seen_per_page.setdefault(_ppage, set())
-                    if text.strip() in _page_seen2:
+                    if _page_text in _page_seen2:
                         _hybrid_dedup_skipped += 1
                         continue
-                    _page_seen2.add(text.strip())
+                    _page_seen2.add(_page_text)
                     _ppage_bbox = (
                         [_bbox_l, _bbox_t, _bbox_r, _bbox_b]
                         if _have_bbox and _bbox_r > _bbox_l and _bbox_b > _bbox_t
@@ -2902,7 +3298,7 @@ class V2DocumentProcessor:
                     )
                     _split_chunk = create_text_chunk(
                         doc_id=doc_hash,
-                        content=text.strip(),
+                        content=_page_text,
                         source_file=source_file,
                         file_type=file_type,
                         page_number=_ppage,
@@ -2915,17 +3311,17 @@ class V2DocumentProcessor:
                             ],
                             level=2,
                         ),
-                        chunk_type=ChunkType.PARAGRAPH,
+                        chunk_type=_page_chunk_type,
                         page_width=int(_pw),
                         page_height=int(_ph),
-                        extraction_method="hybrid_chunker_pagesplit",
+                        extraction_method=_emit_method,
                         position=self._next_chunk_position(),
                         **self._intelligence_metadata,
                     )
-                    _split_chunk.metadata.refined_content = text.strip()
+                    _split_chunk.metadata.refined_content = _page_text
                     chunks.append(_split_chunk)
                 # Skip the original cross-page chunk; we've emitted
-                # per-page copies above.
+                # per-page slices above.
                 continue
 
             if dc.meta and dc.meta.doc_items:
@@ -3005,6 +3401,15 @@ class V2DocumentProcessor:
             elif label == "list_item":
                 chunk_type = ChunkType.LIST_ITEM
             elif "heading" in label or "title" in label:
+                chunk_type = ChunkType.HEADING
+            # v2.10 Phase 4: HybridChunker slices multi-page titles
+            # across pages and Docling labels the trailing slice
+            # ``label=text`` (so we land here as PARAGRAPH). The
+            # trailing slice — e.g. a book subtitle that lives on a
+            # different page from the title head — is structurally a
+            # heading, not retrieval-noise micro-prose. Promote when
+            # the universal structural signature matches.
+            if _looks_like_subtitle_continuation(text.strip(), chunk_type, parent_heading):
                 chunk_type = ChunkType.HEADING
 
             # Create chunk ID

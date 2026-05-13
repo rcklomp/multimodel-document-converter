@@ -803,6 +803,40 @@ class BatchProcessor:
         return chunk_dict
 
     @staticmethod
+    def _phash_carve_out_should_preserve_duplicate(
+        page_number: Optional[int],
+        image_only_pages: set,
+        pages_with_exported_image: set,
+    ) -> bool:
+        """PLAN_V2.10 Phase 3: should a duplicate IMAGE chunk on the
+        given page be PRESERVED (rather than dropped by the pHash
+        registry) because the page would otherwise have no surviving
+        content?
+
+        The carve-out fires when ALL hold:
+          - `page_number` is known
+          - the page has no surviving TEXT/TABLE chunks
+            (i.e. `page_number in image_only_pages`)
+          - the page has not yet exported any IMAGE chunk in this
+            run — INCLUDING unique images, not just preserved
+            duplicates. Once an image (unique or preserved) is
+            written for the page, subsequent near-duplicates on
+            the same page still drop because the page is covered.
+
+        Returns True ⇒ preserve. The caller is then responsible for
+        adding `page_number` to `pages_with_exported_image` so a
+        second near-duplicate on the same page does not also
+        preserve.
+        """
+        if page_number is None:
+            return False
+        if page_number not in image_only_pages:
+            return False
+        if page_number in pages_with_exported_image:
+            return False
+        return True
+
+    @staticmethod
     def _is_blank_asset(path: Path) -> bool:
         """Check if an image asset is blank (all white/all black/empty).
 
@@ -840,10 +874,23 @@ class BatchProcessor:
 
         Called after patch_corrupted_chunks(); any remaining corrupted text
         must not reach final JSONL.  Non-TEXT chunks are never quarantined.
+
+        PLAN_V2.10 Phase 2 (2026-05-12): switched from
+        `has_encoding_artifacts` (single-match) to `is_irreparably_corrupt`
+        (artifact-ratio + OCR-failure runs). Single-match was over-firing
+        on Fluent Python's encodings chapter where pp125/126/136 contain
+        Python REPL output explaining UTF-8 byte literals like
+        ``bytearray(b'caf\\xc3\\xa9')`` — a chunk with one or two
+        ``\\xHH`` literal escapes in ~1800 chars of legitimate prose
+        registered as "corruption" and was being quarantined post-scout.
+        The ratio-based detector keeps the original corpus contract intact
+        (Combat p66 squadron-roster /C211 + em-dash runs still drop;
+        CRONIN-style /uniFB01 + replacement-char clusters still drop)
+        while sparing low-density legitimate escapes.
         """
         if not getattr(self, "_quarantine_corrupted_chunks", True):
             return chunks
-        from .validators.corruption_interceptor import has_encoding_artifacts
+        from .validators.corruption_interceptor import is_irreparably_corrupt
 
         clean = []
         quarantined = 0
@@ -867,7 +914,7 @@ class BatchProcessor:
             ):
                 clean.append(c)
                 continue
-            if has_encoding_artifacts(c.content):
+            if is_irreparably_corrupt(c.content):
                 quarantined += 1
             else:
                 clean.append(c)
@@ -2961,14 +3008,24 @@ class BatchProcessor:
                 errors.append(f"QA-CHECK-01 failed: {token_result.error_message}")
 
         # Step 5: TextIntegrityScout - Rescue lost text if variance > 10%
+        # Phase 2 (PLAN_V2.10.md): also trigger on per-batch localized shortfall
+        # so the scout fires on large documents where doc-level variance averages
+        # out (e.g. Fluent_Python: 770 pages, 6 missing pages, doc-variance ~0%).
+        per_batch_force_run = self._per_batch_shortfall_fires(
+            chunks=filtered_chunks,
+            batches=split_result.batches,
+            pdf_path=pdf_path,
+        )
         recovery_input = list(filtered_chunks)  # do not mutate the baseline list
         recovered_chunks = self._run_text_integrity_scout(
             chunks=recovery_input,
             source_file=pdf_path.name,
             variance_percent=token_result.variance_percent,
+            force_run=per_batch_force_run,
         )
 
         # Step 6: Re-validate token balance after recovery (polish log level)
+        scout_produced_chunks = len(recovered_chunks) > len(filtered_chunks)
         if token_result.variance_percent < -10.0:
             post_recovery_result = self._run_token_validation(recovered_chunks, pdf_path.name)
             if post_recovery_result.is_valid:
@@ -2987,6 +3044,22 @@ class BatchProcessor:
                     f"{post_recovery_result.variance_percent:.1f}%",
                     flush=True,
                 )
+            all_chunks = recovered_chunks
+        elif scout_produced_chunks:
+            # Per-batch trigger fired and the scout rescued real text on
+            # individual pages — keep those recovery chunks even though
+            # doc-level variance was within tolerance.
+            extra = len(recovered_chunks) - len(filtered_chunks)
+            print(
+                f"✓ [QA-CHECK-01] Per-batch scout recovered {extra} chunk(s) "
+                f"on localized-shortfall batches (doc-variance "
+                f"{token_result.variance_percent:.1f}% within tolerance)",
+                flush=True,
+            )
+            logger.info(
+                f"[QA-CHECK-01] Per-batch TextIntegrityScout added {extra} recovery chunk(s); "
+                f"doc-level variance {token_result.variance_percent:.1f}% remained within tolerance"
+            )
             all_chunks = recovered_chunks
         else:
             all_chunks = filtered_chunks
@@ -3249,6 +3322,49 @@ class BatchProcessor:
             export_chunks = _deduped
 
             # ============================================================
+            # PLAN_V2.10 Phase 3 — `B4B_FULL_DOC_PICTURE_DEDUP`
+            #
+            # Build the set of pages whose only content reaching the
+            # exporter is IMAGE chunks. The cross-page pHash dedup further
+            # below is a publisher-artwork fix (Earthship Vol 1, Python
+            # Distilled): hand-drawn illustrations across consecutive
+            # pages share pHash signatures within Hamming ≤ 10. Without
+            # this guard, the registry rejects every same-style figure
+            # except the first one it sees, orphaning whole image-only
+            # pages and reporting them as MISSING_PAGES at strict-gate
+            # time. The guard preserves AT MOST one image per such page
+            # — subsequent near-duplicates on the same page still drop
+            # because the page already has surviving content.
+            # ============================================================
+            _phash_image_only_pages: set[int] = set()
+            try:
+                _pages_with_non_image = {
+                    int(c.metadata.page_number)
+                    for c in export_chunks
+                    if c.modality in (Modality.TEXT, Modality.TABLE)
+                    and c.metadata
+                    and c.metadata.page_number
+                }
+                _pages_with_image_chunk = {
+                    int(c.metadata.page_number)
+                    for c in export_chunks
+                    if c.modality == Modality.IMAGE
+                    and c.metadata
+                    and c.metadata.page_number
+                }
+                _phash_image_only_pages = _pages_with_image_chunk - _pages_with_non_image
+            except Exception:
+                _phash_image_only_pages = set()
+            # Tracks pages that have already written at least one IMAGE
+            # chunk during this export loop — INCLUDING unique images
+            # (not just preserved near-duplicates). The carve-out below
+            # only fires when an image-only page would otherwise emit
+            # zero IMAGE chunks; once any image has been written for a
+            # page, subsequent near-duplicates on that same page still
+            # drop because the page is already covered.
+            _phash_pages_with_exported_image: set[int] = set()
+
+            # ============================================================
             # METADATA RECORD: write AFTER all filtering so chunk_count
             # reflects the actual exported chunk set.
             # ============================================================
@@ -3337,31 +3453,67 @@ class BatchProcessor:
                                             asset_path=asset_file,
                                         )
 
+                                        _pg = (
+                                            int(chunk.metadata.page_number)
+                                            if chunk.metadata and chunk.metadata.page_number
+                                            else None
+                                        )
                                         if dup_info.is_duplicate:
-                                            # DUPLICATE_REJECTED - skip this chunk
-                                            duplicate_count += 1
                                             orig_page = (
                                                 dup_info.original_record.page_number
                                                 if dup_info.original_record
                                                 else "unknown"
                                             )
-                                            logger.warning(
-                                                f"[DUPLICATE_REJECTED] Skipping {asset_file} "
-                                                f"(duplicate of page {orig_page})"
+                                            # PLAN_V2.10 Phase 3 carve-out:
+                                            # if this duplicate sits on an
+                                            # image-only page that has not
+                                            # yet exported any IMAGE, keep
+                                            # it — rejecting it would orphan
+                                            # the page (MISSING_PAGES). The
+                                            # decision is pinned by the pure
+                                            # `_phash_carve_out_should_preserve_duplicate`
+                                            # helper above so the contract is
+                                            # exercised by the same code path
+                                            # the tests assert.
+                                            if self._phash_carve_out_should_preserve_duplicate(
+                                                page_number=_pg,
+                                                image_only_pages=_phash_image_only_pages,
+                                                pages_with_exported_image=_phash_pages_with_exported_image,
+                                            ):
+                                                _phash_pages_with_exported_image.add(_pg)
+                                                logger.info(
+                                                    f"[PHASH-PAGE-COVERAGE] Preserving near-duplicate "
+                                                    f"{asset_file} on image-only page {_pg} "
+                                                    f"(would otherwise orphan the page; "
+                                                    f"matches asset on page {orig_page})"
+                                                )
+                                                # fall through to write this chunk
+                                            else:
+                                                # DUPLICATE_REJECTED - skip this chunk
+                                                duplicate_count += 1
+                                                logger.warning(
+                                                    f"[DUPLICATE_REJECTED] Skipping {asset_file} "
+                                                    f"(duplicate of page {orig_page})"
+                                                )
+                                                # Delete the duplicate asset file
+                                                try:
+                                                    full_asset_path.unlink()
+                                                    logger.info(f"Deleted duplicate asset: {asset_file}")
+                                                except Exception as del_e:
+                                                    logger.warning(f"Failed to delete duplicate: {del_e}")
+                                                continue  # Skip writing this chunk
+                                        else:
+                                            # Log successful registration; record
+                                            # the page so any later near-duplicate
+                                            # on the same image-only page still
+                                            # drops via the carve-out's "already
+                                            # covered" branch.
+                                            if _pg is not None:
+                                                _phash_pages_with_exported_image.add(_pg)
+                                            logger.info(
+                                                f"[FINALIZING] Asset {filename} linked to "
+                                                f"Page {chunk.metadata.page_number}"
                                             )
-                                            # Delete the duplicate asset file
-                                            try:
-                                                full_asset_path.unlink()
-                                                logger.info(f"Deleted duplicate asset: {asset_file}")
-                                            except Exception as del_e:
-                                                logger.warning(f"Failed to delete duplicate: {del_e}")
-                                            continue  # Skip writing this chunk
-
-                                        # Log successful registration
-                                        logger.info(
-                                            f"[FINALIZING] Asset {filename} linked to "
-                                            f"Page {chunk.metadata.page_number}"
-                                        )
 
                                 except Exception as hash_e:
                                     logger.warning(f"pHash check failed for {asset_file}: {hash_e}")
@@ -4709,7 +4861,20 @@ class BatchProcessor:
         Attach tiny non-label text fragments to neighboring text chunks.
 
         This reduces standalone micro-chunk noise that hurts retrieval quality.
+
+        v2.10 Phase 4: cross-page-split fallback marker chunks
+        (`extraction_method == "hybrid_chunker_pagesplit_fallback"`,
+        content `[CROSS_PAGE_CONTINUED]`) are *sentinel* outputs of the
+        cross-page split emergency path. They must stay standalone — if
+        we merge them into a neighbor, the marker string contaminates
+        retrievable prose (Python_Distilled p472 saw the marker
+        appended onto the "Set Operations" table chunk before this
+        guard was added).
         """
+
+        def is_pagesplit_fallback(ch: IngestionChunk) -> bool:
+            method = getattr(getattr(ch, "metadata", None), "extraction_method", "") or ""
+            return method == "hybrid_chunker_pagesplit_fallback"
 
         def is_code_chunk(ch: IngestionChunk) -> bool:
             try:
@@ -4750,6 +4915,7 @@ class BatchProcessor:
                 cur.modality != Modality.TEXT
                 or is_code_chunk(cur)
                 or not (cur.content or "").strip()
+                or is_pagesplit_fallback(cur)
             ):
                 out.append(cur)
                 i += 1
@@ -4839,6 +5005,7 @@ class BatchProcessor:
                 if (
                     nxt.modality == Modality.TEXT
                     and not is_code_chunk(nxt)
+                    and not is_pagesplit_fallback(nxt)
                     and page_of(nxt) == cur_page
                     and (nxt.content or "").strip()
                 ):
@@ -4855,6 +5022,7 @@ class BatchProcessor:
                 if (
                     prev.modality == Modality.TEXT
                     and not is_code_chunk(prev)
+                    and not is_pagesplit_fallback(prev)
                     and page_of(prev) == cur_page
                     and (prev.content or "").strip()
                 ):
@@ -6046,6 +6214,18 @@ class BatchProcessor:
         near-identical results. The context is already preserved in
         prev_text_snippet/next_text_snippet, so the content duplication is
         unnecessary for RAG.
+
+        v2.10 (`DOCLING_DUPLICATE_DOC_CHUNK_OVERLAP_TRIM` resolution):
+        the comparison is now **page-scoped**. Docling 2.86 occasionally
+        emits two byte-identical DocChunks for the same code block on
+        adjacent pages — e.g. Python_Cookbook DocChunk #335 prov=[396]
+        and DocChunk #336 prov=[397] with identical `dc.text`. The
+        cross-page overlap-trim was stripping chunk[N+1]'s entire
+        content (because chunk[N+1].content equals chunk[N].content's
+        tail in full), dropping that page from coverage. DSO's intended
+        overlap target was always *same-page* sentence trimming;
+        page-scoping the prev/cur pair preserves the intent while
+        eliminating cross-page page-loss.
         """
         trimmed = 0
         last_text_idx = -1
@@ -6058,6 +6238,24 @@ class BatchProcessor:
                 continue
             prev = chunks[last_text_idx]
             if not prev.content:
+                continue
+
+            cur_page = (
+                int(cur.metadata.page_number)
+                if cur.metadata and cur.metadata.page_number
+                else None
+            )
+            prev_page = (
+                int(prev.metadata.page_number)
+                if prev.metadata and prev.metadata.page_number
+                else None
+            )
+            if cur_page is not None and prev_page is not None and cur_page != prev_page:
+                # Cross-page consecutive chunks: skip overlap trim.
+                # Their content may coincidentally match (Docling
+                # duplicate-DocChunks shape) but trimming would drop
+                # page coverage.
+                last_text_idx = i
                 continue
 
             # Find longest exact overlap: tail of prev == head of cur.
@@ -7920,11 +8118,102 @@ class BatchProcessor:
     # TEXT INTEGRITY SCOUT (Recovery Mode)
     # ========================================================================
 
+    def _per_batch_shortfall_fires(
+        self,
+        chunks: List[IngestionChunk],
+        batches: List["BatchInfo"],
+        pdf_path: Path,
+    ) -> bool:
+        """Phase 2 (PLAN_V2.10.md) — Per-batch TextIntegrityScout trigger.
+
+        Returns True when at least one processed batch's page range shows
+        localized text-coverage shortfall, even if doc-level QA-CHECK-01
+        variance is within tolerance. Universal page-shape rule (no
+        filename- or profile-specific logic). Thresholds live in
+        `mmrag_v2.validators.text_integrity_scout_trigger` and are
+        defended by `scripts/probe_phase2_scout_threshold.py`.
+        """
+        try:
+            from .validators.text_integrity_scout_trigger import any_batch_fires
+        except Exception as imp_err:  # pragma: no cover
+            logger.warning(
+                f"[RECOVERY] Per-batch trigger module unavailable; falling back to doc-level gate only: {imp_err}"
+            )
+            return False
+
+        if not batches:
+            return False
+        if not pdf_path or not Path(pdf_path).exists():
+            return False
+
+        # Per-page emitted TEXT-chunk char counts.
+        chunk_chars_per_page: Dict[int, int] = {}
+        for ch in chunks:
+            if ch.modality != Modality.TEXT:
+                continue
+            content = ch.content or ""
+            page_no = getattr(ch.metadata, "page_number", None)
+            if not isinstance(page_no, int) or page_no <= 0:
+                continue
+            chunk_chars_per_page[page_no] = chunk_chars_per_page.get(page_no, 0) + len(content)
+
+        # Per-page source text char counts via PyMuPDF (text layer only).
+        source_chars_per_page: Dict[int, int] = {}
+        doc: Optional[fitz.Document] = None
+        try:
+            try:
+                doc = fitz.open(str(pdf_path))
+            except Exception as open_err:
+                logger.warning(
+                    f"[RECOVERY] Per-batch trigger: failed to open PDF for source text extraction: {open_err}"
+                )
+                return False
+            for page_idx in range(len(doc)):
+                page_no = page_idx + 1
+                if self._processed_pages is not None and page_no not in self._processed_pages:
+                    continue
+                try:
+                    txt = doc.load_page(page_idx).get_text("text") or ""
+                except Exception:
+                    txt = ""
+                source_chars_per_page[page_no] = len(txt.strip())
+        finally:
+            if doc is not None:
+                try:
+                    doc.close()
+                except Exception:
+                    pass
+
+        batch_triples = [
+            (b.batch_index, int(b.start_page), int(b.end_page)) for b in batches
+        ]
+        fired, shapes = any_batch_fires(
+            batches=batch_triples,
+            source_chars_per_page=source_chars_per_page,
+            chunk_chars_per_page=chunk_chars_per_page,
+        )
+        if fired:
+            firing = [s for s in shapes if s.fires()]
+            details = "; ".join(
+                f"batch {s.batch_index + 1} pp{s.start_page}-{s.end_page} "
+                f"var={s.variance_ratio:.0%} missing={list(s.missing_pages)}"
+                for s in firing
+            )
+            logger.info(
+                f"[RECOVERY] Per-batch shortfall trigger fired on {len(firing)}/{len(shapes)} batch(es): {details}"
+            )
+        else:
+            logger.debug(
+                f"[RECOVERY] Per-batch shortfall trigger did not fire across {len(shapes)} batch(es)"
+            )
+        return fired
+
     def _run_text_integrity_scout(
         self,
         chunks: List[IngestionChunk],
         source_file: str,
         variance_percent: float,
+        force_run: bool = False,
     ) -> List[IngestionChunk]:
         """
         Recovery scan to rescue lost text when variance > 10%.
@@ -7943,6 +8232,11 @@ class BatchProcessor:
             chunks: All chunks from layout-aware processing
             source_file: Source filename
             variance_percent: Current token variance (triggers if > 10%)
+            force_run: Phase 2 (PLAN_V2.10.md) — when True, bypass the
+                doc-level variance gate. The per-batch shortfall trigger
+                ORs into this flag so the scout fires on localized
+                shortfalls inside large documents whose doc-level
+                variance lands within tolerance.
 
         Returns:
             Extended chunk list with recovery chunks added
@@ -7960,11 +8254,16 @@ class BatchProcessor:
         MAX_TOTAL_RECOVERY_CHUNKS = 48 if profile_type == "technical_manual" else 200
         ocr_recovery_allowed = bool(self.enable_ocr or self.force_ocr)
 
-        if variance_percent >= RECOVERY_THRESHOLD:
+        if not force_run and variance_percent >= RECOVERY_THRESHOLD:
             logger.info(
                 f"[RECOVERY] Variance {variance_percent:.1f}% is within tolerance, skipping recovery"
             )
             return chunks
+        if force_run and variance_percent >= RECOVERY_THRESHOLD:
+            logger.info(
+                f"[RECOVERY] Doc variance {variance_percent:.1f}% within tolerance but "
+                "per-batch shortfall trigger fired; running scout on localized batches."
+            )
 
         if not ocr_recovery_allowed:
             logger.info(

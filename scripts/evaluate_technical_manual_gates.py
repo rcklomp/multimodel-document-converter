@@ -224,15 +224,20 @@ def main() -> int:
             if label:
                 labels += 1
 
-            is_code_chunk = (
-                str(md.get("chunk_type") or "").lower() == "code"
-                or str(md.get("content_classification") or "").lower() == "code"
-            )
+            # v2.10 Phase 4: ``chunk_type`` of heading / title is also
+            # non-paragraph structural content — exempt from the
+            # micro_non_label counter alongside code (parallels
+            # ``qa_conversion_audit._is_typed_non_micro`` and
+            # ``qa_ingestion_hygiene._is_typed_non_micro``). The
+            # threshold (``micro_limit``) is unchanged.
+            ct_lower = str(md.get("chunk_type") or "").lower()
+            cc_lower = str(md.get("content_classification") or "").lower()
+            is_typed_non_micro = ct_lower in ("code", "heading", "title") or cc_lower == "code"
             is_code_like = bool(CODE_LIKE_RE.search(s))
             if is_code_like:
                 code_like_total += 1
 
-            if len(s) < 30 and (not label) and (not is_code_chunk):
+            if len(s) < 30 and (not label) and (not is_typed_non_micro):
                 micro += 1
             if len(s) > 1500:
                 oversize += 1

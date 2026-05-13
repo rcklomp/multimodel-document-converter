@@ -101,6 +101,37 @@ def test_classify_dense_index_pages_trusts_document_index_label_without_text():
     assert _classify_dense_index_pages(doc) == {285, 286}
 
 
+def test_compact_replacement_char_toc_tail_routes_to_pageskip():
+    doc = _FixtureDoc(
+        [
+            _item(
+                11,
+                "Model Inference: Generating Captions for Images ������������ 328",
+                "text",
+            ),
+            _item(11, "Model Evaluation ������������������������������������ 331", "text"),
+            _item(11, "Further Improvements ������������������������������� 334", "text"),
+            _item(11, "Summary��������������������������������������������� 335", "text"),
+            _item(11, "Index ���������������������������������������������� 337", "section_header"),
+            _item(
+                12,
+                "This ordinary body page references a section .... 42 but is not a TOC tail.",
+                "paragraph",
+            ),
+            _item(
+                12,
+                "Dense-index routing must not fire on a single dotted reference.",
+                "paragraph",
+            ),
+            _item(12, "Another body paragraph with normal prose.", "paragraph"),
+            _item(12, "More body text without page-leader structure.", "paragraph"),
+            _item(12, "Final body line on the negative-control page.", "paragraph"),
+        ]
+    )
+
+    assert _classify_dense_index_pages(doc) == {11}
+
+
 def test_document_index_lines_dedups_per_entry_across_grid_cells():
     # Real Docling 2.86 DocumentIndex grids contain massive cell-level
     # duplication PLUS sliding-window overlap between unique cells, with

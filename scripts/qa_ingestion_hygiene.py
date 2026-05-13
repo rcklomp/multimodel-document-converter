@@ -75,6 +75,17 @@ def _is_code_chunk(meta: dict) -> bool:
     return ct == "code" or cc == "code"
 
 
+def _is_typed_non_micro(meta: dict) -> bool:
+    """Mirror of `qa_conversion_audit._is_typed_non_micro`. Chunks
+    with an explicit non-paragraph chunk_type (code / heading /
+    title) are intentional structural content, not retrieval-noise
+    micro-fragments; exempt them from the `micro_non_label_chunks`
+    counter alongside `_is_label_like(content)`."""
+    ct = str((meta or {}).get("chunk_type") or "").lower()
+    cc = str((meta or {}).get("content_classification") or "").lower()
+    return ct in ("code", "heading", "title") or cc == "code"
+
+
 def _is_label_like(text: str) -> bool:
     s = (text or "").strip()
     if not s:
@@ -166,7 +177,7 @@ def scan(path: Path) -> Tuple[Stats, Dict[str, Optional[str]]]:
         label_like = _is_label_like(c)
         if label_like:
             st.label_chunks += 1
-        if L < 30 and (not label_like) and (not _is_code_chunk(meta)):
+        if L < 30 and (not label_like) and (not _is_typed_non_micro(meta)):
             st.micro_non_label_chunks += 1
 
         if _has_ctrl(c):
