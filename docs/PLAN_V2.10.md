@@ -1411,7 +1411,8 @@ in [`docs/PHASE_5_DEVLIN_HEADING_DIAGNOSTIC.md`](PHASE_5_DEVLIN_HEADING_DIAGNOST
   pass under bare `pytest`.
 * Smoke remains 11/11.
 * No QA thresholds weakened.
-* Code landed in the worktree, not yet committed to `main`.
+* Committed on `main` in `f3d8478` ("feat(v2.10): Phase 5 —
+  HYBRID_CHUNKER_HEADING_PROPAGATION (Devlin) validated-local").
 
 ---
 

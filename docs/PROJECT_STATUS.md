@@ -494,8 +494,9 @@ planned.
 1. `OCR_PATH_HEADING_PROPAGATION` — Firearms.
 2. `KI_EPUB_EXTRACTION_LANE_REWRITE` — KI EPUB.
 
-**Phase 5 `validated-local` (2026-05-13). `HYBRID_CHUNKER_HEADING_PROPAGATION`
-(Devlin). Code landed in the worktree, not yet committed to `main`.**
+**Phase 5 `validated-local` (2026-05-13; committed in `f3d8478` —
+"feat(v2.10): Phase 5 — HYBRID_CHUNKER_HEADING_PROPAGATION (Devlin)
+validated-local"). `HYBRID_CHUNKER_HEADING_PROPAGATION` (Devlin).**
 
 3. `HYBRID_CHUNKER_HEADING_PROPAGATION` — Devlin. Producer-side fix
    in [`src/mmrag_v2/batch_processor.py`](../src/mmrag_v2/batch_processor.py)
