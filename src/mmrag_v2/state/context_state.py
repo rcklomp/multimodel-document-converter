@@ -116,6 +116,29 @@ def is_valid_heading(text: str) -> bool:
     ):
         return False
 
+    # Code/JSON/table payloads can be misclassified as section headers by
+    # Docling. They must not seed cross-chunk heading propagation.
+    if _re.match(r"^(def|class|return|import|from|>>>|\{|\[|```)\b", _lower):
+        return False
+    if _re.match(r"^[A-Z_][A-Z0-9_\s-]{1,40}:\s*[\[{]", text):
+        return False
+
+    # Repeated token artifacts such as "Type Type TypeTypeTypeType" are
+    # stylized divider/OCR failures, not structural headings.
+    words = _re.findall(r"[A-Za-z][A-Za-z0-9_]*", text)
+    if words:
+        compact_alpha = _re.sub(r"[^A-Za-z]+", "", text).lower()
+        for word in {w.lower() for w in words if len(w) >= 3}:
+            if compact_alpha == word * (len(compact_alpha) // len(word)) and (
+                len(compact_alpha) // len(word)
+            ) >= 3:
+                return False
+        if len(words) >= 3:
+            lowered_words = [w.lower() for w in words]
+            max_count = max(lowered_words.count(w) for w in set(lowered_words))
+            if max_count >= 3 and max_count / len(lowered_words) >= 0.5:
+                return False
+
     # "Role: Name" pattern (credit lines in any language)
     if _re.match(r"^[A-Za-z\s]{3,30}:\s+[A-Z]", text):
         return False

@@ -142,9 +142,11 @@ def test_process_pdf_routes_front_matter_after_all_heading_assignment_paths():
     source = inspect.getsource(BatchProcessor.process_pdf)
 
     assert "_apply_vision_aided_front_matter_detection(all_chunks)" in source
+    assert "_apply_vision_aided_front_matter_detection(export_chunks)" in source
     assert source.index("_infer_headings_from_text(all_chunks)") < source.index(
         "_apply_vision_aided_front_matter_detection(all_chunks)"
     )
-    assert source.index("_propagate_headings(all_chunks)") < source.index(
-        "_apply_vision_aided_front_matter_detection(all_chunks)"
+    assert source.count("_propagate_headings(") == 1
+    assert source.index("_propagate_headings(export_chunks)") < source.index(
+        "_apply_vision_aided_front_matter_detection(export_chunks)"
     )

@@ -489,11 +489,54 @@ v2.10 production-tag blockers (8 deferral rows over 7 classes — items
 4 and 5 each cover two docs). No intermediate `v2.9.0` final tag is
 planned.
 
-**Remaining open blockers (3 of 7 classes):**
+**Remaining open blockers (2 of 7 classes):**
 
 1. `OCR_PATH_HEADING_PROPAGATION` — Firearms.
 2. `KI_EPUB_EXTRACTION_LANE_REWRITE` — KI EPUB.
-3. `HYBRID_CHUNKER_HEADING_PROPAGATION` — Devlin.
+
+**Phase 5 `validated-local` (2026-05-13). `HYBRID_CHUNKER_HEADING_PROPAGATION`
+(Devlin). Code landed in the worktree, not yet committed to `main`.**
+
+3. `HYBRID_CHUNKER_HEADING_PROPAGATION` — Devlin. Producer-side fix
+   in [`src/mmrag_v2/batch_processor.py`](../src/mmrag_v2/batch_processor.py)
+   collapses HybridChunker heading propagation to ONE site
+   (export-boundary `_propagate_headings(export_chunks)`). Validator
+   centralized in
+   [`src/mmrag_v2/state/context_state.py::is_valid_heading`](../src/mmrag_v2/state/context_state.py#L64)
+   — tightened against repeated-token artefacts (`Type Type Type…`),
+   code/JSON heading shapes (`GRAPH DATA: {`, `def …`, `>>>`, `{`, `[`,
+   ` ``` `), and bracket-prefixed code labels (`[A-Z_]+:\s*[\[{]`).
+   Generic Docling buckets (`Start`, `Front Matter`) may remain on
+   their owning chunk but are NOT permitted to seed forward
+   carry-state via `_GENERIC_CARRY_HEADINGS`. Devlin's strict-gate
+   HEADING audit: **`PASS coverage 783/790 (99%)`, null_headings=7**
+   (the seven nulls are legitimate front-matter pages before the
+   first real section signal — Pages 3–7). Top 10 attributed
+   headings post-fix are all real chapter/section titles
+   (`'6. Automating Evaluation'` 24, `'B. Parallelization and
+   Scalability'` 21, `'Generation:'` 20, …); the rejected v1
+   garbage strings (`'Type Type TypeTypeTypeType'`,
+   `'GRAPH DATA: {'`, `'Start'`) each have **0** chunks attributed
+   in the corrected output. The full strict gate still returns
+   `QA_FAIL` because of pre-existing VLM image-placeholder findings
+   on the `--vision-provider none --no-refiner` reconvert (out of
+   Phase 5 scope). 7 new tests pin both the happy-path heading
+   carry-forward AND the garbage-rejection contracts in
+   `tests/test_hybrid_chunker_heading_propagation.py`. The
+   "only one propagation site" structural contract is pinned by
+   `tests/test_vision_aided_front_matter.py` via source
+   introspection (`source.count("_propagate_headings(") == 1`).
+   Smoke 11/11 GATE_PASS + 11/11 UNIVERSAL_PASS verified
+   2026-05-13. Diagnostic notes recorded in
+   `docs/PHASE_5_DEVLIN_HEADING_DIAGNOSTIC.md`, including the
+   rejected v1 quality regression and the corrected
+   top-heading distribution. See `docs/PLAN_V2.10.md` §Phase 5.
+
+**Phase 4 `validated-local` (2026-05-13; committed in `8effdfd` —
+"feat(v2.10): land Phase 2/3/4 — TextIntegrityScout + B4B picture
+dedup + cross-page-split"). All Phase 4 charter criteria are met:
+Cookbook & Distilled page-loss closed, smoke 11/11 GATE_PASS, full
+pytest green.**
 
 **Phase 4 `validated-local` (2026-05-13; committed in `8effdfd` —
 "feat(v2.10): land Phase 2/3/4 — TextIntegrityScout + B4B picture

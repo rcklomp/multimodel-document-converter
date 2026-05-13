@@ -3154,11 +3154,10 @@ class BatchProcessor:
         # Look for prominent text patterns (all-caps lines, numbered sections)
         # and use them as parent_heading in the breadcrumb.
         all_chunks = self._infer_headings_from_text(all_chunks)
-        all_chunks = self._propagate_headings(all_chunks)
 
-        # Vision-aided front-matter detection must run after every heading
-        # assignment path so later inference/propagation cannot reintroduce
-        # author or publisher names as structural parents.
+        # Vision-aided front-matter detection must run after heading inference
+        # so author or publisher names are not retained as structural parents.
+        # A second call runs at export after the canonical propagation pass.
         all_chunks = self._apply_vision_aided_front_matter_detection(all_chunks)
 
         # Selective OCR patching for encoding-corrupted chunks.
@@ -3294,6 +3293,11 @@ class BatchProcessor:
             # empty_text_chunks invariant (UNIVERSAL_FAIL) cannot tolerate
             # even one such chunk; this catches every upstream path at once.
             export_chunks = self._drop_empty_text_chunks_before_metadata(export_chunks)
+
+            # Canonical heading propagation runs once, at the export boundary,
+            # after all filters/splitters have exposed the final chunk set.
+            export_chunks = self._propagate_headings(export_chunks)
+            export_chunks = self._apply_vision_aided_front_matter_detection(export_chunks)
 
             # v2.9 Phase 1 (followup): final-stage dedup by chunk_id. The
             # per-document position counter eliminates the bulk of v2.8's
@@ -5583,7 +5587,107 @@ class BatchProcessor:
 
         Falls back to forward-propagation when no TOC is available.
         """
-        toc = getattr(self, "_toc_headings", {})
+        from .state.context_state import is_valid_heading
+
+        _GENERIC_CARRY_HEADINGS = {"start", "front matter"}
+        _rejected_heading_chunk_ids: set[int] = set()
+
+        def _norm_heading(s: str) -> str:
+            import re as _re_norm
+            return _re_norm.sub(r"\s+", " ", s.replace("\xa0", " ")).strip()
+
+        def _is_informative_heading(heading: Optional[str]) -> bool:
+            if not heading or not is_valid_heading(heading):
+                return False
+            return _norm_heading(heading).lower() not in _GENERIC_CARRY_HEADINGS
+
+        def _sanitize_existing_heading(ch: IngestionChunk) -> Optional[str]:
+            heading = ch.metadata.hierarchy.parent_heading
+            if not heading:
+                return None
+            if _is_informative_heading(heading):
+                return heading
+            # Invalid headings are removed rather than allowed to seed carry
+            # state. Generic labels may remain on their own chunk but do not
+            # propagate to neighboring HybridChunker chunks.
+            if not is_valid_heading(heading) or _norm_heading(heading).lower() == "start":
+                _rejected_heading_chunk_ids.add(id(ch))
+                ch.metadata.hierarchy.parent_heading = None
+                bp = ch.metadata.hierarchy.breadcrumb_path or []
+                if len(bp) >= 2:
+                    ch.metadata.hierarchy.breadcrumb_path = [bp[0], bp[-1]]
+                    ch.metadata.hierarchy.level = min(len(ch.metadata.hierarchy.breadcrumb_path), 5)
+                return None
+            return heading
+
+        def _apply_forward_heading(
+            ch: IngestionChunk,
+            heading: str,
+        ) -> None:
+            ch.metadata.hierarchy.parent_heading = heading
+            bp = ch.metadata.hierarchy.breadcrumb_path
+            if bp and len(bp) >= 2:
+                ch.metadata.hierarchy.breadcrumb_path = [bp[0], heading, bp[-1]]
+                ch.metadata.hierarchy.level = min(len(ch.metadata.hierarchy.breadcrumb_path), 5)
+
+        def _is_hybrid_text_without_heading(ch: IngestionChunk) -> bool:
+            if id(ch) in _rejected_heading_chunk_ids:
+                return False
+            if ch.modality != Modality.TEXT or not ch.metadata or not ch.metadata.hierarchy:
+                return False
+            if ch.metadata.hierarchy.parent_heading:
+                return False
+            method = ch.metadata.extraction_method or ""
+            return method.startswith("hybrid_chunker")
+
+        def _page_of(ch: IngestionChunk) -> int:
+            try:
+                return int(ch.metadata.page_number or 0)
+            except Exception:
+                return 0
+
+        def _fill_remaining_hybrid_page_context() -> int:
+            """Fill unordered HybridChunker page-split siblings.
+
+            Some generated technical manuals expose pages where an explicit
+            HybridChunker heading chunk exists, but some page-split siblings
+            occur earlier in the in-memory list. A single forward scan misses
+            those siblings. Page-scoped carry uses the explicit heading found
+            anywhere on that page, then carries that context to later pages
+            that have only page-split continuations.
+            """
+            by_page: Dict[int, List[IngestionChunk]] = {}
+            for item in chunks:
+                if item.modality != Modality.TEXT or not item.metadata or not item.metadata.hierarchy:
+                    continue
+                page = _page_of(item)
+                if page > 0:
+                    by_page.setdefault(page, []).append(item)
+
+            filled = 0
+            carry: Optional[str] = None
+            for page in sorted(by_page):
+                page_chunks = by_page[page]
+                page_heading: Optional[str] = None
+                for item in page_chunks:
+                    heading = _sanitize_existing_heading(item)
+                    if _is_informative_heading(heading):
+                        page_heading = heading
+                        break
+
+                effective_heading = page_heading or carry
+                if effective_heading:
+                    for item in page_chunks:
+                        if _is_hybrid_text_without_heading(item):
+                            _apply_forward_heading(item, effective_heading)
+                            filled += 1
+
+                if _is_informative_heading(page_heading):
+                    carry = page_heading
+
+            return filled
+
+        toc = getattr(self, "_toc_headings", {}) or {}
         assigned = 0
 
         if toc:
@@ -5592,7 +5696,9 @@ class BatchProcessor:
                 return _re_norm.sub(r"\s+", " ", s.replace("\xa0", " ")).strip()
 
             # heading_map: norm_title → breadcrumb at that heading's definition point
-            heading_map: Dict[str, List[str]] = toc.pop("__heading_map__", {})  # type: ignore[arg-type]
+            heading_map: Dict[str, List[str]] = toc.get("__heading_map__", {})  # type: ignore[assignment]
+            fallback_assigned = 0
+            last_heading: Optional[str] = None
 
             for ch in chunks:
                 if not ch.metadata or not ch.metadata.hierarchy:
@@ -5601,11 +5707,23 @@ class BatchProcessor:
                 pg = ch.metadata.page_number
                 toc_breadcrumb = toc.get(pg)
                 if not toc_breadcrumb:
+                    # Partial TOCs are common in generated PDFs. A truthy but
+                    # page-incomplete TOC must not disable the HybridChunker
+                    # forward-propagation fallback for pages outside the TOC map.
+                    if ch.modality != Modality.TEXT:
+                        continue
+                    ph = _sanitize_existing_heading(ch)
+                    if _is_informative_heading(ph):
+                        last_heading = ph
+                    elif last_heading and _is_informative_heading(last_heading):
+                        _apply_forward_heading(ch, last_heading)
+                        assigned += 1
+                        fallback_assigned += 1
                     continue
 
                 existing_bp = ch.metadata.hierarchy.breadcrumb_path
                 doc_name = existing_bp[0] if existing_bp else "Document"
-                current_heading = ch.metadata.hierarchy.parent_heading
+                current_heading = _sanitize_existing_heading(ch)
 
                 if current_heading:
                     current_norm = _norm(current_heading)
@@ -5646,10 +5764,22 @@ class BatchProcessor:
                     parent = toc_breadcrumb[-1]
                     new_bp = [doc_name] + toc_breadcrumb + [f"Page {pg}"]
 
+                if not _is_informative_heading(parent):
+                    continue
+
                 ch.metadata.hierarchy.parent_heading = parent
                 ch.metadata.hierarchy.breadcrumb_path = new_bp
                 ch.metadata.hierarchy.level = min(len(new_bp), 5)
+                if ch.modality == Modality.TEXT:
+                    last_heading = parent
                 assigned += 1
+
+            if fallback_assigned:
+                logger.info(
+                    "[HEADING-PROPAGATE] Assigned headings to %s chunks via "
+                    "forward-propagation fallback outside TOC coverage",
+                    fallback_assigned,
+                )
 
         else:
             # No TOC — forward-propagate last known heading
@@ -5657,15 +5787,21 @@ class BatchProcessor:
             for ch in chunks:
                 if ch.modality != Modality.TEXT or not ch.metadata or not ch.metadata.hierarchy:
                     continue
-                ph = ch.metadata.hierarchy.parent_heading
-                if ph:
+                ph = _sanitize_existing_heading(ch)
+                if _is_informative_heading(ph):
                     last_heading = ph
-                elif last_heading:
-                    ch.metadata.hierarchy.parent_heading = last_heading
-                    bp = ch.metadata.hierarchy.breadcrumb_path
-                    if bp and len(bp) >= 2:
-                        ch.metadata.hierarchy.breadcrumb_path = [bp[0], last_heading, bp[-1]]
+                elif last_heading and _is_informative_heading(last_heading):
+                    _apply_forward_heading(ch, last_heading)
                     assigned += 1
+
+        page_context_assigned = _fill_remaining_hybrid_page_context()
+        if page_context_assigned:
+            assigned += page_context_assigned
+            logger.info(
+                "[HEADING-PROPAGATE] Assigned headings to %s unordered "
+                "HybridChunker page-split chunks via page context",
+                page_context_assigned,
+            )
 
         if assigned:
             source = "TOC hierarchy" if toc else "forward-propagation"

@@ -1299,6 +1299,120 @@ tests + Devlin reconvert ~60 min for ~400 pages + re-enrich
 
 **Cost class:** Reconvert (1 doc) + re-enrich.
 
+#### 2026-05-13 close — `validated-local`
+
+Phase 5 closed in two passes. The first attempt hit
+`HEADING coverage 790/790 (100%)` by propagating
+Docling-emitted garbage section_headers
+(`'Type Type TypeTypeTypeType'`, `'GRAPH DATA: {'`,
+`'Start'`, `'Front Matter'` together attributed to 54% of
+chunks). That run was **rejected** by an audit-time
+quality probe and reworked.
+
+**Corrected fix shape (the one that landed):**
+
+* **Single propagation site.** `_propagate_headings(all_chunks)`
+  was removed from the mid-pipeline call site and replaced with
+  one canonical call to `_propagate_headings(export_chunks)`
+  at the export boundary, after all filters/splitters have
+  exposed the final chunk set. The previous attempt's three
+  propagation sites (mid-pipeline + export-stage + inline
+  `chunk_dict["metadata"]["hierarchy"]` write-loop mutation
+  bypassing the pydantic model) are gone. The "only one site"
+  contract is pinned by source-introspection in
+  `tests/test_vision_aided_front_matter.py::test_process_pdf_routes_front_matter_after_all_heading_assignment_paths`
+  via `assert source.count("_propagate_headings(") == 1`.
+* **Single validator.** Heading validation lives in
+  [`src/mmrag_v2/state/context_state.py::is_valid_heading`](../src/mmrag_v2/state/context_state.py#L64).
+  Tightened against three additional shapes:
+  (a) code/JSON prefixes — `^(def|class|return|import|from|>>>|\{|\[|```\)\b`
+  and bracket-prefixed code labels `^[A-Z_][A-Z0-9_\s-]{1,40}:\s*[\[{]`;
+  (b) repeated-token compact-alpha (`'Type Type TypeTypeTypeType'` →
+  the alphabetic projection equals one word repeated ≥3 times); and
+  (c) repeated-word density (a single word taking ≥50% of a 3+-word
+  heading at ≥3 occurrences). The validator is used by both the
+  initial sanitization pass and the carry-forward gate in
+  `_propagate_headings`. No parallel `_valid_export_heading` exists.
+* **Generic-bucket carry block.** A small set
+  `_GENERIC_CARRY_HEADINGS = {"start", "front matter"}` blocks
+  Docling-generic labels from seeding forward carry. `"Start"`
+  is also stripped from its bearing chunk (Devlin's single PDF
+  bookmark — not useful anywhere); `"Front Matter"` remains
+  on its own chunk but does not propagate.
+* **No `chunk_dict` mutation at write time.** Heading edits
+  happen on the `IngestionChunk` model before serialization.
+
+**Tests (red → green) on the corrected fix:**
+
+`tests/test_hybrid_chunker_heading_propagation.py` — 7 cases:
+
+Positive (the plan's required 4):
+* `test_devlin_shape_batch_boundary_carries_forward`
+* `test_propagation_does_not_overwrite_explicit_heading`
+* `test_propagation_unit_test_from_b429cb5_still_passes`
+* `test_unordered_pagesplit_sibling_uses_same_page_heading`
+
+Negative (the missing pin that v1 lacked):
+* `test_garbage_repeated_heading_does_not_seed_carry_forward`
+  — `"Type Type TypeTypeTypeType"` is stripped from its bearing
+  chunk AND does NOT carry to the next chunk.
+* `test_code_shape_heading_does_not_seed_carry_forward`
+  — `"GRAPH DATA: {"` is stripped + does NOT carry.
+* `test_real_heading_wins_over_garbage_heading_on_same_page`
+  — when a page has both a garbage heading and a real heading,
+  same-page pagesplit siblings inherit the real one;
+  the garbage one's bearing chunk gets its parent_heading
+  cleared.
+
+`tests/test_vision_aided_front_matter.py` updated with one
+extra source-introspection assertion pinning the single
+propagation site.
+
+**Results on the affected reconvert (2026-05-13):**
+
+* `output/Devlin_LLM_Agents/ingestion.jsonl` strict-gate
+  `HEADING: PASS coverage 783/790 (99%) null_headings=7`. The
+  seven nulls are legitimate front-matter pages (3–7) before
+  the first real section signal — front-matter chunks without
+  a heading should stay headingless, not be force-attributed.
+* Top 10 attributed parent_heading values are all real chapter
+  / section titles. Garbage check: `'Type Type TypeTypeTypeType'`
+  **0** chunks, `'GRAPH DATA: {'` **0**, `'Start'` **0**.
+  Top-10 share of total chunks is **22%** (was 54% under v1
+  garbage attribution).
+* The full strict gate still returns `QA_FAIL` because of
+  pre-existing VLM image-placeholder findings on the
+  non-enriched reconvert (`--vision-provider none --no-refiner`,
+  `VISION_PENDING=68`, `IMAGE_DESCRIPTION_UNUSABLE=68/68`).
+  These findings are out of Phase 5 scope and present on every
+  non-enriched reconvert in this cycle.
+* Phase 4 regression suite
+  (`tests/test_cross_page_split_page_attribution.py`):
+  **27 passed**.
+* Vision-aided front-matter suite (with the new propagation-site
+  assertion): **8 passed**.
+* Full bare pytest
+  (`conda run -n mmrag-v2 pytest tests/ -x --ignore=tests/manual -q`):
+  **860 passed, 14 skipped**.
+* Smoke (`bash scripts/smoke_multiprofile.sh`):
+  **11/11 GATE_PASS, 11/11 UNIVERSAL_PASS**.
+
+Investigation notes and the rejected-v1 evidence are recorded
+in [`docs/PHASE_5_DEVLIN_HEADING_DIAGNOSTIC.md`](PHASE_5_DEVLIN_HEADING_DIAGNOSTIC.md).
+
+**Phase 5 close status — `validated-local` (2026-05-13):**
+
+* Devlin HEADING coverage 0.99 (above the 0.80 floor); top-10
+  attributions are all real titles; the garbage strings named
+  in the v1 audit each have 0 chunks.
+* Single propagation site; single heading validator; no
+  `chunk_dict` post-serialization mutation.
+* 7 focused tests + 27 Phase 4 regression + 860 full pytest
+  pass under bare `pytest`.
+* Smoke remains 11/11.
+* No QA thresholds weakened.
+* Code landed in the worktree, not yet committed to `main`.
+
 ---
 
 ### Phase 6 — `OCR_PATH_HEADING_PROPAGATION` (Firearms)
