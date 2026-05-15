@@ -56,8 +56,11 @@ from .schema.ingestion_schema import (
     HierarchyMetadata,
     IngestionChunk,
     IngestionMetadata,
+    Modality,
     SemanticContext,
+    SpatialMetadata,
     ChunkType,
+    _generate_chunk_id,
     create_image_chunk,
     create_table_chunk,
     create_text_chunk,
@@ -142,6 +145,15 @@ def _docling_item_prov_list(item: Any) -> List[Any]:
 
 
 CROSS_PAGE_CONTINUED_MARKER = "[CROSS_PAGE_CONTINUED]"
+
+# v2.10 Phase 7 (`KI_EPUB_EXTRACTION_LANE_REWRITE`): EPUB chapter marker.
+# `_epub_to_html` prepends ``<p>__MMRAG_EPUB_CH_NNNN__</p>`` to each spine
+# chapter; ``_apply_epub_synthetic_pagination`` reads the marker out of the
+# emitted chunk content to derive a per-chapter synthetic page_number
+# (``chapter_1based * 1000 + position_in_chapter // 5``) and emit the
+# documented full-page bbox sentinel ``[0, 0, 1000, 1000]``.
+_EPUB_CHAPTER_MARKER_PREFIX = "__MMRAG_EPUB_CH_"
+_EPUB_CHAPTER_MARKER_RE = re.compile(r"__MMRAG_EPUB_CH_(\d+)__")
 
 
 # Stop-word leads that mark a short standalone chunk as a SYNTACTIC
@@ -1097,14 +1109,19 @@ class V2DocumentProcessor:
         }
         return type_map.get(ext, FileType.PDF)
 
-    @staticmethod
-    def _epub_to_html(epub_path: Path) -> Optional[Path]:
-        """Extract XHTML content from an EPUB file into a temporary HTML file.
+    def _epub_to_html(self, epub_path: Path) -> Optional[Path]:
+        """Extract EPUB spine content into a single HTML file with
+        chapter-boundary markers.
 
-        Uses ebooklib + BeautifulSoup to extract clean body content from each
-        EPUB chapter. The previous ZIP-based approach produced malformed HTML
-        (SVG elements, XHTML namespaces) that Docling's HTML parser couldn't
-        handle, yielding 0 chunks.
+        v2.10 Phase 7 (`KI_EPUB_EXTRACTION_LANE_REWRITE`): walks
+        ``book.spine`` (the canonical reading order) instead of
+        ``get_items_of_type`` (which returns manifest order). Prepends a
+        marker paragraph ``__MMRAG_EPUB_CH_NNNN__`` to each non-empty
+        chapter so the post-Docling pass (``_apply_epub_synthetic_pagination``)
+        can derive a per-chunk synthetic ``page_number``. Stashes the
+        chapter count on ``self._epub_chapter_count`` and the spine
+        chapter names on ``self._epub_spine_chapter_names`` for the
+        post-process pass and diagnostics.
 
         Returns:
             Path to a temporary HTML file, or None on failure.
@@ -1122,19 +1139,31 @@ class V2DocumentProcessor:
         try:
             book = epub.read_epub(str(epub_path), options={"ignore_ncx": True})
             parts: list[str] = []
+            chapter_names: list[str] = []
+            chapter_count = 0
 
-            for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
+            for sp_entry in book.spine:
+                idref = sp_entry[0] if isinstance(sp_entry, tuple) else sp_entry
+                item = book.get_item_with_id(idref)
+                if item is None or item.get_type() != ebooklib.ITEM_DOCUMENT:
+                    continue
                 soup = BeautifulSoup(item.get_content(), "html.parser")
                 body = soup.find("body")
-                if body:
-                    # Extract inner HTML of <body>, stripping SVG and script tags
-                    for tag in body.find_all(["svg", "script", "style"]):
-                        tag.decompose()
-                    inner = body.decode_contents()
-                    if inner.strip():
-                        parts.append(inner)
+                if body is None:
+                    continue
+                for tag in body.find_all(["svg", "script", "style"]):
+                    tag.decompose()
+                inner = body.decode_contents()
+                if not inner.strip():
+                    continue
+                chapter_count += 1
+                chapter_names.append(item.get_name() or f"chapter_{chapter_count}")
+                marker_para = f"<p>{_EPUB_CHAPTER_MARKER_PREFIX}{chapter_count:04d}__</p>"
+                parts.append(marker_para + "\n" + inner)
 
             if not parts:
+                self._epub_chapter_count = 0
+                self._epub_spine_chapter_names = []
                 return None
 
             html = (
@@ -1149,11 +1178,177 @@ class V2DocumentProcessor:
             )
             tmp.write(html)
             tmp.close()
-            logger.info(f"[EPUB] Extracted {len(parts)} chapters, {len(html)} bytes")
+            self._epub_chapter_count = chapter_count
+            self._epub_spine_chapter_names = chapter_names
+            logger.info(
+                f"[EPUB] Extracted {chapter_count} spine chapters, {len(html)} bytes; "
+                f"chapter markers embedded for synthetic pagination"
+            )
             return Path(tmp.name)
         except Exception as exc:
             logger.warning(f"[EPUB] Failed to convert EPUB to HTML: {exc}")
             return None
+
+    def _apply_epub_synthetic_pagination(
+        self,
+        chunks: List[IngestionChunk],
+        chapter_count: int,
+    ) -> Generator[IngestionChunk, None, None]:
+        """v2.10 Phase 7 (`KI_EPUB_EXTRACTION_LANE_REWRITE`): rewrite EPUB
+        chunks with deterministic per-chapter synthetic ``page_number`` and
+        the documented full-page bbox sentinel ``[0, 0, 1000, 1000]``.
+
+        EPUB has no native pagination; ``_epub_to_html`` inserts a
+        per-chapter marker (``__MMRAG_EPUB_CH_NNNN__``) at the head of each
+        spine chapter. This pass walks chunks in emission order, switches
+        the running chapter index when a marker appears in chunk content,
+        strips the marker, and assigns:
+
+            page_number = chapter_1based * 1000 + position_in_chapter // 5
+            bbox = [0, 0, 1000, 1000]
+            extraction_method = "epub_html"
+
+        Pre-marker fallback: Docling's HTML parser sometimes drops the
+        first one or more marker paragraphs (e.g. KI EPUB's titlepage +
+        colophon are stripped before the first surviving marker reaches
+        the chunk stream). Chunks that arrive before any marker are
+        buffered and back-attributed to chapter ``(first_marker - 1)``
+        once the first marker is seen — that's the chapter directly
+        preceding the first surviving marker in spine order. When NO
+        marker survives (catastrophic), the buffer flushes to chapter 1.
+
+        Chunks that become empty after marker removal are dropped (those
+        are the marker-only paragraphs Docling emits as standalone chunks).
+        ``chunk_id`` is regenerated with the new ``page_number`` and a
+        monotonic global position so the v2.9 chunk_id position-component
+        contract (no duplicate chunk_ids within a document) holds across
+        the rewrite.
+        """
+        marker_re = _EPUB_CHAPTER_MARKER_RE
+        full_page_bbox = [0, 0, COORD_SCALE, COORD_SCALE]
+
+        def _rewrite_chunk(
+            chunk: IngestionChunk,
+            cleaned: str,
+            new_page: int,
+            global_pos: int,
+        ) -> IngestionChunk:
+            chunk.content = cleaned
+            meta = chunk.metadata
+            if meta is not None:
+                meta.page_number = new_page
+                meta.extraction_method = "epub_html"
+                if meta.refined_content:
+                    refined_cleaned = marker_re.sub("", meta.refined_content).strip()
+                    meta.refined_content = refined_cleaned or cleaned
+                else:
+                    meta.refined_content = cleaned
+                meta.spatial = SpatialMetadata(
+                    bbox=list(full_page_bbox),
+                    page_width=COORD_SCALE,
+                    page_height=COORD_SCALE,
+                )
+            modality_str = (
+                chunk.modality.value if hasattr(chunk.modality, "value") else "text"
+            )
+            chunk.chunk_id = _generate_chunk_id(
+                chunk.doc_id,
+                cleaned,
+                new_page,
+                modality_str,
+                global_pos,
+            )
+            return chunk
+
+        pre_marker_buffer: List[Tuple[IngestionChunk, str]] = []
+        current_chapter: Optional[int] = None
+        chapter_position = 0
+        global_position = 0
+        emitted = 0
+        # Per-synthetic-page seen set: drop byte-equal content within the
+        # same synthetic page so qa_universal_invariants'
+        # ``within_page_text_dupe_excess`` check does not fire on
+        # producer-side short-text repeats ("Voorbeeldprompt:", "of",
+        # etc. emitted twice within a 5-chunk window).
+        seen_per_page: Dict[int, set[str]] = {}
+        dedup_skipped = 0
+
+        def _emit_for_chapter(
+            chunk: IngestionChunk,
+            cleaned: str,
+            chapter: int,
+            chapter_pos: int,
+        ) -> Tuple[Optional[IngestionChunk], int]:
+            nonlocal global_position, emitted, dedup_skipped
+            new_page = chapter * 1000 + (chapter_pos // 5)
+            page_seen = seen_per_page.setdefault(new_page, set())
+            if cleaned in page_seen:
+                dedup_skipped += 1
+                return None, chapter_pos
+            page_seen.add(cleaned)
+            global_position += 1
+            emitted += 1
+            return (
+                _rewrite_chunk(chunk, cleaned, new_page, global_position),
+                chapter_pos + 1,
+            )
+
+        for chunk in chunks:
+            text = chunk.content or ""
+            markers = list(marker_re.finditer(text))
+            cleaned = marker_re.sub("", text).strip() if markers else text.strip()
+            if not cleaned and not markers:
+                continue
+            if markers:
+                first_marker_idx = int(markers[0].group(1))
+                if current_chapter is None:
+                    # First marker we have seen. Back-attribute the
+                    # pre-marker buffer to the chapter preceding this
+                    # marker (e.g. KI: marker 4 is first; buffered
+                    # chunks 0..32 belong to chapter 3 = cW.xhtml TOC).
+                    flush_chapter = max(1, first_marker_idx - 1)
+                    flush_pos = 0
+                    for buf_chunk, buf_cleaned in pre_marker_buffer:
+                        emitted_chunk, flush_pos = _emit_for_chapter(
+                            buf_chunk, buf_cleaned, flush_chapter, flush_pos
+                        )
+                        if emitted_chunk is not None:
+                            yield emitted_chunk
+                    pre_marker_buffer.clear()
+                    current_chapter = first_marker_idx
+                    chapter_position = 0
+                elif first_marker_idx != current_chapter:
+                    current_chapter = first_marker_idx
+                    chapter_position = 0
+            if not cleaned:
+                # Marker-only chunk; chapter advanced above, drop the chunk.
+                continue
+            if current_chapter is None:
+                # No marker seen yet; defer chapter assignment.
+                pre_marker_buffer.append((chunk, cleaned))
+                continue
+            emitted_chunk, chapter_position = _emit_for_chapter(
+                chunk, cleaned, current_chapter, chapter_position
+            )
+            if emitted_chunk is not None:
+                yield emitted_chunk
+
+        # Catastrophic: no marker ever seen → flush buffer to chapter 1.
+        if pre_marker_buffer and current_chapter is None:
+            flush_pos = 0
+            for buf_chunk, buf_cleaned in pre_marker_buffer:
+                emitted_chunk, flush_pos = _emit_for_chapter(
+                    buf_chunk, buf_cleaned, 1, flush_pos
+                )
+                if emitted_chunk is not None:
+                    yield emitted_chunk
+            pre_marker_buffer.clear()
+
+        logger.info(
+            f"[EPUB] Synthetic pagination applied: chapters={chapter_count} "
+            f"emitted_chunks={emitted} dropped_chunks={len(chunks) - emitted} "
+            f"per_page_dedup_skipped={dedup_skipped}"
+        )
 
     def _is_advertisement(self, text: str) -> bool:
         """Detect if text is likely an advertisement (SRS Rule 4)."""
@@ -2635,6 +2830,30 @@ class V2DocumentProcessor:
         """
         Process a document and yield validated IngestionChunk objects.
 
+        v2.10 Phase 7: when the source is an EPUB, the inner generator's
+        chunks are buffered and rewritten by
+        ``_apply_epub_synthetic_pagination`` so EPUB chunks emit a
+        deterministic synthetic ``page_number`` (per chapter + position)
+        and the documented full-page bbox sentinel. PDF and other formats
+        stream through unchanged.
+        """
+        src_path = Path(input_path)
+        is_epub_source = src_path.suffix.lower() == ".epub"
+        inner = self._process_document_inner(input_path)
+        if is_epub_source:
+            buffered = list(inner)
+            chapter_count = getattr(self, "_epub_chapter_count", 0) or 0
+            yield from self._apply_epub_synthetic_pagination(buffered, chapter_count)
+        else:
+            yield from inner
+
+    def _process_document_inner(
+        self,
+        input_path: str,
+    ) -> Generator[IngestionChunk, None, None]:
+        """
+        Inner per-format extraction generator.
+
         Args:
             input_path: Path to document file
 
@@ -2644,6 +2863,8 @@ class V2DocumentProcessor:
         Note:
             In batch processing mode, uses overrides for doc_hash, source_file,
             page_offset, and inherits initial_state for breadcrumb continuity.
+            EPUB post-processing (synthetic pagination) is applied by the
+            public ``process_document`` wrapper, not here.
         """
         file_path = Path(input_path).resolve()
 

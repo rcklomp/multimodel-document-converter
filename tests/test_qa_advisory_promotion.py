@@ -11,6 +11,7 @@ Allowed advisory codes:
 - `ASSET_TINY` (unconditional)
 - `PAGE_COUNT_UNKNOWN` (unconditional; EPUB lane)
 - `SCRIPT_ADVISORY_FAIL` (unconditional; qa_semantic_fidelity exits 0)
+- `MISSING_CHAPTERS` (conditional: edge-only low-content EPUB spine items)
 - `VISION_HARD_FALLBACK_RATE` (conditional: every hard_fallback chunk
   must carry the F4 sentinel `complex_asset_short_response_after_retry`)
 
@@ -28,8 +29,10 @@ if str(SCRIPTS) not in sys.path:
 
 from qa_full_conversion import (  # noqa: E402
     _ALLOWED_ADVISORY_WARN_CODES,
+    EpubChapterInfo,
     _F4_HARD_FALLBACK_SENTINEL,
     Issue,
+    _epub_chapter_coverage_issues,
     _warn_is_documented_advisory,
 )
 
@@ -54,6 +57,24 @@ def _ok_image_chunk():
     }
 
 
+def _chapter(index: int, name: str, text_len: int, sample: str = "") -> EpubChapterInfo:
+    return EpubChapterInfo(
+        index=index,
+        name=name,
+        text_len=text_len,
+        text_sample=sample,
+    )
+
+
+def _text_chunk_on_epub_page(page_number: int):
+    return {
+        "modality": "text",
+        "metadata": {
+            "page_number": page_number,
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # Unconditional allowed advisories
 # ---------------------------------------------------------------------------
@@ -72,6 +93,118 @@ def test_page_count_unknown_is_documented_advisory() -> None:
 def test_script_advisory_fail_is_documented_advisory() -> None:
     issue = Issue("WARN", "SCRIPT_ADVISORY_FAIL", "advisory only.")
     assert _warn_is_documented_advisory(issue, []) is True
+
+
+def test_missing_epub_leading_structural_chapters_are_documented_advisory(
+    monkeypatch,
+) -> None:
+    """Leading low-content title/colophon spine items can be stripped by
+    Docling's HTML parser without representing real body-content loss.
+    """
+    chapters = [
+        _chapter(1, "titlepage.xhtml", 0),
+        _chapter(2, "OEBPS/c9.xhtml", 536, "Colofon Copyright: Example"),
+        _chapter(3, "OEBPS/chapter1.xhtml", 4000, "Chapter 1 real content"),
+        _chapter(4, "OEBPS/chapter2.xhtml", 4000, "Chapter 2 real content"),
+    ]
+    monkeypatch.setattr(
+        "qa_full_conversion._epub_spine_chapters",
+        lambda _path: chapters,
+    )
+
+    issues = _epub_chapter_coverage_issues(
+        Path("book.epub"),
+        [_text_chunk_on_epub_page(3000), _text_chunk_on_epub_page(4000)],
+        allow_missing=False,
+    )
+
+    assert len(issues) == 1
+    assert issues[0].severity == "WARN"
+    assert issues[0].code == "MISSING_CHAPTERS"
+    assert _warn_is_documented_advisory(issues[0], []) is True
+
+
+def test_missing_epub_internal_chapter_is_FAIL(monkeypatch) -> None:
+    """A missing internal chapter is not a structural edge artifact; it is
+    real content-loss risk even if the missing item is short.
+    """
+    chapters = [
+        _chapter(1, "OEBPS/chapter1.xhtml", 4000, "Chapter 1 real content"),
+        _chapter(2, "OEBPS/titlepage.xhtml", 0),
+        _chapter(3, "OEBPS/chapter3.xhtml", 4000, "Chapter 3 real content"),
+    ]
+    monkeypatch.setattr(
+        "qa_full_conversion._epub_spine_chapters",
+        lambda _path: chapters,
+    )
+
+    issues = _epub_chapter_coverage_issues(
+        Path("book.epub"),
+        [_text_chunk_on_epub_page(1000), _text_chunk_on_epub_page(3000)],
+        allow_missing=False,
+    )
+
+    assert len(issues) == 1
+    assert issues[0].severity == "FAIL"
+    assert issues[0].code == "MISSING_CHAPTERS"
+    assert _warn_is_documented_advisory(issues[0], []) is False
+
+
+def test_missing_epub_content_bearing_edge_chapter_is_FAIL(monkeypatch) -> None:
+    """The edge carve-out is for low-value structural stubs only. A real
+    first chapter that disappears must remain a hard failure.
+    """
+    chapters = [
+        _chapter(1, "OEBPS/introduction.xhtml", 2500, "Introduction with real prose"),
+        _chapter(2, "OEBPS/chapter1.xhtml", 4000, "Chapter 1 real content"),
+        _chapter(3, "OEBPS/chapter2.xhtml", 4000, "Chapter 2 real content"),
+    ]
+    monkeypatch.setattr(
+        "qa_full_conversion._epub_spine_chapters",
+        lambda _path: chapters,
+    )
+
+    issues = _epub_chapter_coverage_issues(
+        Path("book.epub"),
+        [_text_chunk_on_epub_page(2000), _text_chunk_on_epub_page(3000)],
+        allow_missing=False,
+    )
+
+    assert len(issues) == 1
+    assert issues[0].severity == "FAIL"
+    assert issues[0].code == "MISSING_CHAPTERS"
+
+
+def test_missing_epub_short_opaque_edge_chapter_is_FAIL(monkeypatch) -> None:
+    """Short is not enough. An edge chapter must have structural
+    name/text evidence before MISSING_CHAPTERS can be advisory.
+    """
+    chapters = [
+        _chapter(1, "OEBPS/c1.xhtml", 400, "A concise but real opening essay."),
+        _chapter(2, "OEBPS/chapter1.xhtml", 4000, "Chapter 1 real content"),
+    ]
+    monkeypatch.setattr(
+        "qa_full_conversion._epub_spine_chapters",
+        lambda _path: chapters,
+    )
+
+    issues = _epub_chapter_coverage_issues(
+        Path("book.epub"),
+        [_text_chunk_on_epub_page(2000)],
+        allow_missing=False,
+    )
+
+    assert len(issues) == 1
+    assert issues[0].severity == "FAIL"
+    assert issues[0].code == "MISSING_CHAPTERS"
+
+
+def test_missing_chapters_warn_without_edge_structural_message_is_NOT_advisory() -> None:
+    """Defensive: the allow-list code alone is not enough. The WARN must
+    be the narrow edge-structural case emitted by the EPUB coverage gate.
+    """
+    issue = Issue("WARN", "MISSING_CHAPTERS", "internal chapter 7 missing")
+    assert _warn_is_documented_advisory(issue, []) is False
 
 
 def test_unknown_warn_code_is_NOT_advisory() -> None:
@@ -136,12 +269,17 @@ def test_vision_hf_rate_with_missing_vision_error_is_NOT_advisory() -> None:
 def test_allowed_advisory_codes_match_expected_set() -> None:
     """Pin the set so changes to QUALITY_GATES.md governance are
     visible in diffs (matching the SCAN0013 GATE_PASS variant
-    discipline)."""
+    discipline). MISSING_CHAPTERS was added in v2.10 Phase 7
+    (KI_EPUB_EXTRACTION_LANE_REWRITE), but the advisory path is pinned
+    separately above: only edge low-content structural spine items are
+    allowed to remain WARN.
+    """
     assert _ALLOWED_ADVISORY_WARN_CODES == frozenset({
         "ASSET_TINY",
         "PAGE_COUNT_UNKNOWN",
         "SCRIPT_ADVISORY_FAIL",
         "VISION_HARD_FALLBACK_RATE",
+        "MISSING_CHAPTERS",
     })
 
 

@@ -60,7 +60,11 @@ single-page push gate restored the 0013 form-detection that the first
 Phase 6 iteration accidentally flipped). The corpus-level AFTER
 snapshot has not yet been authored, so the v2.10 ship bar remains
 Phase 8's full 34-doc re-verification. Phase 7
-(`KI_EPUB_EXTRACTION_LANE_REWRITE`) is the next implementation target.
+(`KI_EPUB_EXTRACTION_LANE_REWRITE`) is now `validated-local`
+(2026-05-15): KI EPUB strict `QA_PASS_WITH_ADVISORIES`, ChatGPT EPUB
+regression `QA_PASS_WITH_ADVISORIES`, smoke 11/11 GATE_PASS + 11/11
+UNIVERSAL_PASS. Phase 8 (strict-gate re-verification + v2.10 release
+prep) is the next implementation target.
 
 **AFTER state (target):** `docs/QUALITY_SNAPSHOT_<DATE>_v2.10_after.md`
 authored at Phase 8 close.
@@ -103,7 +107,7 @@ production-tag blockers** under the unchanged strict gate
 | # | Doc(s) | Class | Affected pages | Retrieval impact | v2.10 status | Root cause / current evidence |
 |---|---|---|---:|---|---|---|
 | 1 | Firearms | `OCR_PATH_HEADING_PROPAGATION` | ~300 (HEADING 72 % → 99.7 %) | Moderate | `validated-local` (2026-05-15). Full strict gate `QA_PASS: failures=0 warnings=0`. Audit-fix iteration also closed the pre-existing TEXT `infix_artifacts: 148 → 0` via the new chunk-content repair `_repair_infix_step_numbers` (universal heuristic that **behaviorally mirrors** the audit detector after its newline / stop-word post-filters; parity pinned by re-applying the audit detector to repaired content), and the VLM `image_placeholder_ratio: 0.2424 → 0.0000` via targeted enrichment of the 264 ``vision_status="pending"`` shadow chunks (`scripts/enrich_firearms_pending_only.py` delegating to the canonical `enrich_image_chunks_v29.py::_enrich_one` helper). | OCR/element-by-element path did not promote Docling `section_header` items into `ContextStateV2.hierarchy_stack`. Phase 6 fix: `Region.is_heading` / `ProcessedChunk.is_heading` carry Docling's structural label through `LayoutAwareOCRProcessor`; `BatchProcessor._attribute_ocr_chunk_heading` does ordered per-chunk push+read; `_promote_ocr_section_headers` is the fallback for VLM/Tesseract-fullpage paths. New `ContextStateV2.get_section_heading()` skips the level-0 doc-title breadcrumb. Validator tightenings (terminal-period sentence-shape on `.` only — `?` and `!` accepted; numbered-prefix body-case shape) centralised in `is_valid_heading`. Single-page push gate (`self._doc_total_pages > 1`) on BOTH call sites prevents form-shape regressions on the canonical 0013 invoice. HEADING coverage 1091/1094 (3 NULL = page-1 front-matter, correctly unattributed by ordered design), top-5 all real chapter/section titles; smoke 11/11 GATE_PASS + 11/11 UNIVERSAL_PASS; Earthship_Vol1 full-doc HEADING coverage unchanged at 1.00 (549/549). See [docs/PHASE_6_FIREARMS_OCR_HEADING_DIAGNOSTIC.md](PHASE_6_FIREARMS_OCR_HEADING_DIAGNOSTIC.md). |
-| 2 | KI_En_ChatGPT_Praktische_Gids | `KI_EPUB_EXTRACTION_LANE_REWRITE` | full doc | Moderate | open | EPUB lane structural gaps: no pagination, no bbox, heavy dedup excess. `processor._epub_to_html` ([src/mmrag_v2/processor.py:857](../src/mmrag_v2/processor.py#L857)) routes EPUBs through Docling HTML — no page-number provenance. (`docs/archive/PLAN_V2.9__PHASE4.md` Step 6) |
+| 2 | KI_En_ChatGPT_Praktische_Gids | `KI_EPUB_EXTRACTION_LANE_REWRITE` | full doc | Moderate | `validated-local` (Phase 7, 2026-05-15). KI EPUB strict `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1` (advisory = `MISSING_CHAPTERS` for the two contiguous leading low-content structural spine items — titlepage + colophon — Docling's HTML parser strips before any chunk emerges). ChatGPT EPUB regression control also `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1`. Smoke 11/11 GATE_PASS + 11/11 UNIVERSAL_PASS. | Fix lives in the existing EPUB lane: `_epub_to_html` walks `book.spine` and prepends a `<p>__MMRAG_EPUB_CH_NNNN__</p>` marker to each non-empty chapter; the post-Docling `_apply_epub_synthetic_pagination` pass scans chunks in emission order, rewrites `page_number = chapter_1based * 1000 + position_in_chapter // 5`, sets the EPUB sentinel `bbox=[0,0,1000,1000]` + `extraction_method="epub_html"`, regenerates `chunk_id` with the new page (preserving the v2.9 position-component uniqueness contract), and dedups byte-equal content within a 5-chunk synthetic page. Pre-marker buffer back-attributes chunks emitted before any marker survives to chapter `first_marker - 1` (handles KI's titlepage+colophon stripping by Docling). `qa_full_conversion.py` adds an EPUB-aware branch that enumerates spine chapters via `ebooklib` and replaces PDF page-coverage with `MISSING_CHAPTERS`; it is WARN/advisory only when every missing item is a contiguous leading/trailing low-content structural spine item. Internal or content-bearing missing chapters remain FAIL. |
 | 3 | Devlin_LLM_Agents | `HYBRID_CHUNKER_HEADING_PROPAGATION` | ~250 (HEADING 72 %) | Moderate | `validated-local` (Phase 5, 2026-05-13, `f3d8478`) | Cross-batch heading carry-forward (`b429cb5`) verified in unit tests + small probe but does NOT move Devlin's metric. Root cause: Devlin's batches end mid-section without an end-of-section heading chunk. Phase 5 fix: single propagation site at export boundary + heading validator tightened against garbage/code shapes. Devlin HEADING 99%. |
 | 4 | Python_Cookbook | `CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION` | 4 pages | None — content present, wrong `page_number` | `validated-local` (Phase 4, 2026-05-13, `8effdfd`) | Cross-page split at [src/mmrag_v2/processor.py:2870-2929](../src/mmrag_v2/processor.py#L2870-L2929) emits same merged `text.strip()` to every contributing page. Phase 4 fix: per-page text split via `prov.charspan` slicing + bare DocItem dereferencing. All 4 Cookbook pages closed. |
 | 5 | Python_Distilled | `CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION` (3p) + `B4B_FULL_DOC_PICTURE_DEDUP` (3p) | 7 / 1411 | Mixed | `validated-local` (Phase 3 + Phase 4, 2026-05-13) | Both portions closed. Phase 3: image-only pages extracted under relaxed threshold. Phase 4: cross-page-split MISSING_PAGES=0. |
@@ -310,7 +314,7 @@ chunks via cloud `qwen3-vl-plus`. Phase 7
 | 4 | `CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION` (per-page text split with correct `page_number`) | Python_Cookbook, Python_Distilled (3 pages overlap with Phase 3) | Cookbook + Distilled (2 docs; Distilled overlaps Phase 3) | yes (image chunks on both) | `validated-local` (2026-05-13, `8effdfd`) |
 | 5 | `HYBRID_CHUNKER_HEADING_PROPAGATION` (Devlin-shape batch-boundary investigation + fix) | Devlin_LLM_Agents | Devlin (1 doc) | yes | `validated-local` (2026-05-13, `f3d8478`) |
 | 6 | `OCR_PATH_HEADING_PROPAGATION` (ordered per-chunk attribution via `Region.is_heading` / `ProcessedChunk.is_heading`; central `is_valid_heading` tightened for terminal-period sentence-shape `.`-only + numbered-prefix body-case; single-page push gate on BOTH per-chunk and fallback paths; audit-fix `BatchProcessor._repair_infix_step_numbers` repairs OCR-mashed numbered-step boundaries and behaviorally mirrors the audit detector after its newline / stop-word post-filters) | Firearms (primary) + Earthship_Vol1 (regression) | Firearms reconverted; Earthship_Vol1 reconverted for regression confirmation | targeted enrichment of 264 ``vision_status="pending"`` shadow chunks via cloud `qwen3-vl-plus` | `validated-local` (2026-05-15). Firearms `QA_PASS: failures=0 warnings=0`. |
-| 7 | `KI_EPUB_EXTRACTION_LANE_REWRITE` (pagination + bbox + dedup in EPUB lane) | KI_En_ChatGPT_Praktische_Gids; ChatGPT_Praktijk_handboek (regression control) | KI EPUB (1 doc); ChatGPT EPUB validated as control | yes (KI image chunks) | `pending` |
+| 7 | `KI_EPUB_EXTRACTION_LANE_REWRITE` (pagination + bbox + dedup in EPUB lane) | KI_En_ChatGPT_Praktische_Gids; ChatGPT_Praktijk_handboek (regression control) | KI EPUB (1 doc); ChatGPT EPUB validated as control | yes (KI image chunks) | `validated-local` (2026-05-15). KI strict `QA_PASS_WITH_ADVISORIES`. ChatGPT regression `QA_PASS_WITH_ADVISORIES`. Smoke 11/11 GATE_PASS + 11/11 UNIVERSAL_PASS. |
 | 8 | Strict-Gate Re-Verification + v2.10 Release Prep (Qdrant rebuild, AFTER snapshot, tag) | all 34 | no | no | `pending` |
 
 ---
@@ -1711,13 +1715,10 @@ Goals for the fix:
 1. Probe both EPUBs: dump the spine order, item ordering,
    chunk_id collision count post-v2.9, and the current bbox
    distribution.
-2. Modify `_epub_to_html` to track chapter index per content
-   block. Annotate the produced HTML with `data-epub-chapter`
-   and `data-epub-position` attributes; Docling preserves
-   data attributes through the HTML parse.
-3. In the HTML chunk emission path (find it via grepping for
-   `FileType.HTML` and `_convert_html` in processor.py), use
-   `data-epub-chapter` to derive a synthetic
+2. Modify `_epub_to_html` to walk `book.spine` and prepend
+   `__MMRAG_EPUB_CH_NNNN__` chapter-boundary markers to the
+   generated HTML in reading order.
+3. In the EPUB post-process path, scan surviving markers to derive a synthetic
    `page_number = chapter_index * 1000 + sequence_within_chapter
    // 5` (chapter at offset 1000-2000, etc.), and emit
    `bbox=[0, 0, 1000, 1000]` with `extraction_method="epub_html"`.
@@ -1760,7 +1761,7 @@ Goals for the fix:
   Reports `QA_PASS` or `QA_PASS_WITH_ADVISORIES`.
 - ChatGPT_Praktijk_handboek remains `QA_PASS_WITH_ADVISORIES`
   (regression control).
-- 4 new tests pass.
+- EPUB-lane tests and conditional `MISSING_CHAPTERS` advisory pins pass.
 
 **Risk:** Medium-high. EPUB lane is touched by every
 ebooklib-related code path. The synthetic page-number

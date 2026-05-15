@@ -62,6 +62,14 @@ class Issue:
     message: str
 
 
+@dataclass(frozen=True)
+class EpubChapterInfo:
+    index: int
+    name: str
+    text_len: int
+    text_sample: str
+
+
 # Plan v2.9 Phase G (2026-05-11) — advisory-warning allowance.
 # WARN codes in this set are documented allowed-advisories per
 # `docs/QUALITY_GATES.md` "Advisory Warning Classes". When EVERY
@@ -79,6 +87,11 @@ _ALLOWED_ADVISORY_WARN_CODES = frozenset(
         "PAGE_COUNT_UNKNOWN",
         "SCRIPT_ADVISORY_FAIL",
         "VISION_HARD_FALLBACK_RATE",  # conditional: all hard_fallbacks must carry the F4 sentinel
+        # v2.10 Phase 7: EPUB lane. Allowed only for WARN-severity
+        # MISSING_CHAPTERS raised by _epub_chapter_coverage_issues when
+        # every missing chapter is an edge-only low-content structural
+        # spine item. Internal/content-bearing missing chapters are FAIL.
+        "MISSING_CHAPTERS",
     }
 )
 
@@ -207,6 +220,197 @@ def _read_pdf_page_count(path: Path) -> Optional[int]:
             doc.close()
     except Exception:
         return None
+
+
+def _is_epub_source(path: Optional[Path]) -> bool:
+    """v2.10 Phase 7: detect EPUB source paths. Producer
+    (`processor._epub_to_html` + `_apply_epub_synthetic_pagination`)
+    emits synthetic page numbers (`chapter_1based * 1000 + position // 5`)
+    for EPUBs, so the PDF page-coverage check does not apply.
+    """
+    return path is not None and path.suffix.lower() == ".epub"
+
+
+_EPUB_STRUCTURAL_NAME_RE = re.compile(
+    r"(?:^|[/_.-])(?:cover|titlepage|title|colophon|copyright|dedication|"
+    r"imprint|toc|contents|nav)(?:[/_.-]|$)",
+    re.IGNORECASE,
+)
+_EPUB_STRUCTURAL_TEXT_RE = re.compile(
+    r"(?:©|\b(?:colofon|colophon|copyright|all rights reserved|alle rechten "
+    r"voorbehouden|isbn|uitgever|publisher|published by|cover|omslag|"
+    r"title page|inhoudsopgave)\b)",
+    re.IGNORECASE,
+)
+
+
+def _epub_spine_chapters(path: Path) -> Optional[list[EpubChapterInfo]]:
+    """v2.10 Phase 7: enumerate non-empty spine chapters via ebooklib —
+    mirrors the producer's chapter enumeration in
+    `processor._epub_to_html` so the gate's expected chapter set lines
+    up with what the producer emits.
+    """
+    try:
+        import ebooklib  # type: ignore
+        from ebooklib import epub  # type: ignore
+        from bs4 import BeautifulSoup  # type: ignore
+    except Exception:
+        return None
+    try:
+        book = epub.read_epub(str(path), options={"ignore_ncx": True})
+    except Exception:
+        return None
+    chapters: list[EpubChapterInfo] = []
+    for sp_entry in book.spine:
+        idref = sp_entry[0] if isinstance(sp_entry, tuple) else sp_entry
+        item = book.get_item_with_id(idref)
+        if item is None or item.get_type() != ebooklib.ITEM_DOCUMENT:
+            continue
+        try:
+            soup = BeautifulSoup(item.get_content(), "html.parser")
+        except Exception:
+            continue
+        body = soup.find("body")
+        if body is None:
+            continue
+        for tag in body.find_all(["svg", "script", "style"]):
+            tag.decompose()
+        inner = body.decode_contents()
+        if inner.strip():
+            text = " ".join(body.get_text(" ", strip=True).split())
+            chapters.append(
+                EpubChapterInfo(
+                    index=len(chapters) + 1,
+                    name=item.get_name() or f"chapter_{len(chapters) + 1}",
+                    text_len=len(text),
+                    text_sample=text[:160],
+                )
+            )
+    return chapters
+
+
+def _epub_chapter_count(path: Path) -> Optional[int]:
+    chapters = _epub_spine_chapters(path)
+    if chapters is None:
+        return None
+    return len(chapters)
+
+
+def _is_low_value_epub_structural_chapter(chapter: EpubChapterInfo) -> bool:
+    """Return True only for EPUB spine items that are reasonable advisory
+    candidates when stripped by the HTML parser.
+
+    The carve-out is intentionally narrow: short leading/trailing title,
+    copyright, colophon, cover, TOC/nav, or blank wrapper items. Real
+    internal/content-bearing chapters still fail chapter coverage.
+    """
+    name = chapter.name or ""
+    sample = chapter.text_sample or ""
+    if chapter.text_len == 0:
+        return True
+    if chapter.text_len <= 1200 and (
+        _EPUB_STRUCTURAL_NAME_RE.search(name)
+        or _EPUB_STRUCTURAL_TEXT_RE.search(sample)
+    ):
+        return True
+    return False
+
+
+def _missing_epub_chapters_are_advisory(
+    missing: list[int],
+    chapters: list[EpubChapterInfo],
+) -> bool:
+    """MISSING_CHAPTERS is advisory only for low-value edge chapters.
+
+    Missing internal chapters indicate real content loss and remain FAIL.
+    Edge means before the first covered chapter or after the last covered
+    chapter; scattered gaps do not qualify.
+    """
+    if not missing or not chapters:
+        return False
+    missing_set = set(missing)
+    all_indices = {chapter.index for chapter in chapters}
+    covered = all_indices - missing_set
+    if not covered:
+        return False
+    first_covered = min(covered)
+    last_covered = max(covered)
+    edge_missing = {
+        idx
+        for idx in all_indices
+        if idx < first_covered or idx > last_covered
+    }
+    if missing_set != edge_missing:
+        return False
+    by_index = {chapter.index: chapter for chapter in chapters}
+    return all(
+        _is_low_value_epub_structural_chapter(by_index[idx])
+        for idx in missing
+    )
+
+
+def _epub_chapter_coverage_issues(
+    epub_path: Path,
+    chunks: list[dict[str, Any]],
+    allow_missing: bool,
+) -> list[Issue]:
+    """v2.10 Phase 7: EPUB lane chapter coverage.
+
+    Producer synthetic mapping is ``page_number = chapter_1based * 1000
+    + position // 5``, so a chunk's chapter index is ``page_number //
+    1000``. Missing chapters are advisory only when every missing item
+    is an edge-only low-content structural spine item (title page,
+    colophon, copyright stub, blank wrapper, etc.). Internal gaps or
+    content-bearing missing chapters are FAIL regardless of
+    ``--allow-missing-pages``.
+    """
+    issues: list[Issue] = []
+    chapters = _epub_spine_chapters(epub_path)
+    if not chapters:
+        issues.append(
+            Issue(
+                "WARN",
+                "PAGE_COUNT_UNKNOWN",
+                f"Could not enumerate EPUB chapters in {epub_path.name}; "
+                "skipping chapter coverage check.",
+            )
+        )
+        return issues
+    chapter_count = len(chapters)
+    chapters_with_chunks: set[int] = set()
+    for c in chunks:
+        page = _chunk_page(c)
+        if page:
+            chapters_with_chunks.add(page // 1000)
+    missing = [
+        ch for ch in range(1, chapter_count + 1) if ch not in chapters_with_chunks
+    ]
+    if missing:
+        severity = (
+            "WARN"
+            if _missing_epub_chapters_are_advisory(missing, chapters)
+            else "FAIL"
+        )
+        preview = ", ".join(str(c) for c in missing[:20])
+        suffix = "" if len(missing) <= 20 else f" ... (+{len(missing) - 20})"
+        missing_names = ", ".join(
+            f"{ch.index}={ch.name}" for ch in chapters if ch.index in set(missing[:5])
+        )
+        reason = (
+            "edge low-content structural spine item(s)"
+            if severity == "WARN"
+            else "internal or content-bearing spine item(s)"
+        )
+        issues.append(
+            Issue(
+                severity,
+                "MISSING_CHAPTERS",
+                f"{len(missing)} EPUB chapter(s) have no chunks "
+                f"(expected 1..{chapter_count}): {preview}{suffix}; "
+                f"{reason}; {missing_names}",
+            )
+        )
+    return issues
 
 
 _INTENTIONALLY_BLANK_PATTERN = re.compile(
@@ -825,18 +1029,22 @@ def _warn_is_documented_advisory(
     documented in `docs/QUALITY_GATES.md` "Advisory Warning Classes"
     as an allowed advisory that does not block QA_PASS_WITH_ADVISORIES.
 
-    Most codes are unconditional. `VISION_HARD_FALLBACK_RATE` is the
-    exception: it is allowed-advisory ONLY when every hard_fallback
-    image chunk in the corpus carries the F4 sentinel
-    (`complex_asset_short_response_after_retry`). A
-    non-F4-sentinelled hard_fallback indicates a real defect (asset
-    file missing, VLM API failure, validator rejection) and continues
-    to block PASS.
+    Most codes are unconditional. Conditional codes:
+    - `MISSING_CHAPTERS`: allowed only for the explicit edge low-content
+      structural-chapter message emitted by `_epub_chapter_coverage_issues`.
+    - `VISION_HARD_FALLBACK_RATE`: allowed only when every hard_fallback
+      image chunk in the corpus carries the F4 sentinel
+      (`complex_asset_short_response_after_retry`). A
+      non-F4-sentinelled hard_fallback indicates a real defect (asset
+      file missing, VLM API failure, validator rejection) and continues
+      to block PASS.
     """
     if issue.severity != "WARN":
         return False
     if issue.code not in _ALLOWED_ADVISORY_WARN_CODES:
         return False
+    if issue.code == "MISSING_CHAPTERS":
+        return "edge low-content structural spine item" in issue.message
     if issue.code != "VISION_HARD_FALLBACK_RATE":
         return True
 
@@ -943,14 +1151,23 @@ def main() -> int:
                 )
             )
 
-    issues.extend(
-        _page_coverage_issues(
-            metadata,
-            chunks,
-            args.source_pdf.resolve() if args.source_pdf else None,
-            args.allow_missing_pages,
+    source = args.source_pdf.resolve() if args.source_pdf else None
+    if _is_epub_source(source):
+        # v2.10 Phase 7: EPUB sources use synthetic per-chapter page
+        # numbers; the PDF page-coverage check does not apply. Validate
+        # chapter coverage instead via ebooklib spine enumeration.
+        issues.extend(
+            _epub_chapter_coverage_issues(source, chunks, args.allow_missing_pages)
         )
-    )
+    else:
+        issues.extend(
+            _page_coverage_issues(
+                metadata,
+                chunks,
+                source,
+                args.allow_missing_pages,
+            )
+        )
     issues.extend(_duplicate_text_issues(chunks, args.min_duplicate_chars))
     issues.extend(_page_outlier_issues(chunks))
     issues.extend(_corruption_issues(chunks))

@@ -10,9 +10,13 @@
 #   bash scripts/smoke_multiprofile.sh [output_root]
 #
 # Environment overrides:
-#   PAGES        pages per doc        (default: 10)
-#   BATCH_SIZE   batch size           (default: 3)
-#   ENV_NAME     conda env name       (default: mmrag-v2)
+#   PAGES                      pages per doc        (default: 10)
+#   BATCH_SIZE                 batch size           (default: 3)
+#   ENV_NAME                   conda env name       (default: mmrag-v2)
+#   HF_HUB_OFFLINE             HF cache only        (default: 1)
+#   TRANSFORMERS_OFFLINE       transformers cache   (default: 1)
+#   TOKENIZERS_PARALLELISM     tokenizer threads    (default: false)
+#   TORCH_COMPILE_DISABLE      disable torch.compile(default: 1)
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
@@ -20,6 +24,16 @@ ROOT="${1:-output/smoke_multiprofile_$(date +%Y%m%d_%H%M%S)}"
 PAGES="${PAGES:-10}"
 BATCH_SIZE="${BATCH_SIZE:-3}"
 ENV_NAME="${ENV_NAME:-mmrag-v2}"
+
+# Keep smoke deterministic and avoid repeated Docling/TorchInductor native
+# initialization hangs on Apple Silicon when the matrix runs many short
+# conversions sequentially. Operators can override these if they intentionally
+# want to exercise online model resolution or torch.compile.
+export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
+export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
+export TORCH_COMPILE_DISABLE="${TORCH_COMPILE_DISABLE:-1}"
+
 mkdir -p "$ROOT"
 
 SUMMARY="$ROOT/_summary.txt"
@@ -28,6 +42,7 @@ now() { date -u "+%Y-%m-%dT%H:%M:%SZ"; }
 
 echo "smoke_multiprofile start=$(now)" | tee -a "$SUMMARY"
 echo "ROOT=$ROOT  PAGES=$PAGES  BATCH_SIZE=$BATCH_SIZE" | tee -a "$SUMMARY"
+echo "HF_HUB_OFFLINE=$HF_HUB_OFFLINE  TRANSFORMERS_OFFLINE=$TRANSFORMERS_OFFLINE  TOKENIZERS_PARALLELISM=$TOKENIZERS_PARALLELISM  TORCH_COMPILE_DISABLE=$TORCH_COMPILE_DISABLE" | tee -a "$SUMMARY"
 echo "" | tee -a "$SUMMARY"
 
 # ---------------------------------------------------------------------------

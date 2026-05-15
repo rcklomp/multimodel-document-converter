@@ -106,6 +106,60 @@ against live full-HARRY conversion).
 
 ---
 
+## EPUB Lane (v2.10 Phase 7)
+
+EPUB has no native pagination and HTML has no inherent geometry, so the
+EPUB lane synthesizes both. `processor._epub_to_html` walks
+`book.spine` (the canonical reading order) and prepends a
+`<p>__MMRAG_EPUB_CH_NNNN__</p>` chapter-boundary marker to each
+non-empty chapter; empty chapters (typical for `titlepage.xhtml`
+wrappers) are skipped. The HTML feeds the standard Docling HTML
+parser. After chunk emission, `_apply_epub_synthetic_pagination`
+walks chunks in order, scans content for markers, and rewrites every
+EPUB chunk with:
+
+- **`page_number = chapter_1based * 1000 + position_in_chapter // 5`.**
+  Five chunks per synthetic page; chapter 1 → 1000-N, chapter 2 →
+  2000-N, etc. Resets `position_in_chapter` at each marker boundary.
+- **`bbox = [0, 0, 1000, 1000]`** — the documented EPUB full-page
+  sentinel. HTML has no geometry; downstream consumers should treat
+  this bbox as "spans the entire chunk-page" rather than a real layout
+  region.
+- **`extraction_method = "epub_html"`.** Distinct from `docling`
+  (legacy element-by-element) and `hybrid_chunker` so audits can
+  identify EPUB-lane chunks at a glance.
+- **Regenerated `chunk_id`** with the new `page_number` and a monotonic
+  global position counter (preserves the v2.9 chunk_id
+  position-component uniqueness contract).
+- **Per-synthetic-page dedup** (5-chunk window) drops byte-equal
+  content so `qa_universal_invariants.py within_page_text_dupe_excess`
+  does not fire on producer-side short-text repeats.
+
+**Pre-marker buffer:** Docling's HTML parser sometimes strips
+early-spine items (the titlepage `<div>` wrapper or a class-heavy
+colophon `<p>` block) before any chunk reaches the post-process pass.
+Chunks that arrive before the first surviving marker are buffered and
+back-attributed to chapter `first_marker - 1` (the chapter directly
+preceding the first surviving marker). When **no** marker survives —
+catastrophic — the buffer flushes to chapter 1 with a logged warning.
+
+**QA gate behaviour.** `qa_full_conversion.py` detects `.epub` source
+paths and replaces the PDF page-coverage check with chapter-coverage
+via `ebooklib` spine enumeration. Missing chapters are
+`MISSING_CHAPTERS`, but the advisory is deliberately narrow:
+`QA_PASS_WITH_ADVISORIES` is allowed only when every missing chapter is
+a contiguous leading/trailing low-content structural spine item (for
+example title page, cover, copyright/colophon stub, or blank wrapper)
+that Docling's HTML parser stripped before chunk emission. Missing
+internal chapters, scattered gaps, or content-bearing edge chapters are
+`FAIL` because they indicate possible EPUB content loss.
+
+**Downstream guidance for RAG consumers.** EPUB page numbers are
+*virtual*, not source-document pages. A chunk on page `13029` means
+"chapter 13, ~6th synthetic page" — not "page 13029 of the source
+book". Cite chapter index (`page_number // 1000`) for human-facing
+references.
+
 ## Implementation Status (v2.7.0)
 
 | Feature | Status | Notes |

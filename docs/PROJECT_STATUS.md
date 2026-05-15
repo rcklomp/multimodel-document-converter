@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-05-13
+Last updated: 2026-05-15
 
 Purpose: fast orientation for a new coding session. Read this before deeper project docs.
 
@@ -33,19 +33,19 @@ housekeeping, and Option-1 v2.9.0-final terminology cleanup; see
 
 **Next cycle:** v2.10. Plan at
 [`docs/PLAN_V2.10.md`](PLAN_V2.10.md) (authored from
-`PLAN_V2.10_DRAFT_PROMPT.md`); Phases 1-6 validated-local
-(Phase 6 closed 2026-05-15 after the audit-fix iteration). Firearms
-full strict gate returns
-`QA_PASS: failures=0 warnings=0` with HEADING coverage 0.997,
-smoke 11/11 GATE_PASS + 11/11 UNIVERSAL_PASS, Earthship_Vol1
-full-doc regression HEADING coverage 100 % → 100 % (no drop),
-**953 pytest passing**. The audit-fix iteration also closed the
-pre-existing TEXT `infix_artifacts: 148 → 0` via the new
-`_repair_infix_step_numbers` chunk-content repair and the VLM
-`image_placeholder_ratio: 0.2424 → 0.0000` via targeted enrichment
-of the 264 pending shadow chunks. Phase 7
-(`KI_EPUB_EXTRACTION_LANE_REWRITE`) is the next implementation
-target.
+`PLAN_V2.10_DRAFT_PROMPT.md`); Phases 1-7 validated-local
+(Phase 7 closed 2026-05-15). KI_En_ChatGPT_Praktische_Gids full
+strict gate now `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1`
+(advisory = `MISSING_CHAPTERS` for the two contiguous leading
+low-content structural spine items — titlepage + colophon — Docling's
+HTML parser strips before any chunk emerges; internal or
+content-bearing missing chapters remain FAIL; documented in
+[`docs/CONVERSION_PROFILES.md`](CONVERSION_PROFILES.md) §EPUB lane).
+ChatGPT_Praktijk_handboek regression control remains
+`QA_PASS_WITH_ADVISORIES: failures=0 warnings=1`. Smoke 11/11
+GATE_PASS + 11/11 UNIVERSAL_PASS, **966 pytest passing**. Phase 8
+(strict-gate re-verification + v2.10 release prep) is the next
+implementation target.
 
 ---
 
@@ -180,11 +180,39 @@ v2.10 production-tag blockers (8 deferral rows over 7 classes — items
 4 and 5 each cover two docs). No intermediate `v2.9.0` final tag is
 planned.
 
-**Remaining open blockers (1 of 7 classes, plus residual scope on row 2):**
+**Remaining open blockers (0 of 7 classes — all Phase 1-7 closed):**
 
-1. `KI_EPUB_EXTRACTION_LANE_REWRITE` — EPUB lane structural gaps
-   (no pagination, no bbox, heavy dedup excess). User signed off
-   v2.10 deferral on 2026-05-10.
+All 7 named-class deferrals are now `validated-local`. Phase 8
+(strict-gate re-verification + v2.10 release prep) is the next
+implementation target.
+
+**Phase 7 `validated-local` (2026-05-15).**
+
+1. `KI_EPUB_EXTRACTION_LANE_REWRITE` — KI_En_ChatGPT_Praktische_Gids.
+   `processor._epub_to_html` walks `book.spine` and prepends a
+   `<p>__MMRAG_EPUB_CH_NNNN__</p>` marker to each non-empty chapter.
+   The post-Docling `_apply_epub_synthetic_pagination` rewrites every
+   EPUB chunk with synthetic `page_number = chapter_1based * 1000 +
+   position_in_chapter // 5`, the documented full-page bbox sentinel
+   `[0, 0, 1000, 1000]`, `extraction_method="epub_html"`, and a
+   regenerated `chunk_id` (preserves the v2.9 position-component
+   uniqueness contract). Pre-marker buffer back-attributes chunks
+   emitted before any marker survives to chapter `first_marker - 1`
+   (the chapter immediately preceding the first surviving marker —
+   correct for KI where Docling's HTML parser strips the titlepage and
+   colophon entirely). Per-synthetic-page dedup skips byte-equal
+   content within a 5-chunk window (closes
+   `within_page_text_dupe_excess`). `qa_full_conversion.py` adds an
+   EPUB-aware branch: detects `.epub` source, enumerates spine chapters
+   via `ebooklib`, and replaces the PDF page-coverage check with
+   `MISSING_CHAPTERS`. This is WARN/advisory only for contiguous
+   leading/trailing low-content structural spine items; internal or
+   content-bearing missing chapters remain FAIL. KI strict
+   `QA_PASS_WITH_ADVISORIES: failures=0
+   warnings=1`. ChatGPT_Praktijk_handboek regression control remains
+   `QA_PASS_WITH_ADVISORIES`. Synthetic page-number convention and
+   bbox sentinel documented in
+   [`docs/CONVERSION_PROFILES.md`](CONVERSION_PROFILES.md) §EPUB lane.
 
 **Phase 6 `validated-local` (2026-05-15).**
 
@@ -359,11 +387,17 @@ Carry forward to v2.10 planning:
 
 ## Active Engineering Direction
 
-Plan at [`docs/PLAN_V2.10.md`](PLAN_V2.10.md). Phases 1-6 are
-`validated-local` (Phase 6 closed 2026-05-15 after the audit-fix
-iteration). Firearms full strict gate returns
-`QA_PASS: failures=0 warnings=0`. The next task is Phase 7
-(`KI_EPUB_EXTRACTION_LANE_REWRITE`, KI EPUB).
+Plan at [`docs/PLAN_V2.10.md`](PLAN_V2.10.md). Phases 1-7 are
+`validated-local` (Phase 7 closed 2026-05-15). KI_En_ChatGPT_Praktische_Gids
+full strict gate returns `QA_PASS_WITH_ADVISORIES: failures=0
+warnings=1` (advisory = `MISSING_CHAPTERS` for the two contiguous
+leading low-content structural spine items Docling's HTML parser
+strips; internal or content-bearing missing chapters remain FAIL).
+ChatGPT_Praktijk_handboek
+regression control unchanged at `QA_PASS_WITH_ADVISORIES`. Smoke
+11/11 GATE_PASS + 11/11 UNIVERSAL_PASS, **966 pytest passing**.
+The next task is Phase 8 (strict-gate re-verification + v2.10
+release prep).
 
 PCWorld VLM evidence from the RC1 cycle remains valid: raw
 text-reading detections 36.5 % → 22.2 %, zero measured Combat-style
@@ -373,6 +407,25 @@ hallucinations, blind-set 87.5 % final-valid. See
 ## Recently Completed
 
 Reverse-chronological. Each entry's evidence files are tracked.
+
+- **PLAN_V2.10 Phase 7 — `KI_EPUB_EXTRACTION_LANE_REWRITE`
+  (KI EPUB):** `validated-local` (2026-05-15).
+  `processor._epub_to_html` walks `book.spine` and embeds
+  `__MMRAG_EPUB_CH_NNNN__` markers between non-empty chapters; the
+  post-Docling `_apply_epub_synthetic_pagination` rewrites every EPUB
+  chunk with synthetic `page_number = chapter_1based * 1000 +
+  position_in_chapter // 5`, the EPUB sentinel bbox `[0,0,1000,1000]`,
+  `extraction_method="epub_html"`, regenerated chunk_id, and
+  per-synthetic-page dedup. `qa_full_conversion.py` adds an
+  EPUB-aware branch that enumerates spine chapters via `ebooklib` and
+  reports `MISSING_CHAPTERS` instead of PDF page-coverage. This is
+  WARN/advisory only for contiguous leading/trailing low-content
+  structural spine items; internal or content-bearing missing chapters
+  remain FAIL. KI strict
+  `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1`. ChatGPT regression
+  control `QA_PASS_WITH_ADVISORIES`. 8 EPUB-lane tests plus
+  conditional `MISSING_CHAPTERS` advisory pins. Smoke 11/11 GATE_PASS +
+  UNIVERSAL_PASS. Full pytest **966 passed**, 14 skipped.
 
 - **PLAN_V2.10 Phase 5 — `HYBRID_CHUNKER_HEADING_PROPAGATION`
   (Devlin):** `validated-local` (2026-05-13, `f3d8478`). Single

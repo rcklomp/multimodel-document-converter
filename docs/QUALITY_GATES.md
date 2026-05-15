@@ -146,6 +146,7 @@ Allowed advisory codes and their rationale (per `docs/DECISIONS.md`
 | `ASSET_TINY` | Publisher icon-class assets (<1 KB). Per the Retrieval-Value Test these are low-retrieval-value but valid; their presence in the JSONL is informational. | No |
 | `PAGE_COUNT_UNKNOWN` | EPUB documents have no PDF-style page count. The EPUB lane provides a virtual page mapping via chunk order. | No |
 | `SCRIPT_ADVISORY_FAIL` | `qa_semantic_fidelity.py` exit 0 indicates the script itself classified the issue as advisory only (e.g., `code_indentation_fidelity` below 0.90 on a doc whose profile makes that floor inappropriate). | No |
+| `MISSING_CHAPTERS` | EPUB spine coverage found missing chapters, but every missing chapter is a contiguous leading/trailing low-content structural item (for example title page, cover, copyright/colophon stub, or blank wrapper) that Docling's HTML parser stripped before chunk emission. Internal gaps or content-bearing edge chapters remain `FAIL`. | Yes (edge + low-content structural only) |
 | `VISION_HARD_FALLBACK_RATE` | Hard-fallback rate > 5 % when ALL hard_fallbacks have the F4 sentinel — documented "VLM legitimately can't describe this" cases (complex assets with terse responses after the Phase 3 detail-retry). | Yes (F4 condition above) |
 
 The PASS variant is parallel to the SCAN0013 form-aware variant
@@ -167,4 +168,3 @@ allowed-advisory set as a way to silence a `FAIL` that should be
 fixed. The set is for code-classes whose `WARN` severity already
 reflects "informational, not blocking" — the promotion makes the
 gate's final status agree with the code-classification.
-
