@@ -1,6 +1,6 @@
-# Testing Guide (v2.7.0)
+# Testing Guide (v2.10-dev)
 
-**Version:** v2.7.0  
+**Version:** v2.10-dev (Phases 1-7 `validated-local`; Phase 8 pending)  
 **Validation Policy:** Required for every test command
 
 ## Environment
@@ -32,20 +32,25 @@ Representative test set (all present in `data/`):
 conda run -n mmrag-v2 bash scripts/smoke_multiprofile.sh
 ```
 Expected: `GATE_PASS` + `UNIVERSAL_PASS` in every row of the summary table.
+The smoke runner defaults to cache-only model resolution and
+`TORCH_COMPILE_DISABLE=1` for deterministic Apple-Silicon runs; override
+those environment variables only when intentionally testing online model
+resolution or `torch.compile`.
 
 ### Single-Conversion Full QA
 ```bash
 conda run -n mmrag-v2 python scripts/qa_full_conversion.py \
   output/<document>/ingestion.jsonl \
-  --source-pdf "data/<category>/<source>.pdf"
+  --source-pdf "data/<category>/<source>.pdf" \
+  --allow-warnings
 ```
 
-Expected: `QA_PASS`. `QA_WARN` means the output is structurally usable but has
-advisory issues to review before ingestion; `QA_FAIL` means the conversion is
-not production-clean. The wrapper runs the existing QA scripts and adds
-deterministic checks for missing pages, duplicate long text, per-page outliers,
-localized corruption, image-description quality, asset health, and table
-corruption.
+Expected: `QA_PASS` or `QA_PASS_WITH_ADVISORIES`. `QA_FAIL` means the
+conversion is not production-clean. The wrapper runs the existing QA scripts
+and adds deterministic checks for missing pages/chapters, duplicate long text,
+per-page outliers, localized corruption, image-description quality, asset
+health, and table corruption. Documented advisory codes are governed by
+`docs/QUALITY_GATES.md`.
 
 ### TOC / Index Page-Loss Contract (env-gated)
 Phase 1 v2.9 uses generated page-window probes to lock the TOC/index page-loss

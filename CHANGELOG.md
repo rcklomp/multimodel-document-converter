@@ -1,14 +1,258 @@
 # Changelog: MM-Converter-V2
 
-All notable changes to this project will be documented in this file. This project adheres to the functional requirements defined in **SRS v2.4.1**.
+All notable changes to this project will be documented in this file. Current behavior is governed by `AGENTS.md`, `docs/DECISIONS.md`, `docs/QUALITY_GATES.md`, and `docs/ARCHITECTURE.md`; archived SRS files are historical references.
 
 > **Versioning note:** Historical entries before the `v2.4.x` line used an internal `v18.x` milestone scheme during rapid iteration and test/fix cycles. Only stable or decision-worthy checkpoints were recorded, so intermediate builds are intentionally omitted. From `v2.4` onward, entries follow the current public semantic line.
 
+## [v2.10-dev] — unreleased
+
+PLAN_V2.10 Phases 1–7 closed locally. All seven named root-cause
+classes are `validated-local`; the v2.10 production tag remains gated
+on Phase 8 full-corpus strict-gate re-verification, Qdrant rebuild,
+AFTER snapshot, and release tagging (see `docs/PLAN_V2.10.md`).
+
+### v2.10 Phase 7 — `KI_EPUB_EXTRACTION_LANE_REWRITE` (KI EPUB) (2026-05-15, `validated-local`)
+
+- **Spine-order EPUB extraction.** `_epub_to_html` now walks
+  `book.spine` and injects `__MMRAG_EPUB_CH_NNNN__` chapter markers in
+  canonical reading order before the HTML is handed to Docling.
+- **Synthetic EPUB pagination.** `_apply_epub_synthetic_pagination`
+  rewrites EPUB chunks with virtual page numbers
+  `chapter_1based * 1000 + position_in_chapter // 5`, the documented
+  EPUB bbox sentinel `[0,0,1000,1000]`,
+  `extraction_method="epub_html"`, regenerated unique chunk IDs, and
+  per-synthetic-page dedup.
+- **EPUB-aware strict gate.** `scripts/qa_full_conversion.py` detects
+  `.epub` source paths, enumerates spine chapters via `ebooklib`, and
+  replaces PDF page coverage with chapter coverage. `MISSING_CHAPTERS`
+  is a documented advisory only for contiguous leading/trailing
+  low-content structural spine items; internal or content-bearing
+  missing chapters remain failures.
+- **Tests and evidence.** `tests/test_epub_extraction_lane.py` adds
+  EPUB-lane coverage and `tests/test_qa_advisory_promotion.py` pins the
+  advisory code. KI EPUB strict gate:
+  `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1`; ChatGPT EPUB
+  regression control: `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1`.
+  Full pytest: **966 passed, 14 skipped, 0 failed**. Smoke:
+  **11/11 GATE_PASS + 11/11 UNIVERSAL_PASS**.
+- **Smoke runner stability.** `scripts/smoke_multiprofile.sh` now
+  defaults to offline model resolution and `TORCH_COMPILE_DISABLE=1`
+  for deterministic Apple-Silicon smoke runs; callers can override the
+  environment variables when intentionally exercising online model
+  resolution or `torch.compile`.
+
+### v2.10 Phase 6 — `OCR_PATH_HEADING_PROPAGATION` (Firearms) (2026-05-15, `validated-local`)
+
+- **Ordered OCR-lane heading attribution.** `Region.is_heading` and
+  `ProcessedChunk.is_heading` carry Docling section-header/title labels
+  through the layout-aware OCR lane. `BatchProcessor` attributes each
+  OCR chunk by ordered push+read against `ContextStateV2`, while the
+  older page-level promotion path remains only as the VLM/Tesseract
+  full-page fallback.
+- **Central heading validation.** `ContextStateV2.get_section_heading()`
+  skips the level-0 document title breadcrumb; `is_valid_heading`
+  rejects terminal-period sentence-shape headings and numbered-prefix
+  body-case strings while preserving real numbered/question/exclamation
+  headings.
+- **Audit-fix text repair.** `BatchProcessor._repair_infix_step_numbers`
+  repairs OCR/multi-column numbered-step infix artifacts and
+  behaviorally mirrors the audit detector after its newline and
+  stop-word post-filters. Parity is pinned by
+  `tests/test_infix_step_number_repair.py`.
+- **Evidence.** Firearms strict gate:
+  `QA_PASS: failures=0 warnings=0`; HEADING coverage 1091/1094
+  (0.997); TEXT `infix_artifacts` 148 → 0; targeted enrichment cleared
+  264 pending shadow chunks. Earthship scanned-class regression:
+  HEADING 549/549 unchanged. Phase 6 added 93 regression cases; full
+  pytest after Phase 6 was **953 passed, 14 skipped, 0 failed**.
+
+### v2.10 Phase 5 — `HYBRID_CHUNKER_HEADING_PROPAGATION` (Devlin) (2026-05-13, `validated-local`)
+
+- **Single propagation site at export boundary.** `_propagate_headings(all_chunks)`
+  removed from the mid-pipeline call site; replaced with one canonical
+  `_propagate_headings(export_chunks)` after all filters/splitters. Pins
+  the "only one site" contract via source introspection in
+  `tests/test_vision_aided_front_matter.py`.
+- **Heading validator tightened.** `is_valid_heading` in
+  `src/mmrag_v2/state/context_state.py` now rejects: (a) code/JSON prefixes
+  (`def`, `class`, `return`, `import`, `>>>`, `{`, `[`, ` ``` `); (b) repeated-token
+  compact-alpha (`'Type Type TypeTypeTypeType'`); (c) repeated-word density
+  (≥50% of a 3+-word heading, ≥3 occurrences). No parallel
+  `_valid_export_heading` exists — the validator is the single source.
+- **Generic-bucket carry block.** `_GENERIC_CARRY_HEADINGS = {"start", "front matter"}`
+  blocks Docling-generic labels from seeding forward carry. `"Start"`
+  stripped from its bearing chunk; `"Front Matter"` remains but does not propagate.
+- **No `chunk_dict` mutation at write time.** Heading edits happen on the
+  `IngestionChunk` model before serialization.
+- **Tests.** `tests/test_hybrid_chunker_heading_propagation.py` adds 7 cases
+  (4 positive including Devlin-shape batch boundary, 3 negative including
+  garbage/code rejection and real-heading-wins-over-garbage).
+- **Evidence.** Devlin strict gate: `HEADING PASS coverage 783/790 (99%)`,
+  null_headings=7 (legitimate front-matter pages 3–7). Garbage strings
+  each have 0 chunks attributed. Full pytest: **860 passed, 14 skipped,
+  0 failed**. Smoke: **11/11 GATE_PASS + 11/11 UNIVERSAL_PASS**.
+  Committed in `f3d8478`.
+
+### v2.10 Phase 4 — `CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION` (Cookbook + Distilled) (2026-05-13, `validated-local`)
+
+- **Per-page text split via `prov.charspan` slicing.** New helper
+  `_split_doc_chunk_text_by_page` walks each item's `prov` list, slices
+  the item's full text by charspan per page, and intersects with `dc.text`.
+  Bare `DocItem` references are dereferenced via `self_ref` against
+  `doc.texts`. Replaces the v2.9 same-merged-text broadcast that dropped
+  page attribution.
+- **`[CROSS_PAGE_CONTINUED]` marker reserved for total failure.** Partial
+  reconstruction emits only real chunks (no markers); total failure emits
+  one marker at the *earliest* contributing page (not one per page).
+- **BatchProcessor page-scoped overlap-trim.** `_deduplicate_chunk_overlap`
+  now only trims same-page consecutive chunks; cross-page skips the trim
+  regardless of content identity. Closes Cookbook p397
+  `DOCLING_DUPLICATE_DOC_CHUNK_OVERLAP_TRIM`.
+- **Micro-merge skips fallback markers.** `_merge_micro_text_chunks` skips
+  chunks with `extraction_method == "hybrid_chunker_pagesplit_fallback"`
+  on both sides. Prevents marker text concatenation onto neighbor prose.
+- **Subtitle-continuation promotion.** `_looks_like_subtitle_continuation`
+  promotes short single-line PARAGRAPH chunks to `ChunkType.HEADING` when
+  structural signals match (length<30, no terminal punctuation, non-empty
+  parent_heading distinct from content, first word is English connector).
+  Closes HarryPotter `LITERATURE_MICRO_GATE_TUNE_AFTER_CROSS_PAGE_FIX`.
+- **Audit-side heading/title exemption.** Three gate scripts now treat
+  `chunk_type ∈ {code, heading, title}` as non-paragraph structural
+  content exempt from `micro_non_label` counter. Thresholds unchanged.
+- **Tests.** `tests/test_cross_page_split_page_attribution.py` adds 27 cases
+  (p209 URL attribution, p208 content regression, three-page merge,
+  marker reservation, bare-DocItem dereferencing, page_offset handling,
+  overlap-trim page scoping, subtitle-continuation promotion, audit
+  micro_non_label exemption).
+- **Evidence.** Cookbook: cross-page-split MISSING_PAGES 4→0 (63/128/365/397
+  closed); markers 62→0; `micro_non_label_ratio=0.002`. Distilled:
+  cross-page MISSING_PAGES=0; markers=2 (genuine fallback); `micro_non_label_ratio=0.008`.
+  Smoke: **11/11 GATE_PASS + 11/11 UNIVERSAL_PASS**. Full pytest:
+  **853 passed, 14 skipped, 0 failed**. Committed in `8effdfd`.
+
+### v2.10 Phase 3 — `B4B_FULL_DOC_PICTURE_DEDUP` (2026-05-12, `validated-local`)
+
+- **pHash dedup page-coverage carve-out.** At
+  `BatchProcessor`'s finalize-time export loop
+  ([batch_processor.py:3364](src/mmrag_v2/batch_processor.py#L3364)),
+  the cross-page pHash registry (Hamming threshold 10) was
+  rejecting Earthship's hand-drawn cross-section illustrations on
+  consecutive pages as near-duplicates, leaving image-only pages
+  with 0 chunks and a strict-gate `MISSING_PAGES` failure
+  (Earthship p109; extraction_method `docling` — the Docling chunk
+  is preserved, not synthesized). The export loop pre-computes
+  `_phash_image_only_pages` and maintains
+  `_phash_pages_with_exported_image` (updated on BOTH unique-image
+  emission AND preserved-duplicate emission); a duplicate IMAGE is
+  preserved only when the page is image-only AND no IMAGE has yet
+  been exported for it (logged
+  `[PHASH-PAGE-COVERAGE] Preserving`). Decision factored as the
+  pure static helper
+  `BatchProcessor._phash_carve_out_should_preserve_duplicate` so
+  production and tests cannot drift apart.
+- **SHADOW-EXTRACTION page-coverage-aware threshold.** At
+  [processor.py:_run_shadow_extraction](src/mmrag_v2/processor.py),
+  the historical `300×300 OR area ≥ 40 %` gate was rejecting
+  Python_Distilled's chapter-intro diagrams (453×258–290 points,
+  24–27 % page area) — these pages then had 0 chunks of any
+  modality and registered `MISSING_PAGES` at the strict gate. The
+  new static helper `V2DocumentProcessor._shadow_image_meets_threshold`
+  keeps the standard threshold for pages with prior chunks and
+  drops the size floor to 200×200 (area floor unchanged at 40 %)
+  for pages with no prior chunks. `process_document` now tracks
+  `pages_with_prior_chunks` (TEXT yielded + pending IMAGE/TABLE +
+  `_hybrid_text_chunks`) and threads it into the shadow path.
+- **Tests.**
+  `tests/test_phash_dedup_page_coverage.py` adds 9 regression
+  tests pinning both contracts: the pHash carve-out's cases
+  (image-only-page preserved; text-bearing page drops as before;
+  second duplicate on the same image-only page drops;
+  unique-then-duplicate on the same image-only page drops;
+  direct pin on the pure decision helper covering the
+  page-already-covered, text-bearing, and missing-page-number
+  branches), the SHADOW threshold's three cases (mid-size
+  relaxes; tiny icons still filtered; full-page editorial image
+  passes both lanes), and a guard that the image-only-page set
+  is computed from `export_chunks` rather than survivors. The
+  last two tests were added after the 2026-05-12 post-close audit
+  that flagged a bookkeeping gap: the carve-out previously
+  tracked "page had preserved duplicate" instead of "page has
+  any exported IMAGE", which could let a duplicate slip through
+  if a unique image had been emitted earlier on the same
+  image-only page.
+- **Evidence.** Earthship strict gate
+  (`python scripts/qa_full_conversion.py
+  output/Earthship_Vol1/ingestion.jsonl --source-pdf
+  "data/technical_manual/Earthship_Vol1_How to build your own.pdf"`)
+  reports `QA_PASS: failures=0 warnings=0`
+  (baseline was `QA_FAIL: failures=1 — MISSING_PAGES: 109`).
+  Python_Distilled strict gate reports
+  `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1` (advisory is
+  pre-existing `ASSET_TINY`; baseline was `QA_FAIL: failures=1 —
+  MISSING_PAGES: 6, 686, 688, 913`). Full pytest: **826 passed,
+  14 skipped, 0 failed** (was 817 at end of Phase 2; +9 new
+  tests including the 2 post-close-audit additions). Smoke
+  multiprofile remains **11/11 GATE_PASS + 11/11 UNIVERSAL_PASS**.
+
+### v2.10 Phase 2 — `TEXT_INTEGRITY_SCOUT_FULL_DOC_SENSITIVITY` (2026-05-12, `validated-local`)
+
+- **Per-batch TextIntegrityScout trigger.** New pure module
+  `src/mmrag_v2/validators/text_integrity_scout_trigger.py` exposes
+  `any_batch_fires(...)` over universal page-shape rules
+  (per-batch variance ≥ 30 % OR ≥ 2 pages where source ≥ 100 chars
+  and emitted text < 50 chars, with a 500-char batch source floor).
+  `BatchProcessor._per_batch_shortfall_fires(...)` computes per-page
+  source-text length once via PyMuPDF and feeds the helper using
+  `split_result.batches` as the partition.
+  `_run_text_integrity_scout(force_run=...)` now accepts the verdict
+  and bypasses the doc-level variance gate when localized shortfall
+  is detected; the post-scout merge logic keeps recovery output
+  whenever the scout produced extra chunks (not only when doc-level
+  variance was already bad). Closes Fluent_Python pp 8 / 10 / 11
+  MISSING_PAGES on the 770-page full-doc path.
+- **Quarantine parallel-site fix.** During Phase 2 validation,
+  diagnostic snapshots localized a residual MISSING_PAGES regression
+  (Fluent pp 125 / 126 / 136) to `_quarantine_corrupted_text_chunks`.
+  The detector used the single-pattern-match `has_encoding_artifacts`,
+  whereas the parallel patcher `patch_corrupted_chunks` is gated on
+  the doc-level `has_encoding_corruption` flag — a parallel-site
+  audit gap. Detector swapped to the ratio-based
+  `is_irreparably_corrupt` so isolated ``\xHH`` literal escapes
+  inside legitimate prose (Python REPL output describing UTF-8 byte
+  literals in the encodings chapter) are preserved while the
+  existing Combat p66 / Cronin TOC contract holds.
+- **Corpus probe.** `scripts/probe_phase2_scout_threshold.py`
+  simulates per-batch shape across every
+  `output/<doc>/ingestion.jsonl` and records firing batches in
+  `output/probe_phase2_scout_threshold/probe_summary.json`. 8 docs
+  fire at the chosen threshold; for the seven non-Fluent cases the
+  scout's existing per-page primary_chars ≥ 50 guard means no
+  spurious recovery chunks are added.
+- **Tests.** `tests/test_text_integrity_scout_per_batch_trigger.py`
+  adds 10 regression tests pinning the trigger contract and the
+  quarantine low-ratio-hex-escape behavior. Existing quarantine
+  contract suites
+  (`tests/test_corruption_quarantine_toc_exemption.py`,
+  `tests/test_finalization_bridge.py::TestCorruptionQuarantineBridge`,
+  `tests/test_export_integrity.py::test_full_pipeline_writes_valid_jsonl`)
+  all remain green.
+- **Evidence.** Fluent strict gate
+  (`python scripts/qa_full_conversion.py
+  output/Fluent_Python/ingestion.jsonl --source-pdf
+  "data/technical_manual/Fluent Python Luciano Ramalho 2015.pdf"`)
+  reports `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1`
+  (advisory is the pre-existing `ASSET_TINY` 7-asset finding,
+  unrelated to Phase 2). Full pytest: **817 passed, 14 skipped,
+  0 failed** (was 807 before Phase 2; the 10 new tests are the
+  ones above).
+
 ## [v2.9.0-rc1] — 2026-05-12 (strict-gate close, RC tagged)
 
-Tag `v2.9.0-rc1` created on commit `3e06d1b` (`main`, local).
-Final `v2.9.0` production tag remains blocked by 8 signed v2.10
-deferrals (see `docs/DECISIONS.md` "v2.9.0-rc1 Signed Deferrals").
+Tag `v2.9.0-rc1` created on commit `3e06d1b` (`main`, pushed to
+GitHub). This is the v2.9 ship state; no intermediate final
+`v2.9.0` tag is planned. The 8 signed deferrals carry forward as
+v2.10 production-tag blockers (see `docs/DECISIONS.md`
+"v2.9.0-rc1 Signed Deferrals").
 
 ### Closing state
 
@@ -101,10 +345,10 @@ Every threshold and lane added this cycle has:
 | 7 | Chaubal_PyTorch_Projects | `TEXT_LABEL_TOC_DENSE_INDEX_ROUTER_MISS` |
 | 8 | Earthship_Vol1 | `B4B_FULL_DOC_PICTURE_DEDUP` |
 
-Engine version on `main` reads **2.9.0**. Schema version stays
-**2.7.0** (no chunk-shape change). Tag `v2.9.0-rc1` is present
-locally; final `v2.9.0` production tag will land once the 8 v2.10
-deferrals close under the unchanged strict gate.
+Engine version on `main` reads **2.9.0-rc1**. Schema version stays
+**2.7.0** (no chunk-shape change). The next production iteration is
+v2.10; the 8 carry-forward deferrals must close there under the
+unchanged strict gate.
 
 ## [Unreleased] — v2.9 development arc (superseded by v2.9.0-rc1 above)
 

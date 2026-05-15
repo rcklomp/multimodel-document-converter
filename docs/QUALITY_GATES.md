@@ -124,7 +124,7 @@ With `--source-pdf`, those pages are classified as `MISSING_PAGES_BLANK`
 ### Advisory Warning Classes (Phase G, 2026-05-11)
 
 The strict gate emits `QA_PASS_WITH_ADVISORIES` (a documented PASS
-variant — counts as PASS toward the v2.9.0-rc1 32/34 contract) when
+variant for v2.9.0-rc1 and v2.10 strict-gate accounting) when
 **all** of the following hold:
 
 1. Zero `FAIL`-severity issues.

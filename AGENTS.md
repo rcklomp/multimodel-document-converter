@@ -86,9 +86,9 @@ Companion docs:
 1. Start sessions with the indexed handoff path:
    - `docs/PROJECT_STATUS.md`
    - `docs/README.md`
-   - `docs/PLAN_V2.10_DRAFT_PROMPT.md` (next-cycle plan-writing prompt until `docs/PLAN_V2.10.md` exists)
-   - `docs/PLAN_V2.9.md` (v2.9 execution history through the rc1 scope cut)
-   - `docs/archive/PROGRESS_CHECKLIST.md` (historical task log only — task state moved into `PROJECT_STATUS.md` on 2026-05-07)
+   - `docs/PLAN_V2.10.md` (active v2.10 execution plan; Phases 1-7 validated-local, Phase 8 pending)
+   - `docs/PLAN_V2.10_DRAFT_PROMPT.md` (historical prompt only)
+   - `docs/PLAN_V2.9.md` (v2.9 execution history through the rc1 scope cut, if present)
 2. Use the three-layer documentation model:
    - Layer 0 contracts: this file, `CLAUDE.md`, `docs/AGENT_GOVERNANCE.md`, `docs/DECISIONS.md`, `docs/QUALITY_GATES.md`, `docs/ARCHITECTURE.md`, SRS.
    - Layer 1 current state: `docs/PROJECT_STATUS.md`, dated quality snapshots.
@@ -116,21 +116,24 @@ Companion docs:
 
 **QA policy:** All profiles use the standard 10% token variance tolerance. See `docs/QUALITY_GATES.md`.
 
-### Priority TODOs (Open — v2.10 planning scope)
-Source: `docs/PLAN_V2.10_DRAFT_PROMPT.md` and the RC1 AFTER snapshot. `docs/PLAN_V2.9.md` is retained as v2.9 execution history through the rc1 scope cut; the original v2.9 prompt is preserved at `docs/archive/PLAN_V2.9_DRAFT_PROMPT.md`.
+### Priority TODOs (Open — v2.10 release scope)
+Source: `docs/PLAN_V2.10.md` and the RC1 AFTER snapshot. Phases 1-7
+closed the seven named v2.10 root-cause classes locally on 2026-05-15.
+The next implementation target is Phase 8:
 
-The next task is to create `docs/PLAN_V2.10.md` from `docs/PLAN_V2.10_DRAFT_PROMPT.md`. The plan must close the 8 signed v2.10 deferral classes (which carry forward as v2.10 production-tag blockers — no intermediate `v2.9.0` final tag is planned):
+1. Re-run the strict gate across the 34-doc canonical corpus and require
+   every row to be `QA_PASS` or `QA_PASS_WITH_ADVISORIES`.
+2. Re-run the full non-manual pytest suite and multi-profile smoke gate.
+3. Rebuild Qdrant `mmrag_v2_8` from the accepted v2.10 JSONLs.
+4. Author the v2.10 AFTER quality snapshot and update release docs.
+5. Tag the v2.10 release according to the Phase 8 decision.
 
-1. `OCR_PATH_HEADING_PROPAGATION` — Firearms.
-2. `KI_EPUB_EXTRACTION_LANE_REWRITE` — KI EPUB.
-3. `HYBRID_CHUNKER_HEADING_PROPAGATION` — Devlin.
-4. `CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION` — Python_Cookbook and part of Python_Distilled.
-5. `B4B_FULL_DOC_PICTURE_DEDUP` — Earthship and part of Python_Distilled.
-6. `TEXT_INTEGRITY_SCOUT_FULL_DOC_SENSITIVITY` — Fluent_Python.
-7. `TEXT_LABEL_TOC_DENSE_INDEX_ROUTER_MISS` — Chaubal p11.
-8. Devlin `mmrag_v2_8` payload re-ingest housekeeping is non-blocking but should be considered with the v2.10 Qdrant/retrieval validation scope.
-
-Existing non-goals to re-evaluate during v2.10 planning: local VLM comparison (NuMarkdown-8B reachability), remote CodeFormulaV2 inference target, broader UIR refactor, HybridChunker per-item token guard, and rendered-region-crop magazine image quality.
+Existing non-goals remain outside v2.10 unless Phase 8 explicitly
+promotes them: local VLM comparison (NuMarkdown-8B reachability),
+remote CodeFormulaV2 inference target, broader UIR refactor,
+HybridChunker per-item token guard, rendered-region-crop magazine
+image quality, and a broader EPUB engine rewrite beyond the Phase 7
+synthetic-pagination lane.
 
 ### Recently Completed (Do Not Reopen)
 1. `--force-ocr` override is implemented.

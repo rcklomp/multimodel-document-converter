@@ -532,7 +532,11 @@ list" line: "Each item above is a v2.10 production-tag blocker").
 | 8 | Earthship_Vol1 | `B4B_FULL_DOC_PICTURE_DEDUP` | 1 page (of 287) | Marginal — single full-page figure |
 
 **User sign-off recorded 2026-05-11** for `v2.9.0-rc1` execution.
-Each item above is a v2.10 production-tag blocker.
+Each item above is a v2.10 production-tag blocker. Status note
+(2026-05-15): all seven v2.10 root-cause implementation classes are
+now `validated-local`; the production tag still requires Phase 8
+corpus-wide strict-gate re-verification, Qdrant rebuild, AFTER
+snapshot, and release tagging before any `complete` claim.
 
 ### v2.10 backlog implementation notes
 

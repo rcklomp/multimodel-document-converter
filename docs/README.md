@@ -10,9 +10,9 @@ This folder uses a three-layer documentation structure so a new coding session c
    - current quality baseline
    - immediate next work and per-phase status
 
-2. `docs/PLAN_V2.9.md`
-   - active plan; phase-level execution detail
-   - per-phase status and Done-when contracts
+2. `docs/PLAN_V2.10.md`
+   - active v2.10 execution plan
+   - Phases 1-7 local validation evidence and Phase 8 release bar
 
 3. `AGENTS.md`
    - hard project invariants
@@ -26,7 +26,7 @@ This folder uses a three-layer documentation structure so a new coding session c
    - design decisions and acceptance thresholds
    - quality gates used to decide pass/fail
 
-Read `docs/ARCHITECTURE.md` when changing core pipeline behavior. Read the SRS only as historical v2.5 context; if it conflicts with `AGENTS.md`, `docs/DECISIONS.md`, or `docs/ARCHITECTURE.md`, the current docs win. **Current canonical baseline is `docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`** — RC tag `v2.9.0-rc1` on commit `3e06d1b` (local only as of 2026-05-12). Last shipped tag is `v2.8.0` (snapshot `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md` remains the v2.8 SHIPPED record). Final `v2.9.0` blocked by 8 signed v2.10 deferrals (`docs/DECISIONS.md` "v2.9.0-rc1 Signed Deferrals"). When a metric appears in both a layer-1 status doc and a dated snapshot, the latest snapshot is canonical (per `docs/AGENT_GOVERNANCE.md` Canonicality Rule). The `docs/archive/PROGRESS_CHECKLIST.md` historical task log is kept for archaeology only — current task state lives in `docs/PROJECT_STATUS.md` (archived 2026-05-07).
+Read `docs/ARCHITECTURE.md` when changing core pipeline behavior. Read the SRS only as historical v2.5 context; if it conflicts with `AGENTS.md`, `docs/DECISIONS.md`, or `docs/ARCHITECTURE.md`, the current docs win. **Current canonical baseline is `docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`** — `v2.9.0-rc1` is the v2.9 ship state, tag `v2.9.0-rc1` on commit `3e06d1b`, pushed to GitHub on 2026-05-12. No intermediate final `v2.9.0` tag is planned; the 8 signed deferrals carried forward as v2.10 production-tag blockers (`docs/DECISIONS.md` "v2.9.0-rc1 Signed Deferrals"). As of 2026-05-15, all seven v2.10 root-cause classes are `validated-local`; Phase 8 still must produce the corpus-wide AFTER snapshot before v2.10 can be marked complete. When a metric appears in both a layer-1 status doc and a dated snapshot, the latest snapshot is canonical (per `docs/AGENT_GOVERNANCE.md` Canonicality Rule). The archived task logs are archaeology only — current task state lives in `docs/PROJECT_STATUS.md`.
 
 ## Layer Model
 
@@ -48,7 +48,8 @@ Stable rules. These should change rarely.
 Compact project status. These files should be updated whenever a session changes direction, baseline, or known quality state.
 
 - `docs/PROJECT_STATUS.md`
-- `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md` — **current canonical baseline** (v2.8.0 SHIPPED)
+- `docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md` — **current canonical baseline** (`v2.9.0-rc1` ship state)
+- `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md` — v2.8.0 SHIPPED reference baseline
 - `docs/QUALITY_SNAPSHOT_2026-05-03.md` — v2.8 BEFORE baseline (kept frozen so the AFTER snapshot's delta column is reproducible; not a current-state document)
 - `docs/archive/quality_snapshots/QUALITY_SNAPSHOT_2026-05-01.md` — superseded; banner-annotated. Specifically: Ayeva 0.93 reading is from the older probe under different flags; v2.8 fresh re-conversion reads 0.83 FAIL.
 - `docs/archive/quality_snapshots/QUALITY_SNAPSHOT_2026-04-30.md` — superseded; banner-annotated.
@@ -58,7 +59,9 @@ Compact project status. These files should be updated whenever a session changes
 
 Operational commands and historical notes.
 
-- `docs/PLAN_V2.9.md` — **active master plan** (Phase 1 closed 2026-05-07 `df91061`; Phase 2 closed 2026-05-08 `29a7242`; Phase 3 closed 2026-05-09 `649c952`/`51e897b`; Phase 4 closed 2026-05-10 with two signed v2.10 deferrals — `v2.9.0-rc1` Phase 5 execution authorized; final `v2.9.0` still blocked)
+- `docs/PLAN_V2.10.md` — active v2.10 plan; Phases 1-7 are `validated-local`, Phase 8 is pending
+- `docs/PLAN_V2.10_DRAFT_PROMPT.md` — historical prompt that produced the v2.10 plan
+- `docs/PLAN_V2.9.md` — v2.9 execution history through the `v2.9.0-rc1` scope cut and close-out, if present in the local checkout
 - `docs/QUALITY_SNAPSHOT_2026-05-08_v2.9_phase2_after.md` — Phase 2 closure snapshot
 - `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase3_vlm_baseline.md` — Phase 3 closure snapshot
 - `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase4_after.md` — Phase 4 closure snapshot (signed v2.10 deferrals, `v2.9.0-rc1` authorized)

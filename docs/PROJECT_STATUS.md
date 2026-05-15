@@ -14,9 +14,8 @@ blockers**. See `docs/DECISIONS.md` "v2.9.0-rc1 Signed Deferrals
 (2026-05-11 close-out)" for the named list.
 
 **Strict-gate state at RC1:** 26 PASS / 0 WARN / 8 FAIL out of 34
-(12 `QA_PASS` + 14 `QA_PASS_WITH_ADVISORIES`). All 8 FAILs are signed
-v2.10 deferrals. Test suite: **806 passed, 14 skipped, 0 failed**
-(Phases 1-4 reconverts add +47 tests → 853 total).
+(12 `QA_PASS` + 14 `QA_PASS_WITH_ADVISORIES`). All 8 FAILs were signed
+v2.10 deferrals. RC1 test suite: **806 passed, 14 skipped, 0 failed**.
 
 **Qdrant `mmrag_v2_8`:** 30,461 points, status green (25,691 text +
 4,379 image + 391 table). Rebuilt 2026-05-12 from the 34 canonical
@@ -32,8 +31,7 @@ housekeeping, and Option-1 v2.9.0-final terminology cleanup; see
 §10 Revision log).
 
 **Next cycle:** v2.10. Plan at
-[`docs/PLAN_V2.10.md`](PLAN_V2.10.md) (authored from
-`PLAN_V2.10_DRAFT_PROMPT.md`); Phases 1-7 validated-local
+[`docs/PLAN_V2.10.md`](PLAN_V2.10.md); Phases 1-7 validated-local
 (Phase 7 closed 2026-05-15). KI_En_ChatGPT_Praktische_Gids full
 strict gate now `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1`
 (advisory = `MISSING_CHAPTERS` for the two contiguous leading
@@ -43,9 +41,11 @@ content-bearing missing chapters remain FAIL; documented in
 [`docs/CONVERSION_PROFILES.md`](CONVERSION_PROFILES.md) §EPUB lane).
 ChatGPT_Praktijk_handboek regression control remains
 `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1`. Smoke 11/11
-GATE_PASS + 11/11 UNIVERSAL_PASS, **966 pytest passing**. Phase 8
-(strict-gate re-verification + v2.10 release prep) is the next
-implementation target.
+GATE_PASS + 11/11 UNIVERSAL_PASS, **966 pytest passing**. The smoke
+runner now defaults to offline model resolution and
+`TORCH_COMPILE_DISABLE=1` to avoid repeated Docling/TorchInductor
+native hangs on Apple Silicon. Phase 8 (strict-gate re-verification +
+v2.10 release prep) is the next implementation target.
 
 ---
 
@@ -166,11 +166,10 @@ Warning Classes").
 0 pending. Devlin Phase H catch-up ran 2026-05-12 (the original
 Phase H on 2026-05-11 missed Devlin's 67 pending chunks).
 
-**Test suite:** 853 passed, 14 skipped, 0 failed (was 806 at
-v2.9.0-rc1; +47 net regression tests across Phases 2–5, including
-27 cross-page-split tests in
-`tests/test_cross_page_split_page_attribution.py` and 14 audit/micro-gate
-tests).
+**Current local test suite:** 966 passed, 14 skipped, 0 failed after
+Phase 7 (was 806 at v2.9.0-rc1). This includes the Phase 6 OCR-lane
+heading + infix-repair tests and the Phase 7 EPUB-lane/advisory tests.
+The corpus-wide v2.10 AFTER snapshot is still pending Phase 8.
 
 ### Open work — v2.10 production-tag blockers
 
@@ -395,9 +394,10 @@ leading low-content structural spine items Docling's HTML parser
 strips; internal or content-bearing missing chapters remain FAIL).
 ChatGPT_Praktijk_handboek
 regression control unchanged at `QA_PASS_WITH_ADVISORIES`. Smoke
-11/11 GATE_PASS + 11/11 UNIVERSAL_PASS, **966 pytest passing**.
-The next task is Phase 8 (strict-gate re-verification + v2.10
-release prep).
+11/11 GATE_PASS + 11/11 UNIVERSAL_PASS, **966 pytest passing**. The
+smoke runner includes the Phase 7 runtime guard
+`TORCH_COMPILE_DISABLE=1` by default. The next task is Phase 8
+(strict-gate re-verification + v2.10 release prep).
 
 PCWorld VLM evidence from the RC1 cycle remains valid: raw
 text-reading detections 36.5 % → 22.2 %, zero measured Combat-style
@@ -427,6 +427,19 @@ Reverse-chronological. Each entry's evidence files are tracked.
   conditional `MISSING_CHAPTERS` advisory pins. Smoke 11/11 GATE_PASS +
   UNIVERSAL_PASS. Full pytest **966 passed**, 14 skipped.
 
+- **PLAN_V2.10 Phase 6 — `OCR_PATH_HEADING_PROPAGATION`
+  (Firearms):** `validated-local` (2026-05-15). Ordered OCR-lane
+  heading attribution through `Region.is_heading` /
+  `ProcessedChunk.is_heading`; central `ContextStateV2` validator
+  tightenings; single-page push gate on both OCR heading paths; audit
+  fix `BatchProcessor._repair_infix_step_numbers`; targeted enrichment
+  of 264 pending shadow chunks. Firearms strict gate
+  `QA_PASS: failures=0 warnings=0`, HEADING 1091/1094, TEXT
+  `infix_artifacts` 148 → 0. Earthship scanned-class heading
+  regression unchanged at 549/549. 70 OCR-lane tests + 23 infix-repair
+  tests. Full pytest after Phase 6 **953 passed**, 14 skipped.
+  See `docs/PHASE_6_FIREARMS_OCR_HEADING_DIAGNOSTIC.md`.
+
 - **PLAN_V2.10 Phase 5 — `HYBRID_CHUNKER_HEADING_PROPAGATION`
   (Devlin):** `validated-local` (2026-05-13, `f3d8478`). Single
   propagation site at export boundary; heading validator tightened
@@ -443,7 +456,7 @@ Reverse-chronological. Each entry's evidence files are tracked.
   overlap-trim + micro_non_label heading exemption. Cookbook 4/4
   missing pages closed; Distilled cross-page MISSING_PAGES=0.
   27 tests in `tests/test_cross_page_split_page_attribution.py`.
-  Smoke 11/11 GATE_PASS. Full pytest 853 passed.
+  Smoke 11/11 GATE_PASS + UNIVERSAL_PASS. Full pytest 853 passed.
 
 - **PLAN_V2.10 Phase 3 — `B4B_FULL_DOC_PICTURE_DEDUP`
   (Earthship + Distilled):** `validated-local` (2026-05-12). Two-site

@@ -1,19 +1,19 @@
 # Plan: v2.10 — Close the v2.9.0-rc1 Signed Deferrals and Ship the Next Production Baseline
 
-**Status:** Draft v1.4 — Phases 1-6 validated-local (2026-05-15).
-Phase 6 closes OCR-lane heading propagation **and** the audit-fix
-follow-up: Firearms full strict gate returns
-`QA_PASS: failures=0 warnings=0` after the new
-`BatchProcessor._repair_infix_step_numbers` zeroed the TEXT
-`infix_artifacts` (148 → 0) and targeted VLM enrichment via
-`scripts/enrich_firearms_pending_only.py` cleared the 264
-``vision_status="pending"`` shadow chunks
-(`image_placeholder_ratio: 0.2424 → 0.0000`). HEADING coverage
-0.72 → 0.997 (top-5 all real headings); smoke 11/11
-GATE_PASS + UNIVERSAL_PASS; 953 pytest passing; Earthship_Vol1
-full-doc regression HEADING coverage 100 % → 100 % (no drop). No
-threshold weakened. See
-[docs/PHASE_6_FIREARMS_OCR_HEADING_DIAGNOSTIC.md](PHASE_6_FIREARMS_OCR_HEADING_DIAGNOSTIC.md).
+**Status:** Draft v1.5 — Phases 1-7 `validated-local` (2026-05-15).
+All seven named root-cause classes are closed locally. Phase 6 closes
+Firearms OCR-lane heading propagation plus the audit-fix follow-up:
+Firearms full strict gate returns `QA_PASS: failures=0 warnings=0`;
+HEADING coverage is 1091/1094 (0.997), TEXT `infix_artifacts` is
+148 → 0, and targeted VLM enrichment clears the 264 pending shadow
+chunks. Phase 7 closes `KI_EPUB_EXTRACTION_LANE_REWRITE`: KI EPUB
+strict gate returns `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1`
+(`MISSING_CHAPTERS` for two contiguous low-content edge spine items),
+and ChatGPT EPUB remains `QA_PASS_WITH_ADVISORIES`. Full pytest is
+**966 passed, 14 skipped, 0 failed**. Smoke multiprofile is
+**11/11 GATE_PASS + 11/11 UNIVERSAL_PASS** after the smoke runner's
+Apple-Silicon runtime guard (`TORCH_COMPILE_DISABLE=1`) removed the
+sequential Docling/TorchInductor hang. No QA threshold weakened.
 **Owner:** ingestion pipeline
 **Successor to:** `docs/PLAN_V2.9.md` (v2.9.0-rc1 shipped 2026-05-12, tag `v2.9.0-rc1` on commit `3e06d1b`)
 **Related:** `docs/PROJECT_STATUS.md`, `docs/QUALITY_GATES.md`, `docs/DECISIONS.md`,
@@ -23,8 +23,8 @@ threshold weakened. See
 (26 PASS / 0 WARN / 8 FAIL across the 34-doc canonical corpus; all
 8 FAILs are signed v2.10 production-tag blockers).
 
-**CURRENT working state (2026-05-13 local validation):** Phases 1–5
-are `validated-local`.
+**CURRENT working state (2026-05-15 local validation):** Phases 1–7
+are `validated-local`; Phase 8 is the only remaining v2.10 workstream.
 
 - Phase 1 (`TEXT_LABEL_TOC_DENSE_INDEX_ROUTER_MISS`, Chaubal p11) —
   `output/Chaubal_PyTorch_Projects/ingestion.jsonl` was regenerated,
@@ -49,22 +49,20 @@ are `validated-local`.
   propagation site at export boundary; heading validator tightened
   against garbage/code shapes. Devlin HEADING 99%. Full pytest 860
   passed. Committed in `f3d8478`.
+- Phase 6 (`OCR_PATH_HEADING_PROPAGATION`, Firearms) — ordered OCR-lane
+  heading attribution plus audit-fix TEXT infix repair and targeted
+  pending-image enrichment. Firearms strict gate `QA_PASS: failures=0
+  warnings=0`; Earthship scanned-class heading regression unchanged.
+- Phase 7 (`KI_EPUB_EXTRACTION_LANE_REWRITE`, KI EPUB) — EPUB spine
+  markers, synthetic pagination/bbox, per-synthetic-page dedup, and
+  EPUB-aware `MISSING_CHAPTERS` advisory. KI and ChatGPT EPUB strict
+  gates both `QA_PASS_WITH_ADVISORIES`.
 
-Full local test suite now reads **953 passed / 14 skipped / 0
-failed** (was 860 at Phase 5 close; +93 net new regression tests in
-Phase 6: ordered OCR-lane heading propagation, structural pins,
-page-count gate, validator tightening regression, and audit-fix infix
-repair pins). Smoke multiprofile remains **11/11
-GATE_PASS + 11/11 UNIVERSAL_PASS** (unchanged after Phase 6's
-single-page push gate restored the 0013 form-detection that the first
-Phase 6 iteration accidentally flipped). The corpus-level AFTER
-snapshot has not yet been authored, so the v2.10 ship bar remains
-Phase 8's full 34-doc re-verification. Phase 7
-(`KI_EPUB_EXTRACTION_LANE_REWRITE`) is now `validated-local`
-(2026-05-15): KI EPUB strict `QA_PASS_WITH_ADVISORIES`, ChatGPT EPUB
-regression `QA_PASS_WITH_ADVISORIES`, smoke 11/11 GATE_PASS + 11/11
-UNIVERSAL_PASS. Phase 8 (strict-gate re-verification + v2.10 release
-prep) is the next implementation target.
+Full local test suite now reads **966 passed / 14 skipped / 0
+failed**. Smoke multiprofile remains **11/11 GATE_PASS + 11/11
+UNIVERSAL_PASS**. The corpus-level AFTER snapshot has not yet been
+authored, so the v2.10 ship bar remains Phase 8's full 34-doc
+re-verification, Qdrant rebuild, AFTER snapshot, and release tag.
 
 **AFTER state (target):** `docs/QUALITY_SNAPSHOT_<DATE>_v2.10_after.md`
 authored at Phase 8 close.
@@ -148,9 +146,9 @@ the v2.10 production-tag bar. The work also yields:
    evidence is `tracked` or `snapshot`; known limitations
    documented; a fresh session can reproduce the claim without
    chat history.
-3. **`pytest tests/ -q` reports `806 passed or higher, 14
-   skipped, 0 failed`** with every new red→green test from
-   Phases 1-7 added and green.
+3. **`pytest tests/ -q` reports the Phase 7 local baseline
+   (`966 passed, 14 skipped, 0 failed`) or higher** with every new
+   red→green test from Phases 1-7 added and green.
 4. **`bash scripts/smoke_multiprofile.sh`: every row `GATE_PASS` +
    `UNIVERSAL_PASS`** (form variants per `docs/QUALITY_GATES.md`
    "Form / Invoice Acceptance Class" remain valid).
@@ -291,19 +289,22 @@ The 8 signed deferrals decompose into 7 unique root-cause classes
 each close one class; Phase 0 sets the documentation baseline,
 Phase 8 re-verifies the strict gate corpus-wide and tags the
 release. Ordering is smallest-cost / lowest-blast-radius first.
-As of this draft revision, Phases 1–6 are `validated-local`
-(Phase 6 closed 2026-05-15 after the audit-fix iteration). Firearms
-full strict gate returns `QA_PASS: failures=0 warnings=0`. The TEXT
+As of this draft revision, Phases 1–7 are `validated-local`.
+Phase 6 closed 2026-05-15 after the audit-fix iteration: Firearms
+full strict gate returns `QA_PASS: failures=0 warnings=0`; the TEXT
 `infix_artifacts` defect (pre-existing real OCR/multi-column-layout
 artifact, 148 hits in BEFORE) was closed by the new
 `BatchProcessor._repair_infix_step_numbers` chunk-content repair
 whose detection **behaviorally mirrors the audit detector after its
 newline / stop-word post-filters**; parity is pinned by the
 audit-detector parity test in
-`tests/test_infix_step_number_repair.py`. The VLM image-placeholder
-defect was closed by targeted enrichment of the 264 pending shadow
-chunks via cloud `qwen3-vl-plus`. Phase 7
-(`KI_EPUB_EXTRACTION_LANE_REWRITE`) is the next implementation target.
+`tests/test_infix_step_number_repair.py`; and the VLM
+image-placeholder defect was closed by targeted enrichment of the 264
+pending shadow chunks via cloud `qwen3-vl-plus`. Phase 7
+(`KI_EPUB_EXTRACTION_LANE_REWRITE`) closed the EPUB lane with
+spine-order chapter markers, synthetic pagination/bbox, scoped dedup,
+and the documented conditional `MISSING_CHAPTERS` advisory. Phase 8
+is now the next implementation target.
 
 | Phase | Scope | Docs affected | Reconvert? | Re-enrich? | Status |
 |---|---|---|---|---|---|
@@ -340,7 +341,7 @@ will read.
 |---|---|---|
 | `AGENTS.md` §5 ("CURRENT STATE & DIRECTIVES") | Engine version says `v2.9.0-rc1`; v2.10 planning scope explicit; 8 deferrals listed as v2.10 production-tag blockers; no language that implies a future final `v2.9.0` tag. | A new session enters v2.10 work thinking v2.9 still has open execution phases. |
 | `docs/PROJECT_STATUS.md` headline (lines 1-40) | Banner says `v2.9.0-rc1` shipped; explicit "no intermediate final `v2.9.0` tag planned"; the 8 deferrals framed as v2.10 production-tag blockers. | Banner contradicts §"Open work — v2.10 production-tag blockers" — new sessions disagree with themselves. |
-| `docs/README.md` "Read Order For New Sessions" | Step 2 points at `docs/PLAN_V2.10.md` (after this plan is committed) or `docs/PLAN_V2.10_DRAFT_PROMPT.md` (until then). | New sessions land on the v2.9 plan as if it were active. |
+| `docs/README.md` "Read Order For New Sessions" | Step 2 points at `docs/PLAN_V2.10.md`; `docs/PLAN_V2.10_DRAFT_PROMPT.md` is historical only. | New sessions land on the active v2.10 plan instead of obsolete draft-planning guidance. |
 | `CLAUDE.md` "Read First" list | Same as README — v2.10 plan / draft prompt is the active execution doc; PLAN_V2.9.md framed as history. | Same risk; CLAUDE.md is read on every Claude Code session start. |
 | `docs/TESTING.md` version header + strict-gate command examples | Header reads `v2.9.0-rc1` (or `v2.10.x` once Phase 8 lands); the Single-Conversion Full QA block uses `--source-pdf --allow-warnings` per `docs/QUALITY_GATES.md` "Canonical Single-Doc Strict Gate". | Test instructions disagree with the canonical gate, producing phantom MISSING_PAGES failures. |
 | `CHANGELOG.md` `[v2.9.0-rc1]` | Section is the v2.9 close-out; does not promise a final `v2.9.0` tag; carry-forward to v2.10 list is the 8 named deferrals. | Changelog implies a tag that doesn't exist. |
@@ -1661,18 +1662,36 @@ Tests:
 
 ### Phase 7 — `KI_EPUB_EXTRACTION_LANE_REWRITE` (KI EPUB)
 
-**What:** KI_En_ChatGPT_Praktische_Gids is an EPUB. The current
-EPUB lane (`processor._epub_to_html` at
-[processor.py:857](../src/mmrag_v2/processor.py#L857))
-extracts EPUB chapter HTML, concatenates into a single HTML
-document, and feeds it to Docling's HTML parser. This loses
-EPUB-native pagination (chapters become a long page-less HTML
-blob) and bbox metadata (HTML has no inherent geometry).
+**Phase 7 close status — `validated-local` (2026-05-15).**
+Implementation landed in the existing EPUB lane. `_epub_to_html` now
+walks `book.spine`, injects `__MMRAG_EPUB_CH_NNNN__` markers in reading
+order, and `_apply_epub_synthetic_pagination` rewrites EPUB chunks with
+synthetic page numbers, the EPUB bbox sentinel `[0,0,1000,1000]`,
+`extraction_method="epub_html"`, regenerated unique chunk IDs, and
+per-synthetic-page dedup. `qa_full_conversion.py` now treats `.epub`
+sources as chapter-coverage documents rather than PDF page-coverage
+documents and emits conditional `MISSING_CHAPTERS` advisories only for
+contiguous low-content edge spine items. Evidence: KI EPUB strict gate
+`QA_PASS_WITH_ADVISORIES: failures=0 warnings=1`; ChatGPT EPUB
+regression control `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1`;
+focused EPUB tests green; full pytest **966 passed, 14 skipped**; smoke
+**11/11 GATE_PASS + 11/11 UNIVERSAL_PASS**.
 
-ChatGPT_Praktijk_handboek is the regression control: it's the
-other EPUB in the corpus, currently a `QA_PASS_WITH_ADVISORIES`
-with `PAGE_COUNT_UNKNOWN` (the milder symptom of the same
-lane).
+The subsections below preserve the original Phase 7 implementation
+contract for auditability; the close-status block above is the current
+state.
+
+**Original problem:** KI_En_ChatGPT_Praktische_Gids is an EPUB. Before
+Phase 7, the EPUB lane (`processor._epub_to_html` at
+[processor.py:857](../src/mmrag_v2/processor.py#L857)) extracted EPUB
+chapter HTML, concatenated it into a single HTML document, and fed it
+to Docling's HTML parser. That lost EPUB-native chapter structure
+(chapters became a long page-less HTML blob) and bbox metadata (HTML
+has no inherent geometry).
+
+ChatGPT_Praktijk_handboek is the regression control: it is the other
+EPUB in the corpus and remains `QA_PASS_WITH_ADVISORIES` after the
+Phase 7 EPUB-lane rewrite.
 
 Goals for the fix:
 1. Produce a synthetic `page_number` per chunk derived from
@@ -1817,8 +1836,8 @@ reconvert manifest is complete.
 2. Run `bash scripts/smoke_multiprofile.sh`. Expected: 11/11
    `GATE_PASS + UNIVERSAL_PASS`.
 3. Run `pytest tests/ -q`. Expected: all of v2.9.0-rc1's 806
-   plus every new test from Phases 1-7 (count of approx 20+
-   new tests). 0 failed, 14 skipped.
+   tests plus every new test from Phases 1-7; current local baseline
+   after Phase 7 is **966 passed, 14 skipped, 0 failed**.
 4. Verify chunk_id uniqueness corpus-wide: for each JSONL,
    `jq -r '.chunk_id' | sort -u | wc -l` matches
    `wc -l` (minus the IngestionMetadata first line).
@@ -1924,10 +1943,9 @@ Before tagging `v2.10.0-rc1` (or `v2.10.0`):
   every row `GATE_PASS + UNIVERSAL_PASS` (form variants per
   `docs/QUALITY_GATES.md` "Form / Invoice Acceptance Class"
   remain valid). (Goal 4.)
-- [ ] **Tests.** `pytest tests/ -q` reports the v2.9.0-rc1
-  baseline count or higher (806 passed / 14 skipped at the Phase 1
-  local-validation point), plus every new regression test added by
-  Phases 2-7 and any Phase 1 hardening test. 0 failed. (Goal 3.)
+- [ ] **Tests.** `pytest tests/ -q` reports the Phase 7 local
+  baseline count or higher (**966 passed / 14 skipped**), plus any
+  Phase 8 hardening test. 0 failed. (Goal 3.)
 - [ ] **chunk_id contract.** 0 within-file duplicates across all
   34 canonical JSONLs. Re-verify via
   `for f in output/*/ingestion.jsonl; do jq -r 'select(.chunk_id)
@@ -2036,17 +2054,18 @@ upgrades or for the broader UIR refactor.
 | Phase | Reconvert | New image chunks (approx) | Cloud VLM calls |
 |---|---|---:|---:|
 | 1 | Chaubal | 55 (actual) | 80 actual calls incl. retries; 53 complete + 2 F4 hard_fallback |
-| 2 | Fluent | 70 | 70 |
-| 3 | Earthship + Python_Distilled | 50 + 30 | 80 |
-| 4 | Python_Cookbook + Python_Distilled | 25 + (shared with Phase 3) | 25 |
-| 5 | Devlin | 67 (matches Phase H catch-up count) | 67 |
-| 6 | Firearms | scanned-page renders, possibly 0 new image chunks if extraction shape unchanged | 0-300 |
-| 7 | KI EPUB | ~20-50 | 50 |
+| 2 | Fluent | 83 actual | 78 complete + 5 hard_fallback retries |
+| 3 | Earthship + Python_Distilled | 468 + 349 actual | completed locally |
+| 4 | Python_Cookbook + Python_Distilled | image chunks on both docs | completed locally |
+| 5 | Devlin | 67 (matches Phase H catch-up count) | completed locally |
+| 6 | Firearms | 264 pending shadow chunks enriched | completed locally |
+| 7 | KI EPUB | KI image chunks | completed locally |
 | 8 | None | None | 0 |
-| **Remaining total after Phase 1** | **6-7 docs** | **~310-610 chunks** | **~310-610 calls** |
+| **Remaining total after Phase 7** | **Phase 8 verification only** | **0 planned new enrichment** | **0 planned new VLM calls** |
 
-At ~3.5 s/call this is ~18-36 min of remaining cloud-VLM wall
-time, well below the v2.9 cycle's ~4,500-call budget.
+Phase 8 should not introduce new enrichment unless strict-gate
+re-verification finds a real residual defect. If it does, document the
+new cost and evidence trail in the Phase 8 close section.
 
 ---
 
@@ -2056,14 +2075,14 @@ time, well below the v2.9 cycle's ~4,500-call budget.
 |---|---|---|
 | 0 — Documentation Hygiene | 1-2 h | No |
 | 1 — TOC router extension (Chaubal) | `validated-local` 2026-05-12 | No |
-| 2 — TextIntegrityScout per-batch (Fluent) | 4-6 h | No |
-| 3 — Full-doc picture dedup (Earthship + Distilled) | 6-8 h | No |
-| 4 — Cross-page-split page attribution (Cookbook + Distilled) | 8-12 h | No |
-| 5 — HybridChunker heading propagation (Devlin) | 1-1.5 days | No |
-| 6 — OCR-path heading propagation (Firearms) | 1-1.5 days | No |
-| 7 — EPUB lane rewrite (KI EPUB) | 1.5-2 days | No |
+| 2 — TextIntegrityScout per-batch (Fluent) | `validated-local` 2026-05-12 | No |
+| 3 — Full-doc picture dedup (Earthship + Distilled) | `validated-local` 2026-05-12 | No |
+| 4 — Cross-page-split page attribution (Cookbook + Distilled) | `validated-local` 2026-05-13 | No |
+| 5 — HybridChunker heading propagation (Devlin) | `validated-local` 2026-05-13 | No |
+| 6 — OCR-path heading propagation (Firearms) | `validated-local` 2026-05-15 | No |
+| 7 — EPUB lane rewrite (KI EPUB) | `validated-local` 2026-05-15 | No |
 | 8 — Strict-gate re-verify + Qdrant rebuild + tag | 1-2 days (incl. 10h Qdrant rebuild wall time) | No |
-| **Remaining total after Phase 1** | **7-11 working days** | — |
+| **Remaining total after Phase 7** | **Phase 8 only** | — |
 
 External dependencies: none. All work lands in-repo; cloud
 VLM enrichment uses the same DashScope endpoint already
@@ -2075,6 +2094,7 @@ authorized for v2.9.
 
 | Date | Decision | Rationale |
 |---|---|---|
+| 2026-05-15 | Plan updated to Draft v1.5. Phases 1-7 are `validated-local`; Phase 8 is the only remaining v2.10 release workstream. | Phase 6 Firearms strict gate is `QA_PASS`; Phase 7 KI and ChatGPT EPUB strict gates are `QA_PASS_WITH_ADVISORIES`; full pytest is 966 passed / 14 skipped; smoke is 11/11 GATE_PASS + UNIVERSAL_PASS after the smoke runner's Apple-Silicon TorchInductor guard. |
 | 2026-05-13 | Plan updated to Draft v1.2. Phase 4 (`CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION`) moved to `validated-local` (2026-05-13, commit `8effdfd`). Per-page text split via `prov.charspan` slicing + bare DocItem dereferencing + `_looks_like_subtitle_continuation` promotion + page-scoped overlap-trim + audit micro_non_label heading exemption. All 4 Cookbook missing pages closed; Distilled cross-page MISSING_PAGES=0. 27 tests in `tests/test_cross_page_split_page_attribution.py`. Smoke 11/11 GATE_PASS + UNIVERSAL_PASS. Full pytest 853 passed. | Phase 4 also resolved two in-flight defects: (a) Cookbook p397 DOCLING_DUPLICATE_DOC_CHUNK_OVERLAP_TRIM — page-scoped the overlap-trim; (b) HarryPotter LITERATURE_MICRO_GATE_TUNE_AFTER_CROSS_PAGE_FIX — subtitle-continuation promotion + heading/title micro_non_label exemption. Neither threshold weakened. |
 | 2026-05-13 | Phase 5 (`HYBRID_CHUNKER_HEADING_PROPAGATION`, Devlin) moved to `validated-local` (2026-05-13, commit `f3d8478`). Single propagation site at export boundary; heading validator tightened against garbage/code shapes. Devlin HEADING 99%. 7 tests in `tests/test_hybrid_chunker_heading_propagation.py`. Full pytest 860 passed. | Phase 5 landed after a rejected first attempt that propagated Docling-emitted garbage headings. Corrected fix uses `is_valid_heading` validator + `_GENERIC_CARRY_HEADINGS` block. |
 | 2026-05-12 | Plan authored as Draft v1.0. Phase ordering: smallest-cost / lowest-blast-radius first (Phase 1 Chaubal regex extension → Phase 7 EPUB lane rewrite). | Matches the v2.8 / v2.9 plan pattern; surfaces high-risk fixes (Phases 4-7) after the low-risk ones validate the test infrastructure. |
@@ -2087,4 +2107,4 @@ authorized for v2.9.
 
 ---
 
-**END OF PLAN — v2.10 Draft v1.2**
+**END OF PLAN — v2.10 Draft v1.5**
