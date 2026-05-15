@@ -1,6 +1,19 @@
 # Plan: v2.10 — Close the v2.9.0-rc1 Signed Deferrals and Ship the Next Production Baseline
 
-**Status:** Draft v1.1
+**Status:** Draft v1.4 — Phases 1-6 validated-local (2026-05-15).
+Phase 6 closes OCR-lane heading propagation **and** the audit-fix
+follow-up: Firearms full strict gate returns
+`QA_PASS: failures=0 warnings=0` after the new
+`BatchProcessor._repair_infix_step_numbers` zeroed the TEXT
+`infix_artifacts` (148 → 0) and targeted VLM enrichment via
+`scripts/enrich_firearms_pending_only.py` cleared the 264
+``vision_status="pending"`` shadow chunks
+(`image_placeholder_ratio: 0.2424 → 0.0000`). HEADING coverage
+0.72 → 0.997 (top-5 all real headings); smoke 11/11
+GATE_PASS + UNIVERSAL_PASS; 953 pytest passing; Earthship_Vol1
+full-doc regression HEADING coverage 100 % → 100 % (no drop). No
+threshold weakened. See
+[docs/PHASE_6_FIREARMS_OCR_HEADING_DIAGNOSTIC.md](PHASE_6_FIREARMS_OCR_HEADING_DIAGNOSTIC.md).
 **Owner:** ingestion pipeline
 **Successor to:** `docs/PLAN_V2.9.md` (v2.9.0-rc1 shipped 2026-05-12, tag `v2.9.0-rc1` on commit `3e06d1b`)
 **Related:** `docs/PROJECT_STATUS.md`, `docs/QUALITY_GATES.md`, `docs/DECISIONS.md`,
@@ -10,7 +23,7 @@
 (26 PASS / 0 WARN / 8 FAIL across the 34-doc canonical corpus; all
 8 FAILs are signed v2.10 production-tag blockers).
 
-**CURRENT working state (2026-05-12 local validation):** Phases 1, 2, and 3
+**CURRENT working state (2026-05-13 local validation):** Phases 1–5
 are `validated-local`.
 
 - Phase 1 (`TEXT_LABEL_TOC_DENSE_INDEX_ROUTER_MISS`, Chaubal p11) —
@@ -18,34 +31,36 @@ are `validated-local`.
   re-enriched, and passed the canonical single-doc strict gate with
   `MISSING_PAGES=[]` and `QA_PASS`.
 - Phase 2 (`TEXT_INTEGRITY_SCOUT_FULL_DOC_SENSITIVITY`, Fluent_Python) —
-  per-batch trigger + quarantine parallel-site fix shipped to the
-  worktree; Fluent reconverted + re-enriched; strict gate reports
-  `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1` (the single
-  advisory is the pre-existing `ASSET_TINY` 7-asset finding, unrelated
-  to Phase 2).
+  per-batch trigger + quarantine parallel-site fix shipped; Fluent
+  reconverted + re-enriched; strict gate reports
+  `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1`.
 - Phase 3 (`B4B_FULL_DOC_PICTURE_DEDUP`, Earthship + Python_Distilled)
   — pHash dedup page-coverage carve-out + SHADOW-EXTRACTION
-  page-coverage-aware threshold shipped to the worktree. Earthship
-  reconverted + re-enriched; Python_Distilled reconverted + re-enriched.
-  Both strict gates report `QA_PASS` / `QA_PASS_WITH_ADVISORIES` after
-  re-enrichment; the affected `MISSING_PAGES` class is gone. Earthship
-  p109's `image` chunk (extraction_method `docling`) now survives the
-  finalize-time pHash registry via the page-coverage carve-out — the
-  carve-out preserves the chunk, it does not synthesize a new one.
-  Python_Distilled pp 686 / 688 / 913 are extracted as IMAGE chunks
-  (extraction_method `shadow`) under the relaxed 200×200 threshold;
-  p6 is now `text` via the Phase 1 / Phase 2 stack.
+  page-coverage-aware threshold shipped. Both strict gates report
+  `QA_PASS` / `QA_PASS_WITH_ADVISORIES`.
+- Phase 4 (`CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION`, Python_Cookbook +
+  Python_Distilled) — per-page text split via `prov.charspan` slicing +
+  bare DocItem dereferencing + `_looks_like_subtitle_continuation`
+  promotion + page-scoped overlap-trim + audit micro_non_label heading
+  exemption. Cookbook 4/4 missing pages closed; Distilled cross-page
+  MISSING_PAGES=0. Smoke 11/11 GATE_PASS + UNIVERSAL_PASS. Full pytest
+  853 passed. Committed in `8effdfd`.
+- Phase 5 (`HYBRID_CHUNKER_HEADING_PROPAGATION`, Devlin) — single
+  propagation site at export boundary; heading validator tightened
+  against garbage/code shapes. Devlin HEADING 99%. Full pytest 860
+  passed. Committed in `f3d8478`.
 
-Full local test suite now reads **826 passed / 14 skipped / 0
-failed** (was 806 at v2.9.0-rc1; +20 net new regression tests across
-Phases 1-3, including 2 added after the 2026-05-12 post-close
-audit that fixed a bookkeeping gap in the Phase 3 pHash carve-out).
-Smoke multiprofile remains **11/11 GATE_PASS + 11/11 UNIVERSAL_PASS**
-(unchanged). The corpus-level AFTER snapshot has not yet been
-authored, so the v2.10 ship bar remains Phase 8's full 34-doc
-re-verification. Phase 4 (`CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION`,
-Python_Cookbook + the remaining 3 Python_Distilled cross-page-split
-pages) is the next implementation target.
+Full local test suite now reads **953 passed / 14 skipped / 0
+failed** (was 860 at Phase 5 close; +93 net new regression tests in
+Phase 6: ordered OCR-lane heading propagation, structural pins,
+page-count gate, validator tightening regression, and audit-fix infix
+repair pins). Smoke multiprofile remains **11/11
+GATE_PASS + 11/11 UNIVERSAL_PASS** (unchanged after Phase 6's
+single-page push gate restored the 0013 form-detection that the first
+Phase 6 iteration accidentally flipped). The corpus-level AFTER
+snapshot has not yet been authored, so the v2.10 ship bar remains
+Phase 8's full 34-doc re-verification. Phase 7
+(`KI_EPUB_EXTRACTION_LANE_REWRITE`) is the next implementation target.
 
 **AFTER state (target):** `docs/QUALITY_SNAPSHOT_<DATE>_v2.10_after.md`
 authored at Phase 8 close.
@@ -87,11 +102,11 @@ production-tag blockers** under the unchanged strict gate
 
 | # | Doc(s) | Class | Affected pages | Retrieval impact | v2.10 status | Root cause / current evidence |
 |---|---|---|---:|---|---|---|
-| 1 | Firearms | `OCR_PATH_HEADING_PROPAGATION` | ~300 (HEADING 72 %) | Moderate | open | OCR/element-by-element path does not promote Docling `section_header` items into `ContextStateV2.hierarchy_stack`. Phase 4 cross-batch carry-forward (`b429cb5`) is correct for HybridChunker path but doesn't apply to the OCR-routed lane. (`docs/archive/PLAN_V2.9__PHASE4.md` Step 4) |
+| 1 | Firearms | `OCR_PATH_HEADING_PROPAGATION` | ~300 (HEADING 72 % → 99.7 %) | Moderate | `validated-local` (2026-05-15). Full strict gate `QA_PASS: failures=0 warnings=0`. Audit-fix iteration also closed the pre-existing TEXT `infix_artifacts: 148 → 0` via the new chunk-content repair `_repair_infix_step_numbers` (universal heuristic that **behaviorally mirrors** the audit detector after its newline / stop-word post-filters; parity pinned by re-applying the audit detector to repaired content), and the VLM `image_placeholder_ratio: 0.2424 → 0.0000` via targeted enrichment of the 264 ``vision_status="pending"`` shadow chunks (`scripts/enrich_firearms_pending_only.py` delegating to the canonical `enrich_image_chunks_v29.py::_enrich_one` helper). | OCR/element-by-element path did not promote Docling `section_header` items into `ContextStateV2.hierarchy_stack`. Phase 6 fix: `Region.is_heading` / `ProcessedChunk.is_heading` carry Docling's structural label through `LayoutAwareOCRProcessor`; `BatchProcessor._attribute_ocr_chunk_heading` does ordered per-chunk push+read; `_promote_ocr_section_headers` is the fallback for VLM/Tesseract-fullpage paths. New `ContextStateV2.get_section_heading()` skips the level-0 doc-title breadcrumb. Validator tightenings (terminal-period sentence-shape on `.` only — `?` and `!` accepted; numbered-prefix body-case shape) centralised in `is_valid_heading`. Single-page push gate (`self._doc_total_pages > 1`) on BOTH call sites prevents form-shape regressions on the canonical 0013 invoice. HEADING coverage 1091/1094 (3 NULL = page-1 front-matter, correctly unattributed by ordered design), top-5 all real chapter/section titles; smoke 11/11 GATE_PASS + 11/11 UNIVERSAL_PASS; Earthship_Vol1 full-doc HEADING coverage unchanged at 1.00 (549/549). See [docs/PHASE_6_FIREARMS_OCR_HEADING_DIAGNOSTIC.md](PHASE_6_FIREARMS_OCR_HEADING_DIAGNOSTIC.md). |
 | 2 | KI_En_ChatGPT_Praktische_Gids | `KI_EPUB_EXTRACTION_LANE_REWRITE` | full doc | Moderate | open | EPUB lane structural gaps: no pagination, no bbox, heavy dedup excess. `processor._epub_to_html` ([src/mmrag_v2/processor.py:857](../src/mmrag_v2/processor.py#L857)) routes EPUBs through Docling HTML — no page-number provenance. (`docs/archive/PLAN_V2.9__PHASE4.md` Step 6) |
-| 3 | Devlin_LLM_Agents | `HYBRID_CHUNKER_HEADING_PROPAGATION` | ~250 (HEADING 72 %) | Moderate | open | Cross-batch heading carry-forward (`b429cb5`) verified in unit tests + small probe but does NOT move Devlin's metric. Likely root cause: Devlin's batches end mid-section without an end-of-section heading chunk, so `_propagate_headings` ([src/mmrag_v2/batch_processor.py:5404](../src/mmrag_v2/batch_processor.py#L5404)) has no source on the next batch's first chunk. |
-| 4 | Python_Cookbook | `CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION` | 4 pages | None — content present, wrong `page_number` | open | Cross-page split at [src/mmrag_v2/processor.py:2870-2929](../src/mmrag_v2/processor.py#L2870-L2929) emits same merged `text.strip()` to every contributing page; per-page dedup at line 2893-2897 then keeps only the first page. Content lives one page earlier than the source page it was extracted from. (`docs/PHASE_B3_CROSS_PAGE_SPLIT_DIAGNOSTIC.md`) |
-| 5 | Python_Distilled | `CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION` (3p) + `B4B_FULL_DOC_PICTURE_DEDUP` (3p) | 7 / 1411 | Mixed | `validated-local` (Phase 3 portion) / `open` (Phase 4 portion) | Phase 3 portion closed locally 2026-05-12. The 3 image-only pages (686 / 688 / 913) were below SHADOW-EXTRACTION's `300×300 OR area ≥ 40 %` threshold; the page-coverage-aware threshold (200×200 floor for pages with no prior chunks) now extracts them. p6 also recovered as TEXT via Phase 1 / 2 stack. The remaining 3 cross-page-split pages are Phase 4 scope. |
+| 3 | Devlin_LLM_Agents | `HYBRID_CHUNKER_HEADING_PROPAGATION` | ~250 (HEADING 72 %) | Moderate | `validated-local` (Phase 5, 2026-05-13, `f3d8478`) | Cross-batch heading carry-forward (`b429cb5`) verified in unit tests + small probe but does NOT move Devlin's metric. Root cause: Devlin's batches end mid-section without an end-of-section heading chunk. Phase 5 fix: single propagation site at export boundary + heading validator tightened against garbage/code shapes. Devlin HEADING 99%. |
+| 4 | Python_Cookbook | `CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION` | 4 pages | None — content present, wrong `page_number` | `validated-local` (Phase 4, 2026-05-13, `8effdfd`) | Cross-page split at [src/mmrag_v2/processor.py:2870-2929](../src/mmrag_v2/processor.py#L2870-L2929) emits same merged `text.strip()` to every contributing page. Phase 4 fix: per-page text split via `prov.charspan` slicing + bare DocItem dereferencing. All 4 Cookbook pages closed. |
+| 5 | Python_Distilled | `CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION` (3p) + `B4B_FULL_DOC_PICTURE_DEDUP` (3p) | 7 / 1411 | Mixed | `validated-local` (Phase 3 + Phase 4, 2026-05-13) | Both portions closed. Phase 3: image-only pages extracted under relaxed threshold. Phase 4: cross-page-split MISSING_PAGES=0. |
 | 6 | Fluent_Python | `TEXT_INTEGRITY_SCOUT_FULL_DOC_SENSITIVITY` | 6 / 770 | None at retrieval | `validated-local` | Closed locally 2026-05-12 by adding a per-batch shortfall trigger (`src/mmrag_v2/validators/text_integrity_scout_trigger.py` + `BatchProcessor._per_batch_shortfall_fires`) that ORs into the scout's doc-level variance gate. Validation surfaced a parallel-site audit gap in `_quarantine_corrupted_text_chunks`; detector swapped to the existing ratio-based `is_irreparably_corrupt` so legitimate Python REPL byte-literal content (Fluent's encodings chapter) is preserved while Combat p66 / Cronin contracts stay green. Fresh Fluent reconvert + re-enrich reports `QA_PASS_WITH_ADVISORIES` (failures=0). |
 | 7 | Chaubal_PyTorch_Projects | `TEXT_LABEL_TOC_DENSE_INDEX_ROUTER_MISS` | 1 / 800 | None | `validated-local` | Closed locally 2026-05-12 by extending the dense-index classifier to recognize compact TOC tails with U+FFFD leader runs from Docling `text` / `section_header` items. Fresh Chaubal reconvert + re-enrichment reports `QA_PASS`, `MISSING_PAGES=[]`; page 11 emits one `hybrid_chunker_pageskip` chunk. |
 | 8 | Earthship_Vol1 | `B4B_FULL_DOC_PICTURE_DEDUP` | 1 / 287 | Marginal | `validated-local` | Closed locally 2026-05-12 with row 5/8 (Phase 3). The drop site was the cross-page pHash dedup at [batch_processor.py:3364](../src/mmrag_v2/batch_processor.py#L3364), not `_filter_blank_assets`. Earthship's hand-drawn cross-sections share pHash signatures within Hamming ≤ 10. The page-coverage carve-out preserves a near-duplicate only when no IMAGE has yet been exported for the image-only page; once any image (unique or preserved-duplicate) is written for that page, subsequent near-duplicates still drop. |
@@ -272,19 +287,29 @@ The 8 signed deferrals decompose into 7 unique root-cause classes
 each close one class; Phase 0 sets the documentation baseline,
 Phase 8 re-verifies the strict gate corpus-wide and tags the
 release. Ordering is smallest-cost / lowest-blast-radius first.
-As of this draft revision, Phases 1, 2, and 3 are locally validated
-and Phase 4 (`CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION`) is the next
-implementation target.
+As of this draft revision, Phases 1–6 are `validated-local`
+(Phase 6 closed 2026-05-15 after the audit-fix iteration). Firearms
+full strict gate returns `QA_PASS: failures=0 warnings=0`. The TEXT
+`infix_artifacts` defect (pre-existing real OCR/multi-column-layout
+artifact, 148 hits in BEFORE) was closed by the new
+`BatchProcessor._repair_infix_step_numbers` chunk-content repair
+whose detection **behaviorally mirrors the audit detector after its
+newline / stop-word post-filters**; parity is pinned by the
+audit-detector parity test in
+`tests/test_infix_step_number_repair.py`. The VLM image-placeholder
+defect was closed by targeted enrichment of the 264 pending shadow
+chunks via cloud `qwen3-vl-plus`. Phase 7
+(`KI_EPUB_EXTRACTION_LANE_REWRITE`) is the next implementation target.
 
 | Phase | Scope | Docs affected | Reconvert? | Re-enrich? | Status |
 |---|---|---|---|---|---|
-| 0 | Documentation Hygiene (control-doc verification) | — | no | no | `pending` |
+| 0 | Documentation Hygiene (control-doc verification) | — | no | no | `pending` (absorbed by v2.10 doc updates) |
 | 1 | `TEXT_LABEL_TOC_DENSE_INDEX_ROUTER_MISS` (router extension for `text` / `section_header`-labeled compact TOC with U+FFFD leaders) | Chaubal_PyTorch_Projects p11 | Chaubal (1 doc, done locally) | done locally (55 image chunks; 80 VLM calls incl. retries) | `validated-local` |
 | 2 | `TEXT_INTEGRITY_SCOUT_FULL_DOC_SENSITIVITY` (per-batch trigger threshold) + parallel-site fix on corruption quarantine | Fluent_Python | Fluent (1 doc, done locally) | done locally (83 image chunks; 78 complete + 5 hard_fallback retries) | `validated-local` |
 | 3 | `B4B_FULL_DOC_PICTURE_DEDUP` (full-doc image-only-page chunk drop) + SHADOW-EXTRACTION page-coverage threshold | Earthship_Vol1, Python_Distilled | Earthship + Python_Distilled (2 docs, done locally) | done locally (468 + 349 image chunks) | `validated-local` |
-| 4 | `CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION` (per-page text split with correct `page_number`) | Python_Cookbook, Python_Distilled (3 pages overlap with Phase 3) | Cookbook + Distilled (2 docs; Distilled overlaps Phase 3) | yes | `pending` |
-| 5 | `HYBRID_CHUNKER_HEADING_PROPAGATION` (Devlin-shape batch-boundary investigation + fix) | Devlin_LLM_Agents | Devlin (1 doc) | yes | `pending` |
-| 6 | `OCR_PATH_HEADING_PROPAGATION` (promote `section_header` into `ContextStateV2.hierarchy_stack` on OCR/element-by-element lane) | Firearms | Firearms (1 doc) | no (Firearms has scanned-degraded image chunks already enriched; reconvert preserves image chunk_ids only if extraction shape unchanged — verify) | conditional |
+| 4 | `CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION` (per-page text split with correct `page_number`) | Python_Cookbook, Python_Distilled (3 pages overlap with Phase 3) | Cookbook + Distilled (2 docs; Distilled overlaps Phase 3) | yes (image chunks on both) | `validated-local` (2026-05-13, `8effdfd`) |
+| 5 | `HYBRID_CHUNKER_HEADING_PROPAGATION` (Devlin-shape batch-boundary investigation + fix) | Devlin_LLM_Agents | Devlin (1 doc) | yes | `validated-local` (2026-05-13, `f3d8478`) |
+| 6 | `OCR_PATH_HEADING_PROPAGATION` (ordered per-chunk attribution via `Region.is_heading` / `ProcessedChunk.is_heading`; central `is_valid_heading` tightened for terminal-period sentence-shape `.`-only + numbered-prefix body-case; single-page push gate on BOTH per-chunk and fallback paths; audit-fix `BatchProcessor._repair_infix_step_numbers` repairs OCR-mashed numbered-step boundaries and behaviorally mirrors the audit detector after its newline / stop-word post-filters) | Firearms (primary) + Earthship_Vol1 (regression) | Firearms reconverted; Earthship_Vol1 reconverted for regression confirmation | targeted enrichment of 264 ``vision_status="pending"`` shadow chunks via cloud `qwen3-vl-plus` | `validated-local` (2026-05-15). Firearms `QA_PASS: failures=0 warnings=0`. |
 | 7 | `KI_EPUB_EXTRACTION_LANE_REWRITE` (pagination + bbox + dedup in EPUB lane) | KI_En_ChatGPT_Praktische_Gids; ChatGPT_Praktijk_handboek (regression control) | KI EPUB (1 doc); ChatGPT EPUB validated as control | yes (KI image chunks) | `pending` |
 | 8 | Strict-Gate Re-Verification + v2.10 Release Prep (Qdrant rebuild, AFTER snapshot, tag) | all 34 | no | no | `pending` |
 
@@ -1520,6 +1545,114 @@ preserved across reconvert if extraction shape is unchanged
 
 **Cost class:** Reconvert (1 doc); re-enrich conditional.
 
+**Phase 6 close status — `validated-local` (2026-05-15).**
+
+After the audit-fix iteration (2026-05-14 → 2026-05-15), Firearms
+full strict gate returns `QA_PASS: failures=0 warnings=0`. The
+original plan's Done-when items are all satisfied — the strict-gate
+QA_PASS bar (item 1) is met in addition to HEADING coverage ≥ 0.80
+and the cross-corpus scanned-doc regression.
+
+Numeric:
+
+* Firearms HEADING coverage 0.72 → **0.997** (1091/1094 attributed;
+  3 NULL chunks are page-1 front-matter correctly unattributed
+  under ordered per-chunk attribution); top-10 attributions are all
+  real chapter or section titles (Disassembly: 696, Reassembly
+  Tips: 145, General Instructions: 19, WNCHESTER MODEL 70, SAVACE
+  MODEL I10, REMINGTON MODEL 700, MOSSBERG MODEL 479, REMINGTON
+  ROLLING BLOCK, WINCHESTER MODEL 71, NOSTALGIA). The BEFORE-state
+  body-prose garbage strings ("Data: Remington Model 788" 141×,
+  "5. Drift out the trigger cross-pin toward the right." 24×,
+  "6 Drift out the trigger pin…" 21×) each have **0** chunks
+  AFTER.
+* Strict gate: `HEADING: PASS` + `TEXT: PASS` + `IMAGE: PASS` +
+  `UNIVERSAL_PASS` + `SEMANTIC_PASS`. Overall
+  `qa_full_conversion.py` verdict: **`QA_PASS: failures=0
+  warnings=0`** on
+  `output/Firearms_phase6e/ingestion.jsonl`. The two scope-orthogonal
+  defects flagged by the first audit iteration were both closed in
+  the audit-fix iteration:
+  - TEXT `infix_artifacts: 148 → 0` via the new
+    `BatchProcessor._repair_infix_step_numbers` chunk-content repair.
+    Detection **behaviorally mirrors**
+    `scripts/qa_conversion_audit.py::_INFIX_RE` **after the audit's
+    newline / stop-word post-filters** — the production regex
+    collapses the audit's ``\s+`` + ``"\n" in between`` post-filter
+    into a single ``[ \t]+`` on the prev→num side, reproduces the
+    audit's left-context exclusion and short-word / stop-word
+    filters explicitly, and preserves the original separator after
+    the period so existing paragraph breaks are not collapsed. 23
+    focused tests in `tests/test_infix_step_number_repair.py` pin
+    the contract, including the audit-detector parity test that
+    re-applies the audit detector to repaired content and asserts
+    the count drops to 0.
+  - VLM `image_placeholder_ratio: 0.2424 → 0.0000` via targeted
+    enrichment of the 264 ``vision_status="pending"`` shadow
+    full-page chunks
+    (`scripts/enrich_firearms_pending_only.py`, which iterates only
+    `pending`-status image chunks and delegates per-chunk work to
+    the canonical `enrich_image_chunks_v29.py::_enrich_one` helper
+    so prompt / retry / hard-fallback behaviour is unchanged). All
+    264 enriched successfully; 0 hard_fallback.
+
+Implementation:
+
+* Ordered per-chunk attribution via
+  `Region.is_heading` / `ProcessedChunk.is_heading`
+  (`src/mmrag_v2/ocr/layout_aware_processor.py` dataclass extensions);
+  `BatchProcessor._attribute_ocr_chunk_heading` does push+read at
+  chunk-emission time so within-page ordering is preserved.
+  `_promote_ocr_section_headers` is the fallback for VLM-fullpage /
+  Tesseract-fullpage paths that emit a single synthesized chunk per
+  page. Single validator (`is_valid_heading` in
+  `state.context_state` — no parallel OCR validator); no
+  `chunk_dict` post-serialization mutation. The HybridChunker-lane
+  `_propagate_headings(` call count inside `process_pdf` remains
+  1 (Phase 5 structural pin held).
+* Two universal `is_valid_heading` tightenings centralised:
+  (a) **terminal-period** sentence-shape (≥5 words ending in `.` →
+  reject; `?` and `!` are accepted so real question / exclamation
+  headings pass — narrowing iteration after the audit found
+  `"What Is an AI Agent?"`, `"Why Use Retrieval Augmented
+  Generation?"`, `"2. What are AI agents?"` were false-negatived
+  by the original `".!?"` rule); (b) **numbered-prefix
+  body-case** shape (numbered prefix + ≥2 lowercase content words →
+  reject). Each is pinned by parameterised positive AND negative
+  tests in `tests/test_ocr_path_heading_propagation.py`; all
+  Phase 5 audit-named garbage ("Type Type TypeTypeTypeType",
+  "GRAPH DATA: {") still rejected; all Phase 5 Devlin real
+  headings ("1 - The New Age of AI Agents", "2. Fine-Tuning:
+  Teaching the Model to Specialize", "5.1 Notation and
+  Preliminaries", etc.) still accepted.
+* Single-page push gate (`self._doc_total_pages > 1`) applied on
+  BOTH the per-chunk path (`_attribute_ocr_chunk_heading`) and the
+  fallback path (`_promote_ocr_section_headers`). An intermediate
+  iteration that gated only the fallback regressed
+  `scanned/0013_140302111325_001` because Docling tags layout-
+  prominent invoice value lines as `section_header`; the per-chunk
+  push then promoted them and flipped the audit gate's form-
+  detection heuristic. The gate is purely a document-shape
+  constraint, not filename- or page-number-specific.
+
+Tests:
+
+* 70 focused OCR-lane tests (incl. ordered-attribution + question /
+  exclamation + single-page gate + structural pins) + 23 infix-repair
+  tests + 7 Phase 5 + 27 Phase 4 + 8 vision-aided front-matter
+  regression.
+* Full bare `pytest tests/ -x --ignore=tests/manual -q`:
+  **953 passed, 14 skipped**.
+* Smoke: **11/11 GATE_PASS + 11/11 UNIVERSAL_PASS** (Phase 6 v1
+  regressed 0013 to 10/11; the audit-fix per-chunk gate restored
+  the baseline).
+* Regression on Earthship_Vol1 (236-page scanned-class doc, the
+  Greenhouse-like control): HEADING coverage 1.00 → 1.00 (no
+  drop); `UNIVERSAL_PASS`; `micro_non_label_ratio=0.033` (limit
+  0.12).
+* No QA thresholds weakened.
+* Diagnostic doc: `docs/PHASE_6_FIREARMS_OCR_HEADING_DIAGNOSTIC.md`.
+
 ---
 
 ### Phase 7 — `KI_EPUB_EXTRACTION_LANE_REWRITE` (KI EPUB)
@@ -1941,6 +2074,8 @@ authorized for v2.9.
 
 | Date | Decision | Rationale |
 |---|---|---|
+| 2026-05-13 | Plan updated to Draft v1.2. Phase 4 (`CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION`) moved to `validated-local` (2026-05-13, commit `8effdfd`). Per-page text split via `prov.charspan` slicing + bare DocItem dereferencing + `_looks_like_subtitle_continuation` promotion + page-scoped overlap-trim + audit micro_non_label heading exemption. All 4 Cookbook missing pages closed; Distilled cross-page MISSING_PAGES=0. 27 tests in `tests/test_cross_page_split_page_attribution.py`. Smoke 11/11 GATE_PASS + UNIVERSAL_PASS. Full pytest 853 passed. | Phase 4 also resolved two in-flight defects: (a) Cookbook p397 DOCLING_DUPLICATE_DOC_CHUNK_OVERLAP_TRIM — page-scoped the overlap-trim; (b) HarryPotter LITERATURE_MICRO_GATE_TUNE_AFTER_CROSS_PAGE_FIX — subtitle-continuation promotion + heading/title micro_non_label exemption. Neither threshold weakened. |
+| 2026-05-13 | Phase 5 (`HYBRID_CHUNKER_HEADING_PROPAGATION`, Devlin) moved to `validated-local` (2026-05-13, commit `f3d8478`). Single propagation site at export boundary; heading validator tightened against garbage/code shapes. Devlin HEADING 99%. 7 tests in `tests/test_hybrid_chunker_heading_propagation.py`. Full pytest 860 passed. | Phase 5 landed after a rejected first attempt that propagated Docling-emitted garbage headings. Corrected fix uses `is_valid_heading` validator + `_GENERIC_CARRY_HEADINGS` block. |
 | 2026-05-12 | Plan authored as Draft v1.0. Phase ordering: smallest-cost / lowest-blast-radius first (Phase 1 Chaubal regex extension → Phase 7 EPUB lane rewrite). | Matches the v2.8 / v2.9 plan pattern; surfaces high-risk fixes (Phases 4-7) after the low-risk ones validate the test infrastructure. |
 | 2026-05-12 | Python_Distilled handled across Phase 3 AND Phase 4 (one shared reconvert), rather than a single "Python_Distilled close" phase. | Phase 3 (image-only-page chunk drop) and Phase 4 (cross-page-split attribution) are architecturally distinct root causes; collapsing them into one phase would mix two parallel-site audits and obscure the test boundary. |
 | 2026-05-12 | Phase 5 (Devlin) is investigation-first, no pre-decided fix shape. | The Phase 4 v2.9 carry-forward fix `b429cb5` is correct in unit tests but doesn't move Devlin's metric — root cause is non-obvious. Pre-committing to a fix shape would risk the 2026-05-09 Path A precedent. |
@@ -1951,4 +2086,4 @@ authorized for v2.9.
 
 ---
 
-**END OF PLAN — v2.10 Draft v1.1**
+**END OF PLAN — v2.10 Draft v1.2**

@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-05-12
+Last updated: 2026-05-13
 
 Purpose: fast orientation for a new coding session. Read this before deeper project docs.
 
@@ -15,7 +15,8 @@ blockers**. See `docs/DECISIONS.md` "v2.9.0-rc1 Signed Deferrals
 
 **Strict-gate state at RC1:** 26 PASS / 0 WARN / 8 FAIL out of 34
 (12 `QA_PASS` + 14 `QA_PASS_WITH_ADVISORIES`). All 8 FAILs are signed
-v2.10 deferrals. Test suite: **806 passed, 14 skipped, 0 failed**.
+v2.10 deferrals. Test suite: **806 passed, 14 skipped, 0 failed**
+(Phases 1-4 reconverts add +47 tests → 853 total).
 
 **Qdrant `mmrag_v2_8`:** 30,461 points, status green (25,691 text +
 4,379 image + 391 table). Rebuilt 2026-05-12 from the 34 canonical
@@ -30,29 +31,37 @@ cleanup, Devlin Phase H catch-up, search-tool default re-tune
 housekeeping, and Option-1 v2.9.0-final terminology cleanup; see
 §10 Revision log).
 
-**Next cycle:** v2.10. Planning seed at
-[`docs/PLAN_V2.10_DRAFT_PROMPT.md`](PLAN_V2.10_DRAFT_PROMPT.md);
-authoring `docs/PLAN_V2.10.md` is the next-session task.
+**Next cycle:** v2.10. Plan at
+[`docs/PLAN_V2.10.md`](PLAN_V2.10.md) (authored from
+`PLAN_V2.10_DRAFT_PROMPT.md`); Phases 1-6 validated-local
+(Phase 6 closed 2026-05-15 after the audit-fix iteration). Firearms
+full strict gate returns
+`QA_PASS: failures=0 warnings=0` with HEADING coverage 0.997,
+smoke 11/11 GATE_PASS + 11/11 UNIVERSAL_PASS, Earthship_Vol1
+full-doc regression HEADING coverage 100 % → 100 % (no drop),
+**953 pytest passing**. The audit-fix iteration also closed the
+pre-existing TEXT `infix_artifacts: 148 → 0` via the new
+`_repair_infix_step_numbers` chunk-content repair and the VLM
+`image_placeholder_ratio: 0.2424 → 0.0000` via targeted enrichment
+of the 264 pending shadow chunks. Phase 7
+(`KI_EPUB_EXTRACTION_LANE_REWRITE`) is the next implementation
+target.
 
 ---
 
-## v2.9 Execution History (through 2026-05-12)
+## v2.9 Execution History (archaeology only)
 
 The phase-by-phase narrative that produced the RC1 close-out is
-preserved below as execution history. **Authoritative ship state is
-in §Current Objective above**; the close-out snapshot §2 "Phases
-shipped in this cycle" is the canonical summary. The blow-by-blow
-below is kept for archaeology only.
-
----
+preserved below. **Authoritative ship state is in §Current Objective
+above**; the close-out snapshot's "Phases shipped in this cycle" is
+the canonical summary.
 
 ### v2.9 origins (Phase 0)
 
-A v2.9.0 tag was created on
-2026-05-05 against a 32/34 AUDIT_PASS reading from
-`scripts/qa_conversion_audit.py` alone, then deleted on 2026-05-06
-after a user-driven review surfaced multiple defects that the
-single-script gate did not catch (HARRY chapter-intro pages
+A v2.9.0 tag was created on 2026-05-05 against a 32/34 AUDIT_PASS
+reading from `scripts/qa_conversion_audit.py` alone, then deleted on
+2026-05-06 after a user-driven review surfaced multiple defects that
+the single-script gate did not catch (HARRY chapter-intro pages
 silently merged into adjacent pages; Combat p4 lost full-page
 imagery; Combat p66 emitted 73 byte-equal corrupted-table copies;
 Phase 5b enrichment never updated the canonical ``content`` field).
@@ -68,374 +77,53 @@ fresh JSONLs) and Phase 5b (cloud VLM enrichment, 4,269 complete /
 
 **2026-05-11 update.** The first full-corpus strict-gate run
 (`scripts/qa_full_conversion.py --source-pdf --allow-warnings`)
-reported **9 PASS / 8 WARN / 17 FAIL out of 34**. Only 2 of the 17
-FAILs are the signed Phase 4 deferrals; the other 15 are
-previously-unmeasured failure classes. The previous v2.9 plan
-(`docs/archive/PLAN_V2.9_2026-05-06_strict_gate_recovery.md`) has
-been archived and replaced with a new
-[`docs/PLAN_V2.9.md`](PLAN_V2.9.md) recovery plan organized around
-nine work-streams (Phase A diagnostic → I tag). Phase A is complete
-(`docs/PHASE_A_MISSING_PAGES_DIAGNOSTIC.md`): the MISSING_PAGES
-surface decomposes into four distinct sub-classes (B1 TOC
-quarantine over-fire, B2 "intentionally left blank" disclaimer,
-B3 short-text page filter, B4 image-only page chunk-drop). Phase B
-sub-classes proceed in smallest-cost-first order.
-
-**Phase B1 closed (2026-05-11).** Three-layer fix: universal
-U+FFFD collapse at chunk-creation chokepoint
-(`_collapse_replacement_chars` in
-`mmrag_v2.schema.ingestion_schema`); producer-site sanitizer
-retained in `_sanitize_toc_index_text` (cleans text before
-dense-index splitting); two-site BatchProcessor exemption for
-`hybrid_chunker_pageskip*` chunks as defense-in-depth for
-non-U+FFFD signatures. The sanitizer was widened from TOC-only
-to corpus-wide on 2026-05-11 after architectural review flagged
-the narrower scope as borderline overfit. Reconverts of Cronin,
-Nagasubramanian, Sekar, Chaubal: 62 missing pages → 7 (89 %
-reduction; full TOC class closed). All four now report
-`AUDIT_PASS` + `UNIVERSAL_PASS` + `LOCALIZED_CORRUPTION = 0` with
-HEADING ≥ 99 %. Residual missing pages (Nagasubramanian p2,
-Sekar p2/p159/p228/p247, Chaubal p4/p11) are sub-class C/A and
-fold into B3/B4 scope. 13 regression tests in
-`tests/test_corruption_quarantine_toc_exemption.py` + 1 updated
-in `tests/test_finalization_bridge.py`. Test suite: **750 passed,
-14 skipped, 0 failed** (was 736 at Phase 4 close, +14 net new).
-
-**Phase B2 closed (2026-05-11).** Gate-side fix:
-`scripts/qa_full_conversion.py:_is_intentionally_blank_text`
-recognizes the "This page intentionally left blank" boilerplate
-(with a 120-char structural length cap to reject false positives).
-Greenhouse_Design: p3/p11/p23 now classified as
-MISSING_PAGES_BLANK (INFO/acceptable). 10 regression tests in
-`tests/test_qa_intentionally_blank_pages.py`. Test suite: 760
-passed, 14 skipped, 0 failed (+10 net new vs B1 close).
-
-**Phase B4.a closed (2026-05-11).** Two-rule gate-side detector in
-`scripts/qa_full_conversion.py`: `_page_render_is_near_blank` (mean>245
-AND std<20 AND text<200) plus `_page_is_no_text_image_only_placeholder`
-(text_len==0 AND images>=1 AND mean>250). Catches publisher-template
-placeholder pages with 0 false positives on 15-page real-content
-sample. **Python_Distilled: 697 → 4 missing (694 reclassified as
-MISSING_PAGES_BLANK INFO)**, Devlin p2/p264 closed, Chaubal p4
-closed. 17 regression tests in `tests/test_qa_near_blank_render.py`.
-Test suite: **787 passed**, 14 skipped, 0 failed.
-
-**Phase H closed Cronin (2026-05-11).** Targeted re-enrichment of
-4 docs (Cronin / Nagasubramanian / Sekar / Chaubal — the B1+B3
-reconvert outputs with pending image chunks). 170 image chunks ×
-~3 s/call ≈ 8 min. 157 enriched + 13 hard_fallback (7.6 %; F4
-sentinel applies). Result: **Cronin → QA_PASS** (full strict gate
-green); Nagasubramanian / Sekar → QA_WARN (was FAIL); Chaubal stays
-QA_FAIL on its 1 remaining missing page (p11, sub-class A/B4
-residual).
-
-**Phase D iconography lane closed (2026-05-11).**
-`src/mmrag_v2/vision/asset_complexity.py` adds a `tiny bbox`
-iconography lane (bbox <1 % of page → `simple` complexity
-regardless of file size). Hybrid_electric_vehicles "Logo icon." now
-correctly classifies as simple-asset-acceptable description, flipping
-the doc from QA_FAIL → QA_WARN. Corpus probe: 216/4031 image chunks
-have bbox<1 %; all 14 with short descriptions are legitimate
-icon-class. AIOS p8 "Bar chart.0 to 1.0." remains FAIL (5 % bbox,
-genuinely complex; retry-harness issue under investigation).
-2 regression tests in `tests/test_asset_complexity.py`.
-
-**Phase G advisory-warning allowance closed (2026-05-11).**
-`scripts/qa_full_conversion.py` now emits
-`QA_PASS_WITH_ADVISORIES` (a documented PASS variant, parallel to
-the SCAN0013 `GATE_PASS [form: ...]` pattern) when all WARN issues
-are in the documented advisory set: `ASSET_TINY`,
-`PAGE_COUNT_UNKNOWN`, `SCRIPT_ADVISORY_FAIL` (unconditional);
-`VISION_HARD_FALLBACK_RATE` (conditional: every hard_fallback must
-carry the F4 sentinel `complex_asset_short_response_after_retry`).
-Corpus probe confirms 100 % F4 coverage on the 5 docs with that
-WARN (Jungjun, Kimothi, Bourne, Nagasubramanian, Sekar — total
-25 hard_fallback chunks, all F4). 11 regression tests in
-`tests/test_qa_advisory_promotion.py`. Allowance documented in
-`docs/QUALITY_GATES.md` "Advisory Warning Classes".
-
-**Cumulative strict-gate state after B1+B2+B3+B4.a+D+G+H
-(2026-05-11):**
-
-| State | PASS | WARN | FAIL | Tests |
-|---|---:|---:|---:|---:|
-| 2026-05-11 BEFORE (first full-corpus run) | 9 | 8 | 17 | 736 |
-| After all current Phase B/D/G/H work | **24** | **0** | **10** | **804** |
-| Net delta | **+15** | **−8** | **−7** | **+68** |
-
-PASS=24 breaks down as 11 pure `QA_PASS` + 13 `QA_PASS_WITH_ADVISORIES`.
-Goal 1 (v2.9.0-rc1) requires 32/34 PASS-class; **8 more docs need
-closure** to reach the RC target. The 10 remaining FAILs:
-
-| Class | Docs | Path |
-|---|---|---|
-| Signed v2.10 deferral | Firearms, KI_En | Out of scope ✓ |
-| In-flight Phase E reconvert | Combat | Producer-side blank-asset filter widened to std<10; reconvert running |
-| Phase D residual | AIOS p8 | Retry-harness bug suspected; deferral candidate |
-| Phase C | Devlin | HEADING 72% (HybridChunker-path); deferral candidate parallel to Firearms |
-| B3.b cross-page-split (deferred) | Python_Cookbook (4 pages) | v2.10 sign-off needed |
-| B3.b + B4.b mixed | Python_Distilled (4 pages: 1 absorbed, 3 image-only) | v2.10 sign-off needed |
-| New: TextIntegrityScout sensitivity (deferred) | Fluent_Python (6 pages) | v2.10 sign-off needed |
-| Chaubal p11 + Earthship p109 | 2 pages real image content | B4.b small surface fix |
-
-**Phase B3 closed with 3 signed v2.10 deferrals (2026-05-11).**
-Three sub-classes:
-- **B3.a (closed)**: `_emit_section_header_only_page_chunks` in
-  `src/mmrag_v2/processor.py` emits a chunk for pages whose only
-  Docling items are `section_header` / `title` (chapter dividers,
-  title pages). Reconverts: Devlin p170 ✓; Nagasubramanian p2 ✓;
-  Sekar p2/p159/p228/p247 ✓. **MISSING_PAGES=[] now on
-  Nagasubramanian and Sekar; AUDIT_PASS + UNIVERSAL_PASS on
-  both.**
-- **B3.b (deferred to v2.10 as
-  `CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION`)**: Bourne p209 URL/citation
-  list and Ayeva p4 dedication are absorbed into adjacent-page
-  chunks via the v2.9 cross-page-split with wrong `page_number`
-  attribution. Content present in corpus (just on the wrong
-  page); no band-aid backfill (would conflict with Phase 1's
-  `recovery_page_coverage` ban). Diagnostic:
-  `docs/PHASE_B3_CROSS_PAGE_SPLIT_DIAGNOSTIC.md`.
-- **B3.c (deferred to v2.10 as
-  `LOW_RETRIEVAL_VALUE_PAGE_TAXONOMY`)**: Greenhouse p2 (book-title
-  page) and Ayeva p4 (dedication, alternate classification).
-  Corpus-wide FP test on a candidate dedication regex matched
-  Greenhouse p25 — a legitimate Preface acknowledgment. Detector
-  cannot be made tight enough without overfit risk; the
-  Retrieval-Value Test (`docs/DECISIONS.md`) signed deferral
-  pattern applies.
-
-Added `docs/DECISIONS.md` "Retrieval-Value Test" governance:
-features that do not improve retrieval are omitted rather than
-backfilled. 10 new B3 regression tests in
-`tests/test_section_header_only_page_emit.py`. Test suite:
-**770 passed**, 14 skipped, 0 failed (+10 net new vs B2 close;
-+34 cumulative vs Phase 4 close baseline of 736).
+reported **9 PASS / 8 WARN / 17 FAIL out of 34**. The previous v2.9
+plan was archived and replaced with a new recovery plan organized
+around nine work-streams (Phase A diagnostic → I tag).
 
 **`v2.9.0-rc1` ship state achieved 2026-05-11; tag landed 2026-05-12.**
 AFTER snapshot at `docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`.
 Per `docs/DECISIONS.md` "v2.9.0-rc1 Signed Deferrals (2026-05-11
 close-out)", the RC ships with 8 signed v2.10 deferrals (Firearms,
 KI EPUB, Devlin, Python_Cookbook, Python_Distilled, Fluent_Python,
-Chaubal, Earthship) covering all 8 remaining QA_FAIL rows. No
-intermediate `v2.9.0` final tag is planned; the 8 deferrals carry
-forward as v2.10 production-tag blockers. Strict gate state:
-**26 PASS / 0 WARN / 8 FAIL** (12 `QA_PASS` + 14
+Chaubal, Earthship) covering all 8 remaining QA_FAIL rows. Strict
+gate state: **26 PASS / 0 WARN / 8 FAIL** (12 `QA_PASS` + 14
 `QA_PASS_WITH_ADVISORIES`).
-
-Phases shipped in this cycle: B1 (TOC U+FFFD sanitizer + exemption),
-B2 (intentionally-left-blank), B3 Step 2 (section-header-only page
-emission), B4.a (render-based + zero-text image-only blank
-detection), Phase D iconography lane, Phase E (Combat blank-asset +
-gibberish-table), Phase G (QA_PASS_WITH_ADVISORIES variant), Phase H
-(targeted re-enrichment).
-
-**Phase I Qdrant rebuild complete (2026-05-12).**
-`mmrag_v2_8` dropped (was 22,446 v2.8 points) and recreated from the
-34 canonical post-recovery JSONLs via
-`scripts/rebuild_mmrag_v2_8_for_rc1.py`. Final state: status=green,
-`points_count=30,461` (exact match to source: 25,691 text + 4,379
-image + 391 table), `indexed_vectors_count=30,213`, vector dim 4096
-(llava). Wall time 10h15m on local Ollama. The 16 sister `*_v2`
-per-doc collections from earlier experiments were dropped during
-post-RC1 sanitization; `mmrag_v2_8` is now the sole collection.
-
-**`v2.9.0-rc1` tag landed 2026-05-12** on commit `3e06d1b`, pushed to
-GitHub. Post-tag hygiene commits (`51f4b37` sanitization, `e60f70f`
-version bump, `10e94d1` + `4fa871c` + `665a76c` snapshot/search-tool
-follow-ups) are on `main`.
 
 ### v2.9 in-flight fixes (committed)
 
-- **Phase 2 closed (2026-05-08, verification-only)** — re-verified the
-  four shipped v2.9 fixes under the strict gate after Phase 1 outputs.
-  All five contract checks green: chunk_id uniqueness across 5,749
-  chunks (0 dupes); HARRY refiner-suppressed (`refinement_applied=false`
-  on all 651 text chunks) AND HARRY postprocessor acceptance fixture
-  (2 passed, not skipped, with `HARRY_ACCEPTANCE_JSONL=...`); Combat
-  refiner-engaged (109 refined chunks, 0 edit-ratio spam, smart-route
-  fired); Ayeva CodeFormulaV2 lane (`code_indentation_fidelity=0.9693`,
-  `[CODE-ENRICH] Enabled Docling code enrichment` per batch); Firearms
-  route-flip verified (`profile_type=scanned/scanned_degraded`).
-  Smoke baseline 11/11 `GATE_PASS + UNIVERSAL_PASS`. Phase 1
-  invariants hold across every conversion (0 SIGALRM, 0
-  `recovery_page_coverage`, 0 empty text chunks). See
-  `docs/QUALITY_SNAPSHOT_2026-05-08_v2.9_phase2_after.md` and the
-  Config Provenance block recorded there.
-
-  *Carried forward to Phase 4* (split decision documented in the
-  Phase 2 snapshot): Firearms HEADING coverage 72 % (target ≥ 0.80)
-  and chunk-count drift 1690 → 2183 (+29 %). The Phase 4 commit
-  `3fbce7a` route-flip mechanism succeeded, but the OCR/shadow lane
-  on the new profile emits more chunks per page than the v2.8
-  baseline; this is fix work for Phase 4 alongside Combat p66 /
-  Adedeji p301 / KI EPUB.
-- **Phase 1 closed (2026-05-07, commit `df91061`)** — dense-index page
-  router + empty-chunk safety net. `_classify_dense_index_pages`
-  trusts Docling's `document_index` label and routes those pages
-  around HybridChunker via `MmragChunkingSerializerProvider(skip_pages=...)`;
-  a dedicated grid-traversal emitter with two-layer dedup (byte-equal
-  cell collapse + entry-boundary regex split) produces
-  `extraction_method="hybrid_chunker_pageskip"` chunks with no
-  `recovery_page_coverage` and no SIGALRM fires. Three layered guards
-  drop empty text chunks (oversize-breaker, finalize stage,
-  JSONL-write loop) so the strict-gate `empty_text_chunks` invariant
-  holds under full-document conversion. Full Kimothi (258 pages)
-  reports `AUDIT_PASS / UNIVERSAL_PASS / HYGIENE_PASS`; Ayeva back-
-  index probe reports per-page chars 76–105 % of source PDF text
-  layer (closes the prior −30 % token-variance regression). Test
-  suite: **628 passed, 14 skipped**.
 - **chunk_id collision fix** — per-document monotonic ``position``
   hashed into the chunk-id seed; v2.8's 427 within-file dupes
   collapse to zero on a fresh broad reconversion.
 - **Refiner smart-routing** — the config-default refiner only
   auto-enables when the diagnostic engine reports
-  ``has_encoding_corruption=True``. ``--no-refiner`` no longer needed
-  in the Phase 5 conversion runner.
+  ``has_encoding_corruption=True``.
 - **Cross-page DocChunk page-coverage split** — Docling's
   HybridChunker emits multi-page chunks; the chunker now emits one
   IngestionChunk per source page so chapter-intro pages aren't lost.
-- **Mid-sentence merger and near-duplicate filter are now
-  page-scoped** — they no longer reattribute one page's content to
-  another or drop legitimate cross-page split copies.
 - **CorruptionInterceptor extended to TABLE modality** — Combat p66's
   squadron-roster table is now subject to the same patch+quarantine
-  path as text. Long em-dash and ``CS`` filler runs are detected
-  alongside CIDFont/uniXXXX/replacement-char patterns.
-- **FULL-PAGE-GUARD defers full-page assets when no
-  conversion-time VLM** — three sites changed from discard → defer
-  with ``vision_status='pending'``. Combat p4 (and similar pages
-  whose only content is a full-page image) now produces a chunk that
-  Phase 5b enrichment can fill in.
+  path as text.
+- **FULL-PAGE-GUARD defers full-page assets** — three sites changed
+  from discard → defer with ``vision_status='pending'``.
 - **Phase 5b enrichment script writes canonical ``chunk.content``** —
-  not just ``metadata.visual_description``. Earlier v2.9 attempts
-  reported ``image_placeholder_ratio=1.0`` because the canonical
-  field was never updated.
+  not just ``metadata.visual_description``.
 - **``scripts/qa_full_conversion.py`` strict gate** — bundles
   audit + universal + hygiene + semantic_fidelity plus deterministic
   page-coverage / dup-excess / corruption / image-quality checks.
   Documented in ``docs/TESTING.md`` as the v2.9 acceptance bar.
 
-### Open work for v2.9
-
-- **~~MISSING_PAGES on TOC / index pages~~** — closed by Phase 1
-  (commit `df91061`, 2026-05-07). Broad-doc re-verification across
-  the 18 originally-failing docs is folded into Phase 5.
-- **~~Phase 2: re-verify shipped fixes under strict gate~~** — closed
-  2026-05-08 (verification only). See
-  `docs/QUALITY_SNAPSHOT_2026-05-08_v2.9_phase2_after.md`.
-- **Phase 3 Steps 1-3 implemented (2026-05-09).** Source Sanctity
-  validator hardened across 3 commits surfacing 13 leak classes on
-  real qwen3-vl-plus output (`c23d3f6`, `a879e85`, `f224aad`); 604
-  image chunks across 3 docs (Hao 252, Adedeji 128, PCWorld 224)
-  enriched cleanly at 0 % hard-fallback rate. Asset-complexity
-  classifier shipped in `src/mmrag_v2/vision/asset_complexity.py`
-  with 12 unit tests. Gate calibration shipped on both
-  `qa_full_conversion.py` (`_is_blankish_visual_description`) and
-  `qa_semantic_fidelity.py` (`is_placeholder_image_or_table`) with
-  the F4 hard-fallback exemption and complexity-aware short-
-  description rule, plus 15 regression tests
-  (`tests/test_qa_image_gate_calibration.py`). Step 1 baseline doc
-  at `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase3_vlm_baseline.md`.
-  pytest 645 → 672 passing (+27). **A1 follow-up implemented
-  2026-05-09:** `detect_text_reading()` now delegates through a
-  module-scope pattern table with `_detect_first_match()` diagnostics
-  for the Step 4 retry harness; behavior diff is identical across the
-  13 documented leak fixtures and the 604-description Phase 3 corpus,
-  benchmark delta +1.3 %, pytest `678 passed, 14 skipped`.
-- **Phase 3 Step 4 retry harness shipped (2026-05-09, `649c952`).**
-  VLM detail-retry on short-on-complex chunks. 5 of 10 documented
-  targets resolved by retry (Hao p35-1, p139, p355, p364; Adedeji
-  p227); 5 hard_fallback with `complex_asset_short_response_after_retry`
-  sentinel (F4-exempt). Strict gate `IMAGE_DESCRIPTION_UNUSABLE = 0`
-  across all 3 enriched JSONLs. Snapshot updated at
-  `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase3_vlm_baseline.md`
-  §9. Phase 3 closed.
-- **Phase 4: localized strict-gate hard failures — closed with signed
-  deferrals (2026-05-10).** Plan and closure
-  evidence: `docs/archive/PLAN_V2.9__PHASE4.md` and
-  `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase4_after.md`.
-  - Step 1 — `qa_full_conversion.py --source-pdf` documented as
-    canonical strict-gate command (`611805d`).
-  - Step 2 — Adedeji p298-316 source-PDF back-index fallback
-    (`afbbaa6`); 0 TABLE_CORRUPTION, 0 LOCALIZED_CORRUPTION at
-    full 320-page scale.
-  - Step 3 — Combat p66 chunk-level corruption filter at finalize
-    boundary (`6719460`); 0 false positives across 3,709 chunks.
-  - Step 4 (fix) — cross-batch heading carry-forward (`b429cb5`);
-    correct in unit tests + small probe; doesn't apply to Firearms
-    (OCR-routed). The Path A profile-scoped HEADING gate relaxation
-    (`5e58e6e`) was overfit threshold tuning and was reverted in
-    `cbd7fb4`. Firearms HEADING continues to FAIL the strict
-    `>= 0.80` gate. **DEFERRED to v2.10 as
-    `OCR_PATH_HEADING_PROPAGATION` — user sign-off recorded
-    2026-05-10.**
-  - Step 5 — Adedeji `code_indentation_fidelity` 0.886 → 0.9032
-    (cascade win from Step 2; no separate fix needed).
-  - Step 6 — KI EPUB structural failures (no pagination, no bbox,
-    heavy dedup excess). **DEFERRED to v2.10 as
-    `KI_EPUB_EXTRACTION_LANE_REWRITE` — user sign-off recorded
-    2026-05-10.**
-  - Tests: 736 passed, 14 skipped (was 685 at Phase 3 close,
-    +51 net new across Phase 4).
-- **Signed Phase 4 deferrals (allowed only for `v2.9.0-rc1`; carried
-  forward as v2.10 production-tag blockers).**
-  1. `OCR_PATH_HEADING_PROPAGATION` — Firearms HEADING coverage
-     0.722 vs 0.80 floor. Defect: OCR/element-by-element path
-     doesn't promote Docling section_header items into
-     `ContextStateV2.hierarchy_stack` (probe data in
-     `docs/archive/PLAN_V2.9__PHASE4.md` Step 4). User signed off
-     v2.10 deferral on 2026-05-10.
-  2. `KI_EPUB_EXTRACTION_LANE_REWRITE` — EPUB lane structural
-     gaps (acceptance baseline in `docs/archive/PLAN_V2.9__PHASE4.md`
-     Step 6). User signed off v2.10 deferral on 2026-05-10.
-- **Phase 5a/5b broad corpus run (2026-05-10/11) — validated-local.**
-  A Python-native MPS-safe runner (`scripts/convert_books_v29.py`)
-  replaced the legacy shell runner for Phase 5. Fresh reconversion now
-  exists for **34/34** canonical corpus docs; the long-tail documents
-  (`Bourne_RAG_2024`, `Raieli_AI_Agents`, `Hao_ML_Platform`,
-  `Greenhouse_Design`) completed under the 10,800-second timeout.
-  The canonical corpus has **30,356 chunks / 30,356 unique chunk_ids**.
-  Phase 5b cloud `qwen3-vl-plus` enrichment processed 4,382 image
-  chunks; the env-gated acceptance test passed:
-  `RUN_V29_VLM_ACCEPTANCE=1 pytest tests/test_v29_image_enrichment_acceptance.py -q`
-  → `1 passed`.
-- **Phase 5c Qdrant refresh — blocked.** `localhost:6333` is not
-  reachable and Docker socket access is denied by the sandbox. The
-  required escalation to inspect/start the Qdrant container was
-  rejected by the platform usage limit, so `mmrag_v2_8` has **not**
-  been dropped or recreated. Qdrant remains the next blocker before
-  the RC AFTER snapshot and `v2.9.0-rc1` tag.
-- **Phase 5 runner update (2026-05-10).** Use
-  `conda run -n mmrag-v2 python scripts/convert_books_v29.py`.
-  `scripts/convert_books.sh` is disabled for Phase 5 because nested
-  shell execution makes torch report `mps=False` on Apple Silicon,
-  causing Docling to fall back to the stalled CPU path. The runner now
-  kills the full conversion process group on timeout so blocked-doc
-  retries fail cleanly, and it uses per-target lock files to prevent
-  two conversions from writing the same output directory concurrently.
+---
 
 ## Active Baseline
 
 - **`docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`** (current
   v2.9 ship state — 26/34 PASS / 0 WARN / 8 FAIL; tag `v2.9.0-rc1`
-  on commit `3e06d1b`. No intermediate `v2.9.0` final tag is planned;
-  the 8 signed deferrals carry forward as v2.10 production-tag
-  blockers).
-- **`docs/QUALITY_SNAPSHOT_2026-05-11_v2.9_strict_gate_full_corpus.md`**
-  (BEFORE state for the RC1 cycle — 9 PASS / 8 WARN / 17 FAIL on the
-  first full-corpus strict-gate run).
+  on commit `3e06d1b`).
 - **`docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`** (v2.8.0 SHIPPED
-  reference baseline; 30/34 canonical PASS under the v2.8-era
-  audit-only gate).
-- `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase4_after.md` (Phase 4
-  close state with 2 signed deferrals; full-corpus strict gate not
-  yet run at that point; superseded by 2026-05-11 BEFORE).
-- `docs/archive/quality_snapshots/v2.9_in_progress/` —
-  v2.9-in-progress snapshots from 2026-05-06 / 05-08 / 05-09 phase3 /
-  05-10 phase5 attempt (kept for execution-history archaeology;
-  not current-state docs).
-- `docs/archive/quality_snapshots/QUALITY_SNAPSHOT_2026-05-03.md`
-  (v2.8 Phase 0 BEFORE state, archived 2026-05-12).
+  reference baseline).
+- `docs/QUALITY_SNAPSHOT_2026-05-09_v2.9_phase4_after.md` (historical;
+  superseded by 2026-05-11 BEFORE snapshot).
 
 `tests/test_docling_postprocessor_acceptance.py` (HARRY pages 13-30
 reading-order fixture) is the binding regression test.
@@ -478,8 +166,11 @@ Warning Classes").
 0 pending. Devlin Phase H catch-up ran 2026-05-12 (the original
 Phase H on 2026-05-11 missed Devlin's 67 pending chunks).
 
-**Test suite:** 806 passed, 14 skipped, 0 failed (was 736 at Phase 4
-close; +70 net regression tests across the RC1 cycle phases).
+**Test suite:** 853 passed, 14 skipped, 0 failed (was 806 at
+v2.9.0-rc1; +47 net regression tests across Phases 2–5, including
+27 cross-page-split tests in
+`tests/test_cross_page_split_page_attribution.py` and 14 audit/micro-gate
+tests).
 
 ### Open work — v2.10 production-tag blockers
 
@@ -489,14 +180,95 @@ v2.10 production-tag blockers (8 deferral rows over 7 classes — items
 4 and 5 each cover two docs). No intermediate `v2.9.0` final tag is
 planned.
 
-**Remaining open blockers (2 of 7 classes):**
+**Remaining open blockers (1 of 7 classes, plus residual scope on row 2):**
 
-1. `OCR_PATH_HEADING_PROPAGATION` — Firearms.
-2. `KI_EPUB_EXTRACTION_LANE_REWRITE` — KI EPUB.
+1. `KI_EPUB_EXTRACTION_LANE_REWRITE` — EPUB lane structural gaps
+   (no pagination, no bbox, heavy dedup excess). User signed off
+   v2.10 deferral on 2026-05-10.
+
+**Phase 6 `validated-local` (2026-05-15).**
+
+2. `OCR_PATH_HEADING_PROPAGATION` — Firearms.
+   `Region.is_heading` / `ProcessedChunk.is_heading` carry Docling's
+   structural `section_header` / `title` label through
+   [`src/mmrag_v2/ocr/layout_aware_processor.py`](../src/mmrag_v2/ocr/layout_aware_processor.py).
+   [`BatchProcessor._attribute_ocr_chunk_heading`](../src/mmrag_v2/batch_processor.py)
+   walks the `ProcessedChunk` stream in order; heading-marked chunks
+   push into `ContextStateV2` via `update_on_heading` BEFORE state is
+   read for that chunk, so within-page ordering is preserved (body
+   chunks before the first heading on a page inherit prior-page
+   state or `None`; chunks after a same-page heading inherit it;
+   multiple headings switch attribution at the right position).
+   The new `ContextStateV2.get_section_heading()` skips the level-0
+   doc-title initial breadcrumb. `_promote_ocr_section_headers`
+   remains as a fallback for VLM-fullpage / Tesseract-fullpage paths
+   that emit a single synthesized chunk per page.
+
+   The central `is_valid_heading` validator was tightened by two
+   universal rules: **terminal-period** sentence-shape (≥5 words
+   ending in `.` → reject; `?` and `!` are accepted so real question
+   / exclamation headings pass) and **numbered-prefix body-case**
+   shape (numbered prefix + ≥2 lowercase content words → reject).
+   All Phase 5 audit-named garbage rejections retained; all Phase 5
+   Devlin real headings still pass.
+
+   The **single-page push gate** (`self._doc_total_pages > 1`)
+   applies on BOTH the per-chunk path
+   (`_attribute_ocr_chunk_heading`) and the fallback path
+   (`_promote_ocr_section_headers`) so the canonical
+   `scanned/0013_140302111325_001` invoice form-detection contract
+   holds.
+
+   **Numeric evidence:** Firearms strict-gate HEADING audit
+   `PASS coverage 1091/1094 (99.7%)` (was 0.72; the 3 NULL chunks are
+   page-1 front-matter correctly unattributed under ordered design);
+   top-5 all real chapter/section titles. 70 OCR-lane tests + 23
+   infix-repair tests + 7 Phase 5 + 27 Phase 4 + 8 vision-aided pin
+   all pass under bare pytest (**953 total, 14 skipped**). Smoke remains
+   **11/11 GATE_PASS + 11/11 UNIVERSAL_PASS**. Earthship_Vol1
+   full-doc regression: HEADING coverage 1.00 → 1.00 (no drop);
+   `micro_non_label_ratio=0.033` (limit 0.12).
+
+   **Audit-fix iteration (2026-05-15):** the two scope-orthogonal
+   defects flagged by the first audit are now closed without
+   weakening any threshold.
+
+   - TEXT `infix_artifacts: 148 → 0`. The hits were real OCR
+     artifacts (Firearms multi-column numbered-instruction-step
+     layouts where the step number was mashed into the trailing
+     word of the preceding paragraph). Closed by the new
+     `BatchProcessor._repair_infix_step_numbers` chunk-content
+     repair. Detection **behaviorally mirrors**
+     `scripts/qa_conversion_audit.py::_INFIX_RE` **after the
+     audit's newline / stop-word post-filters** (the production
+     regex collapses the audit's ``\s+`` + ``"\n" in between``
+     post-filter into a single ``[ \t]+`` on the prev→num side and
+     reproduces the audit's left-context exclusion and
+     short-word / stop-word filters explicitly). Parity is pinned
+     by 23 cases in `tests/test_infix_step_number_repair.py`,
+     including an audit-detector parity test that re-applies the
+     audit to repaired content and asserts the count drops to 0.
+     Universal heuristic, not Firearms-specific; cross-corpus
+     verified to not regress Devlin / Cronin / Earthship / Greenhouse.
+
+   - VLM `image_placeholder_ratio: 0.2424 → 0.0000`. Closed by
+     targeted enrichment of the 264 ``vision_status="pending"``
+     shadow full-page chunks via
+     `scripts/enrich_firearms_pending_only.py` (delegates per-chunk
+     work to the canonical
+     `scripts/enrich_image_chunks_v29.py::_enrich_one` helper, so
+     prompt / retry / hard-fallback semantics are unchanged). 264
+     enriched, 0 hard_fallback.
+
+   Firearms strict-gate verdict (post-audit-fix):
+   `QA_PASS: failures=0 warnings=0`.
+
+   Diagnostic doc:
+   [`docs/PHASE_6_FIREARMS_OCR_HEADING_DIAGNOSTIC.md`](PHASE_6_FIREARMS_OCR_HEADING_DIAGNOSTIC.md).
 
 **Phase 5 `validated-local` (2026-05-13; committed in `f3d8478` —
 "feat(v2.10): Phase 5 — HYBRID_CHUNKER_HEADING_PROPAGATION (Devlin)
-validated-local"). `HYBRID_CHUNKER_HEADING_PROPAGATION` (Devlin).**
+validated-local").**
 
 3. `HYBRID_CHUNKER_HEADING_PROPAGATION` — Devlin. Producer-side fix
    in [`src/mmrag_v2/batch_processor.py`](../src/mmrag_v2/batch_processor.py)
@@ -504,40 +276,18 @@ validated-local"). `HYBRID_CHUNKER_HEADING_PROPAGATION` (Devlin).**
    (export-boundary `_propagate_headings(export_chunks)`). Validator
    centralized in
    [`src/mmrag_v2/state/context_state.py::is_valid_heading`](../src/mmrag_v2/state/context_state.py#L64)
-   — tightened against repeated-token artefacts (`Type Type Type…`),
-   code/JSON heading shapes (`GRAPH DATA: {`, `def …`, `>>>`, `{`, `[`,
-   ` ``` `), and bracket-prefixed code labels (`[A-Z_]+:\s*[\[{]`).
-   Generic Docling buckets (`Start`, `Front Matter`) may remain on
-   their owning chunk but are NOT permitted to seed forward
-   carry-state via `_GENERIC_CARRY_HEADINGS`. Devlin's strict-gate
-   HEADING audit: **`PASS coverage 783/790 (99%)`, null_headings=7**
-   (the seven nulls are legitimate front-matter pages before the
-   first real section signal — Pages 3–7). Top 10 attributed
-   headings post-fix are all real chapter/section titles
-   (`'6. Automating Evaluation'` 24, `'B. Parallelization and
-   Scalability'` 21, `'Generation:'` 20, …); the rejected v1
-   garbage strings (`'Type Type TypeTypeTypeType'`,
-   `'GRAPH DATA: {'`, `'Start'`) each have **0** chunks attributed
-   in the corrected output. The full strict gate still returns
-   `QA_FAIL` because of pre-existing VLM image-placeholder findings
-   on the `--vision-provider none --no-refiner` reconvert (out of
-   Phase 5 scope). 7 new tests pin both the happy-path heading
-   carry-forward AND the garbage-rejection contracts in
-   `tests/test_hybrid_chunker_heading_propagation.py`. The
-   "only one propagation site" structural contract is pinned by
-   `tests/test_vision_aided_front_matter.py` via source
-   introspection (`source.count("_propagate_headings(") == 1`).
-   Smoke 11/11 GATE_PASS + 11/11 UNIVERSAL_PASS verified
-   2026-05-13. Diagnostic notes recorded in
-   `docs/PHASE_5_DEVLIN_HEADING_DIAGNOSTIC.md`, including the
-   rejected v1 quality regression and the corrected
-   top-heading distribution. See `docs/PLAN_V2.10.md` §Phase 5.
-
-**Phase 4 `validated-local` (2026-05-13; committed in `8effdfd` —
-"feat(v2.10): land Phase 2/3/4 — TextIntegrityScout + B4B picture
-dedup + cross-page-split"). All Phase 4 charter criteria are met:
-Cookbook & Distilled page-loss closed, smoke 11/11 GATE_PASS, full
-pytest green.**
+   — tightened against repeated-token artefacts, code/JSON heading
+   shapes, and bracket-prefixed code labels. Generic Docling buckets
+   (`Start`, `Front Matter`) may remain on their owning chunk but are
+   NOT permitted to seed forward carry-state via `_GENERIC_CARRY_HEADINGS`.
+   Devlin's strict-gate HEADING audit: **`PASS coverage 783/790 (99%)`,
+   null_headings=7** (legitimate front-matter pages before the first
+   real section signal — Pages 3–7). 7 new tests in
+   `tests/test_hybrid_chunker_heading_propagation.py`. The "only one
+   propagation site" structural contract is pinned by
+   `tests/test_vision_aided_front_matter.py` via source introspection.
+   Smoke 11/11 GATE_PASS + 11/11 UNIVERSAL_PASS verified 2026-05-13.
+   See `docs/PLAN_V2.10.md` §Phase 5.
 
 **Phase 4 `validated-local` (2026-05-13; committed in `8effdfd` —
 "feat(v2.10): land Phase 2/3/4 — TextIntegrityScout + B4B picture
@@ -553,100 +303,46 @@ pytest green.**
    short-title-continuation chunks to ``ChunkType.HEADING`` when
    the universal structural signature matches (short single-line
    text under a parent_heading, no terminal sentence punctuation,
-   first word is a small English connector — captures the
-   HarryPotter ``"and the Sorcerer's Stone"`` subtitle shape
-   without filename / page / literal-text rules).
+   first word is a small English connector).
    Companion fixes in [`src/mmrag_v2/batch_processor.py`](../src/mmrag_v2/batch_processor.py):
    `_merge_micro_text_chunks` skips `hybrid_chunker_pagesplit_fallback`
-   markers (prevents marker text from being concatenated onto neighbouring
-   prose — Python_Distilled p472), and `_deduplicate_chunk_overlap` is
-   now page-scoped (resolves the `DOCLING_DUPLICATE_DOC_CHUNK_OVERLAP_TRIM`
-   sibling defect that was dropping Cookbook p397).
-   Audit-side classification correction in
-   [`scripts/qa_conversion_audit.py`](../scripts/qa_conversion_audit.py),
-   [`scripts/qa_ingestion_hygiene.py`](../scripts/qa_ingestion_hygiene.py),
-   and [`scripts/evaluate_technical_manual_gates.py`](../scripts/evaluate_technical_manual_gates.py):
-   ``chunk_type ∈ {heading, title}`` is now treated as non-paragraph
+   markers; `_deduplicate_chunk_overlap` is now page-scoped.
+   Audit-side: ``chunk_type ∈ {heading, title}`` treated as non-paragraph
    structural content alongside ``code`` — exempt from the
-   ``micro_non_label`` counter. Threshold values (0.12 / 0.22 by
-   profile) are unchanged.
+   ``micro_non_label`` counter. Threshold values unchanged.
    **Status: all 4 plan-listed Cookbook pages closed** (63 / 128 / 365 / 397).
-   Python_Distilled's cross-page-split MISSING_PAGES list is empty;
-   the JSONL carries 2 genuine emergency-fallback markers
-   (`hybrid_chunker_pagesplit_fallback`) at p1 and p473 — the marker
-   emission path is the contracted "every contributor was
-   serializer-only / unsliceable" defense.
-   **Full strict gates still return `QA_FAIL` on both docs**, but the
-   remaining failures are VLM image-placeholder findings pre-existing
-   on the non-enriched reconvert (`--vision-provider none --no-refiner`);
-   they are out of Phase 4 scope.
-   **Resolved / closed items inside Phase 4:**
-   * Cookbook p397 — a different defect (Docling 2.86 emits two
-     identical DocChunks for the same code block on adjacent pages
-     p396/p397; the second one used to be stripped to empty by
-     [`batch_processor._deduplicate_chunk_overlap`](../src/mmrag_v2/batch_processor.py#L6209),
-     which trimmed whole-content tail/head overlap regardless of
-     page boundary. **Resolved 2026-05-13** by page-scoping the
-     overlap-trim — DSO same-page overlap trimming still fires;
-     cross-page consecutive chunks now skip the trim regardless of
-     content identity. Pinned by
-     `tests/test_cross_page_split_page_attribution.py::test_overlap_trim_is_page_scoped`.
-   * **`LITERATURE_MICRO_GATE_TUNE_AFTER_CROSS_PAGE_FIX`** (HarryPotter
-     smoke, `digital_literature` profile, 10-page slice) used to trip
-     `micro_non_label_ratio=0.125 > 0.12` on the legitimate 24-char
-     subtitle `"and the Sorcerer's Stone"`. **Resolved 2026-05-13** by
-     a paired producer-side / audit-side fix: producer
-     ``_looks_like_subtitle_continuation`` promotes the offending chunk
-     to ``ChunkType.HEADING``; the three gate scripts
-     (``qa_conversion_audit``, ``qa_ingestion_hygiene``,
-     ``evaluate_technical_manual_gates``) now treat ``chunk_type ∈
-     {heading, title}`` as non-paragraph structural content alongside
-     ``code`` — exempt from the ``micro_non_label`` counter. Threshold
-     values are unchanged. Pinned by
-     `tests/test_cross_page_split_page_attribution.py::TestSubtitleContinuationPromotion`
-     and `::TestAuditMicroNonLabelExemption`. Smoke is now 11/11
-     GATE_PASS.
+   Python_Distilled's cross-page-split MISSING_PAGES list is empty.
    See `docs/PLAN_V2.10.md` §Phase 4 for the full investigation log.
 
 **Closed locally (`validated-local`; awaiting Phase 8 full-corpus re-verification):**
 
 5. `B4B_FULL_DOC_PICTURE_DEDUP` — Earthship + Python_Distilled
-   (3 image-only pages).
-   **`validated-local` 2026-05-12.** Two-site fix: (a) pHash dedup
-   page-coverage carve-out at
-   `BatchProcessor`'s finalize-time export loop preserves the FIRST
-   near-duplicate IMAGE on any page whose only export content is
-   IMAGE chunks (closes Earthship p109); (b) SHADOW-EXTRACTION
-   page-coverage-aware threshold (`_shadow_image_meets_threshold`)
-   relaxes the size floor to 200×200 when the page has no prior
-   chunks (closes Python_Distilled pp 686 / 688 / 913 — 24–27 %
-   area chapter-intro diagrams that were below the standard
-   300×300 / 40 % gate). Both strict gates now report
-   `QA_PASS` / `QA_PASS_WITH_ADVISORIES` after re-enrichment. See
+   (3 image-only pages). **`validated-local` 2026-05-12.** Two-site fix:
+   (a) pHash dedup page-coverage carve-out; (b) SHADOW-EXTRACTION
+   page-coverage-aware threshold (200×200 floor for pages with no
+   prior chunks). Both strict gates now report `QA_PASS` /
+   `QA_PASS_WITH_ADVISORIES` after re-enrichment. See
    `docs/PLAN_V2.10.md` §Phase 3.
 6. `TEXT_INTEGRITY_SCOUT_FULL_DOC_SENSITIVITY` — Fluent_Python.
-   **`validated-local` 2026-05-12.** Per-batch trigger module
-   (`src/mmrag_v2/validators/text_integrity_scout_trigger.py`) +
-   `BatchProcessor` wire-up + parallel-site fix on
-   `_quarantine_corrupted_text_chunks` (ratio-based detector). Fluent
-   strict gate reports `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1`
-   (advisory is the pre-existing `ASSET_TINY` finding). See
+   **`validated-local` 2026-05-12.** Per-batch trigger module +
+   parallel-site fix on `_quarantine_corrupted_text_chunks`
+   (ratio-based detector). Fluent strict gate reports
+   `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1`. See
    `docs/PLAN_V2.10.md` §Phase 2.
 7. `TEXT_LABEL_TOC_DENSE_INDEX_ROUTER_MISS` — Chaubal p11.
    **`validated-local` 2026-05-12.** Dense-index classifier extended
-   to recognize compact TOC tails with U+FFFD leader runs from Docling
-   `text` / `section_header` items. Chaubal strict gate reports
-   `QA_PASS` with `MISSING_PAGES=[]`. See `docs/PLAN_V2.10.md` §Phase 1.
+   to recognize compact TOC tails with U+FFFD leader runs. Chaubal
+   strict gate reports `QA_PASS` with `MISSING_PAGES=[]`. See
+   `docs/PLAN_V2.10.md` §Phase 1.
 
 v2.10 housekeeping (non-blocking; see snapshot §9):
 - Devlin re-ingest into `mmrag_v2_8` so payload metadata matches the
-  post-catch-up JSONL (vectors already correct).
+  post-catch-up JSONL.
 - Re-tune `scripts/search_qdrant.py` `--model` default and `MIN_SCORE`
-  floor once v2.10 rebuilds the collection with a (possibly different)
-  embedder.
+  floor once v2.10 rebuilds the collection.
 - Move the hard-coded Dashscope API key out of
   [`scripts/search_qdrant.py:40`](../scripts/search_qdrant.py#L40)
-  into an env var and rotate the leaked key on the provider side.
+  into an env var and rotate the leaked key.
 
 ### Already-known followups (not v2.9 scope)
 
@@ -655,8 +351,7 @@ Carry forward to v2.10 planning:
 - **Local NuMarkdown-8B-Thinking-mlx-8bits VLM lane.** Cloud-only
   for v2.9 enrichment; re-evaluate when network reachability returns.
 - **Remote CodeFormulaV2 inference.** Docling 2.86 still doesn't
-  expose `RemoteCodeFormulaOptions` / `ApiCodeFormulaOptions`. v2.9
-  uses client-local CPU inference (~27 s/page on Apple Silicon).
+  expose `RemoteCodeFormulaOptions` / `ApiCodeFormulaOptions`.
 - **HybridChunker per-item token guard.** Requires upstream Docling.
 - **Broader UIR refactor** (canonical PdfConversionPlan →
   UniversalDocument → ElementProcessor → chunks per CLAUDE.md).
@@ -664,12 +359,11 @@ Carry forward to v2.10 planning:
 
 ## Active Engineering Direction
 
-`v2.9.0-rc1` has shipped. The active engineering task is **drafting
-`docs/PLAN_V2.10.md`** from the seed prompt at
-[`docs/PLAN_V2.10_DRAFT_PROMPT.md`](PLAN_V2.10_DRAFT_PROMPT.md). The
-plan must structure the close of the 8 deferrals (above), the v2.10
-housekeeping items, and the carry-forward followups, with explicit
-acceptance baselines per item and a strict-gate target state.
+Plan at [`docs/PLAN_V2.10.md`](PLAN_V2.10.md). Phases 1-6 are
+`validated-local` (Phase 6 closed 2026-05-15 after the audit-fix
+iteration). Firearms full strict gate returns
+`QA_PASS: failures=0 warnings=0`. The next task is Phase 7
+(`KI_EPUB_EXTRACTION_LANE_REWRITE`, KI EPUB).
 
 PCWorld VLM evidence from the RC1 cycle remains valid: raw
 text-reading detections 36.5 % → 22.2 %, zero measured Combat-style
@@ -678,57 +372,53 @@ hallucinations, blind-set 87.5 % final-valid. See
 
 ## Recently Completed
 
-Reverse-chronological. Each entry's evidence files are tracked. The `[Folded into 2.8.0]` items still appear in chronological CHANGELOG entries but the consolidated v2.8 closure is the canonical artifact.
+Reverse-chronological. Each entry's evidence files are tracked.
 
-- **PLAN_V2.10 Phase 3 — `B4B_FULL_DOC_PICTURE_DEDUP`:** `validated-local` (2026-05-12). Two-site fix on the Earthship p109 + Python_Distilled pp 686/688/913 image-only-page drop class. Drop sites identified via the 2b parallel-site audit: (i) `BatchProcessor` finalize-time pHash dedup at [batch_processor.py:3364](../src/mmrag_v2/batch_processor.py#L3364) was rejecting Earthship's hand-drawn cross-sections as cross-page near-duplicates; the carve-out preserves the FIRST IMAGE chunk per image-only page, with the decision factored as the pure static helper `BatchProcessor._phash_carve_out_should_preserve_duplicate` so the production code and the regression tests assert against the same contract; (ii) `V2DocumentProcessor._run_shadow_extraction` was below-threshold on Python_Distilled's mid-size 453×258–290 chapter-intro diagrams. The new static helper `V2DocumentProcessor._shadow_image_meets_threshold` returns the standard 300×300 / 40 % gate for pages with prior chunks and a relaxed 200×200 size floor for pages with no prior chunks (area floor stays at 40 % — thin banners and dividers still filtered). Earthship strict gate reports `QA_PASS: failures=0 warnings=0`; Python_Distilled reports `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1` (advisory is pre-existing `ASSET_TINY`). Test suite **826 passed, 14 skipped, 0 failed** (was 817 at end of Phase 2; +9 new tests in `tests/test_phash_dedup_page_coverage.py`, including 2 added after the post-close audit that fixed a bookkeeping gap where the carve-out previously tracked "page had preserved duplicate" instead of "page has any exported IMAGE"). Smoke 11/11 unchanged. See `docs/PLAN_V2.10.md` §Phase 3.
-- **PLAN_V2.10 Phase 2 — `TEXT_INTEGRITY_SCOUT_FULL_DOC_SENSITIVITY`:** `validated-local` (2026-05-12). New per-batch
-  trigger module `src/mmrag_v2/validators/text_integrity_scout_trigger.py`
-  (universal page-shape rules with `VARIANCE_PCT=0.30`,
-  `MIN_SOURCE_CHARS=500`, `MIN_MISSING_PAGES=2`) wired into
-  `BatchProcessor._per_batch_shortfall_fires(...)` and threaded through
-  `_run_text_integrity_scout(force_run=...)`. Parallel-site discovery
-  during validation: `_quarantine_corrupted_text_chunks` was using the
-  single-match `has_encoding_artifacts` detector while
-  `patch_corrupted_chunks` is gated on the doc-level
-  `has_encoding_corruption` flag, dropping legitimate Python REPL output
-  that contained ``\xHH`` byte-literal escapes (Fluent pp 125, 126, 136).
-  Quarantine detector swapped to ratio-based `is_irreparably_corrupt`;
-  existing contract tests (Combat p66 em-dash + C/S runs; CRONIN-style
-  /uniFB01 clusters; pageskip TOC exemption) all still pass. Fluent
-  reconverted + re-enriched (83 image chunks). Strict gate reports
-  `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1` (advisory is the
-  pre-existing `ASSET_TINY` 7-asset finding). Test suite **817 passed,
-  14 skipped, 0 failed** (up from 807 — 10 new tests in
-  `tests/test_text_integrity_scout_per_batch_trigger.py`). Corpus probe
-  (`scripts/probe_phase2_scout_threshold.py`) shows the trigger fires on
-  8 docs; for the seven non-Fluent cases the scout's existing per-page
-  primary_chars ≥ 50 guard means no spurious recovery chunks are added.
-  See `docs/PLAN_V2.10.md` §Phase 2 for the full evidence trail.
-- **PLAN_V2.9 Phase 1 (TOC/index page-loss closure):** `complete` (2026-05-07, commit `df91061`). Dense-index page router via Docling `document_index` label fast path + `MmragChunkingSerializerProvider(skip_pages=...)`; dedicated grid-traversal emitter with two-layer dedup; three layered empty-text-chunk guards (oversize-breaker, finalize stage, JSONL-write loop). Full Kimothi (258 pages) reports `AUDIT_PASS / UNIVERSAL_PASS / HYGIENE_PASS`; Ayeva back-index probe per-page chars 76–105 % of source PDF text (closes prior −30 % token variance). Test suite **628 passed, 14 skipped, 0 failed**. Static `recovery_page_coverage` guard passes. SIGALRM did not fire on any tested document.
-- **PLAN_V2.8 (production gaps + broad reconversion + Qdrant re-ingestion):** SHIPPED 2026-05-04. 7 commits on main `5b0e13d → 645ab2b`. Test suite **596 passed, 2 skipped, 0 failed** (at v2.8 ship; current main is 628). Smoke **11/11 GATE_PASS + 11/11 UNIVERSAL_PASS**. Broad reconversion 34/34 PDF/EPUB exit=0. `mmrag_v2_8` Qdrant collection: 22,137 / 22,160 unique embeddable chunks. See `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md` and `CHANGELOG.md` `[2.8.0]`.
-- Post-Docling Sanity Pass + `digital_literature` profile (folded into v2.8): `complete` (2026-05-03, commits `3bdbe0f`, `2f51816`, `379a733`). Reading-order y-sort, drop-cap promotion, label-leak filter, OCR gating, `digital_literature` profile + scorer + strategy.
-- Contextual Retrieval (Anthropic approach): `complete` (2026-05-01). Embed-time `build_contextualized_text(...)` with breadcrumb + heading + neighbor context, AGENT-CONTEXTUAL-01..07 invariants, AST-level drift guard, byte-stable `--no-contextual` rollback flag.
-- Refactor Boundary Closeout: `complete` (2026-05-01). Removed `BatchProcessor.set_intelligence_metadata` deprecated `[V2.8-COMPAT]` API; added typed-policy round-trip drift insurance test.
-- Milestone 2 — Plan Control Plane: `complete` (2026-05-01). `PdfConversionPlan` promoted to typed policy object.
-- Milestone 1 — Stabilize Extraction: `complete` (2026-05-01). RAG Guide unblocked, per-element chunker guard. **⚠ Ayeva 0.93 reading from this milestone is from the older probe; v2.8 canonical reads 0.83 FAIL — see `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`.**
-- Vision-Aided Front Matter / Domain Search Priority / Coordinate Audit: `complete` (2026-04-30). See `docs/archive/quality_snapshots/QUALITY_SNAPSHOT_2026-04-30.md` (banner-annotated as superseded for any specific metric drift; the architectural changes are still active).
-- Dependency metadata: Docling exact-pinned to `2.86.0` in `pyproject.toml`; engine version bumped 2.7.0 → 2.8.0 in v2.8 release commit `645ab2b`.
+- **PLAN_V2.10 Phase 5 — `HYBRID_CHUNKER_HEADING_PROPAGATION`
+  (Devlin):** `validated-local` (2026-05-13, `f3d8478`). Single
+  propagation site at export boundary; heading validator tightened
+  against garbage strings and code shapes. Devlin HEADING 99 %.
+  7 new tests in `tests/test_hybrid_chunker_heading_propagation.py`.
+  Smoke 11/11 GATE_PASS + UNIVERSAL_PASS. Full pytest 860 passed.
+  See `docs/PLAN_V2.10.md` §Phase 5 and
+  `docs/PHASE_5_DEVLIN_HEADING_DIAGNOSTIC.md`.
 
-## Immediate Next Work
+- **PLAN_V2.10 Phase 4 — `CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION`
+  (Cookbook + Distilled):** `validated-local` (2026-05-13, `8effdfd`).
+  Per-page text split via `prov.charspan` + bare `DocItem`
+  dereferencing + subtitle-continuation promotion + page-scoped
+  overlap-trim + micro_non_label heading exemption. Cookbook 4/4
+  missing pages closed; Distilled cross-page MISSING_PAGES=0.
+  27 tests in `tests/test_cross_page_split_page_attribution.py`.
+  Smoke 11/11 GATE_PASS. Full pytest 853 passed.
 
-`docs/PLAN_V2.9.md` is the active plan; the draft prompt that produced
-it has been archived (`docs/archive/PLAN_V2.9_DRAFT_PROMPT.md`).
+- **PLAN_V2.10 Phase 3 — `B4B_FULL_DOC_PICTURE_DEDUP`
+  (Earthship + Distilled):** `validated-local` (2026-05-12). Two-site
+  fix: pHash dedup page-coverage carve-out + SHADOW-EXTRACTION
+  page-coverage-aware threshold (200×200 floor for pages with no
+  prior chunks). Earthship `QA_PASS`; Distilled `QA_PASS_WITH_ADVISORIES`.
+  9 tests in `tests/test_phash_dedup_page_coverage.py`.
+  Full pytest 826 passed. See `docs/PLAN_V2.10.md` §Phase 3.
 
-Phase status (per Plan §3 sequence):
+- **PLAN_V2.10 Phase 2 — `TEXT_INTEGRITY_SCOUT_FULL_DOC_SENSITIVITY`
+  (Fluent_Python):** `validated-local` (2026-05-12). Per-batch
+  trigger module + parallel-site quarantine fix (ratio-based
+  detector). Fluent `QA_PASS_WITH_ADVISORIES`. 10 tests in
+  `tests/test_text_integrity_scout_per_batch_trigger.py`.
+  Full pytest 817 passed. See `docs/PLAN_V2.10.md` §Phase 2.
 
-| Phase | Scope | Status |
-|---|---|---|
-| Phase 0 | Establish strict-gate baseline | `complete` |
-| Phase 1 | TOC/index page-loss closure | `complete` (2026-05-07, `df91061`) |
-| Phase 2 | Re-verify shipped fixes under strict gate | `complete` (2026-05-08, verification only — see `QUALITY_SNAPSHOT_2026-05-08_v2.9_phase2_after.md`) |
-| Phase 3 | Resolve `IMAGE_DESCRIPTION_UNUSABLE` | `complete` (2026-05-09, commits `649c952` + `51e897b`) |
-| Phase 4 | Localized strict-gate hard failures (Combat p66, Adedeji p301, KI EPUB, Firearms HEADING + chunk-count drift carried from Phase 2) | `closed with signed deferrals` (2026-05-10) |
-| Phase 5 | Broad reconversion + Qdrant refresh + RC AFTER snapshot | `blocked in 5c` — 34/34 fresh outputs and Phase 5b VLM acceptance pass; Qdrant service unavailable |
+- **PLAN_V2.10 Phase 1 — `TEXT_LABEL_TOC_DENSE_INDEX_ROUTER_MISS`
+  (Chaubal p11):** `validated-local` (2026-05-12). Compact U+FFFD
+  TOC-tail router. Chaubal `QA_PASS`, `MISSING_PAGES=[]`.
+  See `docs/PLAN_V2.10.md` §Phase 1.
+
+- **PLAN_V2.9 Phase 1 (TOC/index page-loss closure):** `complete`
+  (2026-05-07, commit `df91061`). Dense-index page router via Docling
+  `document_index` label fast path. Test suite 628 passed.
+
+- **PLAN_V2.8 (production gaps + broad reconversion + Qdrant
+  re-ingestion):** SHIPPED 2026-05-04. 7 commits on main
+  `5b0e13d → 645ab2b`. See `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`.
 
 ## Must-Respect Constraints
 

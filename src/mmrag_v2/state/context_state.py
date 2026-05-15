@@ -95,6 +95,59 @@ def is_valid_heading(text: str) -> bool:
     if text.count(". ") + text.count(".\n") > 1:
         return False
 
+    # Phase 6 (PLAN_V2.10) — terminal-period body-prose rejection.
+    # Docling's layout model occasionally mis-classifies numbered list
+    # items or wrapped body lines in technical manuals as section_header
+    # (Firearms-shape canonical example: "5. Drift out the trigger
+    # cross-pin toward the right."). Real headings — numbered or
+    # otherwise — rarely terminate with a period. Phase 5 Devlin
+    # headings ("1 - The New Age of AI Agents", "2. Fine-Tuning:
+    # Teaching the Model to Specialize") do not match this shape.
+    #
+    # The rule is narrowed to terminal `.` only — `?` (question
+    # headings) and `!` (exclamation-shaped headings) are legitimate
+    # heading shapes in many corpora (e.g. "What Is an AI Agent?",
+    # "Why Use Retrieval Augmented Generation?", "2. What are AI
+    # agents?"). An earlier Phase 6 iteration rejected ".!?" with
+    # ≥5 words and false-negatived these real headings; the audit
+    # restored `?` and `!` to the accept set.
+    _stripped = text.rstrip()
+    if _stripped and _stripped[-1] == ".":
+        _words = re.findall(r"\w+", text)
+        if len(_words) >= 5:
+            return False
+
+    # Phase 6 (PLAN_V2.10) — numbered-item body-prose case rejection.
+    # Numbered body-step instructions in technical manuals (canonical
+    # Firearms-shape: "6. Remove the hammer downward") are imperative
+    # phrases: a Title-case verb followed by lowercase content nouns.
+    # Real numbered headings (Devlin-shape: "5.1 Notation and
+    # Preliminaries", "14. Linking to Memory and Context", "1 - The New
+    # Age of AI Agents") use Title-case (or all-caps) for ALL non-stop
+    # content words. The threshold (>= 2 lowercase content words after
+    # the numbered prefix) is the conservative cut that catches Firearms
+    # body steps without rejecting any of Devlin's top-20 numbered
+    # headings (each of which has 0 lowercase content words).
+    _STOP_WORDS = {
+        "the", "a", "an", "of", "in", "on", "at", "for", "and", "or",
+        "but", "to", "with", "from", "by", "as", "is", "are", "was",
+        "were", "be", "been", "being", "via", "into", "onto", "upon",
+    }
+    _numbered_prefix = re.match(r"^\d+(?:\.\d+)*\.?\s+", text)
+    if _numbered_prefix:
+        _after = text[_numbered_prefix.end():]
+        _after_words = re.findall(r"\w+", _after)
+        _lowercase_content_words = sum(
+            1
+            for w in _after_words
+            if w
+            and w.lower() not in _STOP_WORDS
+            and w[0].islower()
+            and not w.isupper()
+        )
+        if _lowercase_content_words >= 2:
+            return False
+
     # Noise pattern (only symbols, bullets, etc.)
     if NOISE_PATTERN.match(text):
         return False
@@ -473,6 +526,23 @@ class ContextStateV2:
         """
         if self.breadcrumbs:
             return self.breadcrumbs[-1]
+        return None
+
+    def get_section_heading(self) -> Optional[str]:
+        """Return the latest pushed section heading (``level >= 1``), or
+        ``None`` if no real heading has been pushed yet.
+
+        ``create_context_state`` seeds the stack with the document title at
+        ``level == 0`` so downstream RAG context is never empty. The OCR/
+        element-by-element extraction lane uses this accessor to attach
+        ``parent_heading`` only after a real Docling ``section_header`` /
+        ``title`` item has been pushed via :meth:`update_on_heading`,
+        without leaking the document title into chunks emitted before any
+        real heading was encountered.
+        """
+        for level in reversed(self.hierarchy_stack):
+            if level.level >= 1:
+                return level.text
         return None
 
     def get_breadcrumb_string(self, separator: str = " > ") -> str:

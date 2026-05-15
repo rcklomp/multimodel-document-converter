@@ -63,11 +63,13 @@ class Region:
     bbox: List[int]  # [x_min, y_min, x_max, y_max] in pixels
     confidence: float
     text: Optional[str] = None  # For text regions from Docling
-
-    @property
-    def area(self) -> int:
-        """Calculate region area in pixels."""
-        return (self.bbox[2] - self.bbox[0]) * (self.bbox[3] - self.bbox[1])
+    # Phase 6 (PLAN_V2.10): preserve Docling's structural label so
+    # downstream ordered heading attribution in BatchProcessor can push
+    # `section_header` / `title` items into ContextStateV2 at the right
+    # ordinal position within the page. ``type`` flattens these to the
+    # generic ``"text"`` Region type via ``_convert_docling_elements``;
+    # ``is_heading`` keeps the original layout signal.
+    is_heading: bool = False
 
 
 @dataclass
@@ -91,6 +93,14 @@ class ProcessedChunk:
     # REQ-MM-03: Contextual anchoring with prev/next text snippets
     prev_text_snippet: Optional[str] = None
     next_text_snippet: Optional[str] = None
+    # Phase 6 (PLAN_V2.10): set True when the source Docling element
+    # carried a ``section_header`` / ``title`` label. The BatchProcessor
+    # per-chunk emission loop pushes this chunk's content into
+    # ``ContextStateV2`` (subject to ``is_valid_heading``) so subsequent
+    # chunks in the same processed_chunks stream inherit
+    # ``parent_heading`` at the ordinal position the heading appeared,
+    # not at the page level.
+    is_heading: bool = False
 
 
 class LayoutAwareOCRProcessor:
@@ -489,6 +499,10 @@ class LayoutAwareOCRProcessor:
                         bbox=bbox,
                         confidence=confidence,
                         text=text,
+                        # Phase 6 (PLAN_V2.10): preserve Docling's
+                        # section_header / title label for ordered
+                        # heading attribution downstream.
+                        is_heading=label.lower() in ("section_header", "title"),
                     )
                 )
 
@@ -695,6 +709,10 @@ class LayoutAwareOCRProcessor:
             extraction_method="layout_aware_ocr",
             ocr_confidence=ocr_result.confidence,
             ocr_layer=ocr_result.layer_used.value,
+            # Phase 6 (PLAN_V2.10): carry Docling's section_header /
+            # title signal through to the emitted chunk so BatchProcessor
+            # can do ordered heading attribution at chunk-emission time.
+            is_heading=region.is_heading,
         )
 
     def _is_flat_code_like_text(self, text: Optional[str]) -> bool:

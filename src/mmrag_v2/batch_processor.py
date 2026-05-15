@@ -37,7 +37,7 @@ import time
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, ClassVar, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, ClassVar, Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING
 
 import fitz  # PyMuPDF for page rendering
 import numpy as np
@@ -1210,6 +1210,31 @@ class BatchProcessor:
                 f"(threshold={self.ocr_confidence_threshold}, doctr={self.enable_doctr})"
             )
 
+        # PLAN_V2.10 Phase 6 — OCR_PATH_HEADING_PROPAGATION.
+        # Docling's section_header / title labels are preserved on
+        # ``Region.is_heading`` (set in
+        # ``LayoutAwareOCRProcessor._convert_docling_elements``) and
+        # carried through to ``ProcessedChunk.is_heading``. The per-chunk
+        # emission loop below walks ``processed_chunks`` in their natural
+        # ordinal order; when it encounters a heading chunk it pushes
+        # the chunk's text into ``self._context_state`` via
+        # ``_attribute_ocr_chunk_heading`` /
+        # ``ContextStateV2.update_on_heading`` (subject to the central
+        # ``is_valid_heading`` validator), and subsequent body chunks
+        # inherit ``parent_heading`` via
+        # ``self._context_state.get_section_heading()`` at the position
+        # the heading appeared — not at the page level. State persists
+        # across batches/pages via the per-document
+        # ``self._context_state``.
+        #
+        # A pre-scan path covers the rare VLM-fullpage / Tesseract-
+        # fullpage emit paths in ``LayoutAwareOCRProcessor`` that
+        # collapse a page into a single synthesized chunk and therefore
+        # do not flow through the per-chunk walk (no ``is_heading``
+        # markers on the synthesized chunk). The same multi-page gate
+        # protects single-page forms in both code paths.
+        prescan_needed = self._should_prescan_ocr_headings(docling_elements)
+
         # Process page through layout-aware pipeline
         processed_chunks = self._layout_processor.process_page(
             page_image=page_image,
@@ -1224,15 +1249,40 @@ class BatchProcessor:
         doc_title = Path(source_file).stem if source_file else "Document"
         page_height_px, page_width_px = page_image.shape[:2]
 
+        # Phase 6 (PLAN_V2.10): if no ``ProcessedChunk.is_heading``
+        # markers reached the chunk stream (VLM-fullpage / Tesseract-
+        # fullpage paths emit a single synthesized chunk per page that
+        # carries no per-region heading signal), fall back to the
+        # pre-scan so the page's Docling-recognised section_headers
+        # still update state for subsequent pages.
+        if prescan_needed and not any(
+            getattr(pc, "is_heading", False) for pc in processed_chunks
+        ):
+            self._promote_ocr_section_headers(docling_elements)
+
         for pc in processed_chunks:
+            # Phase 6 (PLAN_V2.10): ordered heading attribution.
+            # Heading-marked chunks (Docling section_header / title
+            # preserved through Region.is_heading → ProcessedChunk.is_heading)
+            # push their content into ContextStateV2 BEFORE reading
+            # state for this chunk. ``update_on_heading`` runs the
+            # central ``is_valid_heading`` validator and silently
+            # rejects body-shape / garbage strings. Subsequent body
+            # chunks inherit ``parent_heading`` at the ordinal position
+            # the heading appeared, not at the page level.
+            ocr_parent_heading = self._attribute_ocr_chunk_heading(pc)
+
             # REQ-HIER-03: Breadcrumbs MUST contain minimum [filename, "Page X"]
-            breadcrumb_path = [doc_title, f"Page {pc.page_number}"]
+            if ocr_parent_heading:
+                breadcrumb_path = [doc_title, ocr_parent_heading, f"Page {pc.page_number}"]
+            else:
+                breadcrumb_path = [doc_title, f"Page {pc.page_number}"]
 
             # Create hierarchy
             hierarchy = HierarchyMetadata(
-                parent_heading=None,
+                parent_heading=ocr_parent_heading,
                 breadcrumb_path=breadcrumb_path,
-                level=2,  # 2 items in breadcrumb_path
+                level=len(breadcrumb_path),
             )
 
             # Map modality
@@ -5573,6 +5623,138 @@ class BatchProcessor:
         page_map["__heading_map__"] = heading_map  # type: ignore[assignment]
         return page_map
 
+    def _attribute_ocr_chunk_heading(
+        self,
+        pc: Any,
+    ) -> Optional[str]:
+        """Phase 6 (PLAN_V2.10) — ordered per-chunk heading attribution
+        on the OCR/element-by-element lane.
+
+        Called once per ``ProcessedChunk`` in the order returned by
+        :meth:`LayoutAwareOCRProcessor.process_page`. If the chunk
+        carries ``is_heading=True`` (Docling labelled the source element
+        ``section_header`` or ``title``), the chunk's content is pushed
+        into ``self._context_state`` via ``update_on_heading`` (which
+        validates through ``is_valid_heading`` and silently rejects
+        garbage). The current effective heading is then read back via
+        :meth:`ContextStateV2.get_section_heading`, giving:
+
+          - body chunks BEFORE the first heading on a page inherit the
+            previously-active heading (or ``None`` if none exists);
+          - body chunks AFTER a heading on the same page inherit that
+            heading;
+          - multiple headings on one page switch attribution at the
+            right ordinal position;
+          - heading chunks attribute to themselves (the legitimate
+            "chunk that defines the heading" case noted in the plan);
+          - garbage section_header text (Phase 5 / Phase 6 audit
+            shapes) does not displace a prior valid heading because
+            ``update_on_heading`` rejects it before pushing.
+
+        The page-level fallback ``_promote_ocr_section_headers`` is
+        used ONLY when no chunk in the stream carried
+        ``is_heading=True`` (VLM-fullpage / Tesseract-fullpage paths
+        emit a single synthesized chunk per page).
+
+        Multi-page-doc gate. The push targets inter-page heading
+        propagation; on a single-page document there is no cross-page
+        propagation to do, and pushing a Docling-tagged section_header
+        on a form/invoice (canonical 0013-shape: layout-prominent
+        invoice total or field-label-value line) flips the downstream
+        form-detection heuristic in ``scripts/qa_conversion_audit.py``.
+        State READS still happen so prior-state from earlier pages
+        (none, on a single-page doc) remains accessible.
+        """
+        state = self._context_state
+        if state is None:
+            return None
+        if (
+            getattr(pc, "is_heading", False)
+            and self._doc_total_pages
+            and self._doc_total_pages > 1
+        ):
+            content = getattr(pc, "content", None)
+            if content and content.strip():
+                state.update_on_heading(content.strip(), level=1)
+        return state.get_section_heading()
+
+    def _should_prescan_ocr_headings(
+        self,
+        docling_elements: Optional[Iterable[Any]],
+    ) -> bool:
+        """Phase 6 (PLAN_V2.10) — multi-page-doc gate for OCR-lane
+        heading state pushes.
+
+        The push targets inter-page heading propagation; on a single-
+        page document there is no cross-page propagation to do, and
+        pushing a Docling-tagged ``section_header`` on a form/invoice
+        (canonical 0013-shape: layout-prominent invoice total or field-
+        label-value line) flips the downstream form-detection heuristic
+        in ``scripts/qa_conversion_audit.py``
+        (``form := scanned + total_pages ≤ 5 + heading_coverage <
+        0.10``).
+        """
+        if not docling_elements:
+            return False
+        if self._context_state is None:
+            return False
+        if not self._doc_total_pages or self._doc_total_pages <= 1:
+            return False
+        return True
+
+    def _promote_ocr_section_headers(
+        self,
+        docling_elements: Optional[Iterable[Any]],
+    ) -> None:
+        """Phase 6 (PLAN_V2.10) — VLM/Tesseract-fullpage fallback push.
+
+        Ordered per-chunk heading attribution in
+        :meth:`_process_page_layout_aware` is the canonical OCR-lane
+        path; it walks ``processed_chunks`` and pushes
+        ``section_header`` / ``title`` items into ``self._context_state``
+        at the exact ordinal position they appear within the page (via
+        ``ProcessedChunk.is_heading``). On the rare paths where
+        ``LayoutAwareOCRProcessor.process_page`` collapses an entire
+        page into a single synthesized chunk (VLM full-page
+        transcription; full-page Tesseract baseline on text-only pages),
+        the per-chunk walk sees no ``is_heading=True`` markers and the
+        page's Docling-recognised section_headers would be silently
+        dropped from state — breaking cross-page propagation. This
+        helper is invoked only on those fallback paths to re-establish
+        state.
+
+        Validation is centralised: ``update_on_heading`` re-uses the
+        ``is_valid_heading`` validator in ``state.context_state``. No
+        parallel OCR-lane validator. This is the OCR lane's analogue of
+        the HybridChunker lane's :meth:`_propagate_headings`; the two
+        lanes are independent and do not share a propagation site (the
+        HybridChunker lane's call site in ``process_pdf`` stays at
+        exactly one occurrence).
+        """
+        state = self._context_state
+        if not docling_elements or state is None:
+            return
+        if not self._doc_total_pages or self._doc_total_pages <= 1:
+            return
+        for elem in docling_elements:
+            label_obj = getattr(elem, "label", None)
+            if label_obj is None:
+                continue
+            label_val = (
+                str(label_obj.value)
+                if hasattr(label_obj, "value")
+                else str(label_obj)
+            )
+            if label_val not in ("section_header", "title"):
+                continue
+            heading_text = str(getattr(elem, "text", "")).strip()
+            if not heading_text:
+                continue
+            # update_on_heading() validates via is_valid_heading and silently
+            # rejects garbage (repeated tokens, code/JSON shapes, page-number
+            # patterns, etc.), so a single call site is enough.
+            state.update_on_heading(heading_text, level=1)
+
     def _propagate_headings(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
         """Assign heading hierarchy from the PDF's table of contents.
 
@@ -5822,6 +6004,117 @@ class BatchProcessor:
             return self._doc_avg_text_per_page or 0.0
         return sum(page_chars.values()) / len(page_chars)
 
+    # Phase 6 (PLAN_V2.10) audit follow-up — embedded step-number
+    # repair. Matches the canonical Firearms-shape OCR artifact where
+    # a numbered-instruction-step marker ("2.", "12.", …) is mashed
+    # mid-sentence into the trailing word of the preceding paragraph
+    # ("release the trigger 12. forsemgvaupwaros").
+    #
+    # Detection behaviorally mirrors the audit detector
+    # ``scripts/qa_conversion_audit.py::_INFIX_RE`` AFTER its
+    # newline / stop-word post-filters, not byte-for-byte at the raw
+    # regex level. Specifically:
+    #
+    #   - The audit uses ``\s+`` between prev and num and then drops
+    #     any hit whose ``between`` substring contains a newline. The
+    #     production regex collapses both steps into a single
+    #     ``[ \t]+`` (non-newline whitespace), which is equivalent
+    #     after the audit's post-filter.
+    #   - The audit's left-context check excludes prev preceded by
+    #     ``\n``, ``\r``, ``". "``, ``": "``, ``"; "``, ``"! "``, or
+    #     ``"? "``. The production regex reproduces those exclusions
+    #     as zero-width lookbehinds.
+    #   - The audit's short-word and stop-word filters are reproduced
+    #     in ``_INFIX_STOP_PREV`` / ``_INFIX_STOP_NEXT`` and the
+    #     ``len(...) <= 1`` checks inside ``_replace_one``.
+    #
+    # The audit-detector parity test in
+    # ``tests/test_infix_step_number_repair.py`` re-applies the audit
+    # detector to repaired chunk content and asserts the count drops
+    # to zero, pinning the behavioural equivalence directly.
+    _INFIX_STEP_PATTERN: ClassVar[re.Pattern[str]] = re.compile(
+        r"(?<!\n)(?<!\r)(?<!\. )(?<!: )(?<!; )(?<!! )(?<!\? )"
+        r"\b([a-z][a-z'\-]{0,24})[ \t]+"
+        r"((?:[1-9]|[12]\d|3\d|40))\.(\s+)"
+        r"([a-z][A-Za-z'\-]*)"
+    )
+    _INFIX_STOP_PREV: ClassVar[frozenset] = frozenset(
+        {"bis", "to", "from", "through", "vom", "von", "and", "or"}
+    )
+    _INFIX_STOP_NEXT: ClassVar[frozenset] = frozenset(
+        {"bis", "to", "through"}
+    )
+
+    def _repair_infix_step_numbers(
+        self,
+        chunks: List[IngestionChunk],
+    ) -> List[IngestionChunk]:
+        """Repair embedded numbered-step markers mid-sentence
+        (Firearms-shape canonical OCR artifact).
+
+        OCR layout failures on multi-column numbered-instruction-list
+        manuals can mash an instruction-step number into the trailing
+        word of the preceding paragraph
+        (e.g. ``"release the trigger 12. forsemgvaupwaros"``) instead
+        of the canonical paragraph break before ``12.``. The repair
+        inserts a newline between the preceding word and the step
+        number so the chunk content reflects the source manual's
+        paragraph structure. Content is preserved character-for-
+        character except for the one inserted ``\\n`` per hit.
+
+        Detection behaviorally mirrors the audit detector
+        ``scripts/qa_conversion_audit.py::_INFIX_RE`` AFTER its
+        newline / stop-word post-filters — the production regex
+        collapses the audit's ``\\s+`` + ``"\\n" in between``
+        post-filter into a single ``[ \\t]+`` capture group on the
+        prev→num side, and reproduces the audit's left-context
+        exclusion and short-word / stop-word filters explicitly. A
+        chunk that no longer triggers the audit's ``infix_artifacts``
+        counter cannot trigger this production repair either; the
+        ``test_production_repair_matches_audit_detector_parity`` pin
+        in ``tests/test_infix_step_number_repair.py`` re-applies the
+        audit detector to repaired content and asserts the count
+        drops to zero.
+        """
+        if not chunks:
+            return chunks
+
+        repaired_hits = 0
+        repaired_chunks = 0
+
+        def _replace_one(match: "re.Match[str]") -> str:
+            nonlocal repaired_hits
+            prev_word = match.group(1)
+            num = match.group(2)
+            sep_after_period = match.group(3)
+            next_word = match.group(4)
+            if len(prev_word) <= 1 or len(next_word) <= 1:
+                return match.group(0)
+            if prev_word.lower() in self._INFIX_STOP_PREV:
+                return match.group(0)
+            if next_word.lower() in self._INFIX_STOP_NEXT:
+                return match.group(0)
+            repaired_hits += 1
+            # Preserve the original whitespace after the period so that
+            # existing paragraph breaks (``\n\n``) are not collapsed
+            # into a single space.
+            return f"{prev_word}\n{num}.{sep_after_period}{next_word}"
+
+        for ch in chunks:
+            if ch.modality != Modality.TEXT or not ch.content:
+                continue
+            new_content = self._INFIX_STEP_PATTERN.sub(_replace_one, ch.content)
+            if new_content != ch.content:
+                ch.content = new_content
+                repaired_chunks += 1
+
+        if repaired_hits:
+            logger.info(
+                f"[INFIX-REPAIR] Repaired {repaired_hits} embedded step-number "
+                f"boundaries across {repaired_chunks} chunks"
+            )
+        return chunks
+
     def _apply_final_boundary_repairs(
         self, chunks: List[IngestionChunk]
     ) -> List[IngestionChunk]:
@@ -5832,6 +6125,12 @@ class BatchProcessor:
         stitching must happen before mid-sentence merging, and deduplication
         should see the final stitched text.
         """
+        # Phase 6 (PLAN_V2.10) audit follow-up: repair embedded
+        # step-number boundaries before any other text-level repair so
+        # downstream merge / dedup passes see the corrected paragraph
+        # boundaries. Pure content-level edit; same chunk count.
+        chunks = self._repair_infix_step_numbers(chunks)
+
         # Strip trailing section headings that Docling appended to paragraphs.
         # Digital PDFs often have "...end of paragraph. preface" where "preface"
         # is the next section heading concatenated by the layout parser.
