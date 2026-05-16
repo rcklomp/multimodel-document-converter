@@ -1,10 +1,14 @@
 # Plan: v2.11 — Embedder shootout, validated-cloud, and the rc1/rc2 non-goal closure
 
-**Status:** **Draft v0.1** — pre-soak. The synthetic-soak run started
-2026-05-16 will add v2.10.x defect candidates (Phase 0) and may shift
-the embedder-shootout success bar (Phase 1). This draft will be promoted
-to Draft v0.2 after the soak report lands, and to Draft v1.0 after
-v2.10.0 final ships.
+**Status:** **Draft v0.2** — post-soak, post-Phase-0. Soak ran
+2026-05-16 (Format 98.3%, Recall@1 2.1%, Recall@5 doc 54.2%, Relevance
+5.9%, Faithfulness 4.7%). Phase 0 closed same day with zero v2.10.x
+patches needed; `v2.10.0` final shipped. The soak's quantitative
+finding sharpens Phase 1: the challenger embedder must beat
+**specific** numeric floors on the embedder-attributable axes (see
+Phase 1 §"Soak baseline to beat"). Promotion to Draft v1.0 happens
+when the user signs off on starting Phase 1 (pulling the Qwen3
+embedder + spinning up the second Qdrant collection).
 **Predecessor:** [`docs/PLAN_V2.10.md`](PLAN_V2.10.md) — Phases 1-8
 closed, **`v2.10.0` SHIPPED 2026-05-16** (annotated tag on commit
 `db6527c`, public on GitHub). The RC tag `v2.10.0-rc1` (`82c3639`)
@@ -23,12 +27,17 @@ it did **not** close are the three structural questions about whether
 the v2.10 baseline is the *right* baseline:
 
 1. **Is `llava` actually the right embedder for this corpus?** The
-   v2.10 retrieval-regression captures (`tests/fixtures/retrieval_regression_v2_10.json`)
-   surfaced concrete failure modes: Dutch queries dominated by the
-   larger Dutch doc regardless of semantic relevance; "F-35 Lightning II"
-   → cloud-GenAI book; specific-product queries returning wrong-domain
-   results. These are not bugs in chunking — they're embedder weakness
-   on multilingual + domain-discriminative retrieval.
+   v2.10 soak quantified the weakness: Recall@1 (gold chunk in top-1)
+   is **2.1%** (11/518); Recall@5 doc is **54.2%**; the qwen-max judge
+   marks Relevance at 5.9% and Faithfulness at 4.7%. The pattern in
+   the soak's weakest-15 list is unambiguous: queries about LLM /
+   RAG / agent topics get routed to Devlin's book regardless of true
+   topic; Dutch queries get dominated by whichever Dutch doc is bigger;
+   "F-35 Lightning II" lands on cloud-GenAI content. **The chunker is
+   right** (Format 98.3%); the embedder is the bottleneck. See
+   `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md` for the raw data
+   and `docs/DECISIONS.md` "v2.10 chunker-quality ceiling" for the
+   architectural framing.
 2. **Is the validation tied to one developer's machine?** v2.10 is
    `validated-local`. We have no proof that a clean checkout on a
    different machine reproduces the strict gate, the smoke, the
@@ -43,42 +52,40 @@ the v2.10 baseline is the *right* baseline:
 
 v2.11 answers all three with data, not opinion.
 
-### Where the previous cycle left off
+### Where v2.10 ended
 
-- `v2.10.0-rc1` tagged + pushed 2026-05-16 (commit `82c3639`).
-- **`v2.10.0` SHIPPED 2026-05-16** (commit `db6527c`, rc1 commit + soak report). The annotated tag explicitly frames the release as a chunker baseline (Format 98.3% per soak); retrieval-quality work (Recall@1 2.1%) belongs to v2.11 Phase 1 — see `docs/DECISIONS.md` "v2.10 chunker-quality ceiling".
-- Strict gate: 34 PASS / 0 WARN / 0 FAIL across the 34-doc canonical
-  corpus (16 `QA_PASS` + 18 `QA_PASS_WITH_ADVISORIES`).
-- Qdrant `mmrag_v2_8` rebuilt: `status: green`, `points_count: 30,454`,
-  `indexed_vectors_count: 30,192`, 4096-dim cosine via Ollama `llava`.
+- **`v2.10.0` SHIPPED 2026-05-16** (commit `db6527c`, rc1 commit + soak report). RC tag `v2.10.0-rc1` (`82c3639`) retained on GitHub. The v2.10.0 annotated tag explicitly frames the release as a chunker baseline.
+- Strict gate: 34 PASS / 0 WARN / 0 FAIL across the 34-doc canonical corpus (16 `QA_PASS` + 18 `QA_PASS_WITH_ADVISORIES`).
+- Qdrant `mmrag_v2_8` rebuilt: `status: green`, `points_count: 30,454`, `indexed_vectors_count: 30,192`, 4096-dim cosine via Ollama `llava`.
 - Test suite: 975 passed, 14 skipped, 0 failed.
 - Smoke multiprofile: 11/11 GATE_PASS + 11/11 UNIVERSAL_PASS.
-- Retrieval-regression baseline captured: 20 queries × top-5 pinned in
-  `tests/fixtures/retrieval_regression_v2_10.json`.
-- Synthetic-soak harness shipped: `scripts/synthetic_soak.py` + soak
-  report writer; first run in flight at draft-time.
+- Retrieval-regression baseline captured at `tests/fixtures/retrieval_regression_v2_10.json` (20 queries × top-5; pinned by `tests/test_retrieval_regression_v2_10.py`).
+- Synthetic-soak harness shipped + run (`scripts/synthetic_soak.py`, report at `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md`).
 
-What `v2.10.0` final is waiting on:
+### What v2.11 starts from
 
-- Soak report (Phase 0 here).
-- Any v2.10.x patches that soak findings justify (Phase 0 here).
-- A retrieval-regression baseline that has survived at least one
-  rebuild without drift (Phase 1 byproduct here).
-- A validated-cloud checkpoint (Phase 2 here).
+The v2.10 cycle delivered:
 
-### Carry-forward register (Draft v0.1 — TBD = "soak will refine")
+- A clean chunker contract (Format 98.3% certified by the qwen-max judge).
+- Durable infrastructure for measuring future change: retrieval-regression fingerprint + synthetic-soak harness, both runnable against any future Qdrant collection.
+- One concrete blocker that v2.10 couldn't address inside its scope: the embedder. Recall@1 2.1% / Faithfulness 4.7% is documented as the v2.11 Phase 1 starting point.
+
+The harnesses are not single-use. They get re-run against every embedder candidate, every rebuild, and every annotated tag. They're the measurement substrate v2.11 stands on.
+
+### Carry-forward register (Draft v0.2 — post-soak)
 
 | # | Class | Source | v2.11 status | Notes |
 |---|---|---|---|---|
-| 1 | **Embedder choice** (llava → ?) | rc1 retrieval-regression; soak | **`in-scope`** | Phase 1 below. Challenger: Qwen3-Embedding-4B. |
+| 1 | **Embedder choice** (llava → ?) | v2.10 soak: Recall@1 2.1%, Faith 4.7% | **`in-scope`** | Phase 1 below. Challenger: Qwen3-Embedding-4B; BGE-M3 as fallback if Qwen3 not pullable via Ollama. |
 | 2 | **validated-cloud / CI** | rc1 §"validated-local only" | **`in-scope`** | Phase 2 below. |
 | 3 | NuMarkdown-8B local VLM | v2.7 / v2.8 / v2.9 / v2.10 non-goal | **`investigate-then-decide`** | Phase 3a — check reachability, decide formal-defer-or-act. |
 | 4 | Remote CodeFormulaV2 inference | v2.10 non-goal (Docling 2.86 doesn't expose option) | **`upstream-blocked, defer to v2.12`** | One-line confirmation of Docling status. |
 | 5 | Broader UIR refactor | v2.7+ non-goal | **`scope decision needed`** | Big surgery; pick "small carve-out" vs "defer". |
 | 6 | HybridChunker per-item token guard | v2.10 non-goal, upstream-blocked | **`upstream-blocked, defer`** | Confirm Docling status. |
 | 7 | Magazine rendered-region-crop | v2.10 non-goal | **`defer`** | Magazines pass at current quality bar; not a v2.11 blocker. |
-| 8 | EPUB engine rewrite (parallel `EpubEngine`) | v2.10 §5 (v2.11+ scope) | **`scope decision needed`** | Phase 7's synthetic-pagination is a workaround. Real fix is a parallel engine. |
-| 9 | v2.10.x defect candidates from soak | Synthetic-soak report (pending) | **`TBD`** | Phase 0. Promoted on a case-by-case basis. |
+| 8 | EPUB engine rewrite (parallel `EpubEngine`) | v2.10 §5 (v2.11+ scope) | **`defer to v2.12+`** | Soak data shows EPUB recall is embedder-bound (Phase 1), not lane-bound. Marker workaround is durable. Phase 4 below has the rationale. |
+| 9 | v2.10.x defect candidates from soak | Synthetic-soak 2026-05-16 | **`empty (closed)`** | Soak weakest-15 was entirely embedder-attributable wrong-doc retrievals, not chunk-shape defects. Zero v2.10.x patches needed. Phase 0 closed same day. |
+| 10 | **99.9% Format chunker target** | v2.10 soak (Format 98.3% ceiling) | **`out of scope`** | See `docs/DECISIONS.md` "v2.10 chunker-quality ceiling — 99.9% Format not chased". |
 
 ---
 
@@ -141,69 +148,62 @@ Unchanged from v2.10:
 
 ### Phase 0 — v2.10.0 final ship + soak-driven v2.10.x patches  ✅ CLOSED 2026-05-16
 
-**What.** Promote `v2.10.0-rc1` to `v2.10.0` final after:
-- The soak report has been read and any defect candidates either
-  closed in v2.10.x or formally deferred to v2.11/v2.12.
-- The retrieval-regression baseline has survived one no-op
-  re-capture (idempotency check) with zero drift.
+**What this phase was.** The bridge from v2.10 (chunker baseline, validated-local) to v2.11 (embedder swap + validated-cloud). Read the soak, triage the weakest list into code-defect / embedder-weakness / format-defect classes, ship any code-defect patches as v2.10.x, then tag `v2.10.0` final.
 
-**Outcome (2026-05-16).** `v2.10.0` SHIPPED on commit `db6527c`. The
-soak's "weakest 15" list was dominated by embedder-attributable
-wrong-doc retrievals, not chunk-shape defects (Format 98.3%
-corpus-wide certified the chunker is right). Zero v2.10.x patches
-needed. The v2.10.0 annotated tag re-framed the release as a chunker
-baseline; retrieval-quality work moved to Phase 1 below. See
-`docs/DECISIONS.md` "v2.10 chunker-quality ceiling" for the
-explicit decision to *not* pursue Format 99.9% in v2.11/v2.12.
+**What actually happened.**
 
-**Approach.**
-1. Read `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md` once the
-   in-flight soak completes.
-2. Triage the "weakest 15" list:
-   - **Code defect** → fix in `src/mmrag_v2/...`, tag as v2.10.1,
-     ship.
-   - **Embedder weakness** (most likely the bulk) → defer to Phase 1
-     here; don't try to fix mid-rc1.
-   - **Format / chunk-shape defect** → fix in v2.10.x.
-3. If any v2.10.x ships, re-run strict gate + smoke + retrieval
-   regression + soak before tagging.
-4. Once stable, tag `v2.10.0` annotated on the same commit that bears
-   the last v2.10.x patch (or `82c3639` if no patches needed).
+1. Soak ran 2026-05-16 ~20:23-20:53 UTC. Report at `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md`.
+2. Triage of the weakest 15:
+   - **Code defects:** 0.
+   - **Format / chunk-shape defects:** 0 (Format 98.3% corpus-wide). Minor 1/2 Format scores in the weakest list are subjective "odd spacing" / "minor truncation" judge calls — not actionable as code fixes.
+   - **Embedder weakness:** ~15 of 15. Every wrong-doc retrieval in the weakest list is the same pattern (LLM/RAG/agent queries → Devlin; Dutch queries → KI EPUB regardless of true topic; specific-product queries → cloud-GenAI book). Pushed to Phase 1.
+3. **Zero v2.10.x patches issued.** `v2.10.0` annotated tag created on `db6527c` (rc1 commit `82c3639` + soak report commit) and pushed to GitHub the same day.
+4. The 1.7% Format gap is documented as a known limitation with explicit cost/benefit analysis in `docs/DECISIONS.md` "v2.10 chunker-quality ceiling — 99.9% Format not chased (2026-05-16)". Three revisit triggers recorded; none currently met.
 
-**Done when.**
-- v2.10.0 annotated tag on `main`, pushed to GitHub.
-- v2.10 AFTER snapshot revised with the soak summary in §6 or §7.
-- All soak-surfaced defects either closed or in the v2.11/v2.12
-  carry-forward register.
+**Closure outputs (durable evidence).**
 
-**Risk.** Low. Mostly a triage exercise.
-**Cost class.** Read + small fixes. No reconverts unless a soak finding
-forces one.
+- v2.10 AFTER snapshot revised with §10 entry recording the SHIPPED promotion.
+- DECISIONS.md "v2.10 chunker-quality ceiling" entry authored.
+- AGENTS.md / CLAUDE.md / docs/README.md / docs/PROJECT_STATUS.md / root README all swept from "rc1 staged" to "v2.10.0 SHIPPED".
+- This plan's status banner promoted from Draft v0.1 → v0.2.
+
+**Takeaways for v2.11.**
+
+The framing v2.10 ended on — "the chunker is right; the embedder is the bottleneck" — is the architectural premise Phase 1 is testing. Phase 1's success bar is therefore not "make retrieval better" (vague) but "beat these specific soak numbers" (see Phase 1 §"Soak baseline to beat").
 
 ---
 
 ### Phase 1 — Embedder shootout: `llava` vs `Qwen3-Embedding-4B`
 
-**What.** Decide whether to swap the v2.10 embedder. The v2.10
-retrieval-regression captures already surfaced specific failure modes
-attributable to llava (multilingual weakness, domain-discrimination
-weakness, larger-doc dominance for short queries). The candidate
-`Qwen3-Embedding-4B` is:
-- Multilingual (100+ languages including Dutch + German).
+**What.** Decide whether to swap the v2.10 embedder. The v2.10 soak quantified llava's weakness on this corpus. The candidate `Qwen3-Embedding-4B` is:
+
+- Multilingual (100+ languages including Dutch + German — directly addresses the soak's Dutch-query dominance pattern).
 - 2560-dim cosine — 1.6× smaller index than llava's 4096-dim.
-- Same vendor family as the soak judge — same Dashscope ecosystem if
-  the comparison wins.
-- Locally hostable via Ollama at ~2.5 GB Q4_0 → leaves headroom on a
-  16 GB M1 even with llava resident for the VLM enrichment lane.
+- Same vendor family as the soak judge — same Dashscope ecosystem if the comparison wins.
+- Locally hostable via Ollama at ~2.5 GB Q4_0 → leaves headroom on a 16 GB M1 even with llava resident for the VLM enrichment lane.
 
-We are not changing the VLM enrichment path (which legitimately wants
-a vision-language model). We are changing only the **text retrieval
-embedder**. The two roles are decoupled.
+**Fallback challenger if Qwen3-Embedding-4B is not pullable via Ollama** at start-of-phase: **BGE-M3** (Ollama-pullable, 1024-dim, multilingual, ~400 MB Q4). BGE-M3 won't match Qwen3 ceiling but is a guaranteed-available baseline that still tests the "any modern dedicated text embedder beats a repurposed VLM" hypothesis. If Qwen3 is unavailable, run BGE-M3 as the v2.11 challenger and add Qwen3 as a v2.12 candidate.
 
-**Schedule note.** Per release-cycle hygiene: this phase runs *after*
-v2.10.0 ships final (Phase 0 above). We do NOT attempt to swap mid-rc1;
-the regression test + soak baseline exist precisely so this swap can
-be done with rigor instead of in-flight.
+We are not changing the VLM enrichment path (which legitimately wants a vision-language model). We are changing only the **text retrieval embedder**. The two roles are decoupled.
+
+#### Soak baseline to beat
+
+The v2.10 soak gives Phase 1 concrete numeric floors. The challenger collection's soak must beat these on at least three of the four embedder-attributable axes without regressing Format:
+
+| Axis | v2.10 baseline (llava) | Phase 1 floor for challenger | Stretch target |
+|---|---:|---:|---:|
+| **Recall@1** (gold chunk_id is top-1) | 2.1% | **≥ 15%** | ≥ 30% |
+| **Recall@5 chunk_id** | 6.8% | **≥ 25%** | ≥ 50% |
+| **Recall@5 doc_id** | 54.2% | **≥ 70%** | ≥ 85% |
+| **Relevance (judge)** | 5.9% | **≥ 30%** | ≥ 60% |
+| **Faithfulness (judge)** | 4.7% | **≥ 25%** | ≥ 55% |
+| **Format (judge) — NOT regressed** | 98.3% | **≥ 96%** | ≥ 98% |
+
+Reasoning for the floors: at Recall@1 < 15% the user-visible improvement is too small to justify the migration cost; at Recall@5 doc < 70% the challenger isn't materially better than llava on the most lenient axis. The "stretch" column anchors what a well-tuned modern multilingual embedder typically achieves on a corpus this size; if Qwen3 hits stretch on 3+ axes, the swap is a clear win.
+
+If the challenger fails to clear the floors on at least three of the four embedder axes, llava stays as the v2.11 baseline and Phase 1 closes with a `decision-recorded, no-swap` outcome. The harnesses we built are not wasted — they're permanent measurement infrastructure for the next embedder candidate (v2.12+).
+
+**Schedule note.** Per release-cycle hygiene: this phase runs *after* v2.10.0 ships final (Phase 0, closed 2026-05-16). We did NOT swap mid-rc1; the regression test + soak baseline exist precisely so this swap can be done with rigor instead of in-flight.
 
 **Approach.**
 1. `ollama pull qwen3-embedding:4b` (or equivalent tag once published).
@@ -234,20 +234,10 @@ be done with rigor instead of in-flight.
   passing (it asserts against the llava collection).
 
 **Done when.**
-- Both collections green; both fingerprints captured; both soak
-  reports authored.
-- A decision row in `docs/DECISIONS.md` titled "v2.11 Embedder
-  Shootout" recording which embedder won on which axes and which
-  embedder ships.
-- If Qwen3 wins decisively (e.g., Recall@5 doc +5 % or more, no
-  regressions on Format/Faithfulness): `scripts/ingest_to_qdrant.py`
-  default flipped to `qwen3-embedding:4b`; v2.10 llava collection
-  retained as a 30-day rollback baseline; v2.11.0 tag is the
-  embedder-swap release.
-- If llava wins or the tie is too close to justify the migration cost:
-  decision recorded, no swap. v2.11.0 ships without the swap and the
-  Qwen3 work becomes a documented v2.12 candidate. The harnesses we
-  built are NOT wasted — they're now permanent infrastructure.
+- Both collections green; both fingerprints captured; both soak reports authored.
+- A decision row in `docs/DECISIONS.md` titled "v2.11 Embedder Shootout" recording which embedder won on which axes, with the specific numeric deltas against the §"Soak baseline to beat" table, and which embedder ships.
+- **If challenger clears the floors on at least 3 of 4 embedder axes (Recall@1, Recall@5 chunk, Recall@5 doc, Relevance/Faithfulness composite) AND Format ≥ 96%:** `scripts/ingest_to_qdrant.py` default flipped to the challenger; v2.10 llava collection retained as a 30-day rollback baseline; v2.11.0 tag is the embedder-swap release; AFTER snapshot records the headline soak deltas.
+- **If challenger fails the floors:** decision recorded as `no-swap`. v2.11.0 ships the rest of the cycle's work (validated-cloud, carry-forward dispositions) without the embedder change; the challenger becomes a documented v2.12+ candidate. Harnesses remain in place for the next attempt.
 
 **Risk.** Medium. The actual quality delta is unknown until the soak
 reports compare side by side. The architectural risk is low — we have
@@ -337,37 +327,26 @@ the date.
 
 ---
 
-### Phase 4 — EPUB engine question
+### Phase 4 — EPUB engine question — DEFERRED to v2.12+
 
-**What.** The Phase 7 EPUB lane uses a marker-based workaround
-(`__MMRAG_EPUB_CH_NNNN__` injected into the HTML pre-Docling) to recover
-chapter information. That's correct but fragile — Docling can strip
-the markers (it strips KI's first three) and we recover with the
-pre-marker-buffer fallback. A cleaner architecture is a parallel
-`EpubEngine` that doesn't depend on Docling for EPUB at all (uses
-ebooklib directly + a UIR mapping).
+**Soak verdict.** The v2.10 soak's per-doc table gave Phase 4 the data it needed to decide:
 
-**Decision point.** Is the marker workaround robust enough for v2.11,
-or does v2.11 ship the parallel engine? The soak's EPUB queries
-(Q11/Q12 in the regression set) plus the soak's per-doc Recall on the
-two EPUBs are the data inputs.
+| Doc | Format | Recall@5 doc | Faithfulness |
+|---|---:|---:|---:|
+| `KI_En_ChatGPT_Praktische_Gids` | 96.9% | 75.0% | 0.0% |
+| `ChatGPT_Praktijk_handboek` | 100% | 12.5% | 0.0% |
 
-**Approach (if in-scope).**
-1. Add `src/mmrag_v2/engines/epub_engine.py` parallel to
-   `engines/docling_adapter.py` shape.
-2. Map ebooklib output → `UniversalDocument` directly.
-3. Replace `processor._epub_to_html` + post-process markers with a
-   direct path through the new engine.
-4. Reconvert KI + ChatGPT EPUBs; re-run strict gate + retrieval
-   regression + soak; compare to v2.10 EPUB baselines.
+Format on both EPUBs is essentially perfect — the marker workaround + synthetic-pagination architecture (Phase 7 of v2.10) produces clean chunks. The Recall@5 doc collapse on ChatGPT (12.5%) is the known KI-EPUB-dominates pattern, which is an **embedder problem** (Recall@5 doc is dominated by chunk-volume; KI EPUB has 4,512 chunks vs ChatGPT's 298, and llava can't disambiguate on content). The Faithfulness 0% is the same llava-weakness story affecting every doc.
 
-**Done when.** Decision row in `docs/DECISIONS.md`:
-- "EPUB engine kept on marker-workaround for v2.11" (defer), OR
-- "v2.11 ships parallel EpubEngine; KI and ChatGPT EPUB reconverted;
-  Phase 7 marker workaround removed; AFTER snapshot updated."
+**Decision (recorded here, to be transcribed to `docs/DECISIONS.md` at Phase 3 closure):** EPUB engine rewrite stays deferred to **v2.12+**. The marker workaround is durable; the soak proves it's not the bottleneck. Revisit only if:
 
-**Risk.** Medium-high if in-scope. The marker workaround works.
-**Cost class.** New engine code + reconverts if in-scope.
+1. The Phase 1 embedder swap lifts retrieval everywhere *except* on EPUBs (a future soak shows EPUB-specific underperformance vs PDF on the same corpus), OR
+2. A new EPUB enters the corpus that breaks the marker pattern (e.g., an EPUB with reflowable layout that defeats the spine-order chapter detection).
+
+**What the parallel `EpubEngine` would do (for v2.12+ reference).** Add `src/mmrag_v2/engines/epub_engine.py` parallel to `engines/docling_adapter.py`; map ebooklib output → `UniversalDocument` directly; replace `processor._epub_to_html` + post-process markers with a direct path through the new engine; reconvert KI + ChatGPT EPUBs; re-run strict gate + retrieval regression + soak; compare. Estimated effort: 1-2 weeks if pursued in isolation; absorbs into the broader UIR refactor (Phase 3c here) if that's pursued.
+
+**Risk of deferral.** Low. The marker workaround landed clean in v2.10 and has zero open defects.
+**Cost of deferral.** Zero direct cost; carry-forward register row 8 keeps the work item visible.
 
 ---
 
@@ -423,27 +402,21 @@ These remain non-goals for v2.11 unless explicitly promoted:
 |---|---|
 | 2026-05-16 | Draft v0.1 authored mid-v2.10.0-rc1-soak. Embedder challenger (Qwen3-Embedding-4B) named per release-plan discussion. Five rc1 carry-forward non-goals captured with default-recommended dispositions. Phase 0 explicitly gates Phase 1 on v2.10.0 final ship. |
 | 2026-05-16 | **Phase 0 closed same day.** `v2.10.0` SHIPPED on commit `db6527c` (rc1 commit + soak report). Zero v2.10.x patches needed — soak weakest-15 was dominated by embedder-attributable wrong-doc retrievals, not chunk-shape defects. New `docs/DECISIONS.md` entry "v2.10 chunker-quality ceiling — 99.9% Format not chased (2026-05-16)" documents the choice to not pursue Format 99.9% in v2.11/v2.12 and lists three triggers that would revisit. §5 Out of Scope updated with the outbound cross-reference. Draft stays at v0.1 — user has no inspiration to change other parts of the plan yet. |
+| 2026-05-16 | **Promoted to Draft v0.2.** Substantive updates: (1) Thesis §1 quantifies the embedder weakness with soak numbers instead of just regression-test anecdotes. (2) "Where v2.10 ended" section rewritten in past tense; "What v2.10.0 final is waiting on" stanza deleted (obsolete). (3) Carry-forward register row 9 (TBD soak findings) replaced with "empty (closed)" outcome; new row 10 added for the 99.9% Format out-of-scope decision. (4) Phase 0 rewritten uniformly past-tense with the actual triage breakdown. (5) Phase 1 gains a "Soak baseline to beat" sub-section with concrete numeric floors (Recall@1 ≥ 15%, Recall@5 doc ≥ 70%, Relevance ≥ 30%, Faithfulness ≥ 25%, Format ≥ 96%) replacing the vague "+5%" criterion; BGE-M3 documented as fallback challenger if Qwen3-Embedding-4B isn't Ollama-pullable. (6) Phase 4 (EPUB engine) flipped from "decision point" to "deferred to v2.12+" with the soak data backing the deferral. (7) §7 Open questions: items 1 and 5 marked resolved; item 6 added as the new Phase 1 start gate. Promotion to Draft v1.0 happens when the user signs off on starting Phase 1. |
 
 ---
 
-## 7. Open questions (resolve before Draft v0.2)
+## 7. Open questions
 
-1. **Soak findings.** What does the 2026-05-16 soak report show? Will
-   the weakest-15 list move scope into Phase 0 (v2.10.x patches) or
-   directly into Phase 1 (embedder problem)?
-2. **Qwen3-Embedding-4B availability via Ollama.** Is `qwen3-embedding:4b`
-   pullable as of 2026-05-16, or do we ship through `transformers`
-   directly? (If `transformers`-only, add a small embedding service
-   wrapper.)
-3. **NuMarkdown-8B reachability.** Has the local endpoint come back
-   online since v2.10's "off-network" finding?
-4. **CI runner.** Self-hosted on the same network as Qdrant /
-   Ollama, or GitHub-hosted with a private data bucket?
-5. **EPUB engine.** Does any soak finding on KI / ChatGPT EPUB
-   justify v2.11 effort, or is the Phase 7 marker workaround durable?
+Status as of Draft v0.2 (2026-05-16). Answered questions are kept for traceability.
+
+1. ~~**Soak findings.**~~ **Resolved 2026-05-16.** Recall@1 2.1%; Format 98.3%; weakest-15 is entirely embedder-attributable wrong-doc retrievals. All scope moves to Phase 1; zero v2.10.x patches; Phase 0 closed same day.
+2. **Qwen3-Embedding-4B availability via Ollama.** Open. Confirm at Phase 1 kickoff via `ollama pull qwen3-embedding:4b`. If unavailable: fall back to BGE-M3 (Ollama-pullable, multilingual; documented in Phase 1 §Fallback challenger).
+3. **NuMarkdown-8B reachability.** Open. One probe attempt at Phase 3a kickoff; if endpoint still off-network, formal-defer to v2.12.
+4. **CI runner topology.** Open. Self-hosted on the same network as Qdrant + Ollama is the recommended path (2b in Phase 2); GitHub-hosted with private data bucket (2c) deferred to v2.12 unless 2b proves insufficient.
+5. ~~**EPUB engine.**~~ **Resolved 2026-05-16.** Soak data shows EPUB recall is embedder-bound (KI dominates ChatGPT because llava can't disambiguate, not because the EPUB lane is broken). Phase 4 deferred to v2.12+. The marker workaround stays.
+6. **Phase 1 start gate.** Currently waiting on user signoff to: (a) confirm Qwen3-Embedding-4B availability on the local Ollama, (b) approve the second-collection rebuild (~5-7 h wall time), (c) approve the per-Phase-1 budget for re-running the soak via Dashscope (~$2-3 in qwen-max calls). No technical blocker; awaiting decision.
 
 ---
 
-**END OF DRAFT v0.1.** Next checkpoint: read the in-flight soak report
-(due ~21:00 UTC 2026-05-16), promote to Draft v0.2, then to Draft v1.0
-once v2.10.0 final ships and Phase 0 is closed.
+**END OF DRAFT v0.2.** Phase 0 is closed; v2.10.0 has shipped; the soak gave us concrete numeric floors for Phase 1. Next checkpoint: user signoff on Phase 1 start (Qwen3-Embedding-4B pull + second-collection rebuild + comparison soak). Promotion to **Draft v1.0** at that signoff. The Phase 2 (validated-cloud) and Phase 3 (carry-forward dispositions) phases are independent of Phase 1's outcome and can run in parallel or interleaved.
