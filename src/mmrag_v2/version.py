@@ -16,17 +16,10 @@ scattering across the codebase.
 # chunk_id for cross-version mapping must rebuild from v2.9 outputs.
 __schema_version__ = "2.7.0"
 
-# Engine/runtime version. v2.8.0 was the prior shipped tag.
-# v2.9.0-rc1 tagged 2026-05-12 on commit 3e06d1b after the
-# strict-gate corpus close (9 PASS / 8 WARN / 17 FAIL →
-# 26 PASS / 0 WARN / 8 FAIL; all 8 FAILs are signed v2.10
-# deferrals per docs/DECISIONS.md "v2.9.0-rc1 Signed Deferrals").
-# v2.9.0-rc1 is the v2.9 ship state; no intermediate v2.9.0 final
-# tag is planned. The 8 deferrals (Firearms HEADING, KI EPUB,
-# Devlin HEADING, cross-page-split misattribution on
-# Python_Cookbook / Python_Distilled, TextIntegrityScout full-doc
-# sensitivity on Fluent_Python, text-label-TOC on Chaubal p11,
-# full-doc picture dedup on Earthship) carry forward as v2.10
-# production-tag blockers under the unchanged strict gate.
-# See docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md.
-__engine_version__ = "2.9.0-rc1"
+# Engine/runtime version. v2.9.0-rc1 was the prior shipped tag
+# (3e06d1b, 2026-05-12). v2.10.0-rc1 closes the seven v2.10
+# production-tag root-cause classes from the v2.9.0-rc1 signed
+# deferrals through Phases 1-7 and a corpus-wide strict-gate
+# re-verification + Qdrant rebuild in Phase 8.
+# See docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md.
+__engine_version__ = "2.10.0-rc1"

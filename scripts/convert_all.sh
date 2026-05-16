@@ -2,7 +2,11 @@
 # Convert all documents with Qwen VLM + refiner
 set -uo pipefail
 
-API_KEY="sk-5813a0a803ca4b96ab8755b1068f10fd"
+API_KEY="${DASHSCOPE_API_KEY:-}"
+if [ -z "$API_KEY" ]; then
+  echo "ERROR: set DASHSCOPE_API_KEY env var before running this script." >&2
+  exit 2
+fi
 BASE_URL="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 VLM_MODEL="qwen-vl-max"
 REFINER_MODEL="qwen-plus"

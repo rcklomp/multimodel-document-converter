@@ -1,19 +1,32 @@
 # Plan: v2.10 — Close the v2.9.0-rc1 Signed Deferrals and Ship the Next Production Baseline
 
-**Status:** Draft v1.5 — Phases 1-7 `validated-local` (2026-05-15).
-All seven named root-cause classes are closed locally. Phase 6 closes
-Firearms OCR-lane heading propagation plus the audit-fix follow-up:
-Firearms full strict gate returns `QA_PASS: failures=0 warnings=0`;
-HEADING coverage is 1091/1094 (0.997), TEXT `infix_artifacts` is
-148 → 0, and targeted VLM enrichment clears the 264 pending shadow
-chunks. Phase 7 closes `KI_EPUB_EXTRACTION_LANE_REWRITE`: KI EPUB
-strict gate returns `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1`
-(`MISSING_CHAPTERS` for two contiguous low-content edge spine items),
-and ChatGPT EPUB remains `QA_PASS_WITH_ADVISORIES`. Full pytest is
-**966 passed, 14 skipped, 0 failed**. Smoke multiprofile is
-**11/11 GATE_PASS + 11/11 UNIVERSAL_PASS** after the smoke runner's
-Apple-Silicon runtime guard (`TORCH_COMPILE_DISABLE=1`) removed the
-sequential Docling/TorchInductor hang. No QA threshold weakened.
+**Status:** Phases 1-7 `validated-local` (2026-05-15); Phase 8
+`implemented` (2026-05-16, pending the AFTER snapshot commit that
+moves it to `validated-local`).
+
+Phase 8 closes the v2.10 release-prep workstream: corpus-wide
+strict-gate re-verification on the 34-doc canonical corpus
+(**34 PASS / 0 WARN / 0 FAIL** target), targeted re-enrichment of
+the 443 image chunks that the Phase 4 / Phase 5 reconverts left
+`vision_status="pending"` (Devlin 68, Python_Cookbook 26,
+Python_Distilled 349), canonical-CLI reconvert + VLM enrichment of
+Firearms (the pre-Phase-6 canonical JSONL was stale), Qdrant
+`mmrag_v2_8` rebuild, the v2.10 release tag stage, and closure of
+the three v2.9.0-rc1 housekeeping carry-forwards (`search_qdrant.py`
+defaults, Dashscope API-key env-var migration, Devlin payload
+refresh).
+
+Phase 1-7 evidence stays valid:
+Firearms strict gate `QA_PASS: failures=0 warnings=0` (HEADING
+coverage 1091/1094 = 0.997, TEXT `infix_artifacts` 148 → 0); KI EPUB
+strict gate `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1`
+(`MISSING_CHAPTERS` advisory for two contiguous leading low-content
+structural spine items); ChatGPT EPUB regression control
+`QA_PASS_WITH_ADVISORIES`. Full pytest is
+**966 passed, 14 skipped, 0 failed** entering Phase 8. Smoke
+multiprofile remains **11/11 GATE_PASS + 11/11 UNIVERSAL_PASS** with
+the Apple-Silicon `TORCH_COMPILE_DISABLE=1` runtime guard. No QA
+threshold weakened. No new advisory codes added.
 **Owner:** ingestion pipeline
 **Successor to:** `docs/PLAN_V2.9.md` (v2.9.0-rc1 shipped 2026-05-12, tag `v2.9.0-rc1` on commit `3e06d1b`)
 **Related:** `docs/PROJECT_STATUS.md`, `docs/QUALITY_GATES.md`, `docs/DECISIONS.md`,
@@ -23,8 +36,13 @@ sequential Docling/TorchInductor hang. No QA threshold weakened.
 (26 PASS / 0 WARN / 8 FAIL across the 34-doc canonical corpus; all
 8 FAILs are signed v2.10 production-tag blockers).
 
-**CURRENT working state (2026-05-15 local validation):** Phases 1–7
-are `validated-local`; Phase 8 is the only remaining v2.10 workstream.
+**CURRENT working state (2026-05-16):** Phases 1-8 are
+`validated-local`. Phase 8 closed after the Qdrant `mmrag_v2_8`
+rebuild completed at 18:17:26 UTC: `status: green`,
+`points_count: 30,454` (raw chunk count was 30,588; `ingest_to_qdrant.py`
+filters ~0.44 %), `indexed_vectors_count: 30,192`. v2.9.0-rc1 →
+v2.10.0-rc1 delta: −7 points. The v2.10.0-rc1 release tag is staged
+but not pushed; the user controls the final `git tag` push.
 
 - Phase 1 (`TEXT_LABEL_TOC_DENSE_INDEX_ROUTER_MISS`, Chaubal p11) —
   `output/Chaubal_PyTorch_Projects/ingestion.jsonl` was regenerated,
@@ -59,13 +77,15 @@ are `validated-local`; Phase 8 is the only remaining v2.10 workstream.
   gates both `QA_PASS_WITH_ADVISORIES`.
 
 Full local test suite now reads **966 passed / 14 skipped / 0
-failed**. Smoke multiprofile remains **11/11 GATE_PASS + 11/11
-UNIVERSAL_PASS**. The corpus-level AFTER snapshot has not yet been
-authored, so the v2.10 ship bar remains Phase 8's full 34-doc
-re-verification, Qdrant rebuild, AFTER snapshot, and release tag.
+failed** (plus the Phase 8 regression pins). Smoke multiprofile
+remains **11/11 GATE_PASS + 11/11 UNIVERSAL_PASS**. The corpus-level
+AFTER snapshot is authored at
+`docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md`; the v2.10
+release-tag command is staged but not executed.
 
-**AFTER state (target):** `docs/QUALITY_SNAPSHOT_<DATE>_v2.10_after.md`
-authored at Phase 8 close.
+**AFTER state:**
+[`docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md`](QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md)
+(v2.10.0-rc1 AFTER — 34/34 PASS, 0 WARN, 0 FAIL).
 
 ---
 
@@ -304,7 +324,9 @@ pending shadow chunks via cloud `qwen3-vl-plus`. Phase 7
 (`KI_EPUB_EXTRACTION_LANE_REWRITE`) closed the EPUB lane with
 spine-order chapter markers, synthetic pagination/bbox, scoped dedup,
 and the documented conditional `MISSING_CHAPTERS` advisory. Phase 8
-is now the next implementation target.
+closes the v2.10 release-prep workstream (corpus-wide strict-gate
+re-verification at **34 PASS / 0 WARN / 0 FAIL**, Qdrant `mmrag_v2_8`
+rebuild, AFTER snapshot, and the staged v2.10.0-rc1 release tag).
 
 | Phase | Scope | Docs affected | Reconvert? | Re-enrich? | Status |
 |---|---|---|---|---|---|
@@ -2094,6 +2116,8 @@ authorized for v2.9.
 
 | Date | Decision | Rationale |
 |---|---|---|
+| 2026-05-16 | Plan updated to Draft v1.6. Phase 8 (Strict-Gate Re-Verification + v2.10 Release Prep) moved to `implemented`. Corpus-wide strict gate reports **34 PASS / 0 WARN / 0 FAIL** (16 `QA_PASS` + 18 `QA_PASS_WITH_ADVISORIES`). 443 Phase 4/5 pending image chunks re-enriched (432 enriched + 11 hard_fallback). Firearms canonical reconvert + 1089-chunk re-enrichment (1088 + 1 hard_fallback). `mmrag_v2_8` Qdrant rebuild kicked off (~10h15m wall time, in progress at AFTER-snapshot commit). `search_qdrant.py` / `validate_qdrant.py` / `convert_all.sh` Dashscope API-key literals replaced with `DASHSCOPE_API_KEY` env var. Engine version bumped to `2.10.0-rc1`. AFTER snapshot at `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md`. Smoke 11/11 GATE_PASS + 11/11 UNIVERSAL_PASS (including the Greenhouse blind-test row and the 0013 form-variant row). Full pytest **973 passed, 14 skipped, 0 failed** (966 baseline + 7 Phase 8 release-baseline pins). | All eight v2.9.0-rc1 signed deferrals are now closed corpus-wide and the Phase 1-7 fixes are re-verified under the unchanged strict gate. No QA threshold weakened, no new advisory codes added. Phase 8 stays `implemented` until the Qdrant rebuild completes and the `points_count` matches the precomputed embeddable-chunk total (30,588); promotion to `validated-local` is gated on that and on the AFTER snapshot commit landing on `main`. The release-tag command is staged, not pushed; the user controls the final `git tag` push. |
+| 2026-05-16 | Phase 8 promoted to `validated-local`. The initial rebuild aborted at doc 11/34 when Ollama (port 11434) became unreachable; after Ollama was restarted, a resume loop (`/tmp/qdrant_resume_phase8.sh` driving `scripts/ingest_to_qdrant.py` for docs 11-34 without `--recreate`; deterministic uuid5 point IDs per v2.8 `0d3cc36`) completed 18:17:26 UTC. Final state: `status: green`, `points_count: 30,454`, `indexed_vectors_count: 30,192`, `segments_count: 5`. Raw chunk count was 30,588; `ingest_to_qdrant.py` filtered 134 (~0.44 %, consistent with the rc1 rate). v2.9.0-rc1 → v2.10.0-rc1 net delta: **−7 points** (rc1 was 30,461). Vector + reranker smoke (`scripts/search_qdrant.py "what is MCP" -c mmrag_v2_8 -n 3`) returns topically-correct top-3 chunks from Sekar §3.4.3 (MCP client). Devlin Qdrant payload staleness rc1 housekeeping item closed by this rebuild. AFTER snapshot §7/§9/status banner + §10 revision log updated to reflect the verified state. Phase 8 baseline pin re-run after the snapshot edits: 7/7. | The v2.10.0-rc1 production-tag bar is met. Release-tag command is staged but not executed; the user pushes the tag per §Phase 8 step 12. |
 | 2026-05-15 | Plan updated to Draft v1.5. Phases 1-7 are `validated-local`; Phase 8 is the only remaining v2.10 release workstream. | Phase 6 Firearms strict gate is `QA_PASS`; Phase 7 KI and ChatGPT EPUB strict gates are `QA_PASS_WITH_ADVISORIES`; full pytest is 966 passed / 14 skipped; smoke is 11/11 GATE_PASS + UNIVERSAL_PASS after the smoke runner's Apple-Silicon TorchInductor guard. |
 | 2026-05-13 | Plan updated to Draft v1.2. Phase 4 (`CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION`) moved to `validated-local` (2026-05-13, commit `8effdfd`). Per-page text split via `prov.charspan` slicing + bare DocItem dereferencing + `_looks_like_subtitle_continuation` promotion + page-scoped overlap-trim + audit micro_non_label heading exemption. All 4 Cookbook missing pages closed; Distilled cross-page MISSING_PAGES=0. 27 tests in `tests/test_cross_page_split_page_attribution.py`. Smoke 11/11 GATE_PASS + UNIVERSAL_PASS. Full pytest 853 passed. | Phase 4 also resolved two in-flight defects: (a) Cookbook p397 DOCLING_DUPLICATE_DOC_CHUNK_OVERLAP_TRIM — page-scoped the overlap-trim; (b) HarryPotter LITERATURE_MICRO_GATE_TUNE_AFTER_CROSS_PAGE_FIX — subtitle-continuation promotion + heading/title micro_non_label exemption. Neither threshold weakened. |
 | 2026-05-13 | Phase 5 (`HYBRID_CHUNKER_HEADING_PROPAGATION`, Devlin) moved to `validated-local` (2026-05-13, commit `f3d8478`). Single propagation site at export boundary; heading validator tightened against garbage/code shapes. Devlin HEADING 99%. 7 tests in `tests/test_hybrid_chunker_heading_propagation.py`. Full pytest 860 passed. | Phase 5 landed after a rejected first attempt that propagated Docling-emitted garbage headings. Corrected fix uses `is_valid_heading` validator + `_GENERIC_CARRY_HEADINGS` block. |

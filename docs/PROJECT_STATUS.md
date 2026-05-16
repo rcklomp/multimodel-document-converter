@@ -1,51 +1,65 @@
 # Project Status
 
-Last updated: 2026-05-15
+Last updated: 2026-05-16
 
 Purpose: fast orientation for a new coding session. Read this before deeper project docs.
 
 ## Current Objective
 
-**`v2.9.0-rc1` SHIPPED 2026-05-12** — tag `v2.9.0-rc1` on commit
-`3e06d1b`, pushed to GitHub. `v2.9.0-rc1` is the v2.9 ship state;
-**no intermediate `v2.9.0` final tag is planned**. The 8 signed
-deferrals from the close-out carry forward as **v2.10 production-tag
-blockers**. See `docs/DECISIONS.md` "v2.9.0-rc1 Signed Deferrals
-(2026-05-11 close-out)" for the named list.
+**`v2.10.0-rc1` PHASE 8 VALIDATED-LOCAL (2026-05-16)** — PLAN_V2.10
+Phases 1-8 are closed locally; Qdrant `mmrag_v2_8` rebuilt to
+`status: green`, `points_count: 30,454`. Phase 8 strict-gate
+re-verification reports **34 PASS / 0 WARN / 0 FAIL** across the
+34-doc canonical corpus (16 `QA_PASS` + 18
+`QA_PASS_WITH_ADVISORIES`); all eight v2.9.0-rc1 signed deferrals
+are closed. Engine version bumped to `2.10.0-rc1` in
+[`src/mmrag_v2/version.py`](../src/mmrag_v2/version.py) and
+[`pyproject.toml`](../pyproject.toml); the v2.10.0-rc1 annotated tag
+command is staged but not pushed (user controls the final
+`git tag` push).
 
-**Strict-gate state at RC1:** 26 PASS / 0 WARN / 8 FAIL out of 34
-(12 `QA_PASS` + 14 `QA_PASS_WITH_ADVISORIES`). All 8 FAILs were signed
-v2.10 deferrals. RC1 test suite: **806 passed, 14 skipped, 0 failed**.
-
-**Qdrant `mmrag_v2_8`:** 30,461 points, status green (25,691 text +
-4,379 image + 391 table). Rebuilt 2026-05-12 from the 34 canonical
-post-recovery JSONLs via local Ollama llava (4096-dim, 10h15m wall
-time). Sole collection in the local Qdrant — 16 sister `*_v2`
-per-doc collections dropped during post-RC1 sanitization.
+Predecessor: `v2.9.0-rc1` (tag on commit `3e06d1b`, pushed
+2026-05-12) — the v2.9 ship state with 26 PASS / 0 WARN / 8 FAIL and
+8 signed v2.10 deferrals.
 
 **Active canonical baseline:**
-[`docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`](QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md)
-(revised 2026-05-12 for vision-status precision, Qdrant collection
-cleanup, Devlin Phase H catch-up, search-tool default re-tune
-housekeeping, and Option-1 v2.9.0-final terminology cleanup; see
-§10 Revision log).
+[`docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md`](QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md)
+(v2.10.0-rc1 AFTER snapshot — corpus 34/34 PASS, Phase 1-7 closure
+summary, three v2.9.0-rc1 housekeeping carry-forwards closed, §10
+Revision log).
 
-**Next cycle:** v2.10. Plan at
-[`docs/PLAN_V2.10.md`](PLAN_V2.10.md); Phases 1-7 validated-local
-(Phase 7 closed 2026-05-15). KI_En_ChatGPT_Praktische_Gids full
-strict gate now `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1`
-(advisory = `MISSING_CHAPTERS` for the two contiguous leading
-low-content structural spine items — titlepage + colophon — Docling's
-HTML parser strips before any chunk emerges; internal or
-content-bearing missing chapters remain FAIL; documented in
+**Predecessor baseline (kept for delta):**
+[`docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`](QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md)
+(v2.9.0-rc1 ship state, revised 2026-05-12).
+
+**Qdrant `mmrag_v2_8`:** rebuilt in Phase 8 from the 34 canonical
+v2.10 JSONLs via local Ollama llava (4096-dim). Resume loop
+completed 2026-05-16 18:17:26 UTC. Final state:
+`status: green`, `points_count: 30,454`,
+`indexed_vectors_count: 30,192`, `segments_count: 5`. Raw chunk
+count across the JSONLs was 30,588; `scripts/ingest_to_qdrant.py`
+filters a consistent ~0.44 % (empty content / missing asset refs /
+validator rejections), leaving the −134 ingest-time delta. v2.9.0-rc1
+→ v2.10.0-rc1 net delta is **−7 points** (rc1 was 30,461). Vector +
+reranker smoke (`scripts/search_qdrant.py "what is MCP" -c mmrag_v2_8 -n 3`)
+returns topically-correct top-3 chunks. The v2.9.0-rc1 Devlin Qdrant
+payload staleness item from the rc1 housekeeping list is closed by
+this rebuild. Phase 8 is `validated-local`; the v2.10.0-rc1 release
+tag is staged, not pushed.
+
+**Phase 1-7 evidence retained:** KI_En_ChatGPT_Praktische_Gids full
+strict gate `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1`
+(advisory = `MISSING_CHAPTERS` for two contiguous leading low-content
+structural spine items — titlepage + colophon — Docling's HTML parser
+strips before any chunk emerges; internal or content-bearing missing
+chapters remain FAIL; documented in
 [`docs/CONVERSION_PROFILES.md`](CONVERSION_PROFILES.md) §EPUB lane).
 ChatGPT_Praktijk_handboek regression control remains
 `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1`. Smoke 11/11
-GATE_PASS + 11/11 UNIVERSAL_PASS, **966 pytest passing**. The smoke
-runner now defaults to offline model resolution and
-`TORCH_COMPILE_DISABLE=1` to avoid repeated Docling/TorchInductor
-native hangs on Apple Silicon. Phase 8 (strict-gate re-verification +
-v2.10 release prep) is the next implementation target.
+GATE_PASS + 11/11 UNIVERSAL_PASS, **966 pytest passing** plus the
+Phase 8 regression pins. The smoke runner defaults to offline model
+resolution and `TORCH_COMPILE_DISABLE=1` to avoid repeated
+Docling/TorchInductor native hangs on Apple Silicon.
 
 ---
 
@@ -161,29 +175,32 @@ are signed v2.10 deferrals per `docs/DECISIONS.md`. PASS breakdown:
 variant introduced in Phase G; see `docs/QUALITY_GATES.md` "Advisory
 Warning Classes").
 
-**Image enrichment:** 4,379 image chunks, 4,257 `vision_status=complete`
-(97.2 %), 122 `vision_status=hard_fallback` with F4 sentinel (2.8 %),
-0 pending. Devlin Phase H catch-up ran 2026-05-12 (the original
-Phase H on 2026-05-11 missed Devlin's 67 pending chunks).
+**Image enrichment (Phase 8 corpus snapshot):** see
+`docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` §5 for the precise
+post-Phase-8 totals. Phase 8 re-enriched the 443 image chunks left
+`vision_status="pending"` by the Phase 4 / Phase 5 reconverts
+(Devlin 68, Python_Cookbook 26, Python_Distilled 349) and the
+canonical-CLI Firearms reconvert; 0 corpus-wide pending after Phase 8.
 
 **Current local test suite:** 966 passed, 14 skipped, 0 failed after
-Phase 7 (was 806 at v2.9.0-rc1). This includes the Phase 6 OCR-lane
-heading + infix-repair tests and the Phase 7 EPUB-lane/advisory tests.
-The corpus-wide v2.10 AFTER snapshot is still pending Phase 8.
+Phase 7. Phase 8 adds tracked regression pins for the v2.10 release
+baseline (`tests/test_v2_10_release_baseline.py`); the final
+end-of-phase pytest count is captured in the AFTER snapshot §6.
 
-### Open work — v2.10 production-tag blockers
+### Closed work — v2.10 production-tag blockers
 
 Per `docs/DECISIONS.md` "v2.9.0-rc1 Signed Deferrals (2026-05-11
-close-out)", the seven named root-cause classes below carry forward as
-v2.10 production-tag blockers (8 deferral rows over 7 classes — items
-4 and 5 each cover two docs). No intermediate `v2.9.0` final tag is
-planned.
+close-out)", the seven named root-cause classes below were v2.10
+production-tag blockers (8 deferral rows over 7 classes — items 4 and
+5 each cover two docs). All eight are now closed locally and
+corpus-wide re-verified by Phase 8 (2026-05-16).
 
-**Remaining open blockers (0 of 7 classes — all Phase 1-7 closed):**
-
-All 7 named-class deferrals are now `validated-local`. Phase 8
-(strict-gate re-verification + v2.10 release prep) is the next
-implementation target.
+**Remaining open blockers: none.** All seven named-class deferrals
+are `validated-local` (Phases 1-7) and re-verified corpus-wide under
+the unchanged strict gate (Phase 8). Phase 8 is `validated-local`
+(2026-05-16, rebuild green at 30,454 points). The v2.10.0-rc1
+release-tag command is staged but not pushed; the user controls the
+final `git tag` push per `docs/PLAN_V2.10.md` §Phase 8 step 12.
 
 **Phase 7 `validated-local` (2026-05-15).**
 

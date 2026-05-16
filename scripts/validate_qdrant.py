@@ -24,10 +24,15 @@ YELLOW = "\033[33m"
 CYAN = "\033[36m"
 RESET = "\033[0m"
 
+import os
+
 QDRANT = "http://localhost:6333"
 OLLAMA = "http://localhost:11434"
 RERANK_URL = "https://dashscope-intl.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
-RERANK_KEY = "sk-5813a0a803ca4b96ab8755b1068f10fd"
+# v2.10 Phase 8 housekeeping: API key is now read from the DASHSCOPE_API_KEY
+# environment variable. The prior hard-coded literal lived in git history and
+# must be rotated provider-side. The rerank call is skipped when the env var is unset.
+RERANK_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
 
 
 def embed(text: str) -> list[float]:

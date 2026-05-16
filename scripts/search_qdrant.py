@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import textwrap
 import urllib.request
@@ -41,8 +42,12 @@ MIN_SCORE = 0.20
 
 # Reranker config (Alibaba Dashscope)
 RERANK_MODEL = "qwen3-rerank"
-RERANK_API_KEY = "sk-5813a0a803ca4b96ab8755b1068f10fd"
 RERANK_URL = "https://dashscope-intl.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+# v2.10 Phase 8 housekeeping: API key is now read from the DASHSCOPE_API_KEY
+# environment variable. The prior hard-coded literal lived in git history and
+# must be rotated provider-side. The reranker call is skipped (graceful
+# fallback to vector scores) when the env var is unset.
+RERANK_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
 
 
 # ── API helpers ──────────────────────────────────────────────────────────────
@@ -124,6 +129,9 @@ def rerank(query: str, results: list[dict], top_n: int = 5) -> list[dict]:
     """Rerank using qwen3-rerank."""
     if not results:
         return results
+    if not RERANK_API_KEY:
+        # No key configured — return vector-ranked truncation.
+        return results[:top_n]
     documents = []
     for r in results:
         p = r["payload"]

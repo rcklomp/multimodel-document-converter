@@ -4,12 +4,62 @@ All notable changes to this project will be documented in this file. Current beh
 
 > **Versioning note:** Historical entries before the `v2.4.x` line used an internal `v18.x` milestone scheme during rapid iteration and test/fix cycles. Only stable or decision-worthy checkpoints were recorded, so intermediate builds are intentionally omitted. From `v2.4` onward, entries follow the current public semantic line.
 
-## [v2.10-dev] — unreleased
+## [v2.10.0-rc1] — 2026-05-16 (release-tag staged, not pushed)
 
-PLAN_V2.10 Phases 1–7 closed locally. All seven named root-cause
-classes are `validated-local`; the v2.10 production tag remains gated
-on Phase 8 full-corpus strict-gate re-verification, Qdrant rebuild,
-AFTER snapshot, and release tagging (see `docs/PLAN_V2.10.md`).
+PLAN_V2.10 Phases 1-8 closed locally. All seven named root-cause
+classes from the v2.9.0-rc1 signed-deferral list are `validated-local`,
+and Phase 8 corpus-wide strict-gate re-verification reports **34 PASS /
+0 WARN / 0 FAIL** across the 34-doc canonical corpus (16 `QA_PASS` +
+18 `QA_PASS_WITH_ADVISORIES`). 0 advisory codes were added to
+`_ALLOWED_ADVISORY_WARN_CODES`. AFTER snapshot at
+[`docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md`](docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md).
+
+### v2.10 Phase 8 — Strict-Gate Re-Verification + v2.10 Release Prep (2026-05-16, `validated-local`)
+
+- **Corpus-wide strict-gate re-verification.** 34/34 canonical JSONLs
+  report `QA_PASS` or `QA_PASS_WITH_ADVISORIES` under
+  `scripts/qa_full_conversion.py --source-pdf --allow-warnings`. 0
+  `QA_WARN`, 0 `QA_FAIL`.
+- **Image re-enrichment.** The Phase 4 (`CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION`)
+  and Phase 5 (`HYBRID_CHUNKER_HEADING_PROPAGATION`) reconverts left
+  443 image chunks at `vision_status="pending"` (Devlin 68,
+  Python_Cookbook 26, Python_Distilled 349). Phase 8 re-enriched all
+  443 via the canonical `scripts/enrich_image_chunks_v29.py` flow.
+- **Firearms canonical reconvert.** The pre-Phase-6 canonical
+  `output/Firearms/ingestion.jsonl` was stale; Phase 8 reconverted via
+  the canonical CLI invocation
+  (`mmrag-v2 process data/technical_manual/Firearms.pdf --output-dir
+  output/Firearms --vision-provider none`) and re-enriched the resulting
+  image chunks.
+- **Qdrant rebuild.** `mmrag_v2_8` rebuilt from the 34 canonical
+  post-v2.10 JSONLs via `scripts/rebuild_mmrag_v2_8_for_rc1.py` (docs
+  1-10) + an `ingest_to_qdrant.py` resume loop (docs 11-34, no
+  `--recreate`; idempotent uuid5 point IDs per v2.8 commit `0d3cc36`)
+  using local Ollama `llava` (4096-dim). Final state 2026-05-16
+  18:17:26 UTC: `status: green`, `points_count: 30,454`,
+  `indexed_vectors_count: 30,192`, `segments_count: 5`. Raw chunk
+  count across the JSONLs was 30,588; `ingest_to_qdrant.py` filtered
+  134 (~0.44 %, consistent with the rc1 rebuild rate). v2.9.0-rc1 →
+  v2.10.0-rc1 net delta: −7 points (rc1 was 30,461). The v2.9.0-rc1
+  Devlin Qdrant payload staleness housekeeping item is closed by this
+  rebuild. Vector + reranker smoke
+  (`scripts/search_qdrant.py "what is MCP" -c mmrag_v2_8 -n 3`)
+  returns topically-correct top-3 chunks.
+- **`search_qdrant.py` API key migration.** The hard-coded Dashscope
+  literal in `scripts/search_qdrant.py` was replaced with
+  `os.environ.get("DASHSCOPE_API_KEY", "")`; the reranker call
+  gracefully degrades to vector-rank truncation when the env var is
+  unset. The `--model llava` default and the `MIN_SCORE = 0.20` floor
+  remain unchanged (v2.10 keeps the llava 4096-dim embedder). The
+  leaked literal must be rotated provider-side — flagged in the
+  close-out report; the agent cannot perform the rotation for the user.
+- **Engine version bump.** `src/mmrag_v2/version.py` and
+  `pyproject.toml` bumped from `2.9.0-rc1` / `2.9.0rc1` to
+  `2.10.0-rc1` / `2.10.0rc1`. Schema version unchanged at `2.7.0`
+  (chunk-shape contract preserved).
+- **Tests.** Phase 8 regression pins added in
+  `tests/test_v2_10_release_baseline.py` (corpus PASS distribution,
+  pytest baseline, version pin).
 
 ### v2.10 Phase 7 — `KI_EPUB_EXTRACTION_LANE_REWRITE` (KI EPUB) (2026-05-15, `validated-local`)
 

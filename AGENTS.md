@@ -86,7 +86,8 @@ Companion docs:
 1. Start sessions with the indexed handoff path:
    - `docs/PROJECT_STATUS.md`
    - `docs/README.md`
-   - `docs/PLAN_V2.10.md` (active v2.10 execution plan; Phases 1-7 validated-local, Phase 8 pending)
+   - `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` (current canonical baseline)
+   - `docs/PLAN_V2.10.md` (v2.10 execution plan; Phases 1-8 validated-local, release tag pending user push)
    - `docs/PLAN_V2.10_DRAFT_PROMPT.md` (historical prompt only)
    - `docs/PLAN_V2.9.md` (v2.9 execution history through the rc1 scope cut, if present)
 2. Use the three-layer documentation model:
@@ -101,8 +102,8 @@ Companion docs:
 
 ## 📍 5. CURRENT STATE & DIRECTIVES (May 2026)
 
-**Engine version:** `v2.9.0-rc1` (schema version `2.7.0` — de-aliased in v2.8; the chunk-shape contract is unchanged since v2.7).
-**Phase:** `v2.9.0-rc1` is the v2.9 ship state (tag on `3e06d1b`, pushed to GitHub, 2026-05-12). No intermediate `v2.9.0` final tag is planned; the 8 signed deferrals carry forward as v2.10 production-tag blockers (`docs/DECISIONS.md` "v2.9.0-rc1 Signed Deferrals (2026-05-11 close-out)"). Post-tag hygiene/version/search-default commits on `main` include `e60f70f` and later. Current canonical baseline: `docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`.
+**Engine version:** `v2.10.0-rc1` (schema version `2.7.0` — chunk-shape contract unchanged since v2.7).
+**Phase:** `v2.10.0-rc1` release prep is `validated-local` (PLAN_V2.10 Phases 1-8 closed locally 2026-05-16; Qdrant `mmrag_v2_8` rebuilt to `status: green`, `points_count: 30,454`). All eight v2.9.0-rc1 signed deferrals are closed and corpus-wide re-verified; no v2.10 deferrals were created. The release-tag command is staged but not pushed. Current canonical baseline: `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md`. Predecessor (kept for delta): `docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md` (v2.9.0-rc1 ship state, tag on `3e06d1b`).
 
 **Active architecture decisions:**
 - PDF extraction pathway is determined by structural integrity pre-flight tests, not semantic profile. See `docs/DECISIONS.md` — "Structural Pathology over Semantic Profiling".
@@ -116,17 +117,20 @@ Companion docs:
 
 **QA policy:** All profiles use the standard 10% token variance tolerance. See `docs/QUALITY_GATES.md`.
 
-### Priority TODOs (Open — v2.10 release scope)
-Source: `docs/PLAN_V2.10.md` and the RC1 AFTER snapshot. Phases 1-7
-closed the seven named v2.10 root-cause classes locally on 2026-05-15.
-The next implementation target is Phase 8:
+### Priority TODOs (Open — post-v2.10)
+Source: `docs/PLAN_V2.10.md` and the v2.10 AFTER snapshot. PLAN_V2.10
+Phases 1-8 closed locally on 2026-05-16; the only remaining v2.10
+action belongs to the user:
 
-1. Re-run the strict gate across the 34-doc canonical corpus and require
-   every row to be `QA_PASS` or `QA_PASS_WITH_ADVISORIES`.
-2. Re-run the full non-manual pytest suite and multi-profile smoke gate.
-3. Rebuild Qdrant `mmrag_v2_8` from the accepted v2.10 JSONLs.
-4. Author the v2.10 AFTER quality snapshot and update release docs.
-5. Tag the v2.10 release according to the Phase 8 decision.
+1. Push the staged `v2.10.0-rc1` annotated tag against the Phase 8
+   commit. Qdrant `mmrag_v2_8` already verifies `status: green`,
+   `points_count: 30,454` (raw JSONL chunk count was 30,588;
+   `ingest_to_qdrant.py` filtered 134 at ~0.44 %, consistent with the
+   rc1 rate). The release-tag command is prepared but not executed by
+   the agent.
+2. Rotate the leaked Dashscope API key provider-side (the literal was
+   removed from `scripts/search_qdrant.py` in Phase 8 but lives in git
+   history; only the user can rotate at the provider).
 
 Existing non-goals remain outside v2.10 unless Phase 8 explicitly
 promotes them: local VLM comparison (NuMarkdown-8B reachability),
