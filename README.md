@@ -4,25 +4,44 @@ Convert PDF, EPUB, HTML, and Office documents into structured JSONL datasets for
 
 The converter extracts text, images, and tables from complex documents while preserving spatial layout, document hierarchy, and semantic context. It handles everything from born-digital magazines to degraded scanned manuals.
 
-**Version 2.9.0-rc1** (release candidate, tagged local 2026-05-12) | last shipped tag `v2.8.0` | Python 3.10 | Apple Silicon native | Docling 2.86.0 | Schema 2.7.0
+**Version 2.10.0-rc1** (release candidate, tagged + pushed 2026-05-16) | predecessor `v2.9.0-rc1` (3e06d1b, 2026-05-12) | last shipped tag `v2.8.0` | Python 3.10 | Apple Silicon native | Docling 2.86.0 | Schema 2.7.0
 
-> **v2.9.0-rc1 status (2026-05-12): RC TAGGED LOCAL.** Strict gate
+> **v2.10.0-rc1 status (2026-05-16): PUBLIC RC.** Strict gate
 > (`scripts/qa_full_conversion.py --source-pdf --allow-warnings`)
-> reports **26 PASS / 0 WARN / 8 FAIL** across the 34-doc canonical
-> corpus (12 `QA_PASS` + 14 `QA_PASS_WITH_ADVISORIES`). All 8 FAILs
-> are signed v2.10 deferrals per
-> [`docs/DECISIONS.md`](docs/DECISIONS.md) "v2.9.0-rc1 Signed
-> Deferrals". Test suite: 806 passed, 14 skipped, 0 failed. Qdrant
-> `mmrag_v2_8` rebuilt to 30,461 points.
+> reports **34 PASS / 0 WARN / 0 FAIL** across the 34-doc canonical
+> corpus (16 `QA_PASS` + 18 `QA_PASS_WITH_ADVISORIES`). All eight
+> v2.9.0-rc1 signed deferrals are closed and corpus-wide re-verified;
+> no v2.10 deferrals were created. Test suite: **975 passed**,
+> 14 skipped, 0 failed. Smoke multiprofile: **11/11 GATE_PASS +
+> 11/11 UNIVERSAL_PASS** (including the Greenhouse blind-test row
+> and the `0013` form-variant row). Qdrant `mmrag_v2_8` rebuilt to
+> **30,454 points** (`status: green`, `indexed_vectors_count: 30,192`,
+> 4096-dim cosine via local Ollama `llava`).
 >
 > AFTER snapshot:
+> [`docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md`](docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md).
+> Predecessor (kept for delta reproducibility):
 > [`docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`](docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md).
 >
-> `v2.9.0-rc1` is the v2.9 ship state; no intermediate `v2.9.0`
-> final tag is planned. The 8 signed deferrals (Firearms, KI EPUB,
-> Devlin, Python_Cookbook, Python_Distilled, Fluent_Python, Chaubal,
-> Earthship) carry forward as v2.10 production-tag blockers under
-> the unchanged strict gate.
+> v2.10 closed the seven v2.9.0-rc1 named root-cause classes
+> (`OCR_PATH_HEADING_PROPAGATION` on Firearms; `KI_EPUB_EXTRACTION_LANE_REWRITE`
+> on the KI EPUB; `HYBRID_CHUNKER_HEADING_PROPAGATION` on Devlin;
+> `CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION` on Python_Cookbook + part of
+> Python_Distilled; `B4B_FULL_DOC_PICTURE_DEDUP` on Earthship + part
+> of Python_Distilled; `TEXT_INTEGRITY_SCOUT_FULL_DOC_SENSITIVITY`
+> on Fluent_Python; `TEXT_LABEL_TOC_DENSE_INDEX_ROUTER_MISS` on
+> Chaubal p11) plus the three v2.9.0-rc1 housekeeping items (Devlin
+> Qdrant payload staleness absorbed by the rebuild,
+> `search_qdrant.py` defaults retained for the llava 4096-dim
+> embedder, Dashscope API-key literal migrated to the
+> `DASHSCOPE_API_KEY` env var and revoked provider-side). See
+> [`docs/PLAN_V2.10.md`](docs/PLAN_V2.10.md) for the Phase 1-8
+> execution narrative.
+>
+> No QA threshold was weakened. The release tag `v2.10.0-rc1` is
+> public on `main`; a final `v2.10.0` tag awaits a soak window,
+> a retrieval regression baseline, and a validated-cloud checkpoint
+> (see [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)).
 
 ---
 
@@ -123,12 +142,14 @@ Content domains detected: `academic`, `editorial`, `technical`, `literature`, `c
 |--------|---------|-------|
 | PDF | Full | Batched processing, OCR cascade, VLM enrichment |
 | HTML/HTM | Full | Direct Docling processing |
-| EPUB | Full | Auto-extracted to HTML, then processed |
+| EPUB | Full | Spine-ordered chapter extraction with synthetic per-chapter pagination (v2.10 §EPUB lane) |
 | DOCX | Full | Direct Docling processing |
 | PPTX | Full | Direct Docling processing |
 | XLSX | Full | Direct Docling processing |
 
 Batched processing (splitting into N-page batches for memory efficiency) is PDF-only. Other formats use single-pass processing.
+
+**EPUB note (v2.10 Phase 7):** EPUB has no native pagination, so chunks emit a synthetic `page_number = chapter_1based * 1000 + position_in_chapter // 5` and the documented full-page bbox sentinel `[0, 0, 1000, 1000]`. A chunk on page `13029` means "chapter 13, ~6th synthetic page" — not "page 13029 of the source book". Cite chapter index (`page_number // 1000`) for human-facing references. See [`docs/CONVERSION_PROFILES.md`](docs/CONVERSION_PROFILES.md) §EPUB Lane for details.
 
 ---
 
@@ -322,8 +343,8 @@ y0_px = (bbox[1] / 1000) * render_height
 ### Setup
 
 ```bash
-git clone <your-repo-url>
-cd MM-Converter-V2
+git clone git@github.com:rcklomp/multimodel-document-converter.git
+cd multimodel-document-converter
 
 conda env create -f environment.yml
 conda activate mmrag-v2
