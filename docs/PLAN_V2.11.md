@@ -1,14 +1,15 @@
 # Plan: v2.11 — Embedder shootout, validated-cloud, and the rc1/rc2 non-goal closure
 
-**Status:** **Draft v0.2** — post-soak, post-Phase-0. Soak ran
-2026-05-16 (Format 98.3%, Recall@1 2.1%, Recall@5 doc 54.2%, Relevance
-5.9%, Faithfulness 4.7%). Phase 0 closed same day with zero v2.10.x
-patches needed; `v2.10.0` final shipped. The soak's quantitative
-finding sharpens Phase 1: the challenger embedder must beat
-**specific** numeric floors on the embedder-attributable axes (see
-Phase 1 §"Soak baseline to beat"). Promotion to Draft v1.0 happens
-when the user signs off on starting Phase 1 (pulling the Qwen3
-embedder + spinning up the second Qdrant collection).
+**Status:** **Draft v0.3** — audit-driven refinements (Qwen 3.6 Max
+Preview, 2026-05-16) applied on top of Draft v0.2's post-soak content.
+Soak ran 2026-05-16 (Format 98.3%, Recall@1 2.1%, Recall@5 doc 54.2%,
+Relevance 5.9%, Faithfulness 4.7%). Phase 0 closed same day with zero
+v2.10.x patches needed; `v2.10.0` final shipped. The soak's
+quantitative finding sharpens Phase 1: the challenger embedder must
+beat **specific** numeric floors on the embedder-attributable axes
+(see Phase 1 §"Soak baseline to beat"). Promotion to Draft v1.0
+happens when the user signs off on starting Phase 1 (pulling the
+Qwen3 embedder + spinning up the second Qdrant collection).
 **Predecessor:** [`docs/PLAN_V2.10.md`](PLAN_V2.10.md) — Phases 1-8
 closed, **`v2.10.0` SHIPPED 2026-05-16** (annotated tag on commit
 `db6527c`, public on GitHub). The RC tag `v2.10.0-rc1` (`82c3639`)
@@ -124,7 +125,7 @@ The harnesses are not single-use. They get re-run against every embedder candida
 
 ---
 
-## 2b. Cross-phase principles (carried from v2.10 §2b-d)
+## 2b. Cross-phase principles (carried from PLAN_V2.10 §2b Parallel-Site Audit, §2c Architectural constraints, §2d Cost-aware ordering)
 
 Unchanged from v2.10:
 
@@ -206,6 +207,7 @@ If the challenger fails to clear the floors on at least three of the four embedd
 **Schedule note.** Per release-cycle hygiene: this phase runs *after* v2.10.0 ships final (Phase 0, closed 2026-05-16). We did NOT swap mid-rc1; the regression test + soak baseline exist precisely so this swap can be done with rigor instead of in-flight.
 
 **Approach.**
+0. **Rebuild-script resilience pre-work.** `scripts/rebuild_mmrag_v2_8_for_rc1.py` has no resume flag: when Ollama became unreachable mid-rebuild during v2.10 Phase 8, the orchestrator died after doc 11/34 and recovery required a hand-rolled `ingest_to_qdrant.py` resume loop. Before the Phase 1 rebuild kicks off, add a `--resume` flag (skip docs already present in the collection by chunk_id presence check) and a per-doc retry-on-`URLError` wrapper. This is a defensive ~30 min of work that prevents repeating the v2.10 Phase 8 recovery exercise on a 5-7 h rebuild. Pin with `tests/test_rebuild_resume.py`.
 1. `ollama pull qwen3-embedding:4b` (or equivalent tag once published).
 2. Spin up a **second** Qdrant collection — call it
    `mmrag_v2_8__qwen3_4b` — so the current `mmrag_v2_8` (llava)
@@ -259,6 +261,21 @@ mostly waiting on the rebuild + soak.
 checkout in a fresh environment that is NOT the developer's daily
 machine. This closes the "validated-local only" hole that v2.10 left
 open.
+
+**Independent of Phase 1.** The validated-cloud workflow runs against
+whichever embedder is current in `scripts/ingest_to_qdrant.py` at
+checkpoint time. It is **deliberately decoupled** from Phase 1's
+outcome:
+- If Phase 2 runs *before* Phase 1's embedder decision lands, the CI
+  exercises the **llava baseline** (the v2.10 ship state). That alone
+  proves "the v2.10 validation isn't tied to my machine" — useful even
+  in isolation.
+- If Phase 2 runs *after* a Phase 1 swap, CI exercises the new
+  embedder. The same workflow, different binding.
+
+This decoupling means Phase 2 can start in parallel with Phase 1's
+rebuild + soak (which takes ~5-7 h wall time and benefits from being
+left to run undisturbed).
 
 **Approach (three options ordered by setup cost).**
 
@@ -359,12 +376,15 @@ Format on both EPUBs is essentially perfect — the marker workaround + syntheti
 2. Smoke 11/11.
 3. Full pytest + retrieval-regression + soak.
 4. Qdrant green at the chosen collection.
-5. AFTER snapshot at `docs/QUALITY_SNAPSHOT_<DATE>_v2.11_after.md`
-   following the v2.10 template.
-6. Tag `v2.11.0` (no rc-cycle this time if Phase 2 validated-cloud has
-   landed and Phase 0/1 outcomes are clean).
+5. **Version string handling.** Following the v2.10.0 pattern: if Phase 1 ships an embedder swap, bump `src/mmrag_v2/version.py` `__engine_version__` and `pyproject.toml` `version` from `2.10.0-rc1` → `2.11.0-rc1` (rc cycle) → `2.11.0` (final). If Phase 1 closes `no-swap`, retain the `2.10.0-rc1` string but tag `v2.11.0` against the new commit (matches v2.10.0's pattern where the version string stayed `2.10.0-rc1` at the v2.10.0 final tag). Decision recorded in `docs/DECISIONS.md`.
+6. AFTER snapshot at `docs/QUALITY_SNAPSHOT_<DATE>_v2.11_after.md` following the v2.10 template, including the side-by-side embedder-shootout deltas if Phase 1 shipped.
+7. Tag `v2.11.0` (no rc-cycle this time if Phase 2 validated-cloud has landed and Phase 0/1 outcomes are clean).
 
 **Done when.** All of the above green; tag pushed to GitHub.
+
+**Risk.** Low. This is the same re-verification protocol that closed v2.10 Phase 8 cleanly. The only new risk is the rebuild-script Ollama-fail-fast behavior surfaced by the v2.10 cycle (see §C-4 carry forward in this plan's revision log) — if Phase 1 ships an embedder swap, the second rebuild will exercise the same script and the same risk applies.
+
+**Cost class.** No reconvert. If Phase 1 ships an embedder swap, Phase N inherits the comparison Qdrant collection from Phase 1 (no separate rebuild). If Phase 1 closes `no-swap`, Phase N has nothing to rebuild — strict gate + smoke + pytest + retrieval-regression + soak only, ~1-2 hours total.
 
 ---
 
@@ -403,6 +423,7 @@ These remain non-goals for v2.11 unless explicitly promoted:
 | 2026-05-16 | Draft v0.1 authored mid-v2.10.0-rc1-soak. Embedder challenger (Qwen3-Embedding-4B) named per release-plan discussion. Five rc1 carry-forward non-goals captured with default-recommended dispositions. Phase 0 explicitly gates Phase 1 on v2.10.0 final ship. |
 | 2026-05-16 | **Phase 0 closed same day.** `v2.10.0` SHIPPED on commit `db6527c` (rc1 commit + soak report). Zero v2.10.x patches needed — soak weakest-15 was dominated by embedder-attributable wrong-doc retrievals, not chunk-shape defects. New `docs/DECISIONS.md` entry "v2.10 chunker-quality ceiling — 99.9% Format not chased (2026-05-16)" documents the choice to not pursue Format 99.9% in v2.11/v2.12 and lists three triggers that would revisit. §5 Out of Scope updated with the outbound cross-reference. Draft stays at v0.1 — user has no inspiration to change other parts of the plan yet. |
 | 2026-05-16 | **Promoted to Draft v0.2.** Substantive updates: (1) Thesis §1 quantifies the embedder weakness with soak numbers instead of just regression-test anecdotes. (2) "Where v2.10 ended" section rewritten in past tense; "What v2.10.0 final is waiting on" stanza deleted (obsolete). (3) Carry-forward register row 9 (TBD soak findings) replaced with "empty (closed)" outcome; new row 10 added for the 99.9% Format out-of-scope decision. (4) Phase 0 rewritten uniformly past-tense with the actual triage breakdown. (5) Phase 1 gains a "Soak baseline to beat" sub-section with concrete numeric floors (Recall@1 ≥ 15%, Recall@5 doc ≥ 70%, Relevance ≥ 30%, Faithfulness ≥ 25%, Format ≥ 96%) replacing the vague "+5%" criterion; BGE-M3 documented as fallback challenger if Qwen3-Embedding-4B isn't Ollama-pullable. (6) Phase 4 (EPUB engine) flipped from "decision point" to "deferred to v2.12+" with the soak data backing the deferral. (7) §7 Open questions: items 1 and 5 marked resolved; item 6 added as the new Phase 1 start gate. Promotion to Draft v1.0 happens when the user signs off on starting Phase 1. |
+| 2026-05-17 | **Promoted to Draft v0.3** after audit by Qwen 3.6 Max Preview (AUDIT PASS across all six quality dimensions, six low-priority refinements). Applied: (1) `[D-1/D-2]` test-count reconciliation — v2.10 AFTER snapshot §6 gets a new row for the 973 → 975 transition (the +2 retrieval-regression pins landed after Phase 8 close, same day). (2) `[C-1]` Phase N gains explicit Risk + Cost blocks. (3) `[C-2]` Phase 2 gains an "Independent of Phase 1" sub-section clarifying that validated-cloud CI runs against whichever embedder is current and can start in parallel with Phase 1's rebuild. (4) `[C-3]` Phase N approach #5 now documents version-string handling (bump or retain following v2.10.0's pattern). (5) `[C-4]` Phase 1 approach gains a new step 0 — `scripts/rebuild_mmrag_v2_8_for_rc1.py` `--resume` flag + retry-on-URLError wrapper, as defensive ~30 min of work to prevent repeating the v2.10 Phase 8 mid-rebuild recovery. (6) `[S-1]` §2b section reference fixed to name PLAN_V2.10 §2b/§2c/§2d explicitly. Auditor's `[S-2]` ("Phase N" naming) acknowledged as intentional; no change. No data-accuracy or architectural concerns surfaced. |
 
 ---
 
@@ -419,4 +440,4 @@ Status as of Draft v0.2 (2026-05-16). Answered questions are kept for traceabili
 
 ---
 
-**END OF DRAFT v0.2.** Phase 0 is closed; v2.10.0 has shipped; the soak gave us concrete numeric floors for Phase 1. Next checkpoint: user signoff on Phase 1 start (Qwen3-Embedding-4B pull + second-collection rebuild + comparison soak). Promotion to **Draft v1.0** at that signoff. The Phase 2 (validated-cloud) and Phase 3 (carry-forward dispositions) phases are independent of Phase 1's outcome and can run in parallel or interleaved.
+**END OF DRAFT v0.3.** Phase 0 is closed; v2.10.0 has shipped; the soak gave us concrete numeric floors for Phase 1; the Qwen 3.6 Max Preview audit (2026-05-16) returned AUDIT PASS and the six low-priority refinements are folded in. Next checkpoint: user signoff on Phase 1 start (Qwen3-Embedding-4B pull + second-collection rebuild + comparison soak). Promotion to **Draft v1.0** at that signoff. The Phase 2 (validated-cloud) and Phase 3 (carry-forward dispositions) phases are independent of Phase 1's outcome and can run in parallel or interleaved.

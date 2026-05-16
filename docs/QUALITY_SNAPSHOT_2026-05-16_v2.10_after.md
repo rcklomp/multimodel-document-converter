@@ -175,6 +175,7 @@ post-Phase-4/5 pending residue noted in the initial Phase 8 probe.
 | Phase 6 close | 953 | +93 (OCR + infix-repair) |
 | Phase 7 close | 966 | +13 (EPUB lane + advisory) |
 | Phase 8 close (v2.10.0-rc1) | **973** | +7 |
+| v2.10.0 final (db6527c, retrieval-regression pins added) | **975** | +2 |
 
 ## 7. Qdrant rebuild
 
