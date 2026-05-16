@@ -128,9 +128,10 @@ action belongs to the user:
    `ingest_to_qdrant.py` filtered 134 at ~0.44 %, consistent with the
    rc1 rate). The release-tag command is prepared but not executed by
    the agent.
-2. Rotate the leaked Dashscope API key provider-side (the literal was
-   removed from `scripts/search_qdrant.py` in Phase 8 but lives in git
-   history; only the user can rotate at the provider).
+2. ~~Rotate the leaked Dashscope API key provider-side.~~ **Done
+   2026-05-16** — the user revoked the literal at Alibaba Cloud Model
+   Studio. Any historical commit containing the literal can no longer
+   authenticate.
 
 Existing non-goals remain outside v2.10 unless Phase 8 explicitly
 promotes them: local VLM comparison (NuMarkdown-8B reachability),

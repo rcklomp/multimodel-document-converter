@@ -298,13 +298,15 @@ The three v2.9.0-rc1 carry-forward items from
    `scripts/ingest_to_qdrant.py`; the `--model llava` default and
    `MIN_SCORE = 0.20` floor remain calibrated for the rebuilt
    collection. No re-tune required.
-3. **Hard-coded Dashscope API key** — replaced with
+3. **Hard-coded Dashscope API key** — **closed**. Replaced with
    `os.environ.get("DASHSCOPE_API_KEY", "")` in
    `scripts/search_qdrant.py` and `scripts/validate_qdrant.py`, plus
    `${DASHSCOPE_API_KEY:-}` in `scripts/convert_all.sh`. The rerank
    functions gracefully degrade to vector-rank truncation when the env
-   var is unset. The leaked literal must be rotated provider-side; this
-   is a user-only action and is flagged in the close-out report.
+   var is unset. The leaked literal that still lived in git history
+   was revoked by the user at Alibaba Cloud Model Studio on
+   2026-05-16, so any historical commit containing the literal can no
+   longer authenticate against the provider.
 
 ## 10. Revision log
 
@@ -312,3 +314,4 @@ The three v2.9.0-rc1 carry-forward items from
 |---|---|
 | 2026-05-16 | Initial v2.10.0-rc1 AFTER snapshot at Phase 8 close (rebuild in progress at first author). |
 | 2026-05-16 | §7 + §9 + status banner updated after the Phase 8 resume loop completed at 18:17:26 UTC. Final `points_count: 30,454` (raw chunk count was 30,588; `ingest_to_qdrant.py` filtered 134, ~0.44 %). v2.9.0-rc1 → v2.10.0-rc1 net delta: −7 points. Devlin staleness item closed by the rebuilt collection. Phase 8 advances to `validated-local`. |
+| 2026-05-16 | §9 item 3 closed: the leaked Dashscope API-key literal that lived in git history was revoked by the user at Alibaba Cloud Model Studio. Any historical commit containing the literal can no longer authenticate. The last user-only v2.10 release-prep action is now done; only the `v2.10.0-rc1` annotated tag push remains. |
