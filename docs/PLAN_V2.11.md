@@ -6,8 +6,9 @@ the embedder-shootout success bar (Phase 1). This draft will be promoted
 to Draft v0.2 after the soak report lands, and to Draft v1.0 after
 v2.10.0 final ships.
 **Predecessor:** [`docs/PLAN_V2.10.md`](PLAN_V2.10.md) — Phases 1-8
-closed, v2.10.0-rc1 tagged 2026-05-16 on commit `82c3639`, public on
-GitHub.
+closed, **`v2.10.0` SHIPPED 2026-05-16** (annotated tag on commit
+`db6527c`, public on GitHub). The RC tag `v2.10.0-rc1` (`82c3639`)
+is also retained on GitHub.
 **Owner:** ingestion pipeline.
 
 ---
@@ -45,6 +46,7 @@ v2.11 answers all three with data, not opinion.
 ### Where the previous cycle left off
 
 - `v2.10.0-rc1` tagged + pushed 2026-05-16 (commit `82c3639`).
+- **`v2.10.0` SHIPPED 2026-05-16** (commit `db6527c`, rc1 commit + soak report). The annotated tag explicitly frames the release as a chunker baseline (Format 98.3% per soak); retrieval-quality work (Recall@1 2.1%) belongs to v2.11 Phase 1 — see `docs/DECISIONS.md` "v2.10 chunker-quality ceiling".
 - Strict gate: 34 PASS / 0 WARN / 0 FAIL across the 34-doc canonical
   corpus (16 `QA_PASS` + 18 `QA_PASS_WITH_ADVISORIES`).
 - Qdrant `mmrag_v2_8` rebuilt: `status: green`, `points_count: 30,454`,
@@ -137,13 +139,22 @@ Unchanged from v2.10:
 
 ## 3. Phases
 
-### Phase 0 — v2.10.0 final ship + soak-driven v2.10.x patches
+### Phase 0 — v2.10.0 final ship + soak-driven v2.10.x patches  ✅ CLOSED 2026-05-16
 
 **What.** Promote `v2.10.0-rc1` to `v2.10.0` final after:
 - The soak report has been read and any defect candidates either
   closed in v2.10.x or formally deferred to v2.11/v2.12.
 - The retrieval-regression baseline has survived one no-op
   re-capture (idempotency check) with zero drift.
+
+**Outcome (2026-05-16).** `v2.10.0` SHIPPED on commit `db6527c`. The
+soak's "weakest 15" list was dominated by embedder-attributable
+wrong-doc retrievals, not chunk-shape defects (Format 98.3%
+corpus-wide certified the chunker is right). Zero v2.10.x patches
+needed. The v2.10.0 annotated tag re-framed the release as a chunker
+baseline; retrieval-quality work moved to Phase 1 below. See
+`docs/DECISIONS.md` "v2.10 chunker-quality ceiling" for the
+explicit decision to *not* pursue Format 99.9% in v2.11/v2.12.
 
 **Approach.**
 1. Read `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md` once the
@@ -402,6 +413,7 @@ These remain non-goals for v2.11 unless explicitly promoted:
 - Adding a UI / web frontend.
 - New file-format support beyond the current six (PDF/EPUB/HTML/DOCX/PPTX/XLSX).
 - Schema evolution (chunk-shape stays `2.7.0`).
+- **Format 99.9% chunker-quality target.** v2.10 landed at Format 98.3% (1018/1036 axis-points on the soak); going from 98.3% → 99.9% would require a UIR refactor + LLM-cleanup post-process (~3 months of focused work) and the 1.7% gap is masked anyway by the embedder weakness (Recall@1 2.1%). See `docs/DECISIONS.md` "v2.10 chunker-quality ceiling — 99.9% Format not chased (2026-05-16)" for the cost/benefit analysis and the three triggers that would revisit the decision.
 
 ---
 
@@ -410,6 +422,7 @@ These remain non-goals for v2.11 unless explicitly promoted:
 | Date | Change |
 |---|---|
 | 2026-05-16 | Draft v0.1 authored mid-v2.10.0-rc1-soak. Embedder challenger (Qwen3-Embedding-4B) named per release-plan discussion. Five rc1 carry-forward non-goals captured with default-recommended dispositions. Phase 0 explicitly gates Phase 1 on v2.10.0 final ship. |
+| 2026-05-16 | **Phase 0 closed same day.** `v2.10.0` SHIPPED on commit `db6527c` (rc1 commit + soak report). Zero v2.10.x patches needed — soak weakest-15 was dominated by embedder-attributable wrong-doc retrievals, not chunk-shape defects. New `docs/DECISIONS.md` entry "v2.10 chunker-quality ceiling — 99.9% Format not chased (2026-05-16)" documents the choice to not pursue Format 99.9% in v2.11/v2.12 and lists three triggers that would revisit. §5 Out of Scope updated with the outbound cross-reference. Draft stays at v0.1 — user has no inspiration to change other parts of the plan yet. |
 
 ---
 

@@ -86,9 +86,10 @@ Companion docs:
 1. Start sessions with the indexed handoff path:
    - `docs/PROJECT_STATUS.md`
    - `docs/README.md`
-   - `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` (current canonical baseline)
-   - `docs/PLAN_V2.10.md` (v2.10 execution plan; Phases 1-8 validated-local, release tag pending user push)
-   - `docs/PLAN_V2.10_DRAFT_PROMPT.md` (historical prompt only)
+   - `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` (current canonical baseline; v2.10.0 SHIPPED)
+   - `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md` (soak findings; retrieval-quality known-limitation feeding v2.11)
+   - `docs/PLAN_V2.11.md` (active v2.11 plan; Draft v0.1)
+   - `docs/PLAN_V2.10.md` (v2.10 execution history — Phases 1-8 SHIPPED 2026-05-16)
    - `docs/PLAN_V2.9.md` (v2.9 execution history through the rc1 scope cut, if present)
 2. Use the three-layer documentation model:
    - Layer 0 contracts: this file, `CLAUDE.md`, `docs/AGENT_GOVERNANCE.md`, `docs/DECISIONS.md`, `docs/QUALITY_GATES.md`, `docs/ARCHITECTURE.md`, SRS.
@@ -102,8 +103,8 @@ Companion docs:
 
 ## 📍 5. CURRENT STATE & DIRECTIVES (May 2026)
 
-**Engine version:** `v2.10.0-rc1` (schema version `2.7.0` — chunk-shape contract unchanged since v2.7).
-**Phase:** `v2.10.0-rc1` release prep is `validated-local` (PLAN_V2.10 Phases 1-8 closed locally 2026-05-16; Qdrant `mmrag_v2_8` rebuilt to `status: green`, `points_count: 30,454`). All eight v2.9.0-rc1 signed deferrals are closed and corpus-wide re-verified; no v2.10 deferrals were created. The release-tag command is staged but not pushed. Current canonical baseline: `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md`. Predecessor (kept for delta): `docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md` (v2.9.0-rc1 ship state, tag on `3e06d1b`).
+**Engine version:** `v2.10.0-rc1` string retained in `src/mmrag_v2/version.py` and `pyproject.toml`; **release tag is `v2.10.0` SHIPPED 2026-05-16 on commit `db6527c`** (annotated tag pushed to GitHub). Schema version `2.7.0` — chunk-shape contract unchanged since v2.7.
+**Phase:** `v2.10.0` is the v2.10 ship state: PLAN_V2.10 Phases 1-8 closed; Qdrant `mmrag_v2_8` rebuilt to `status: green`, `points_count: 30,454`. All eight v2.9.0-rc1 signed deferrals are closed and corpus-wide re-verified; no v2.10 deferrals were created. The release is explicitly framed in its annotated tag as a **chunker baseline** (Format 98.3% per the v2.10 soak; Recall@1 2.1% on llava is documented as a v2.11 Phase 1 retrieval-quality concern, not a v2.10 chunker regression — see `docs/DECISIONS.md` "v2.10 chunker-quality ceiling"). Current canonical baseline: `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` + `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md`. Predecessors (kept for delta): `docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md` (v2.9.0-rc1 ship state, tag on `3e06d1b`) and `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md` (v2.8.0 SHIPPED reference).
 
 **Active architecture decisions:**
 - PDF extraction pathway is determined by structural integrity pre-flight tests, not semantic profile. See `docs/DECISIONS.md` — "Structural Pathology over Semantic Profiling".
@@ -117,21 +118,28 @@ Companion docs:
 
 **QA policy:** All profiles use the standard 10% token variance tolerance. See `docs/QUALITY_GATES.md`.
 
-### Priority TODOs (Open — post-v2.10)
-Source: `docs/PLAN_V2.10.md` and the v2.10 AFTER snapshot. PLAN_V2.10
-Phases 1-8 closed locally on 2026-05-16; the only remaining v2.10
-action belongs to the user:
+### Priority TODOs (Open — v2.11 cycle)
+Source: `docs/PLAN_V2.11.md` (Draft v0.1). v2.10 is SHIPPED (`v2.10.0`
+tag on `db6527c`, 2026-05-16). The next cycle's open items:
 
-1. Push the staged `v2.10.0-rc1` annotated tag against the Phase 8
-   commit. Qdrant `mmrag_v2_8` already verifies `status: green`,
-   `points_count: 30,454` (raw JSONL chunk count was 30,588;
-   `ingest_to_qdrant.py` filtered 134 at ~0.44 %, consistent with the
-   rc1 rate). The release-tag command is prepared but not executed by
-   the agent.
-2. ~~Rotate the leaked Dashscope API key provider-side.~~ **Done
-   2026-05-16** — the user revoked the literal at Alibaba Cloud Model
-   Studio. Any historical commit containing the literal can no longer
-   authenticate.
+1. **Embedder shootout (v2.11 Phase 1).** Qwen3-Embedding-4B challenger
+   vs Ollama `llava` 4096-dim baseline. Side-by-side soak comparison.
+   Decision row in `docs/DECISIONS.md` after Phase 1. Driven by the
+   v2.10 soak finding Recall@1 = 2.1%.
+2. **Validated-cloud checkpoint (v2.11 Phase 2).** Move from
+   `validated-local` to a CI-on-self-hosted-runner workflow that runs
+   pytest + strict-gate + smoke + retrieval-regression on every push
+   to `main` and every annotated tag.
+3. **Carry-forward non-goal dispositions (v2.11 Phase 3).** Five rc1
+   non-goals (NuMarkdown reachability, remote CodeFormulaV2, broader
+   UIR refactor, HybridChunker per-item guard, magazine
+   rendered-region-crop) — each gets an explicit decision row in
+   `docs/DECISIONS.md` as in-scope sub-phase or formal further-defer.
+4. ~~Rotate the leaked Dashscope API key provider-side.~~ **Done
+   2026-05-16** — revoked at Alibaba Cloud Model Studio.
+5. ~~Push the staged `v2.10.0-rc1` annotated tag.~~ **Done 2026-05-16**
+   — both `v2.10.0-rc1` (`82c3639`) and `v2.10.0` (`db6527c`) are
+   public on GitHub.
 
 Existing non-goals remain outside v2.10 unless Phase 8 explicitly
 promotes them: local VLM comparison (NuMarkdown-8B reachability),

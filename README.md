@@ -4,10 +4,10 @@ Convert PDF, EPUB, HTML, and Office documents into structured JSONL datasets for
 
 The converter extracts text, images, and tables from complex documents while preserving spatial layout, document hierarchy, and semantic context. It handles everything from born-digital magazines to degraded scanned manuals.
 
-**Version 2.10.0-rc1** (release candidate, tagged + pushed 2026-05-16) | predecessor `v2.9.0-rc1` (3e06d1b, 2026-05-12) | last shipped tag `v2.8.0` | Python 3.10 | Apple Silicon native | Docling 2.86.0 | Schema 2.7.0
+**Version 2.10.0** (SHIPPED 2026-05-16, tag on commit `db6527c`) | predecessor `v2.10.0-rc1` (`82c3639`, 2026-05-16) → `v2.9.0-rc1` (`3e06d1b`, 2026-05-12) → `v2.8.0` | Python 3.10 | Apple Silicon native | Docling 2.86.0 | Schema 2.7.0
 
-> **v2.10.0-rc1 status (2026-05-16): PUBLIC RC.** Strict gate
-> (`scripts/qa_full_conversion.py --source-pdf --allow-warnings`)
+> **v2.10.0 — chunker baseline release.** Tagged + pushed 2026-05-16.
+> Strict gate (`scripts/qa_full_conversion.py --source-pdf --allow-warnings`)
 > reports **34 PASS / 0 WARN / 0 FAIL** across the 34-doc canonical
 > corpus (16 `QA_PASS` + 18 `QA_PASS_WITH_ADVISORIES`). All eight
 > v2.9.0-rc1 signed deferrals are closed and corpus-wide re-verified;
@@ -20,6 +20,12 @@ The converter extracts text, images, and tables from complex documents while pre
 >
 > AFTER snapshot:
 > [`docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md`](docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md).
+> v2.10 soak (informational):
+> [`docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md`](docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md)
+> — Format 98.3%, Recall@1 2.1%, documents the retrieval-quality
+> known-limitation that v2.11 Phase 1 addresses (see
+> [`docs/DECISIONS.md`](docs/DECISIONS.md) "v2.10 chunker-quality
+> ceiling" and [`docs/PLAN_V2.11.md`](docs/PLAN_V2.11.md)).
 > Predecessor (kept for delta reproducibility):
 > [`docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`](docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md).
 >
@@ -38,10 +44,14 @@ The converter extracts text, images, and tables from complex documents while pre
 > [`docs/PLAN_V2.10.md`](docs/PLAN_V2.10.md) for the Phase 1-8
 > execution narrative.
 >
-> No QA threshold was weakened. The release tag `v2.10.0-rc1` is
-> public on `main`; a final `v2.10.0` tag awaits a soak window,
-> a retrieval regression baseline, and a validated-cloud checkpoint
-> (see [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)).
+> **Use v2.10.0** if you want a clean ingestion pipeline producing
+> well-formed multimodal JSONL. **Wait for v2.11** if you want
+> production RAG retrieval — the v2.10 embedder (Ollama `llava`)
+> is the retrieval bottleneck per the soak, addressed by v2.11
+> Phase 1 (Qwen3-Embedding-4B challenger).
+>
+> No QA threshold was weakened. Both `v2.10.0-rc1` and `v2.10.0`
+> tags are public on GitHub.
 
 ---
 

@@ -11,10 +11,12 @@ This file provides guidance to Claude Code when working with this repository.
 6. `docs/TESTING.md`
 7. `docs/QUALITY_GATES.md`
 8. `docs/ARCHITECTURE.md`
-9. `docs/PLAN_V2.10.md` (active plan; Phases 1-7 validated-local, Phase 8 pending)
-10. `docs/PLAN_V2.10_DRAFT_PROMPT.md` (historical prompt only)
-11. `docs/PLAN_V2.9.md` (v2.9 execution history through the rc1 scope cut, if present)
-12. `docs/archive/SRS_Multimodal_Ingestion_V2.5.md`
+9. `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` (current canonical baseline; v2.10.0 SHIPPED)
+10. `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md` (v2.10 soak — Format 98.3%, Recall@1 2.1%; retrieval-quality known-limitation feeding v2.11)
+11. `docs/PLAN_V2.11.md` (active v2.11 plan; Draft v0.1)
+12. `docs/PLAN_V2.10.md` (v2.10 execution history — Phases 1-8 SHIPPED 2026-05-16, tag `v2.10.0` on `db6527c`)
+13. `docs/PLAN_V2.9.md` (v2.9 execution history through the rc1 scope cut, if present)
+14. `docs/archive/SRS_Multimodal_Ingestion_V2.5.md`
 
 Use the three-layer docs model:
 - Layer 0 contracts: invariants, governance, decisions, architecture, quality gates.

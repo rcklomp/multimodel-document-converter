@@ -6,17 +6,30 @@ Purpose: fast orientation for a new coding session. Read this before deeper proj
 
 ## Current Objective
 
-**`v2.10.0-rc1` PHASE 8 VALIDATED-LOCAL (2026-05-16)** — PLAN_V2.10
-Phases 1-8 are closed locally; Qdrant `mmrag_v2_8` rebuilt to
-`status: green`, `points_count: 30,454`. Phase 8 strict-gate
-re-verification reports **34 PASS / 0 WARN / 0 FAIL** across the
-34-doc canonical corpus (16 `QA_PASS` + 18
-`QA_PASS_WITH_ADVISORIES`); all eight v2.9.0-rc1 signed deferrals
-are closed. Engine version bumped to `2.10.0-rc1` in
+**`v2.10.0` SHIPPED (2026-05-16, tag on commit `db6527c`)** —
+PLAN_V2.10 Phases 1-8 closed; v2.10.0 final tag pushed to GitHub.
+Phase 8 strict-gate re-verification reports **34 PASS / 0 WARN / 0
+FAIL** across the 34-doc canonical corpus (16 `QA_PASS` + 18
+`QA_PASS_WITH_ADVISORIES`); all eight v2.9.0-rc1 signed deferrals are
+closed. Qdrant `mmrag_v2_8` rebuilt to `status: green`,
+`points_count: 30,454`. The annotated `v2.10.0` tag frames the
+release as a **chunker baseline** (Format 98.3% per soak;
+[`docs/DECISIONS.md`](DECISIONS.md) "v2.10 chunker-quality ceiling")
+— retrieval-quality work (Recall@1 2% on llava) explicitly belongs
+to v2.11 Phase 1. Engine version `2.10.0-rc1` is retained in
 [`src/mmrag_v2/version.py`](../src/mmrag_v2/version.py) and
-[`pyproject.toml`](../pyproject.toml); the v2.10.0-rc1 annotated tag
-command is staged but not pushed (user controls the final
-`git tag` push).
+[`pyproject.toml`](../pyproject.toml) — the v2.10.0 final tag points
+at `db6527c` (rc1 commit + soak report) without bumping the engine
+version string, mirroring the v2.9.0-rc1 ship-state pattern.
+
+Tag tree on GitHub:
+
+```
+v2.8.0       (2026-05-04, 645ab2b)
+v2.9.0-rc1   (2026-05-12, 3e06d1b)  — v2.9 ship state, 8 deferrals
+v2.10.0-rc1  (2026-05-16, 82c3639)  — rc with all 8 closed
+v2.10.0      (2026-05-16, db6527c)  — chunker baseline + soak evidence
+```
 
 Predecessor: `v2.9.0-rc1` (tag on commit `3e06d1b`, pushed
 2026-05-12) — the v2.9 ship state with 26 PASS / 0 WARN / 8 FAIL and
@@ -24,9 +37,12 @@ Predecessor: `v2.9.0-rc1` (tag on commit `3e06d1b`, pushed
 
 **Active canonical baseline:**
 [`docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md`](QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md)
-(v2.10.0-rc1 AFTER snapshot — corpus 34/34 PASS, Phase 1-7 closure
-summary, three v2.9.0-rc1 housekeeping carry-forwards closed, §10
-Revision log).
+(v2.10 AFTER snapshot — corpus 34/34 PASS, Phase 1-7 closure summary,
+three v2.9.0-rc1 housekeeping carry-forwards closed, §10 Revision
+log) and
+[`docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md`](QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md)
+(soak — Format 98.3%, Recall@1 2.1% — informational; documents the
+retrieval-quality known-limitation carried into v2.11).
 
 **Predecessor baseline (kept for delta):**
 [`docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`](QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md)
@@ -40,12 +56,12 @@ completed 2026-05-16 18:17:26 UTC. Final state:
 count across the JSONLs was 30,588; `scripts/ingest_to_qdrant.py`
 filters a consistent ~0.44 % (empty content / missing asset refs /
 validator rejections), leaving the −134 ingest-time delta. v2.9.0-rc1
-→ v2.10.0-rc1 net delta is **−7 points** (rc1 was 30,461). Vector +
+→ v2.10 net delta is **−7 points** (rc1 was 30,461). Vector +
 reranker smoke (`scripts/search_qdrant.py "what is MCP" -c mmrag_v2_8 -n 3`)
 returns topically-correct top-3 chunks. The v2.9.0-rc1 Devlin Qdrant
 payload staleness item from the rc1 housekeeping list is closed by
-this rebuild. Phase 8 is `validated-local`; the v2.10.0-rc1 release
-tag is staged, not pushed.
+this rebuild. **Phase 8 SHIPPED; v2.10.0 tag on `db6527c` pushed to
+GitHub 2026-05-16.**
 
 **Phase 1-7 evidence retained:** KI_En_ChatGPT_Praktische_Gids full
 strict gate `QA_PASS_WITH_ADVISORIES: failures=0 warnings=1`
@@ -197,10 +213,9 @@ corpus-wide re-verified by Phase 8 (2026-05-16).
 
 **Remaining open blockers: none.** All seven named-class deferrals
 are `validated-local` (Phases 1-7) and re-verified corpus-wide under
-the unchanged strict gate (Phase 8). Phase 8 is `validated-local`
-(2026-05-16, rebuild green at 30,454 points). The v2.10.0-rc1
-release-tag command is staged but not pushed; the user controls the
-final `git tag` push per `docs/PLAN_V2.10.md` §Phase 8 step 12.
+the unchanged strict gate (Phase 8). **Phase 8 SHIPPED** (2026-05-16):
+rebuild green at 30,454 points; `v2.10.0` annotated tag on commit
+`db6527c` pushed to GitHub the same day. Cycle closed.
 
 **Phase 7 `validated-local` (2026-05-15).**
 

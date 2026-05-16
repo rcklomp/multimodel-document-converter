@@ -631,3 +631,40 @@ strict-gate re-run → final tag.
 - `docs/PLAN_V2.9.md` §3 Phase B sub-classes (B1 sanitizer = cosmetic; B2 = boilerplate; B3 = mixed application; B4 = mixed application).
 - `docs/PHASE_A_MISSING_PAGES_DIAGNOSTIC.md` §3 Sub-class taxonomy.
 - `docs/QUALITY_GATES.md` `MISSING_PAGES` / `MISSING_PAGES_BLANK` semantics.
+
+---
+
+## v2.10 chunker-quality ceiling — 99.9% Format not chased (2026-05-16)
+
+**Decision.** The v2.10.0 soak landed at **Format 98.3%** (1018/1036 axis-points across 518 sampled top-1 retrievals). Going from 98.3% → 99.9% is not pursued in v2.11 or v2.12. The release-engineering effort returns instead to retrieval quality (embedder swap, see `docs/PLAN_V2.11.md` Phase 1).
+
+**Why this is the right call right now.** Format 98.3% means roughly 17 chunks out of the 518 sampled scored less than perfect (mostly 1/2 "minor formatting issues" — odd whitespace, sentence-break artifacts, light truncation — not 0/2 broken chunks). The remaining defects are a long tail across many lanes, no single class dominates, and the marginal user-visible impact is small.
+
+Meanwhile, the same soak surfaced **Recall@1 = 2.1%** on llava 4096-dim. The retrieval system cannot locate well-formed chunks well enough for the 1.7% format-quality gap to matter to a downstream consumer. Polishing chunks the embedder cannot find is misallocation.
+
+Numerically: bumping Format 98.3 → 99.9 affects ~17 chunks; bumping Recall@1 from 2% → 30% (plausible with Qwen3-Embedding-4B) would affect ~145 queries. ~9× more user-visible impact for less engineering. The retrieval-quality work compounds on top of the chunker work we already shipped; the inverse does not.
+
+**What it would take to actually close the gap.** Documented here so the future "should we chase 99.9%?" question doesn't restart from zero:
+
+| Path | What it does | Cost | Ceiling |
+|---|---|---|---|
+| Whack-a-mole on the soak's weakest list | Identify each defect class, fix one by one with parallel-site audit + regression test | 1-3 months / 5-15 cycles | ~99.2%; diminishing returns. |
+| Generalised post-Docling text scrubber | Unify the ad-hoc passes (drop-cap promotion, label-leak filter, OCR gating from `docs/archive/PLAN_DOCLING_POSTPROCESSOR.md`) into one principled cleanup stage with whitespace + sentence-boundary + punctuation + artifact rules | 1-2 months | 99.2-99.5%. Cheapest of the structural paths. |
+| Kill the element-by-element fallback lane | The KI EPUB hit the fallback because HybridChunker times out on 500K+ char inputs; fallback chunks are visibly less clean. Either make HybridChunker scale or write a fast alternative. | 2-3 months | Closes ~30% of remaining defects; structural win. |
+| LLM-clean every chunk on ingestion | qwen-max (or equivalent) polishes each chunk's content as a final ingestion stage. ~$30 per full corpus rebuild at current Dashscope pricing. | 2-3 weeks of harness work + per-rebuild LLM cost | 99.7-99.9%. Adds ongoing LLM dependency to ingestion. |
+| True UIR refactor | The v2.11 carry-forward non-goal. Unify all extraction lanes through one clean abstraction. Side-effect: many format issues disappear because there's one cleanup site, not eight. | 2-3 months minimum | ~99.5% alone; combine with LLM-cleanup for 99.9%. |
+
+**Combined ceiling.** Realistically, 99.9% requires *UIR refactor + LLM cleanup* together: roughly 3 months of focused work.
+
+**Triggers that would revisit this decision.**
+
+1. **A downstream user actually complains** about a specific format defect class in `mmrag_v2_8` content. A real complaint beats a metric.
+2. **Embedder Recall@1 climbs above ~40%** (v2.11 Phase 1 outcome). Once retrieval can actually find the right chunks, format-quality returns start to compound — polishing matters because more polished chunks are visible to the user.
+3. **Schema 2.7.0 retires.** A schema bump is the natural moment to do the UIR refactor that closes most format defects as a side-effect.
+
+Until at least one of the three triggers fires, the v2.10 chunker quality bar of 34 PASS strict gate + 98.3% Format soak is treated as the durable production baseline.
+
+**Cross-references:**
+- `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md` §4 "Weakest 15" — the source data behind the 1.7% gap.
+- `docs/PLAN_V2.11.md` §1 Carry-Forward Register (rows 5, 8) — UIR refactor and EPUB engine rewrite as deferred items adjacent to this decision.
+- `docs/PLAN_V2.11.md` §5 Out of Scope — the one-line outbound reference back here.

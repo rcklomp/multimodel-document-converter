@@ -1,14 +1,19 @@
-# Quality Snapshot 2026-05-16 — v2.10.0-rc1 AFTER
+# Quality Snapshot 2026-05-16 — v2.10 AFTER
 
-> **Status:** `v2.10.0-rc1` corpus baseline (Phase 8 close,
-> `validated-local`; release tag staged, not pushed).
+> **Status:** v2.10 corpus baseline; **`v2.10.0` SHIPPED 2026-05-16**
+> (annotated tag on commit `db6527c`, pushed to GitHub the same day).
+> Predecessor RC tag `v2.10.0-rc1` (`82c3639`) is also public.
 > Strict gate reports **34 PASS / 0 WARN / 0 FAIL** across the
 > 34-doc canonical corpus, with all eight v2.9.0-rc1 signed
 > deferrals closed locally by PLAN_V2.10 Phases 1-7 and
 > re-verified corpus-wide in Phase 8. Qdrant `mmrag_v2_8` rebuilt
 > 2026-05-16, `status: green`, `points_count: 30,454`,
 > `indexed_vectors_count: 30,192`. No new advisory codes were
-> added; no QA threshold was weakened.
+> added; no QA threshold was weakened. The v2.10.0 annotated tag
+> explicitly frames the release as a **chunker baseline** (Format
+> 98.3% per the v2.10 soak; Recall@1 2.1% retrieval-quality
+> known-limitation belongs to v2.11 Phase 1 — see
+> `docs/DECISIONS.md` "v2.10 chunker-quality ceiling").
 >
 > Predecessors:
 > - `docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md` (v2.9.0-rc1 ship state — 26 PASS / 0 WARN / 8 FAIL)
@@ -44,7 +49,7 @@ and red→green test pins.
 | 5 | `HYBRID_CHUNKER_HEADING_PROPAGATION` | Devlin | single propagation site at export boundary; heading validator tightened against repeated-token artefacts, code/JSON heading shapes, and bracket-prefixed code labels; `_GENERIC_CARRY_HEADINGS` blocks `Start` / `Front Matter` from seeding forward carry-state | +7 |
 | 6 | `OCR_PATH_HEADING_PROPAGATION` | Firearms | ordered OCR-lane heading attribution through `Region.is_heading` / `ProcessedChunk.is_heading`; central `ContextStateV2` validator tightened (terminal-period sentence-shape, numbered-prefix body-case shape); single-page push gate on both OCR heading paths; audit-fix infix step-number repair (`BatchProcessor._repair_infix_step_numbers`); targeted enrichment of 264 pending shadow chunks | +70 (OCR) +23 (infix) |
 | 7 | `KI_EPUB_EXTRACTION_LANE_REWRITE` | KI EPUB, ChatGPT EPUB regression control | `_epub_to_html` spine walk + `__MMRAG_EPUB_CH_NNNN__` markers; `_apply_epub_synthetic_pagination` rewrites EPUB chunks with `chapter_1based * 1000 + position_in_chapter // 5`, `[0,0,1000,1000]` bbox, `extraction_method="epub_html"`, regenerated chunk_id, per-synthetic-page dedup; EPUB-aware strict-gate branch via `ebooklib`; `MISSING_CHAPTERS` advisory for contiguous leading/trailing low-content structural spine items | +8 |
-| 8 | Strict-Gate Re-Verification + v2.10 Release Prep | corpus-wide | 3-doc image re-enrichment (Devlin/Cookbook/Distilled 443 chunks); Firearms canonical-CLI reconvert + re-enrichment; Qdrant `mmrag_v2_8` rebuild; `search_qdrant.py` API-key cleanup + env-var migration; v2.10 release tag staged | (regression tests only — corpus pin + version pin) |
+| 8 | Strict-Gate Re-Verification + v2.10 Release Prep | corpus-wide | 3-doc image re-enrichment (Devlin/Cookbook/Distilled 443 chunks); Firearms canonical-CLI reconvert + re-enrichment; Qdrant `mmrag_v2_8` rebuild; `search_qdrant.py` API-key cleanup + env-var migration; **`v2.10.0` SHIPPED 2026-05-16 on commit `db6527c`** | (regression tests only — corpus pin + version pin) |
 | **Total** | — | — | — | **+~160** |
 
 ## 3. v2.10 release contract — closure of v2.9.0-rc1 deferrals
@@ -249,9 +254,9 @@ Phase 8 re-enrichment output.
   16 GB M1 Mac).
 
 **Rebuild status at AFTER-snapshot commit:** complete and
-verified. Phase 8 advances to `validated-local`. Release-tag
-command staged but not executed; user pushes the tag per
-`docs/PLAN_V2.10.md` §Phase 8 step 12.
+verified. Phase 8 advanced to `validated-local` 2026-05-16 18:17 UTC,
+then to **SHIPPED** ~3 hours later (annotated `v2.10.0` tag on commit
+`db6527c`, pushed to GitHub the same day).
 
 **Operational lesson captured for v2.11:** the rebuild script
 should fail fast on Ollama unavailability (a connection probe
@@ -315,3 +320,4 @@ The three v2.9.0-rc1 carry-forward items from
 | 2026-05-16 | Initial v2.10.0-rc1 AFTER snapshot at Phase 8 close (rebuild in progress at first author). |
 | 2026-05-16 | §7 + §9 + status banner updated after the Phase 8 resume loop completed at 18:17:26 UTC. Final `points_count: 30,454` (raw chunk count was 30,588; `ingest_to_qdrant.py` filtered 134, ~0.44 %). v2.9.0-rc1 → v2.10.0-rc1 net delta: −7 points. Devlin staleness item closed by the rebuilt collection. Phase 8 advances to `validated-local`. |
 | 2026-05-16 | §9 item 3 closed: the leaked Dashscope API-key literal that lived in git history was revoked by the user at Alibaba Cloud Model Studio. Any historical commit containing the literal can no longer authenticate. The last user-only v2.10 release-prep action is now done; only the `v2.10.0-rc1` annotated tag push remains. |
+| 2026-05-16 | **`v2.10.0-rc1` and `v2.10.0` tags both public on GitHub.** RC1 on `82c3639`; final v2.10.0 on `db6527c` (rc1 commit + soak report). Tag tree on GitHub: `v2.8.0 (645ab2b)` → `v2.9.0-rc1 (3e06d1b)` → `v2.10.0-rc1 (82c3639)` → `v2.10.0 (db6527c)`. The v2.10.0 annotated tag explicitly frames the release as a chunker baseline; retrieval-quality work belongs to v2.11 Phase 1 (see `docs/DECISIONS.md` "v2.10 chunker-quality ceiling"). Status banner promoted from `validated-local; release tag staged, not pushed` → `SHIPPED 2026-05-16`. |

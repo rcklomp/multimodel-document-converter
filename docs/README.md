@@ -11,11 +11,19 @@ This folder uses a three-layer documentation structure so a new coding session c
    - immediate next work and per-phase status
 
 2. `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md`
-   - current canonical corpus baseline (`v2.10.0-rc1`, 34/34 PASS)
+   - current canonical corpus baseline (`v2.10.0` SHIPPED, 34/34 PASS)
 
-3. `docs/PLAN_V2.10.md`
-   - v2.10 execution plan
-   - Phases 1-8 `validated-local`; v2.10.0-rc1 release tag pending user push
+2b. `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md`
+   - v2.10 soak — Format 98.3%, Recall@1 2.1%; retrieval-quality
+     known-limitation documented as a v2.11 Phase 1 input
+
+3. `docs/PLAN_V2.11.md`
+   - active v2.11 plan (Draft v0.1); successor to PLAN_V2.10
+   - Phase 1 = embedder shootout (Qwen3-Embedding-4B vs llava)
+
+3b. `docs/PLAN_V2.10.md`
+   - v2.10 execution history — Phases 1-8 SHIPPED 2026-05-16
+   - tag `v2.10.0` on commit `db6527c` pushed to GitHub
 
 3. `AGENTS.md`
    - hard project invariants
@@ -29,7 +37,7 @@ This folder uses a three-layer documentation structure so a new coding session c
    - design decisions and acceptance thresholds
    - quality gates used to decide pass/fail
 
-Read `docs/ARCHITECTURE.md` when changing core pipeline behavior. Read the SRS only as historical v2.5 context; if it conflicts with `AGENTS.md`, `docs/DECISIONS.md`, or `docs/ARCHITECTURE.md`, the current docs win. **Current canonical baseline is `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md`** — `v2.10.0-rc1` corpus baseline from PLAN_V2.10 Phase 8 close (34/34 PASS, all eight v2.9.0-rc1 signed deferrals corpus-wide closed). Phase 8 is `validated-local` (Qdrant `mmrag_v2_8` rebuilt 2026-05-16: `status: green`, `points_count: 30,454`); the release-tag command is staged but not pushed. Predecessor: `docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md` (`v2.9.0-rc1` v2.9 ship state, tag on commit `3e06d1b`). When a metric appears in both a layer-1 status doc and a dated snapshot, the latest snapshot is canonical (per `docs/AGENT_GOVERNANCE.md` Canonicality Rule). The archived task logs are archaeology only — current task state lives in `docs/PROJECT_STATUS.md`.
+Read `docs/ARCHITECTURE.md` when changing core pipeline behavior. Read the SRS only as historical v2.5 context; if it conflicts with `AGENTS.md`, `docs/DECISIONS.md`, or `docs/ARCHITECTURE.md`, the current docs win. **Current canonical baseline is `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md`** — v2.10 corpus baseline from PLAN_V2.10 Phase 8 close (34/34 PASS, all eight v2.9.0-rc1 signed deferrals corpus-wide closed). **`v2.10.0` SHIPPED 2026-05-16** (tag on commit `db6527c`, pushed to GitHub). Qdrant `mmrag_v2_8` rebuilt 2026-05-16: `status: green`, `points_count: 30,454`. The v2.10.0 annotated tag explicitly frames the release as a **chunker baseline** (Format 98.3% per the soak; Recall@1 2.1% on llava is a documented retrieval-quality known-limitation that v2.11 Phase 1 addresses via an embedder swap — see `docs/DECISIONS.md` "v2.10 chunker-quality ceiling"). Predecessor: `docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md` (`v2.9.0-rc1` v2.9 ship state, tag on commit `3e06d1b`). When a metric appears in both a layer-1 status doc and a dated snapshot, the latest snapshot is canonical (per `docs/AGENT_GOVERNANCE.md` Canonicality Rule). The archived task logs are archaeology only — current task state lives in `docs/PROJECT_STATUS.md`.
 
 ## Layer Model
 
@@ -51,7 +59,8 @@ Stable rules. These should change rarely.
 Compact project status. These files should be updated whenever a session changes direction, baseline, or known quality state.
 
 - `docs/PROJECT_STATUS.md`
-- `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` — **current canonical baseline** (`v2.10.0-rc1` corpus baseline, Phase 8 `validated-local`; release tag staged, not pushed)
+- `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` — **current canonical baseline** (v2.10 corpus baseline; `v2.10.0` SHIPPED 2026-05-16 on commit `db6527c`)
+- `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md` — v2.10 soak (Format 98.3%, Recall@1 2.1%); retrieval-quality known-limitation informing v2.11
 - `docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md` — predecessor (`v2.9.0-rc1` ship state, kept for v2.10 delta column)
 - `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md` — v2.8.0 SHIPPED reference baseline
 - `docs/QUALITY_SNAPSHOT_2026-05-03.md` — v2.8 BEFORE baseline (kept frozen so the AFTER snapshot's delta column is reproducible; not a current-state document)
@@ -63,7 +72,8 @@ Compact project status. These files should be updated whenever a session changes
 
 Operational commands and historical notes.
 
-- `docs/PLAN_V2.10.md` — v2.10 plan; Phases 1-8 are `validated-local` (Qdrant rebuild verified green 2026-05-16, `points_count: 30,454`); the v2.10.0-rc1 release tag is staged but not pushed
+- `docs/PLAN_V2.11.md` — active v2.11 plan (Draft v0.1); embedder shootout + validated-cloud + carry-forward non-goal dispositions
+- `docs/PLAN_V2.10.md` — v2.10 execution history; Phases 1-8 SHIPPED 2026-05-16; tag `v2.10.0` on commit `db6527c` pushed to GitHub
 - `docs/PLAN_V2.10_DRAFT_PROMPT.md` — historical prompt that produced the v2.10 plan
 - `docs/PLAN_V2.9.md` — v2.9 execution history through the `v2.9.0-rc1` scope cut and close-out, if present in the local checkout
 - `docs/QUALITY_SNAPSHOT_2026-05-08_v2.9_phase2_after.md` — Phase 2 closure snapshot
