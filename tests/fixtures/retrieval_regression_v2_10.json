@@ -1,0 +1,930 @@
+{
+  "schema": 2,
+  "engine_version": "2.10.0-rc1",
+  "collection": "mmrag_v2_8",
+  "embed_model": "llava",
+  "top_k": 5,
+  "strict_k": 3,
+  "queries": [
+    {
+      "id": "Q01_mcp",
+      "text": "what is the Model Context Protocol and how does an MCP client work",
+      "top_k": [
+        {
+          "chunk_id": "5b915c809145_161_text_278c0c96",
+          "doc_id": "5b915c809145",
+          "source_file": "Devlin M. Building LLM Agents with RAG, Knowledge Graphs and Reflection...2025.pdf",
+          "modality": "text",
+          "page_number": 161,
+          "score": 0.505102
+        },
+        {
+          "chunk_id": "41b2f4013cff_277_text_45941ccb",
+          "doc_id": "41b2f4013cff",
+          "source_file": "Raieli S. Building AI Agents with LLMs, RAG, and Knowledge Graphs...2025.pdf",
+          "modality": "text",
+          "page_number": 277,
+          "score": 0.497758
+        },
+        {
+          "chunk_id": "70930ff6f3a8_413_text_682c0c5a",
+          "doc_id": "70930ff6f3a8",
+          "source_file": "Hao B. Machine Learning Platform Engineering. Build...for ML and AI systems 2026.pdf",
+          "modality": "text",
+          "page_number": 413,
+          "score": 0.49618
+        },
+        {
+          "chunk_id": "41b2f4013cff_277_text_45941ccb_o2",
+          "doc_id": "41b2f4013cff",
+          "source_file": "Raieli S. Building AI Agents with LLMs, RAG, and Knowledge Graphs...2025.pdf",
+          "modality": "text",
+          "page_number": 277,
+          "score": 0.49374
+        },
+        {
+          "chunk_id": "41b2f4013cff_233_text_9db1fea0_o2",
+          "doc_id": "41b2f4013cff",
+          "source_file": "Raieli S. Building AI Agents with LLMs, RAG, and Knowledge Graphs...2025.pdf",
+          "modality": "text",
+          "page_number": 233,
+          "score": 0.487507
+        }
+      ]
+    },
+    {
+      "id": "Q02_rag_eval",
+      "text": "how to evaluate a retrieval augmented generation system",
+      "top_k": [
+        {
+          "chunk_id": "41b2f4013cff_277_text_45941ccb_o2",
+          "doc_id": "41b2f4013cff",
+          "source_file": "Raieli S. Building AI Agents with LLMs, RAG, and Knowledge Graphs...2025.pdf",
+          "modality": "text",
+          "page_number": 277,
+          "score": 0.596455
+        },
+        {
+          "chunk_id": "12c8aaab4fa1_084_text_75699457_o2",
+          "doc_id": "12c8aaab4fa1",
+          "source_file": "A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf",
+          "modality": "text",
+          "page_number": 84,
+          "score": 0.589959
+        },
+        {
+          "chunk_id": "41b2f4013cff_276_text_bb9cceb6_o2",
+          "doc_id": "41b2f4013cff",
+          "source_file": "Raieli S. Building AI Agents with LLMs, RAG, and Knowledge Graphs...2025.pdf",
+          "modality": "text",
+          "page_number": 276,
+          "score": 0.587312
+        },
+        {
+          "chunk_id": "12c8aaab4fa1_149_text_cf493e7e",
+          "doc_id": "12c8aaab4fa1",
+          "source_file": "A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf",
+          "modality": "text",
+          "page_number": 149,
+          "score": 0.581156
+        },
+        {
+          "chunk_id": "12c8aaab4fa1_158_text_718b6338_o2",
+          "doc_id": "12c8aaab4fa1",
+          "source_file": "A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf",
+          "modality": "text",
+          "page_number": 158,
+          "score": 0.580379
+        }
+      ]
+    },
+    {
+      "id": "Q03_agent_tools",
+      "text": "how do LLM agents call tools and reason over results",
+      "top_k": [
+        {
+          "chunk_id": "70930ff6f3a8_413_text_682c0c5a",
+          "doc_id": "70930ff6f3a8",
+          "source_file": "Hao B. Machine Learning Platform Engineering. Build...for ML and AI systems 2026.pdf",
+          "modality": "text",
+          "page_number": 413,
+          "score": 0.5894
+        },
+        {
+          "chunk_id": "41b2f4013cff_277_text_45941ccb_o2",
+          "doc_id": "41b2f4013cff",
+          "source_file": "Raieli S. Building AI Agents with LLMs, RAG, and Knowledge Graphs...2025.pdf",
+          "modality": "text",
+          "page_number": 277,
+          "score": 0.586783
+        },
+        {
+          "chunk_id": "41b2f4013cff_268_text_30177cb6",
+          "doc_id": "41b2f4013cff",
+          "source_file": "Raieli S. Building AI Agents with LLMs, RAG, and Knowledge Graphs...2025.pdf",
+          "modality": "text",
+          "page_number": 268,
+          "score": 0.581444
+        },
+        {
+          "chunk_id": "41b2f4013cff_276_text_bb9cceb6_o2",
+          "doc_id": "41b2f4013cff",
+          "source_file": "Raieli S. Building AI Agents with LLMs, RAG, and Knowledge Graphs...2025.pdf",
+          "modality": "text",
+          "page_number": 276,
+          "score": 0.576207
+        },
+        {
+          "chunk_id": "41b2f4013cff_268_text_30177cb6_o2",
+          "doc_id": "41b2f4013cff",
+          "source_file": "Raieli S. Building AI Agents with LLMs, RAG, and Knowledge Graphs...2025.pdf",
+          "modality": "text",
+          "page_number": 268,
+          "score": 0.572723
+        }
+      ]
+    },
+    {
+      "id": "Q04_rag_arch",
+      "text": "architecture of a production RAG pipeline",
+      "top_k": [
+        {
+          "chunk_id": "41b2f4013cff_241_text_a69c24ea",
+          "doc_id": "41b2f4013cff",
+          "source_file": "Raieli S. Building AI Agents with LLMs, RAG, and Knowledge Graphs...2025.pdf",
+          "modality": "text",
+          "page_number": 241,
+          "score": 0.693968
+        },
+        {
+          "chunk_id": "12c8aaab4fa1_057_text_95bf271b",
+          "doc_id": "12c8aaab4fa1",
+          "source_file": "A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf",
+          "modality": "text",
+          "page_number": 57,
+          "score": 0.667427
+        },
+        {
+          "chunk_id": "12c8aaab4fa1_158_text_718b6338_o2",
+          "doc_id": "12c8aaab4fa1",
+          "source_file": "A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf",
+          "modality": "text",
+          "page_number": 158,
+          "score": 0.660188
+        },
+        {
+          "chunk_id": "12c8aaab4fa1_149_text_cf493e7e",
+          "doc_id": "12c8aaab4fa1",
+          "source_file": "A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf",
+          "modality": "text",
+          "page_number": 149,
+          "score": 0.636451
+        },
+        {
+          "chunk_id": "12c8aaab4fa1_148_text_45c96d2f",
+          "doc_id": "12c8aaab4fa1",
+          "source_file": "A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf",
+          "modality": "text",
+          "page_number": 148,
+          "score": 0.634324
+        }
+      ]
+    },
+    {
+      "id": "Q05_iterator",
+      "text": "how to write a Python iterator with __iter__ and __next__",
+      "top_k": [
+        {
+          "chunk_id": "1e7e436164a3_417_text_6d7a7d27",
+          "doc_id": "1e7e436164a3",
+          "source_file": "Fluent Python Luciano Ramalho 2015.pdf",
+          "modality": "text",
+          "page_number": 417,
+          "score": 0.516586
+        },
+        {
+          "chunk_id": "1e7e436164a3_430_text_112a9607",
+          "doc_id": "1e7e436164a3",
+          "source_file": "Fluent Python Luciano Ramalho 2015.pdf",
+          "modality": "text",
+          "page_number": 430,
+          "score": 0.51551
+        },
+        {
+          "chunk_id": "1e7e436164a3_521_text_b7d5659c",
+          "doc_id": "1e7e436164a3",
+          "source_file": "Fluent Python Luciano Ramalho 2015.pdf",
+          "modality": "text",
+          "page_number": 521,
+          "score": 0.51273
+        },
+        {
+          "chunk_id": "1e7e436164a3_470_text_541e6573",
+          "doc_id": "1e7e436164a3",
+          "source_file": "Fluent Python Luciano Ramalho 2015.pdf",
+          "modality": "text",
+          "page_number": 470,
+          "score": 0.465061
+        },
+        {
+          "chunk_id": "70930ff6f3a8_418_text_98a2427d",
+          "doc_id": "70930ff6f3a8",
+          "source_file": "Hao B. Machine Learning Platform Engineering. Build...for ML and AI systems 2026.pdf",
+          "modality": "text",
+          "page_number": 418,
+          "score": 0.462497
+        }
+      ]
+    },
+    {
+      "id": "Q06_decorator",
+      "text": "Python decorator recipe with functools.wraps",
+      "top_k": [
+        {
+          "chunk_id": "1e7e436164a3_345_text_ce49b7c4",
+          "doc_id": "1e7e436164a3",
+          "source_file": "Fluent Python Luciano Ramalho 2015.pdf",
+          "modality": "text",
+          "page_number": 345,
+          "score": 0.613933
+        },
+        {
+          "chunk_id": "1e7e436164a3_521_text_b7d5659c",
+          "doc_id": "1e7e436164a3",
+          "source_file": "Fluent Python Luciano Ramalho 2015.pdf",
+          "modality": "text",
+          "page_number": 521,
+          "score": 0.592649
+        },
+        {
+          "chunk_id": "1e7e436164a3_535_text_a1118658",
+          "doc_id": "1e7e436164a3",
+          "source_file": "Fluent Python Luciano Ramalho 2015.pdf",
+          "modality": "text",
+          "page_number": 535,
+          "score": 0.57238
+        },
+        {
+          "chunk_id": "1e7e436164a3_102_text_145718b9",
+          "doc_id": "1e7e436164a3",
+          "source_file": "Fluent Python Luciano Ramalho 2015.pdf",
+          "modality": "text",
+          "page_number": 102,
+          "score": 0.549319
+        },
+        {
+          "chunk_id": "1e7e436164a3_103_text_6996750a",
+          "doc_id": "1e7e436164a3",
+          "source_file": "Fluent Python Luciano Ramalho 2015.pdf",
+          "modality": "text",
+          "page_number": 103,
+          "score": 0.542649
+        }
+      ]
+    },
+    {
+      "id": "Q07_module_org",
+      "text": "structuring Python modules and packages for a large project",
+      "top_k": [
+        {
+          "chunk_id": "5b915c809145_161_text_278c0c96",
+          "doc_id": "5b915c809145",
+          "source_file": "Devlin M. Building LLM Agents with RAG, Knowledge Graphs and Reflection...2025.pdf",
+          "modality": "text",
+          "page_number": 161,
+          "score": 0.56548
+        },
+        {
+          "chunk_id": "41b2f4013cff_268_text_30177cb6_o2",
+          "doc_id": "41b2f4013cff",
+          "source_file": "Raieli S. Building AI Agents with LLMs, RAG, and Knowledge Graphs...2025.pdf",
+          "modality": "text",
+          "page_number": 268,
+          "score": 0.535616
+        },
+        {
+          "chunk_id": "5917d010344e_227_text_207d7df8",
+          "doc_id": "5917d010344e",
+          "source_file": "Programming ArcGIS with Python Cookbook.pdf",
+          "modality": "text",
+          "page_number": 227,
+          "score": 0.533868
+        },
+        {
+          "chunk_id": "70930ff6f3a8_218_text_08e8d970",
+          "doc_id": "70930ff6f3a8",
+          "source_file": "Hao B. Machine Learning Platform Engineering. Build...for ML and AI systems 2026.pdf",
+          "modality": "text",
+          "page_number": 218,
+          "score": 0.530945
+        },
+        {
+          "chunk_id": "8e184dc5d9c4_137_text_0eec2a36",
+          "doc_id": "8e184dc5d9c4",
+          "source_file": "Nagasubramanian D. Agentic AI for Engineers.Architecting Goal-Driven System 2026.pdf",
+          "modality": "text",
+          "page_number": 137,
+          "score": 0.525643
+        }
+      ]
+    },
+    {
+      "id": "Q08_pytorch_cnn",
+      "text": "PyTorch convolutional neural network for image classification",
+      "top_k": [
+        {
+          "chunk_id": "8e184dc5d9c4_159_text_89664e86",
+          "doc_id": "8e184dc5d9c4",
+          "source_file": "Nagasubramanian D. Agentic AI for Engineers.Architecting Goal-Driven System 2026.pdf",
+          "modality": "text",
+          "page_number": 159,
+          "score": 0.599434
+        },
+        {
+          "chunk_id": "57dd24faf967_032_text_85401461",
+          "doc_id": "57dd24faf967",
+          "source_file": "Chaubal S. AI Projects in PyTorch. Hands-On Projects in Vision, Text,...2025.pdf",
+          "modality": "text",
+          "page_number": 32,
+          "score": 0.575228
+        },
+        {
+          "chunk_id": "57dd24faf967_131_text_17572ee5",
+          "doc_id": "57dd24faf967",
+          "source_file": "Chaubal S. AI Projects in PyTorch. Hands-On Projects in Vision, Text,...2025.pdf",
+          "modality": "text",
+          "page_number": 131,
+          "score": 0.566312
+        },
+        {
+          "chunk_id": "41b2f4013cff_268_text_30177cb6_o2",
+          "doc_id": "41b2f4013cff",
+          "source_file": "Raieli S. Building AI Agents with LLMs, RAG, and Knowledge Graphs...2025.pdf",
+          "modality": "text",
+          "page_number": 268,
+          "score": 0.553028
+        },
+        {
+          "chunk_id": "41b2f4013cff_268_text_30177cb6",
+          "doc_id": "41b2f4013cff",
+          "source_file": "Raieli S. Building AI Agents with LLMs, RAG, and Knowledge Graphs...2025.pdf",
+          "modality": "text",
+          "page_number": 268,
+          "score": 0.545352
+        }
+      ]
+    },
+    {
+      "id": "Q09_arcgis",
+      "text": "automate ArcGIS Pro workflow with a Python script",
+      "top_k": [
+        {
+          "chunk_id": "70930ff6f3a8_413_text_682c0c5a",
+          "doc_id": "70930ff6f3a8",
+          "source_file": "Hao B. Machine Learning Platform Engineering. Build...for ML and AI systems 2026.pdf",
+          "modality": "text",
+          "page_number": 413,
+          "score": 0.563983
+        },
+        {
+          "chunk_id": "5b915c809145_161_text_278c0c96",
+          "doc_id": "5b915c809145",
+          "source_file": "Devlin M. Building LLM Agents with RAG, Knowledge Graphs and Reflection...2025.pdf",
+          "modality": "text",
+          "page_number": 161,
+          "score": 0.561358
+        },
+        {
+          "chunk_id": "5b915c809145_149_text_66bc564f",
+          "doc_id": "5b915c809145",
+          "source_file": "Devlin M. Building LLM Agents with RAG, Knowledge Graphs and Reflection...2025.pdf",
+          "modality": "text",
+          "page_number": 149,
+          "score": 0.557935
+        },
+        {
+          "chunk_id": "70930ff6f3a8_360_text_ba9867f3",
+          "doc_id": "70930ff6f3a8",
+          "source_file": "Hao B. Machine Learning Platform Engineering. Build...for ML and AI systems 2026.pdf",
+          "modality": "text",
+          "page_number": 360,
+          "score": 0.55641
+        },
+        {
+          "chunk_id": "8e184dc5d9c4_304_text_85cb0e8c",
+          "doc_id": "8e184dc5d9c4",
+          "source_file": "Nagasubramanian D. Agentic AI for Engineers.Architecting Goal-Driven System 2026.pdf",
+          "modality": "text",
+          "page_number": 304,
+          "score": 0.553915
+        }
+      ]
+    },
+    {
+      "id": "Q10_patterns",
+      "text": "design patterns and idioms in Python",
+      "top_k": [
+        {
+          "chunk_id": "07a1232cccf4_027_text_a871089c",
+          "doc_id": "07a1232cccf4",
+          "source_file": "AIOS LLM Agent Operating System.pdf",
+          "modality": "text",
+          "page_number": 27,
+          "score": 0.55798
+        },
+        {
+          "chunk_id": "07a1232cccf4_028_text_ab336a8d",
+          "doc_id": "07a1232cccf4",
+          "source_file": "AIOS LLM Agent Operating System.pdf",
+          "modality": "text",
+          "page_number": 28,
+          "score": 0.552179
+        },
+        {
+          "chunk_id": "5b915c809145_098_text_976c3a5e",
+          "doc_id": "5b915c809145",
+          "source_file": "Devlin M. Building LLM Agents with RAG, Knowledge Graphs and Reflection...2025.pdf",
+          "modality": "text",
+          "page_number": 98,
+          "score": 0.538905
+        },
+        {
+          "chunk_id": "5b915c809145_204_text_bf402960",
+          "doc_id": "5b915c809145",
+          "source_file": "Devlin M. Building LLM Agents with RAG, Knowledge Graphs and Reflection...2025.pdf",
+          "modality": "text",
+          "page_number": 204,
+          "score": 0.527398
+        },
+        {
+          "chunk_id": "5b915c809145_154_text_dd9d6aba",
+          "doc_id": "5b915c809145",
+          "source_file": "Devlin M. Building LLM Agents with RAG, Knowledge Graphs and Reflection...2025.pdf",
+          "modality": "text",
+          "page_number": 154,
+          "score": 0.525295
+        }
+      ]
+    },
+    {
+      "id": "Q11_chatgpt_nl",
+      "text": "hoe schrijf ik betere ChatGPT prompts in het Nederlands",
+      "top_k": [
+        {
+          "chunk_id": "a414e7cb0259_30017_text_dc89166b",
+          "doc_id": "a414e7cb0259",
+          "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
+          "modality": "text",
+          "page_number": 30017,
+          "score": 0.721631
+        },
+        {
+          "chunk_id": "a414e7cb0259_29037_text_4a8eb865",
+          "doc_id": "a414e7cb0259",
+          "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
+          "modality": "text",
+          "page_number": 29037,
+          "score": 0.709141
+        },
+        {
+          "chunk_id": "a414e7cb0259_19005_text_6782d29f",
+          "doc_id": "a414e7cb0259",
+          "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
+          "modality": "text",
+          "page_number": 19005,
+          "score": 0.703359
+        },
+        {
+          "chunk_id": "a414e7cb0259_19009_text_8beb3aa3",
+          "doc_id": "a414e7cb0259",
+          "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
+          "modality": "text",
+          "page_number": 19009,
+          "score": 0.697445
+        },
+        {
+          "chunk_id": "a414e7cb0259_32014_text_f4b29c86",
+          "doc_id": "a414e7cb0259",
+          "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
+          "modality": "text",
+          "page_number": 32014,
+          "score": 0.697056
+        }
+      ]
+    },
+    {
+      "id": "Q12_ki_epub_nl",
+      "text": "digitale producten verkopen met AI en ChatGPT",
+      "top_k": [
+        {
+          "chunk_id": "a414e7cb0259_15006_text_0106ece7",
+          "doc_id": "a414e7cb0259",
+          "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
+          "modality": "text",
+          "page_number": 15006,
+          "score": 0.776863
+        },
+        {
+          "chunk_id": "a414e7cb0259_30014_text_fcafaddb",
+          "doc_id": "a414e7cb0259",
+          "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
+          "modality": "text",
+          "page_number": 30014,
+          "score": 0.764219
+        },
+        {
+          "chunk_id": "a414e7cb0259_14000_text_7e38bd25",
+          "doc_id": "a414e7cb0259",
+          "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
+          "modality": "text",
+          "page_number": 14000,
+          "score": 0.755774
+        },
+        {
+          "chunk_id": "a414e7cb0259_11010_text_c7b613a4",
+          "doc_id": "a414e7cb0259",
+          "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
+          "modality": "text",
+          "page_number": 11010,
+          "score": 0.755527
+        },
+        {
+          "chunk_id": "a414e7cb0259_30079_text_67938e8c",
+          "doc_id": "a414e7cb0259",
+          "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
+          "modality": "text",
+          "page_number": 30079,
+          "score": 0.745978
+        }
+      ]
+    },
+    {
+      "id": "Q13_pcworld",
+      "text": "Windows 11 PC build advice and hardware recommendations",
+      "top_k": [
+        {
+          "chunk_id": "5b915c809145_356_text_9e722962",
+          "doc_id": "5b915c809145",
+          "source_file": "Devlin M. Building LLM Agents with RAG, Knowledge Graphs and Reflection...2025.pdf",
+          "modality": "text",
+          "page_number": 356,
+          "score": 0.55443
+        },
+        {
+          "chunk_id": "aa11d5ea2275_060_text_0c5748eb",
+          "doc_id": "aa11d5ea2275",
+          "source_file": "Earthship_Vol1_How to build your own.pdf",
+          "modality": "text",
+          "page_number": 60,
+          "score": 0.543229
+        },
+        {
+          "chunk_id": "5b915c809145_126_text_cb1da0d3",
+          "doc_id": "5b915c809145",
+          "source_file": "Devlin M. Building LLM Agents with RAG, Knowledge Graphs and Reflection...2025.pdf",
+          "modality": "text",
+          "page_number": 126,
+          "score": 0.540185
+        },
+        {
+          "chunk_id": "aa11d5ea2275_185_text_1dd440de",
+          "doc_id": "aa11d5ea2275",
+          "source_file": "Earthship_Vol1_How to build your own.pdf",
+          "modality": "text",
+          "page_number": 185,
+          "score": 0.539492
+        },
+        {
+          "chunk_id": "aa11d5ea2275_038_text_dc39e75f",
+          "doc_id": "aa11d5ea2275",
+          "source_file": "Earthship_Vol1_How to build your own.pdf",
+          "modality": "text",
+          "page_number": 38,
+          "score": 0.536545
+        }
+      ]
+    },
+    {
+      "id": "Q14_combat",
+      "text": "F-35 Lightning II stealth fighter operations",
+      "top_k": [
+        {
+          "chunk_id": "131b7b54c411_274_text_f9598e7c_o2",
+          "doc_id": "131b7b54c411",
+          "source_file": "Adedeji A. GenAI on Google Cloud. Enterprise Generative AI Systems...Agents 2026.pdf",
+          "modality": "text",
+          "page_number": 274,
+          "score": 0.459974
+        },
+        {
+          "chunk_id": "131b7b54c411_274_text_f9598e7c",
+          "doc_id": "131b7b54c411",
+          "source_file": "Adedeji A. GenAI on Google Cloud. Enterprise Generative AI Systems...Agents 2026.pdf",
+          "modality": "text",
+          "page_number": 274,
+          "score": 0.446649
+        },
+        {
+          "chunk_id": "131b7b54c411_273_text_6ba047c9",
+          "doc_id": "131b7b54c411",
+          "source_file": "Adedeji A. GenAI on Google Cloud. Enterprise Generative AI Systems...Agents 2026.pdf",
+          "modality": "text",
+          "page_number": 273,
+          "score": 0.432
+        },
+        {
+          "chunk_id": "131b7b54c411_283_text_da2f10c8_o3",
+          "doc_id": "131b7b54c411",
+          "source_file": "Adedeji A. GenAI on Google Cloud. Enterprise Generative AI Systems...Agents 2026.pdf",
+          "modality": "text",
+          "page_number": 283,
+          "score": 0.427172
+        },
+        {
+          "chunk_id": "131b7b54c411_287_text_8460c95d_o2",
+          "doc_id": "131b7b54c411",
+          "source_file": "Adedeji A. GenAI on Google Cloud. Enterprise Generative AI Systems...Agents 2026.pdf",
+          "modality": "text",
+          "page_number": 287,
+          "score": 0.418369
+        }
+      ]
+    },
+    {
+      "id": "Q15_firearms",
+      "text": "firearm cleaning and safety procedure step by step",
+      "top_k": [
+        {
+          "chunk_id": "29f7c8bb7680_168_text_b1da6b18",
+          "doc_id": "29f7c8bb7680",
+          "source_file": "Firearms.pdf",
+          "modality": "text",
+          "page_number": 168,
+          "score": 0.4548
+        },
+        {
+          "chunk_id": "29f7c8bb7680_162_text_7ca00e74",
+          "doc_id": "29f7c8bb7680",
+          "source_file": "Firearms.pdf",
+          "modality": "text",
+          "page_number": 162,
+          "score": 0.452299
+        },
+        {
+          "chunk_id": "29f7c8bb7680_145_text_90111706",
+          "doc_id": "29f7c8bb7680",
+          "source_file": "Firearms.pdf",
+          "modality": "text",
+          "page_number": 145,
+          "score": 0.430888
+        },
+        {
+          "chunk_id": "8e184dc5d9c4_097_text_f73ffb77",
+          "doc_id": "8e184dc5d9c4",
+          "source_file": "Nagasubramanian D. Agentic AI for Engineers.Architecting Goal-Driven System 2026.pdf",
+          "modality": "text",
+          "page_number": 97,
+          "score": 0.428264
+        },
+        {
+          "chunk_id": "29f7c8bb7680_132_text_f859b225",
+          "doc_id": "29f7c8bb7680",
+          "source_file": "Firearms.pdf",
+          "modality": "text",
+          "page_number": 132,
+          "score": 0.425804
+        }
+      ]
+    },
+    {
+      "id": "Q16_earthship",
+      "text": "Earthship passive solar design and rainwater harvesting",
+      "top_k": [
+        {
+          "chunk_id": "131b7b54c411_287_text_8460c95d_o2",
+          "doc_id": "131b7b54c411",
+          "source_file": "Adedeji A. GenAI on Google Cloud. Enterprise Generative AI Systems...Agents 2026.pdf",
+          "modality": "text",
+          "page_number": 287,
+          "score": 0.464334
+        },
+        {
+          "chunk_id": "131b7b54c411_288_text_944ba455_o2",
+          "doc_id": "131b7b54c411",
+          "source_file": "Adedeji A. GenAI on Google Cloud. Enterprise Generative AI Systems...Agents 2026.pdf",
+          "modality": "text",
+          "page_number": 288,
+          "score": 0.455771
+        },
+        {
+          "chunk_id": "aa11d5ea2275_043_text_6aeb5cd0",
+          "doc_id": "aa11d5ea2275",
+          "source_file": "Earthship_Vol1_How to build your own.pdf",
+          "modality": "text",
+          "page_number": 43,
+          "score": 0.449484
+        },
+        {
+          "chunk_id": "131b7b54c411_279_text_c07df81b",
+          "doc_id": "131b7b54c411",
+          "source_file": "Adedeji A. GenAI on Google Cloud. Enterprise Generative AI Systems...Agents 2026.pdf",
+          "modality": "text",
+          "page_number": 279,
+          "score": 0.426194
+        },
+        {
+          "chunk_id": "131b7b54c411_278_text_b0d7a59f",
+          "doc_id": "131b7b54c411",
+          "source_file": "Adedeji A. GenAI on Google Cloud. Enterprise Generative AI Systems...Agents 2026.pdf",
+          "modality": "text",
+          "page_number": 278,
+          "score": 0.422828
+        }
+      ]
+    },
+    {
+      "id": "Q17_greenhouse",
+      "text": "greenhouse climate control and ventilation strategy",
+      "top_k": [
+        {
+          "chunk_id": "5b915c809145_098_text_976c3a5e",
+          "doc_id": "5b915c809145",
+          "source_file": "Devlin M. Building LLM Agents with RAG, Knowledge Graphs and Reflection...2025.pdf",
+          "modality": "text",
+          "page_number": 98,
+          "score": 0.510654
+        },
+        {
+          "chunk_id": "aa11d5ea2275_019_text_c812cc05",
+          "doc_id": "aa11d5ea2275",
+          "source_file": "Earthship_Vol1_How to build your own.pdf",
+          "modality": "text",
+          "page_number": 19,
+          "score": 0.507625
+        },
+        {
+          "chunk_id": "8b79e9dca3ae_149_text_53f74feb",
+          "doc_id": "8b79e9dca3ae",
+          "source_file": "Greenhouse Design and Control by Pedro Ponce.pdf",
+          "modality": "text",
+          "page_number": 149,
+          "score": 0.507428
+        },
+        {
+          "chunk_id": "8b79e9dca3ae_148_text_3915e59e",
+          "doc_id": "8b79e9dca3ae",
+          "source_file": "Greenhouse Design and Control by Pedro Ponce.pdf",
+          "modality": "text",
+          "page_number": 148,
+          "score": 0.501023
+        },
+        {
+          "chunk_id": "8e184dc5d9c4_344_text_94b90857",
+          "doc_id": "8e184dc5d9c4",
+          "source_file": "Nagasubramanian D. Agentic AI for Engineers.Architecting Goal-Driven System 2026.pdf",
+          "modality": "text",
+          "page_number": 344,
+          "score": 0.493398
+        }
+      ]
+    },
+    {
+      "id": "Q18_aios",
+      "text": "what is an LLM agent operating system",
+      "top_k": [
+        {
+          "chunk_id": "f0a0beca0506_254_image_792a681d",
+          "doc_id": "f0a0beca0506",
+          "source_file": "HarryPotter_and_the_Sorcerers_Stone.pdf",
+          "modality": "image",
+          "page_number": 254,
+          "score": 0.385646
+        },
+        {
+          "chunk_id": "a4c2916a64c2_011_image_b03e4cab",
+          "doc_id": "a4c2916a64c2",
+          "source_file": "Combat Aircraft - August 2025 UK.pdf",
+          "modality": "image",
+          "page_number": 11,
+          "score": 0.385646
+        },
+        {
+          "chunk_id": "2baf312fdd78_003_image_07de2203",
+          "doc_id": "2baf312fdd78",
+          "source_file": "Hybrid_electric_vehicles_and_their_challenges.pdf",
+          "modality": "image",
+          "page_number": 3,
+          "score": 0.385646
+        },
+        {
+          "chunk_id": "a4c2916a64c2_009_image_e79dde78",
+          "doc_id": "a4c2916a64c2",
+          "source_file": "Combat Aircraft - August 2025 UK.pdf",
+          "modality": "image",
+          "page_number": 9,
+          "score": 0.385646
+        },
+        {
+          "chunk_id": "ae1c6740af40_007_image_8d283ae3",
+          "doc_id": "ae1c6740af40",
+          "source_file": "PCWorld_July_2025_USA.pdf",
+          "modality": "image",
+          "page_number": 7,
+          "score": 0.385646
+        }
+      ]
+    },
+    {
+      "id": "Q19_solar_pv",
+      "text": "modelling a photovoltaic solar PV system performance",
+      "top_k": [
+        {
+          "chunk_id": "5b915c809145_055_text_8dcf3c81",
+          "doc_id": "5b915c809145",
+          "source_file": "Devlin M. Building LLM Agents with RAG, Knowledge Graphs and Reflection...2025.pdf",
+          "modality": "text",
+          "page_number": 55,
+          "score": 0.508359
+        },
+        {
+          "chunk_id": "5b915c809145_159_text_aaf1cf36",
+          "doc_id": "5b915c809145",
+          "source_file": "Devlin M. Building LLM Agents with RAG, Knowledge Graphs and Reflection...2025.pdf",
+          "modality": "text",
+          "page_number": 159,
+          "score": 0.499855
+        },
+        {
+          "chunk_id": "b670f5359e9c_006_text_bc690797",
+          "doc_id": "b670f5359e9c",
+          "source_file": "IRJET_Modeling_of_Solar_PV_system_under.pdf",
+          "modality": "text",
+          "page_number": 6,
+          "score": 0.4983
+        },
+        {
+          "chunk_id": "41b2f4013cff_276_text_bb9cceb6_o2",
+          "doc_id": "41b2f4013cff",
+          "source_file": "Raieli S. Building AI Agents with LLMs, RAG, and Knowledge Graphs...2025.pdf",
+          "modality": "text",
+          "page_number": 276,
+          "score": 0.485908
+        },
+        {
+          "chunk_id": "131b7b54c411_282_text_c0698f39",
+          "doc_id": "131b7b54c411",
+          "source_file": "Adedeji A. GenAI on Google Cloud. Enterprise Generative AI Systems...Agents 2026.pdf",
+          "modality": "text",
+          "page_number": 282,
+          "score": 0.485133
+        }
+      ]
+    },
+    {
+      "id": "Q20_harry",
+      "text": "Harry Potter Quidditch match against Slytherin",
+      "top_k": [
+        {
+          "chunk_id": "f0a0beca0506_007_text_6639b2e1",
+          "doc_id": "f0a0beca0506",
+          "source_file": "HarryPotter_and_the_Sorcerers_Stone.pdf",
+          "modality": "text",
+          "page_number": 7,
+          "score": 0.458809
+        },
+        {
+          "chunk_id": "f0a0beca0506_005_text_214795a2",
+          "doc_id": "f0a0beca0506",
+          "source_file": "HarryPotter_and_the_Sorcerers_Stone.pdf",
+          "modality": "text",
+          "page_number": 5,
+          "score": 0.446613
+        },
+        {
+          "chunk_id": "f0a0beca0506_114_text_74cd0a6e",
+          "doc_id": "f0a0beca0506",
+          "source_file": "HarryPotter_and_the_Sorcerers_Stone.pdf",
+          "modality": "text",
+          "page_number": 114,
+          "score": 0.442728
+        },
+        {
+          "chunk_id": "29f7c8bb7680_002_text_50f66d85",
+          "doc_id": "29f7c8bb7680",
+          "source_file": "Firearms.pdf",
+          "modality": "text",
+          "page_number": 2,
+          "score": 0.432572
+        },
+        {
+          "chunk_id": "a4c2916a64c2_060_text_bd99352d",
+          "doc_id": "a4c2916a64c2",
+          "source_file": "Combat Aircraft - August 2025 UK.pdf",
+          "modality": "text",
+          "page_number": 60,
+          "score": 0.428804
+        }
+      ]
+    }
+  ]
+}
