@@ -1,0 +1,153 @@
+# v2.11 Phase 2.2b — validated-cloud CI workflow.
+#
+# Runs on push to main and on every annotated tag. Mirrors the local
+# Phase 2.2a fresh-env protocol (see docs/PLAN_V2.11.md §Phase 2) on a
+# self-hosted runner that has access to:
+#   - The 34-doc canonical corpus under data/ (gitignored, must be
+#     present on the runner host).
+#   - A running Qdrant on localhost:6333.
+#   - Optionally, Ollama on localhost:11434 with llava (skipped if
+#     unreachable per the test's skipif gates).
+#
+# A GitHub-hosted runner is NOT used because the gitignored data
+# corpus (~few hundred MB of PDFs + EPUBs) is not committed. Future
+# v2.12 work may add a private data bucket + GitHub-hosted runner per
+# `docs/PLAN_V2.11.md` §Phase 2 option 2c.
+#
+# Secret requirements (set via GitHub repo settings -> Secrets):
+#   - DASHSCOPE_API_KEY  required for soak / retrieval-regression /
+#     Phase 1 challenger smoke
+#
+# The workflow is intentionally narrower than the local Phase 8
+# strict-gate corpus run (~hours of wall time) to keep CI feedback
+# under 10 minutes. The deep gate continues to run locally pre-tag.
+
+name: v2.11 validated-cloud
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # ── Quick checks (lint + import smoke) — always run on hosted runner ──
+  quick:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+
+      - name: Install lint tools
+        run: pip install ruff black mypy
+
+      - name: ruff check
+        run: ruff check src tests scripts
+
+      - name: black --check
+        run: black --check src tests scripts
+
+      - name: Import smoke (no corpus required)
+        run: |
+          pip install -e ".[dev]"
+          python -c "from mmrag_v2 import V2DocumentProcessor; print('import OK')"
+
+  # ── Full validation — self-hosted runner only ──
+  # Needs Qdrant + corpus + Dashscope key. Skipped on GitHub-hosted.
+  validate:
+    runs-on: [self-hosted, mmrag-v2]
+    needs: quick
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Activate mmrag-v2 conda env (assumed present on runner)
+        shell: bash -l {0}
+        run: |
+          source "$(conda info --base)/etc/profile.d/conda.sh"
+          conda activate mmrag-v2
+          python --version
+          which python
+
+      - name: pytest (full suite, ignore tests/manual)
+        shell: bash -l {0}
+        run: |
+          source "$(conda info --base)/etc/profile.d/conda.sh"
+          conda activate mmrag-v2
+          pytest tests/ --ignore=tests/manual -q
+
+      - name: Retrieval regression (skips cleanly if Qdrant or Ollama unreachable)
+        shell: bash -l {0}
+        run: |
+          source "$(conda info --base)/etc/profile.d/conda.sh"
+          conda activate mmrag-v2
+          pytest tests/test_retrieval_regression_v2_10.py -v
+
+      - name: Smoke multiprofile (subset; 1 page per doc for CI speed)
+        shell: bash -l {0}
+        env:
+          PAGES: "1"
+          BATCH_SIZE: "1"
+        run: |
+          source "$(conda info --base)/etc/profile.d/conda.sh"
+          conda activate mmrag-v2
+          bash scripts/smoke_multiprofile.sh output/smoke_ci_${{ github.run_id }}
+
+      - name: Upload smoke output as CI artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-output-${{ github.run_id }}
+          path: output/smoke_ci_${{ github.run_id }}/_summary.txt
+          if-no-files-found: warn
+
+  # ── Tag-only: deep gate (corpus strict + soak sub-sample) ──
+  tag-validate:
+    if: startsWith(github.ref, 'refs/tags/v2.')
+    runs-on: [self-hosted, mmrag-v2]
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Strict-gate corpus
+        shell: bash -l {0}
+        run: |
+          source "$(conda info --base)/etc/profile.d/conda.sh"
+          conda activate mmrag-v2
+          python scripts/run_strict_gate_corpus.py | tee /tmp/v2_strict_gate_tag.log
+          # Require: 0 QA_FAIL lines in the output.
+          grep -c "^QA_FAIL" /tmp/v2_strict_gate_tag.log | grep -qE "^0$"
+
+      - name: Synthetic-soak sub-sample (50 chunks for CI speed)
+        shell: bash -l {0}
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+        run: |
+          source "$(conda info --base)/etc/profile.d/conda.sh"
+          conda activate mmrag-v2
+          if [ -z "$DASHSCOPE_API_KEY" ]; then
+            echo "DASHSCOPE_API_KEY secret not set; skipping soak sub-sample."
+            exit 0
+          fi
+          python scripts/synthetic_soak.py --stage all --n-chunks 50 \
+            --work-path /tmp/soak_ci_${{ github.run_id }}.jsonl \
+            --report-path /tmp/soak_ci_${{ github.run_id }}.md
+
+      - name: Upload soak sub-sample report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-ci-${{ github.run_id }}
+          path: |
+            /tmp/v2_strict_gate_tag.log
+            /tmp/soak_ci_${{ github.run_id }}.md
+          if-no-files-found: warn

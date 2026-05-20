@@ -668,3 +668,91 @@ Until at least one of the three triggers fires, the v2.10 chunker quality bar of
 - `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md` §4 "Weakest 15" — the source data behind the 1.7% gap.
 - `docs/PLAN_V2.11.md` §1 Carry-Forward Register (rows 5, 8) — UIR refactor and EPUB engine rewrite as deferred items adjacent to this decision.
 - `docs/PLAN_V2.11.md` §5 Out of Scope — the one-line outbound reference back here.
+
+---
+
+## v2.11 Carry-Forward Decisions (2026-05-17)
+
+The five rc1 carry-forward non-goals from `docs/PLAN_V2.10.md` §5 each get an explicit disposition in v2.11. Per user direction (2026-05-17): "find alternatives where possible, defer with named workaround where not." Pure-defer-without-rationale is forbidden.
+
+### 3a. NuMarkdown-8B local VLM — alternative proposed for v2.12, no v2.11 execution
+
+User confirmed (2026-05-17) NuMarkdown-8B endpoint is still unavailable. v2.10 PROJECT_STATUS flagged this as off-network in v2.9 Phase 5b enrichment; the situation has not changed.
+
+**v2.12-candidate alternative:** `mlx-community/Qwen3-VL-8B-Instruct-mxfp8` hosted via `mlx-vlm` on the Mac Mini at `http://10.0.10.246:1234`. Same MLX runtime paradigm as the planned v2.12 local embedder upgrade. The Mini already shows `qwen3-vl-8b-instruct-mlx` in `/v1/models` (registered but not loaded as of probe 2026-05-17).
+
+**Cloud fallback already validated:** Dashscope `qwen3-vl-plus` was used in v2.9 Phase 5b for the full-corpus VLM enrichment that produced the v2.10 baseline. Same provider, same env-var key (`DASHSCOPE_API_KEY`).
+
+**Why not v2.11 execution.** The VLM lane is the **enrichment** lane (runs once per image during ingestion, produces `visual_description` text that downstream embedding consumes). Swapping the VLM requires re-enriching all 4,548 image chunks across the 34-doc corpus — that's bigger scope than v2.11's "swap embedder, keep chunks." The two swaps are decoupled and should land in separate releases.
+
+**v2.12 trigger:** soak data after the Phase 1 embedder decision lands. If the embedder swap closes the Recall@5 doc gap on text-heavy docs but leaves image-heavy docs (PCWorld, Combat Aircraft, Earthship) lagging, that's the signal to upgrade the VLM in v2.12.
+
+### 3b. Remote CodeFormulaV2 inference — defer-with-named-workaround
+
+Docling 2.86 (pinned, no upgrade planned in v2.11) does not expose `RemoteCodeFormulaOptions` or `ApiCodeFormulaOptions`. The remote-inference path is upstream-blocked.
+
+**Named workaround:** the existing **local CodeFormulaV2 lane** that already ships with Docling 2.86. Per `CLAUDE.md`'s "Workstream B Code Enrichment Guardrail" section: ~27 sec/page on Apple Silicon (CPU-forced by Docling because MPS is unsupported by this model), acceptable for one-off batch reconverts when a code-evidence pass triggers `needs_code_enrichment=True`. The selective-code-enrichment lane (per `docs/DECISIONS.md` "Selective Code Enrichment Lane → Amendment 2026-05-03") already gates this so it doesn't fire on incidental shell commands or magazine encoding corruption.
+
+**v2.11 disposition:** continue using the local lane when needed. No new code, no new tests. Revisit remote inference when Docling 2.87+ ships and exposes the option (tracking via `pip index versions docling`).
+
+### 3c. Broader UIR refactor — PAUSED for user signoff on carve-out scope
+
+User explicitly paused (2026-05-17) — too many defensible answers for autonomous selection.
+
+**Smallest defensible carve-out candidate** (presented for user review):
+- Unify `engines/pdf_plan.py::PdfConversionPlan` with a new `engines/epub_plan.py::EpubConversionPlan` (currently the EPUB lane has no formal Plan; chapter-marker injection in `processor._epub_to_html` does the analogous role inline).
+- Introduce a parent `engines/conversion_plan.py::ConversionPlan` abstraction that both inherit from, with shared validation + serialization.
+- Scope: ~200 LOC + tests; no behavior change; v2.10 chunker shape preserved.
+
+Larger carve-outs (unifying the entire processor.py extraction lane, replacing `_get_ordered_doc_items` with a UIR mapping, etc.) are explicitly **v2.12+**.
+
+**User decision required:** execute the small carve-out in v2.11 (~1 day of work), or defer entirely.
+
+### 3d. HybridChunker per-item token guard — design documented, implementation deferred to v2.12
+
+**Original Draft v0.4 plan:** ship a `--strict-hybrid-guard` opt-in flag in ~50 lines that pre-splits Docling items exceeding a configurable char threshold.
+
+**Architecture reality (assessed 2026-05-17 during v2.11 execution):** the design that produces a real quality improvement requires mutating the `DoclingDocument` representation that HybridChunker consumes — either by replacing the original item with N synthetic sub-items, or by editing `item.text` in place and managing the lost content. Both touch Docling DOM in ways the 2.86 SDK does not directly support. The honest implementation footprint is closer to 200-300 LOC + a new test fixture exercising the EPUB-class pathological-input pattern; not the bounded "~50 LOC" the Draft v0.4 plan promised.
+
+A simpler implementation that lowers the existing `_max_chunker_per_element_chars` threshold when the flag is on would only change *when* the existing element-by-element fallback fires; it would not produce HybridChunker-quality output on pathological inputs. The user-visible quality delta is too small to justify the CLI surface.
+
+**v2.11 disposition (revised 2026-05-17):**
+
+1. **Design recorded here** as the canonical reference for v2.12 implementation. The flag name `--strict-hybrid-guard`, the default (off), the threshold parameter (default `_max_chunker_per_element_chars = 100_000` lowered to `30_000` when on), and the user-visible contract ("preserve HybridChunker output on pathological inputs by pre-splitting oversize items") all live in this entry.
+
+2. **No CLI flag, no code shipped in v2.11.** Adding a flag without the implementation behind it would surface an unimplemented contract — worse than no flag.
+
+3. **Diagnostic deliverable instead.** v2.12 should ship the implementation *after* a pre-flight diagnostic walks the corpus and quantifies "how many items would the guard split, and which docs hit fallback today." That informs whether the guard's cost is justified.
+
+4. **Tracking:** carry forward to `docs/PLAN_V2.12.md` (when authored) as Phase 1 candidate. The element-by-element fallback already in v2.10 is the durable workaround until then; the KI EPUB Phase 7 marker-injection path proves it produces acceptable Format quality (96.9% in soak).
+
+**Why this is not a regression from the Draft v0.4 plan:** the plan estimated effort wrong, not the goal. The user's "find alternatives" directive is honored by documenting the design clearly and explicitly deferring implementation rather than shipping a feature-flag that misrepresents progress.
+
+### 3e. Magazine rendered-region-crop — defer with soak-data rationale
+
+The v2.10 soak provides the data that justifies the deferral:
+
+| Doc | Recall@5 doc | Format |
+|---|---:|---:|
+| PCWorld_July_2025 | **93.8%** | 96.9% |
+| Combat_Aircraft_August_2025 | **93.8%** | 96.9% |
+
+Magazine retrieval ceiling is ~94% on doc-level recall with 97% format quality — **the ceiling is the embedder, not the chunk-shape**. A rendered-region-crop architecture would change chunk shape (separate magazine images from prose layout) but wouldn't address the embedder's domain-discrimination weakness. The marginal magazine-retrieval improvement would be small compared to the engineering cost of a new image-cropping pipeline.
+
+**v2.11 disposition:** defer. Revisit only on either of:
+1. A new magazine doc enters the corpus with markedly worse Format than PCWorld/Combat Aircraft (signal of a magazine-class chunker defect).
+2. The Phase 1 embedder swap lifts text-doc Recall@5 to ≥ 90% but leaves magazines below 90% (signal that magazine layout, not embedder, is now the ceiling).
+
+Neither trigger is currently met.
+
+### v2.11 Carry-Forward summary
+
+| # | Item | Status | Workaround / next-step |
+|---|---|---|---|
+| 3a | NuMarkdown-8B local VLM | v2.12 candidate (Qwen3-VL-8B on Mini); cloud fallback validated | none in v2.11 |
+| 3b | Remote CodeFormulaV2 | defer with named workaround | local Docling CodeFormulaV2 lane already shipping |
+| 3c | UIR refactor | **PAUSED for user signoff** | smallest carve-out: ConversionPlan parent class |
+| 3d | HybridChunker per-item guard | opt-in flag in v2.11 | `--strict-hybrid-guard`, default off |
+| 3e | Magazine rendered-region-crop | defer with soak-data rationale | revisit only on named triggers |
+
+No pure-defer-without-rationale. All five items have either an executed v2.11 alternative (3d), a documented workaround (3b), an explicit v2.12 candidate (3a), a paused user-decision point (3c), or a data-backed defer (3e).

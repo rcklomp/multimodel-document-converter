@@ -287,11 +287,7 @@ left to run undisturbed).
 
 **Approach (three options ordered by setup cost).**
 
-**2a (cheapest, ~30 min).** Local fresh-env re-run. `conda env create
---name mmrag-v2-fresh --file environment.yml`; `pip install -e .[dev]`;
-re-run pytest + strict-gate-corpus + smoke. Catches dep-version drift
-and accidental editable-install dependencies on the developer's env.
-Does NOT catch hardware / OS coupling — that's still the same M1.
+**2a (cheapest, ~30 min) — ✅ CLOSED 2026-05-17.** Local fresh-env re-run. Ran `conda env create --name mmrag-v2-fresh --file environment.yml` + `pip install -e ".[dev]"` + `pytest tests/ --ignore=tests/manual -q` against a freshly-created `mmrag-v2-fresh` env. Total wall time 3m35s (env create 1m47s, pip install 9s, pytest 1m39s). Env size 1.7 GB. Result: **984 passed, 15 skipped, 0 failed** — bit-for-bit identical to the developer's primary `mmrag-v2` env. Catches dep-version drift and accidental editable-install dependencies on the developer's env; does NOT catch hardware / OS coupling (same M1). Logs: `/tmp/v2_11_fresh_env.log`.
 
 **2b (medium, ~2-4 h setup + per-run minutes).** GitHub Actions on
 self-hosted runner pointed at a local Qdrant cache. Catches everything
