@@ -1,15 +1,21 @@
 # Plan: v2.11 — Embedder shootout, validated-cloud, and the rc1/rc2 non-goal closure
 
-**Status:** **Draft v0.3** — audit-driven refinements (Qwen 3.6 Max
-Preview, 2026-05-16) applied on top of Draft v0.2's post-soak content.
-Soak ran 2026-05-16 (Format 98.3%, Recall@1 2.1%, Recall@5 doc 54.2%,
-Relevance 5.9%, Faithfulness 4.7%). Phase 0 closed same day with zero
-v2.10.x patches needed; `v2.10.0` final shipped. The soak's
-quantitative finding sharpens Phase 1: the challenger embedder must
-beat **specific** numeric floors on the embedder-attributable axes
-(see Phase 1 §"Soak baseline to beat"). Promotion to Draft v1.0
-happens when the user signs off on starting Phase 1 (pulling the
-Qwen3 embedder + spinning up the second Qdrant collection).
+**Status:** **Draft v0.4** — user signoff on autonomous execution
+(2026-05-17). Phase 1 architecture finalized: **Path B cloud-first**
+via Dashscope embedding API for the comparison rebuild (Mac Mini
+local hosting deferred to v2.12 candidate); challenger is
+**Qwen3-Embedding-8B-class** via Dashscope `text-embedding-v3` (or
+v4 if available); spend cap $25; default disposition on borderline
+Phase 1 outcome is **no-swap**. Phase 3 carry-forward dispositions
+finalized with concrete alternatives (no pure-defer). Settings
+authorized via `.claude/settings.local.json`. Promotion to Draft v1.0
+happens when Phase 1 outcome lands and Phase 2 + Phase 3 alternatives
+ship.
+
+Predecessor versions:
+- Draft v0.3 (2026-05-16): Qwen 3.6 Max Preview audit-driven refinements.
+- Draft v0.2 (2026-05-16): post-soak data folded in; Phase 0 closed.
+- Draft v0.1 (2026-05-16): initial pre-soak authoring.
 **Predecessor:** [`docs/PLAN_V2.10.md`](PLAN_V2.10.md) — Phases 1-8
 closed, **`v2.10.0` SHIPPED 2026-05-16** (annotated tag on commit
 `db6527c`, public on GitHub). The RC tag `v2.10.0-rc1` (`82c3639`)
@@ -183,7 +189,9 @@ The framing v2.10 ended on — "the chunker is right; the embedder is the bottle
 - Same vendor family as the soak judge — same Dashscope ecosystem if the comparison wins.
 - Locally hostable via Ollama at ~2.5 GB Q4_0 → leaves headroom on a 16 GB M1 even with llava resident for the VLM enrichment lane.
 
-**Fallback challenger if Qwen3-Embedding-4B is not pullable via Ollama** at start-of-phase: **BGE-M3** (Ollama-pullable, 1024-dim, multilingual, ~400 MB Q4). BGE-M3 won't match Qwen3 ceiling but is a guaranteed-available baseline that still tests the "any modern dedicated text embedder beats a repurposed VLM" hypothesis. If Qwen3 is unavailable, run BGE-M3 as the v2.11 challenger and add Qwen3 as a v2.12 candidate.
+**Final architecture (Draft v0.4):** the challenger embedder runs via **Dashscope's cloud `text-embedding-v3` (or v4) endpoint** — same provider as the v2.10 soak judge, reuses the existing `DASHSCOPE_API_KEY` env var. The LM Studio + MLX local-hosting path is deferred to a **v2.12 candidate** documented in the carry-forward register (the MLX-quantized `Qwen3-Embedding-8B-mxfp8` model would not load in LM Studio's chat-completion-oriented runtime — missing `lm_head.weight` tensor expected by the loader; v2.12 will require a different runtime such as `mlx-embedding-models` + a small FastAPI wrapper on the Mac Mini at `http://10.0.10.246:1234`).
+
+**Fallback if Dashscope is unreachable** at Phase 1 kickoff: BGE-M3 via Ollama (1024-dim, multilingual, ~400 MB Q4). Lower ceiling than Qwen3 cloud but proves the architectural hypothesis ("dedicated text embedder beats repurposed VLM") on local infrastructure. Documented but not the primary path.
 
 We are not changing the VLM enrichment path (which legitimately wants a vision-language model). We are changing only the **text retrieval embedder**. The two roles are decoupled.
 
@@ -318,29 +326,24 @@ min per run).
 
 ---
 
-### Phase 3 — Carry-forward non-goals: explicit decisions
+### Phase 3 — Carry-forward non-goals: concrete dispositions (Draft v0.4 — alternatives over deferrals)
 
-**What.** Each of the five rc1 non-goals gets a one-line decision in
-`docs/DECISIONS.md` for v2.11:
-- formal further-defer (with named reason that's still true), OR
-- in-scope sub-phase here (Phase 3a / 3b / etc.).
+**What.** Each of the five rc1 non-goals gets either a concrete v2.11 sub-action or a "defer-with-named-workaround". User explicitly asked (2026-05-17) for alternatives instead of pure-defer where possible. **3c remains paused** for user signoff on carve-out scope.
 
-**Approach (one row per item).**
+**Concrete dispositions:**
 
-| Item | Recommended v2.11 status | Action |
+| Item | v2.11 disposition | Action |
 |---|---|---|
-| **3a. NuMarkdown-8B local VLM** | Probe reachability; decide. | One probe attempt against the documented endpoint. If reachable: open Phase 3a. If not: formal further-defer to v2.12. |
-| **3b. Remote CodeFormulaV2** | Formal-defer to v2.12. | One-line check: does `docling-2.87+` expose `RemoteCodeFormulaOptions`? If yes, in-scope; if no, defer with date-stamp. |
-| **3c. Broader UIR refactor** | Carve-out only. | Pick the smallest defensible carve-out (e.g. unify `PdfConversionPlan` ↔ `EpubConversionPlan` into a parent `ConversionPlan`). Anything larger is v2.12+. |
-| **3d. HybridChunker per-item token guard** | Formal-defer to v2.12. | Upstream Docling tracking issue; one-line citation update. |
-| **3e. Magazine rendered-region-crop** | Formal-defer. | Magazines pass at current quality. Revisit only if soak surfaces a magazine-specific defect. |
+| **3a. NuMarkdown-8B local VLM** | **Alternative VLM proposed as v2.12 candidate** | NuMarkdown reachability confirmed unavailable (user 2026-05-17). Proposed v2.12 replacement: `Qwen3-VL-8B` via `mlx-vlm` on the Mac Mini (10.0.10.246:1234). Same MLX+local-hosting paradigm as the proposed v2.12 embedder. Cloud fallback: Dashscope `qwen3-vl-plus` (already validated in v2.9 Phase 5b). VLM swap is *not* a v2.11 phase — it requires re-enrichment of the image corpus, which is bigger scope than v2.11's "swap embedder, keep chunks." Documented in DECISIONS.md as v2.12-candidate architecture. |
+| **3b. Remote CodeFormulaV2** | **Defer-with-named-workaround** | Docling 2.86's existing local-CPU CodeFormulaV2 lane (per `CLAUDE.md`: ~27 sec/page, acceptable for one-off batches) remains the v2.11 path when code enrichment is needed. Revisit remote inference when Docling 2.87+ exposes `RemoteCodeFormulaOptions`. Recorded in DECISIONS.md. |
+| **3c. Broader UIR refactor** | **PAUSED for user signoff** | Smallest defensible carve-out candidate: unify `PdfConversionPlan` and a new `EpubConversionPlan` into a parent `ConversionPlan` abstraction. Bounded scope (~200 LOC + tests). Anything larger is v2.12+. User decision required on whether to execute in v2.11 or defer entirely. |
+| **3d. HybridChunker per-item token guard** | **Build opt-in v2.11 alternative** | New `--strict-hybrid-guard` flag in `scripts/ingest_to_qdrant.py` (or processor.py pre-flight) — scans Docling items pre-chunk and splits any item exceeding a configurable char threshold before HybridChunker sees it. Default **off** to preserve v2.10 chunker shape; opt-in for future corpus rebuilds. ~50 lines + `tests/test_strict_hybrid_guard.py`. Ships as a v2.11 sub-phase. |
+| **3e. Magazine rendered-region-crop** | **Defer with soak-data rationale** | v2.10 soak shows PCWorld and Combat Aircraft at Recall@5 doc 93.8% with Format 96.9% — magazine retrieval ceiling is the embedder, not chunk-shape. Rendered-region-crop wouldn't materially help. Revisit only if a future soak (post-Phase-1 embedder swap, or a new magazine doc added to the corpus) surfaces a magazine-specific Format defect. Recorded in DECISIONS.md with the soak-data citation. |
 
-**Done when.** Five rows in a new `docs/DECISIONS.md` §"v2.11
-Carry-Forward Decisions" subsection, each citing the rationale and
-the date.
+**Done when.** Five rows in `docs/DECISIONS.md` §"v2.11 Carry-Forward Decisions" subsection, each with rationale + date. 3a + 3b + 3e are documentation-only. 3d ships code (the opt-in guard). 3c blocks on user signoff.
 
-**Risk.** Low. This is governance work.
-**Cost class.** Documentation only unless Phase 3a or 3c opens up.
+**Risk.** Low. The opt-in default on 3d preserves v2.10 chunker shape.
+**Cost class.** Documentation + ~50 lines of code (3d) + tests.
 
 ---
 
@@ -424,6 +427,7 @@ These remain non-goals for v2.11 unless explicitly promoted:
 | 2026-05-16 | **Phase 0 closed same day.** `v2.10.0` SHIPPED on commit `db6527c` (rc1 commit + soak report). Zero v2.10.x patches needed — soak weakest-15 was dominated by embedder-attributable wrong-doc retrievals, not chunk-shape defects. New `docs/DECISIONS.md` entry "v2.10 chunker-quality ceiling — 99.9% Format not chased (2026-05-16)" documents the choice to not pursue Format 99.9% in v2.11/v2.12 and lists three triggers that would revisit. §5 Out of Scope updated with the outbound cross-reference. Draft stays at v0.1 — user has no inspiration to change other parts of the plan yet. |
 | 2026-05-16 | **Promoted to Draft v0.2.** Substantive updates: (1) Thesis §1 quantifies the embedder weakness with soak numbers instead of just regression-test anecdotes. (2) "Where v2.10 ended" section rewritten in past tense; "What v2.10.0 final is waiting on" stanza deleted (obsolete). (3) Carry-forward register row 9 (TBD soak findings) replaced with "empty (closed)" outcome; new row 10 added for the 99.9% Format out-of-scope decision. (4) Phase 0 rewritten uniformly past-tense with the actual triage breakdown. (5) Phase 1 gains a "Soak baseline to beat" sub-section with concrete numeric floors (Recall@1 ≥ 15%, Recall@5 doc ≥ 70%, Relevance ≥ 30%, Faithfulness ≥ 25%, Format ≥ 96%) replacing the vague "+5%" criterion; BGE-M3 documented as fallback challenger if Qwen3-Embedding-4B isn't Ollama-pullable. (6) Phase 4 (EPUB engine) flipped from "decision point" to "deferred to v2.12+" with the soak data backing the deferral. (7) §7 Open questions: items 1 and 5 marked resolved; item 6 added as the new Phase 1 start gate. Promotion to Draft v1.0 happens when the user signs off on starting Phase 1. |
 | 2026-05-17 | **Promoted to Draft v0.3** after audit by Qwen 3.6 Max Preview (AUDIT PASS across all six quality dimensions, six low-priority refinements). Applied: (1) `[D-1/D-2]` test-count reconciliation — v2.10 AFTER snapshot §6 gets a new row for the 973 → 975 transition (the +2 retrieval-regression pins landed after Phase 8 close, same day). (2) `[C-1]` Phase N gains explicit Risk + Cost blocks. (3) `[C-2]` Phase 2 gains an "Independent of Phase 1" sub-section clarifying that validated-cloud CI runs against whichever embedder is current and can start in parallel with Phase 1's rebuild. (4) `[C-3]` Phase N approach #5 now documents version-string handling (bump or retain following v2.10.0's pattern). (5) `[C-4]` Phase 1 approach gains a new step 0 — `scripts/rebuild_mmrag_v2_8_for_rc1.py` `--resume` flag + retry-on-URLError wrapper, as defensive ~30 min of work to prevent repeating the v2.10 Phase 8 mid-rebuild recovery. (6) `[S-1]` §2b section reference fixed to name PLAN_V2.10 §2b/§2c/§2d explicitly. Auditor's `[S-2]` ("Phase N" naming) acknowledged as intentional; no change. No data-accuracy or architectural concerns surfaced. |
+| 2026-05-17 | **Promoted to Draft v0.4** — autonomous-execution signoff. User answered the 7-item pre-flight checklist and authorized `.claude/settings.local.json` for unattended runs. Substantive changes: (1) Phase 1 architecture finalized as **Path B cloud-first** — Dashscope `text-embedding-v3`/v4 as the challenger; LM Studio + MLX local-hosting deferred to v2.12 because `mlx-community/Qwen3-Embedding-8B-mxfp8` fails LM Studio's loader (missing `lm_head.weight`, expected for chat/completion models but not embedders). Mac Mini endpoint `http://10.0.10.246:1234` documented for v2.12. (2) Spend cap raised $5 → $25 for Phase 1 soak. (3) Default disposition on borderline Phase 1 outcome is **no-swap** (user explicitly hedged for the clear-loss scenario). (4) Phase 2 scope expanded — author CI workflow YAML (2b) autonomously; halt before pushing. (5) Phase 3 dispositions converted from pure-defer to concrete alternatives: 3a Qwen3-VL-8B-on-Mini as v2.12 VLM candidate; 3b local Docling CodeFormulaV2 as v2.11 workaround; 3c PAUSED (smallest carve-out is `ConversionPlan` parent class); 3d opt-in `--strict-hybrid-guard` flag built in v2.11 (default off, preserves v2.10 chunker); 3e magazine rendered-region-crop deferred with soak-data rationale (embedder is the ceiling). (6) Halt triggers updated: Qdrant/Dashscope unreachable >15 min halts; Ollama on M1 expected absent and is not a halt condition. |
 
 ---
 

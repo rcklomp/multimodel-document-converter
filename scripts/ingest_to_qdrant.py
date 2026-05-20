@@ -24,9 +24,11 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import re
 import sys
 import time
+import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
@@ -74,6 +76,58 @@ def embed_image(image_path: Path, model: str, ollama_url: str, fallback_text: st
     req.add_header("Content-Type", "application/json")
     resp = urllib.request.urlopen(req, timeout=120)
     return json.loads(resp.read())["embeddings"][0]
+
+
+# ── Dashscope embedding (v2.11 Phase 1) ────────────────────────────────────
+
+_DASHSCOPE_EMBED_URL = "https://dashscope-intl.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding"
+
+
+def embed_text_dashscope(text: str, model: str, api_key: str,
+                        timeout: int = 30, retries: int = 4) -> list[float]:
+    """Embed text via Dashscope native embedding API.
+
+    Used by v2.11 Phase 1 as the cloud-hosted challenger to the v2.10
+    Ollama llava baseline. text-embedding-v3 / v4 both return 1024-dim
+    cosine vectors. Image chunks route through text-of-description
+    (no multimodal embedding — distinct from llava's behavior).
+    """
+    import time
+    if not api_key:
+        raise RuntimeError("DASHSCOPE_API_KEY required for --provider dashscope")
+    # Dashscope text embedding takes ~8K char inputs; truncate defensively.
+    text = (text or "")[:8000] or " "
+    body = json.dumps({
+        "model": model,
+        "input": {"texts": [text]},
+        "parameters": {"text_type": "document"},
+    }).encode()
+    last_err: Exception | None = None
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(_DASHSCOPE_EMBED_URL, data=body, method="POST")
+            req.add_header("Authorization", f"Bearer {api_key}")
+            req.add_header("Content-Type", "application/json")
+            resp = urllib.request.urlopen(req, timeout=timeout)
+            data = json.loads(resp.read())
+            return data["output"]["embeddings"][0]["embedding"]
+        except urllib.error.HTTPError as e:
+            last_err = e
+            if e.code in (429, 500, 502, 503, 504):
+                time.sleep(2 ** attempt)
+                continue
+            try:
+                detail = e.read().decode("utf-8", errors="replace")[:200]
+            except Exception:
+                detail = ""
+            raise RuntimeError(f"Dashscope HTTP {e.code}: {detail}") from e
+        except (urllib.error.URLError, ConnectionError, OSError, TimeoutError) as e:
+            last_err = e
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            raise
+    raise RuntimeError(f"Dashscope embed failed after {retries} retries: {last_err}")
 
 
 # ── Qdrant operations ──────────────────────────────────────────────────────
@@ -331,12 +385,28 @@ def main():
     parser.add_argument("--collection", type=str, default=None)
     parser.add_argument("--qdrant-url", type=str, default="http://localhost:6333")
     parser.add_argument("--ollama-url", type=str, default="http://localhost:11434")
-    parser.add_argument("--model", type=str, default="llava")
+    parser.add_argument("--provider", type=str, default="ollama",
+                        choices=["ollama", "dashscope"],
+                        help="Embedding provider. 'ollama' = local Ollama (default, llava 4096-dim multimodal). "
+                             "'dashscope' = Dashscope cloud text-embedding (v2.11 Phase 1 challenger; "
+                             "1024-dim, text-only — image chunks embed via their VLM description).")
+    parser.add_argument("--model", type=str, default=None,
+                        help="Embedding model. Default 'llava' for ollama; 'text-embedding-v4' for dashscope.")
+    parser.add_argument("--api-key", type=str, default=None,
+                        help="API key for dashscope provider. Defaults to DASHSCOPE_API_KEY env var.")
     parser.add_argument("--batch-size", type=int, default=10)
     parser.add_argument("--recreate", action="store_true")
     parser.add_argument("--no-contextual", action="store_true",
                         help="Disable contextual retrieval (fallback to breadcrumb-only)")
     args = parser.parse_args()
+    # Provider-specific defaults.
+    if args.model is None:
+        args.model = "llava" if args.provider == "ollama" else "text-embedding-v4"
+    if args.provider == "dashscope" and not args.api_key:
+        args.api_key = os.environ.get("DASHSCOPE_API_KEY", "")
+        if not args.api_key:
+            print("ERROR: --provider dashscope requires --api-key or DASHSCOPE_API_KEY env var", file=sys.stderr)
+            return 2
 
     jsonl_path = args.jsonl_path
     if not jsonl_path.exists():
@@ -365,9 +435,24 @@ def main():
     print(f"  Model: {args.model}")
     print()
 
+    # Provider-aware embed helpers (closures capture args).
+    def _embed_text(text: str) -> list[float]:
+        if args.provider == "dashscope":
+            return embed_text_dashscope(text, args.model, args.api_key)
+        return embed_text(text, args.model, args.ollama_url)
+
+    def _embed_image(asset_path: Path | None, fallback_text: str) -> list[float]:
+        if args.provider == "dashscope":
+            # Dashscope text-embedding is text-only; use the VLM description.
+            return embed_text_dashscope(fallback_text or "image", args.model, args.api_key)
+        if asset_path and asset_path.exists():
+            return embed_image(asset_path, args.model, args.ollama_url, fallback_text)
+        return embed_text(fallback_text or "image", args.model, args.ollama_url)
+
     # Get embedding dimension
+    print(f"  Provider: {args.provider}")
     print("  Testing embedding model...")
-    test_emb = embed_text("test", args.model, args.ollama_url)
+    test_emb = _embed_text("test")
     dim = len(test_emb)
     print(f"  Embedding dimension: {dim}")
 
@@ -393,16 +478,14 @@ def main():
         # Build embedding
         try:
             if modality == "image":
-                # Try image embedding first, fall back to description text
+                # Provider-aware: ollama can embed image bytes directly via llava;
+                # dashscope embeds the VLM description text only.
                 asset_ref = chunk.get("asset_ref", {})
                 asset_path = assets_dir / Path(asset_ref.get("file_path", "")).name if asset_ref else None
                 description = (metadata.get("visual_description")
                              or chunk.get("visual_description", "")
                              or content)
-                if asset_path and asset_path.exists():
-                    vector = embed_image(asset_path, args.model, args.ollama_url, description)
-                else:
-                    vector = embed_text(description, args.model, args.ollama_url)
+                vector = _embed_image(asset_path, description)
             else:
                 # Text and table chunks: use contextualized text for embedding.
                 # Contextual retrieval prepends hierarchical + neighbor context.
@@ -431,7 +514,7 @@ def main():
                         modality=modality,
                     )
 
-                vector = embed_text(text_to_embed, args.model, args.ollama_url)
+                vector = _embed_text(text_to_embed)
         except Exception as e:
             print(f"  ERROR embedding chunk {i}/{total} ({chunk_id}): {e}", file=sys.stderr)
             errors += 1
