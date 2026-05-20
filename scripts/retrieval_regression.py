@@ -46,11 +46,13 @@ SCRIPTS = REPO_ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from search_qdrant import embed, search  # noqa: E402
+from search_qdrant import embed as _embed_ollama, search  # noqa: E402
+from ingest_to_qdrant import embed_text_dashscope  # noqa: E402
 
-FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "retrieval_regression_v2_10.json"
-COLLECTION = "mmrag_v2_8"
-EMBED_MODEL = "llava"
+FIXTURE_PATH_DEFAULT = REPO_ROOT / "tests" / "fixtures" / "retrieval_regression_v2_10.json"
+COLLECTION_DEFAULT = "mmrag_v2_8"
+EMBED_MODEL_DEFAULT_OLLAMA = "llava"
+EMBED_MODEL_DEFAULT_DASHSCOPE = "text-embedding-v4"
 TOP_K = 5
 STRICT_K = 3  # top-N chunk_ids must equal the baseline for STRICT pass
 
@@ -89,9 +91,18 @@ QUERIES: list[tuple[str, str]] = [
 ]
 
 
-def _run_query(query_text: str, qdrant_url: str, ollama_url: str) -> list[dict]:
-    vector = embed(query_text, model=EMBED_MODEL, ollama_url=ollama_url)
-    return search(vector, COLLECTION, limit=TOP_K, qdrant_url=qdrant_url)
+def _embed_query(text: str, provider: str, model: str,
+                 ollama_url: str, api_key: str) -> list[float]:
+    """Embed a query through the chosen provider."""
+    if provider == "dashscope":
+        return embed_text_dashscope(text, model, api_key)
+    return _embed_ollama(text, model=model, ollama_url=ollama_url)
+
+
+def _run_query(query_text: str, collection: str, qdrant_url: str,
+               provider: str, model: str, ollama_url: str, api_key: str) -> list[dict]:
+    vector = _embed_query(query_text, provider, model, ollama_url, api_key)
+    return search(vector, collection, limit=TOP_K, qdrant_url=qdrant_url)
 
 
 def _result_summary(result: dict) -> dict:
@@ -106,27 +117,31 @@ def _result_summary(result: dict) -> dict:
     }
 
 
-def capture(qdrant_url: str, ollama_url: str) -> None:
-    FIXTURE_PATH.parent.mkdir(parents=True, exist_ok=True)
+def capture(fixture_path: Path, collection: str, engine_version: str,
+            qdrant_url: str, provider: str, model: str,
+            ollama_url: str, api_key: str) -> None:
+    fixture_path.parent.mkdir(parents=True, exist_ok=True)
     out: dict[str, Any] = {
         "schema": 2,
-        "engine_version": "2.10.0-rc1",
-        "collection": COLLECTION,
-        "embed_model": EMBED_MODEL,
+        "engine_version": engine_version,
+        "collection": collection,
+        "provider": provider,
+        "embed_model": model,
         "top_k": TOP_K,
         "strict_k": STRICT_K,
         "queries": [],
     }
     for qid, qtext in QUERIES:
         print(f"  capture {qid:14s} {qtext!r}", flush=True)
-        results = _run_query(qtext, qdrant_url, ollama_url)
+        results = _run_query(qtext, collection, qdrant_url, provider, model,
+                             ollama_url, api_key)
         out["queries"].append({
             "id": qid,
             "text": qtext,
             "top_k": [_result_summary(r) for r in results[:TOP_K]],
         })
-    FIXTURE_PATH.write_text(json.dumps(out, indent=2, ensure_ascii=False))
-    print(f"\nWrote fingerprint: {FIXTURE_PATH}")
+    fixture_path.write_text(json.dumps(out, indent=2, ensure_ascii=False))
+    print(f"\nWrote fingerprint: {fixture_path}")
     print(f"Queries captured:  {len(out['queries'])}")
 
 
@@ -138,13 +153,14 @@ def _summarize_top1(entry_top_k: list[dict]) -> str:
     return f"score={r.get('score'):.3f} doc={r.get('doc_id')} p={r.get('page_number')} src={src!r}"
 
 
-def verify(qdrant_url: str, ollama_url: str) -> int:
-    if not FIXTURE_PATH.exists():
-        print(f"ERROR: fingerprint missing at {FIXTURE_PATH}; run with --capture first", file=sys.stderr)
+def verify(fixture_path: Path, collection: str, qdrant_url: str,
+           provider: str, model: str, ollama_url: str, api_key: str) -> int:
+    if not fixture_path.exists():
+        print(f"ERROR: fingerprint missing at {fixture_path}; run with --capture first", file=sys.stderr)
         return 2
-    baseline = json.loads(FIXTURE_PATH.read_text())
-    if baseline.get("collection") != COLLECTION:
-        print(f"ERROR: fingerprint collection mismatch ({baseline.get('collection')} != {COLLECTION})", file=sys.stderr)
+    baseline = json.loads(fixture_path.read_text())
+    if baseline.get("collection") != collection:
+        print(f"ERROR: fingerprint collection mismatch ({baseline.get('collection')} != {collection})", file=sys.stderr)
         return 2
 
     failures: list[str] = []
@@ -158,7 +174,8 @@ def verify(qdrant_url: str, ollama_url: str) -> int:
         baseline_chunk_ids = [r["chunk_id"] for r in baseline_top]
         baseline_top1_doc = baseline_top[0]["doc_id"] if baseline_top else None
 
-        results = _run_query(qtext, qdrant_url, ollama_url)
+        results = _run_query(qtext, collection, qdrant_url, provider, model,
+                             ollama_url, api_key)
         current_top = [_result_summary(r) for r in results[:TOP_K]]
         current_chunk_ids = [r["chunk_id"] for r in current_top]
         current_top1_doc = current_top[0]["doc_id"] if current_top else None
@@ -186,8 +203,8 @@ def verify(qdrant_url: str, ollama_url: str) -> int:
         rows.append(f"  {qid:14s} {status:5s} {_summarize_top1(current_top)}")
 
     print("=" * 78)
-    print(f"Retrieval regression — {COLLECTION} ({EMBED_MODEL}, top-{TOP_K}, strict={STRICT_K})")
-    print(f"Baseline:  {FIXTURE_PATH}")
+    print(f"Retrieval regression — {collection} ({provider}/{model}, top-{TOP_K}, strict={STRICT_K})")
+    print(f"Baseline:  {fixture_path}")
     print(f"Engine:    baseline={baseline.get('engine_version')}")
     print("=" * 78)
     for row in rows:
@@ -214,14 +231,55 @@ def verify(qdrant_url: str, ollama_url: str) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--capture", action="store_true",
-                        help="capture fingerprint (overwrites the tracked fixture)")
+                        help="capture fingerprint (overwrites the target fixture)")
+    parser.add_argument("--collection", default=COLLECTION_DEFAULT,
+                        help=f"Target Qdrant collection (default: {COLLECTION_DEFAULT})")
+    parser.add_argument("--fixture", default=None,
+                        help="Fixture JSON path. Defaults: tests/fixtures/retrieval_regression_v2_10.json "
+                             "(provider=ollama), tests/fixtures/retrieval_regression_v2_11_qwen3.json "
+                             "(provider=dashscope).")
+    parser.add_argument("--provider", default="ollama", choices=["ollama", "dashscope"],
+                        help="Embedding provider for query side. Must match how the target "
+                             "collection was built.")
+    parser.add_argument("--model", default=None,
+                        help="Embedding model. Default 'llava' for ollama; "
+                             "'text-embedding-v4' for dashscope.")
+    parser.add_argument("--engine-version", default=None,
+                        help="Engine version string written into the captured fixture. "
+                             "Defaults: '2.10.0' (ollama) / '2.11.0-candidate' (dashscope).")
     parser.add_argument("--qdrant-url", default=os.environ.get("QDRANT_URL", "http://localhost:6333"))
     parser.add_argument("--ollama-url", default=os.environ.get("OLLAMA_URL", "http://localhost:11434"))
+    parser.add_argument("--api-key", default=None,
+                        help="Dashscope API key. Defaults to DASHSCOPE_API_KEY env var.")
     args = parser.parse_args()
+
+    # Provider-aware defaults.
+    if args.model is None:
+        args.model = (EMBED_MODEL_DEFAULT_OLLAMA if args.provider == "ollama"
+                      else EMBED_MODEL_DEFAULT_DASHSCOPE)
+    if args.fixture is None:
+        if args.provider == "ollama":
+            args.fixture = str(FIXTURE_PATH_DEFAULT)
+        else:
+            args.fixture = str(REPO_ROOT / "tests" / "fixtures"
+                              / "retrieval_regression_v2_11_qwen3.json")
+    if args.engine_version is None:
+        args.engine_version = ("2.10.0" if args.provider == "ollama"
+                              else "2.11.0-candidate")
+    if args.api_key is None:
+        args.api_key = os.environ.get("DASHSCOPE_API_KEY", "")
+    if args.provider == "dashscope" and not args.api_key:
+        print("ERROR: --provider dashscope requires --api-key or DASHSCOPE_API_KEY", file=sys.stderr)
+        return 2
+
+    fixture_path = Path(args.fixture)
     if args.capture:
-        capture(args.qdrant_url, args.ollama_url)
+        capture(fixture_path, args.collection, args.engine_version,
+                args.qdrant_url, args.provider, args.model,
+                args.ollama_url, args.api_key)
         return 0
-    return verify(args.qdrant_url, args.ollama_url)
+    return verify(fixture_path, args.collection, args.qdrant_url,
+                  args.provider, args.model, args.ollama_url, args.api_key)
 
 
 if __name__ == "__main__":

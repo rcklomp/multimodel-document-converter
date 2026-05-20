@@ -1,18 +1,23 @@
 # Plan: v2.11 — Embedder shootout, validated-cloud, and the rc1/rc2 non-goal closure
 
-**Status:** **Draft v0.4** — user signoff on autonomous execution
-(2026-05-17). Phase 1 architecture finalized: **Path B cloud-first**
-via Dashscope embedding API for the comparison rebuild (Mac Mini
-local hosting deferred to v2.12 candidate); challenger is
-**Qwen3-Embedding-8B-class** via Dashscope `text-embedding-v3` (or
-v4 if available); spend cap $25; default disposition on borderline
-Phase 1 outcome is **no-swap**. Phase 3 carry-forward dispositions
-finalized with concrete alternatives (no pure-defer). Settings
-authorized via `.claude/settings.local.json`. Promotion to Draft v1.0
-happens when Phase 1 outcome lands and Phase 2 + Phase 3 alternatives
-ship.
+**Status:** **Draft v0.5** — Phase 1 executed end-to-end
+(2026-05-20). Challenger collection `mmrag_v2_8__qwen3_dashscope`
+rebuilt (30,588 points, 1024-dim, status green); challenger
+fingerprint captured; challenger soak completed (518/518 judged).
+**Phase 1 result: 5/6 floors crushed with 10× lift on retrieval +
+relevance + faithfulness, but Format pin missed by −6.2pp**
+(see §"Phase 1 outcome" below for full numbers). **Per the
+contract-violation-mode rule** the literal-gate read is "fails
+Format → no-swap"; per the magnitude read "10× recall lift
+dominates Format coverage-reveal." **Both reads are documented;
+the actual production-default flip is deferred to user sign-off.**
+Phase 2 (validated-cloud CI workflow + fresh-env pytest) landed.
+Phase 3 dispositions landed in DECISIONS.md. Promotion to Draft v1.0
+happens when the user decides swap vs no-swap and the v2.11.0 tag is
+cut.
 
 Predecessor versions:
+- Draft v0.4 (2026-05-17): Path B cloud-first finalized; spend cap $25; default no-swap if borderline.
 - Draft v0.3 (2026-05-16): Qwen 3.6 Max Preview audit-driven refinements.
 - Draft v0.2 (2026-05-16): post-soak data folded in; Phase 0 closed.
 - Draft v0.1 (2026-05-16): initial pre-soak authoring.
@@ -79,11 +84,12 @@ The v2.10 cycle delivered:
 
 The harnesses are not single-use. They get re-run against every embedder candidate, every rebuild, and every annotated tag. They're the measurement substrate v2.11 stands on.
 
-### Carry-forward register (Draft v0.2 — post-soak)
+### Carry-forward register (Draft v0.5 — post-Phase-1)
 
 | # | Class | Source | v2.11 status | Notes |
 |---|---|---|---|---|
-| 1 | **Embedder choice** (llava → ?) | v2.10 soak: Recall@1 2.1%, Faith 4.7% | **`in-scope`** | Phase 1 below. Challenger: Qwen3-Embedding-4B; BGE-M3 as fallback if Qwen3 not pullable via Ollama. |
+| 1 | **Embedder choice** (llava → Dashscope text-embedding-v4) | v2.10 soak: R@1 2.1%, Faith 4.7%. v2.11 Phase 1 soak: R@1 35.5% (+16.9×), Faith 50.6% (+10.8×), Format −8.5pp | **`halted for user signoff`** | Phase 1 outcome §below. 5/6 floors crushed; Format pin −6.2pp below. Make-the-failing-run-pass rule: do not weaken Format gate. Decision deferred. |
+| 1b | **Format pin recovery (v2.11.x)** | Phase 1 Format dip 89.8% vs ≥96% pin, concentrated in scanned/form docs (`CarOK_voorraadtelling` 68.8%, `Earthship_Vol1` 71.9%, `IRJET_Modeling_of_Solar_PV` 71.9%) | **`conditional: opens only if user signs off on swap`** | Chunk-content sanitization for scanned/form profile. Target ≥ 95% in v2.11.1 soak. |
 | 2 | **validated-cloud / CI** | rc1 §"validated-local only" | **`in-scope`** | Phase 2 below. |
 | 3 | NuMarkdown-8B local VLM | v2.7 / v2.8 / v2.9 / v2.10 non-goal | **`investigate-then-decide`** | Phase 3a — check reachability, decide formal-defer-or-act. |
 | 4 | Remote CodeFormulaV2 inference | v2.10 non-goal (Docling 2.86 doesn't expose option) | **`upstream-blocked, defer to v2.12`** | One-line confirmation of Docling status. |
@@ -261,6 +267,96 @@ unchanged). Qdrant rebuild + retrieval-regression capture + soak run:
 yes, all driven by existing scripts. Effort: ~1-2 days of wall time,
 mostly waiting on the rebuild + soak.
 
+#### Phase 1 outcome (2026-05-20)
+
+**Rebuild result.** `mmrag_v2_8__qwen3_dashscope` ingested from the
+same 34 canonical JSONLs via Dashscope `text-embedding-v4`. Final
+state: **30,588 points / 1024-dim cosine / status green** (vs
+baseline `mmrag_v2_8` 30,454 / 4096-dim). The +134 point delta is
+the Dashscope path accepting short/empty content the llava embed
+loop had rejected; minor coverage difference, not a correctness
+issue. Wall time 540.5 minutes via `scripts/rebuild_mmrag_v2_8_for_rc1.py
+--provider dashscope --model text-embedding-v4 --resume`.
+
+**Soak result.** Same 259 chunks + 518 generated queries as the
+v2.10 baseline soak (`output/soak/v2.10/work.jsonl`), copied to
+`output/soak/v2.11_qwen3/work.jsonl` with retrieval+judgment fields
+stripped, then re-retrieved against the challenger collection and
+re-judged. Full report:
+[`docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md`](QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md).
+
+Headline metrics (challenger vs baseline):
+
+| Axis | v2.10 baseline | v2.11 challenger | Δ (pp) | Multiple | Floor | Floor met? |
+|---|---:|---:|---:|---:|---:|---:|
+| Recall@1 chunk | 2.1% | **35.5%** | **+33.4** | **16.9×** | ≥ 15% | ✅ (and clears stretch ≥ 30%) |
+| Recall@5 chunk | 6.8% | **66.8%** | **+60.0** | **9.8×** | ≥ 25% | ✅ (and clears stretch ≥ 50%) |
+| Recall@5 doc | 54.2% | **91.7%** | **+37.5** | 1.7× | ≥ 70% | ✅ (and clears stretch ≥ 85%) |
+| Relevance | 5.9% | **59.3%** | **+53.4** | **10.1×** | ≥ 30% | ✅ (near stretch ≥ 60%) |
+| Faithfulness | 4.7% | **50.6%** | **+45.9** | **10.8×** | ≥ 25% | ✅ (near stretch ≥ 55%) |
+| **Format (judge)** | 98.3% | **89.8%** | **−8.5** | — | **≥ 96%** | ❌ **−6.2pp below pin** |
+
+**Reading the result honestly:**
+
+1. **Embedder-attributable axes (Recall@1, Recall@5 chunk/doc,
+   Relevance, Faithfulness):** every one not only clears the floor
+   but clears the *stretch* target on Recall@1 and Recall@5 chunk,
+   with 10×-class lifts on three of them. The v2.10 hub-collapse
+   pathology (`5b915c809145` as top-1 for 5 disparate queries:
+   MCP, modules, Windows, greenhouse, solar PV — see
+   `tests/fixtures/retrieval_regression_v2_11_qwen3.json` vs
+   `_v2_10.json` side-by-side) is gone in the challenger: top-1
+   docs are query-coherent.
+
+2. **Format regression:** the −8.5pp Format drop is concentrated in
+   docs the baseline rarely retrieved at all due to hub-collapse:
+   `CarOK_voorraadtelling` 68.8% format, `Earthship_Vol1` 71.9%,
+   `IRJET_Modeling_of_Solar_PV` 71.9%. These are scanned/form-class
+   or low-OCR-quality docs whose underlying chunks were always
+   format-imperfect — the baseline llava embedder simply never
+   surfaced them. The challenger reaches them now, and the judge
+   correctly grades the format of *those* chunks. **The regression
+   is a coverage-reveal, not a content-quality regression introduced
+   by the swap.** A v2.11.x patch focusing on chunk-level format
+   sanitization for the scanned/form profile should recover the
+   delta.
+
+**Decision per the plan's own gate:**
+
+The Phase 1 closing rule (§"Done when") reads: "If challenger clears
+the floors on at least 3 of 4 embedder axes AND Format ≥ 96%: swap.
+If challenger fails the floors: no-swap." The challenger clears 5/5
+embedder axes by wide margins. The Format pin is missed by 6.2pp.
+
+Per the **make-the-failing-run-pass** rule
+([memory: feedback_contract_violation_mode.md](../../.claude/projects/-Users-ronald-Projects-MM-Converter-V2-4-1/memory/feedback_contract_violation_mode.md)),
+we do **not** weaken the Format gate to declare a clean swap. We do
+**not** auto-flip `scripts/ingest_to_qdrant.py`'s default provider.
+
+The recommended path (subject to user sign-off):
+
+- **Swap recommended** — the magnitude on the embedder axes (10×
+  lift on 3 of 5) is dominant; the Format regression is structural
+  (coverage-reveal) and addressable in a v2.11.x patch.
+- **Format pin downgraded** for v2.11.0 only — record as known-debt
+  in DECISIONS.md with a v2.11.x patch target ≥ 95% (the soak
+  judge's typical noise floor on this corpus).
+- **Both collections retained** for 30 days post v2.11.0: `mmrag_v2_8`
+  (llava, rollback) + `mmrag_v2_8__qwen3_dashscope` (production).
+- v2.11.x backlog: Format recovery via scanned/form chunk-content
+  sanitization (top-3 offending docs: `CarOK_voorraadtelling`,
+  `Earthship_Vol1`, `IRJET_Modeling_of_Solar_PV`).
+
+**The alternative — no-swap on the literal gate read** — is recorded
+for completeness and is the default if the user does not sign off on
+the Format gate downgrade. Under no-swap, v2.11.0 ships the
+validated-cloud CI workflow + Phase 3 dispositions, Phase 1
+infrastructure remains in place, and the swap returns as v2.12
+Phase 1 with format-recovery work as a prerequisite.
+
+**Halted for user decision** — see §6 Decision log row "v2.11 Phase 1
+embedder swap" (to be populated upon decision).
+
 ---
 
 ### Phase 2 — validated-cloud checkpoint
@@ -424,6 +520,7 @@ These remain non-goals for v2.11 unless explicitly promoted:
 | 2026-05-16 | **Promoted to Draft v0.2.** Substantive updates: (1) Thesis §1 quantifies the embedder weakness with soak numbers instead of just regression-test anecdotes. (2) "Where v2.10 ended" section rewritten in past tense; "What v2.10.0 final is waiting on" stanza deleted (obsolete). (3) Carry-forward register row 9 (TBD soak findings) replaced with "empty (closed)" outcome; new row 10 added for the 99.9% Format out-of-scope decision. (4) Phase 0 rewritten uniformly past-tense with the actual triage breakdown. (5) Phase 1 gains a "Soak baseline to beat" sub-section with concrete numeric floors (Recall@1 ≥ 15%, Recall@5 doc ≥ 70%, Relevance ≥ 30%, Faithfulness ≥ 25%, Format ≥ 96%) replacing the vague "+5%" criterion; BGE-M3 documented as fallback challenger if Qwen3-Embedding-4B isn't Ollama-pullable. (6) Phase 4 (EPUB engine) flipped from "decision point" to "deferred to v2.12+" with the soak data backing the deferral. (7) §7 Open questions: items 1 and 5 marked resolved; item 6 added as the new Phase 1 start gate. Promotion to Draft v1.0 happens when the user signs off on starting Phase 1. |
 | 2026-05-17 | **Promoted to Draft v0.3** after audit by Qwen 3.6 Max Preview (AUDIT PASS across all six quality dimensions, six low-priority refinements). Applied: (1) `[D-1/D-2]` test-count reconciliation — v2.10 AFTER snapshot §6 gets a new row for the 973 → 975 transition (the +2 retrieval-regression pins landed after Phase 8 close, same day). (2) `[C-1]` Phase N gains explicit Risk + Cost blocks. (3) `[C-2]` Phase 2 gains an "Independent of Phase 1" sub-section clarifying that validated-cloud CI runs against whichever embedder is current and can start in parallel with Phase 1's rebuild. (4) `[C-3]` Phase N approach #5 now documents version-string handling (bump or retain following v2.10.0's pattern). (5) `[C-4]` Phase 1 approach gains a new step 0 — `scripts/rebuild_mmrag_v2_8_for_rc1.py` `--resume` flag + retry-on-URLError wrapper, as defensive ~30 min of work to prevent repeating the v2.10 Phase 8 mid-rebuild recovery. (6) `[S-1]` §2b section reference fixed to name PLAN_V2.10 §2b/§2c/§2d explicitly. Auditor's `[S-2]` ("Phase N" naming) acknowledged as intentional; no change. No data-accuracy or architectural concerns surfaced. |
 | 2026-05-17 | **Promoted to Draft v0.4** — autonomous-execution signoff. User answered the 7-item pre-flight checklist and authorized `.claude/settings.local.json` for unattended runs. Substantive changes: (1) Phase 1 architecture finalized as **Path B cloud-first** — Dashscope `text-embedding-v3`/v4 as the challenger; LM Studio + MLX local-hosting deferred to v2.12 because `mlx-community/Qwen3-Embedding-8B-mxfp8` fails LM Studio's loader (missing `lm_head.weight`, expected for chat/completion models but not embedders). Mac Mini endpoint `http://10.0.10.246:1234` documented for v2.12. (2) Spend cap raised $5 → $25 for Phase 1 soak. (3) Default disposition on borderline Phase 1 outcome is **no-swap** (user explicitly hedged for the clear-loss scenario). (4) Phase 2 scope expanded — author CI workflow YAML (2b) autonomously; halt before pushing. (5) Phase 3 dispositions converted from pure-defer to concrete alternatives: 3a Qwen3-VL-8B-on-Mini as v2.12 VLM candidate; 3b local Docling CodeFormulaV2 as v2.11 workaround; 3c PAUSED (smallest carve-out is `ConversionPlan` parent class); 3d opt-in `--strict-hybrid-guard` flag built in v2.11 (default off, preserves v2.10 chunker); 3e magazine rendered-region-crop deferred with soak-data rationale (embedder is the ceiling). (6) Halt triggers updated: Qdrant/Dashscope unreachable >15 min halts; Ollama on M1 expected absent and is not a halt condition. |
+| 2026-05-20 | **Promoted to Draft v0.5** — Phase 1 executed end-to-end. Challenger collection `mmrag_v2_8__qwen3_dashscope` rebuilt (30,588 points, 1024-dim cosine, status green; wall time 540.5 min via `--provider dashscope --resume`). Challenger fingerprint captured (`tests/fixtures/retrieval_regression_v2_11_qwen3.json`). Challenger soak completed end-to-end (518/518 judged; report at `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md`). **Phase 1 result: 5/6 floors crushed with 10× lift; Format pin missed by −6.2pp.** Specifics: Recall@1 chunk 2.1%→35.5% (+16.9×, clears stretch ≥30%); Recall@5 chunk 6.8%→66.8% (+9.8×); Recall@5 doc 54.2%→91.7%; Relevance 5.9%→59.3% (+10.1×); Faithfulness 4.7%→50.6% (+10.8×); Format 98.3%→89.8% (below ≥96% pin). v2.10 hub-collapse pathology (one doc as top-1 for 5 disparate queries) is gone in the challenger. Format dip concentrated in scanned/form docs (`CarOK_voorraadtelling` 68.8%, `Earthship_Vol1` 71.9%, `IRJET_Modeling_of_Solar_PV` 71.9%) — coverage-reveal of pre-existing OCR/scan format imperfections that the baseline's hub-collapse had hidden, not a swap-introduced regression. Per the make-the-failing-run-pass rule, the Format gate is **not** weakened to declare a clean swap; the production-default flip is **deferred to user sign-off**. Both swap-recommended (with Format pin downgraded for v2.11.0 + v2.11.x recovery task) and no-swap (literal gate read) interpretations are recorded above. `scripts/synthetic_soak.py` extended with `--collection`/`--provider`/`--embed-model` flags. `scripts/retrieval_regression.py` extended similarly. Open question 6 closed (user already signed off in Draft v0.4). New open question 7 added below. |
 
 ---
 
@@ -436,8 +533,9 @@ Status as of Draft v0.2 (2026-05-16). Answered questions are kept for traceabili
 3. **NuMarkdown-8B reachability.** Open. One probe attempt at Phase 3a kickoff; if endpoint still off-network, formal-defer to v2.12.
 4. **CI runner topology.** Open. Self-hosted on the same network as Qdrant + Ollama is the recommended path (2b in Phase 2); GitHub-hosted with private data bucket (2c) deferred to v2.12 unless 2b proves insufficient.
 5. ~~**EPUB engine.**~~ **Resolved 2026-05-16.** Soak data shows EPUB recall is embedder-bound (KI dominates ChatGPT because llava can't disambiguate, not because the EPUB lane is broken). Phase 4 deferred to v2.12+. The marker workaround stays.
-6. **Phase 1 start gate.** Currently waiting on user signoff to: (a) confirm Qwen3-Embedding-4B availability on the local Ollama, (b) approve the second-collection rebuild (~5-7 h wall time), (c) approve the per-Phase-1 budget for re-running the soak via Dashscope (~$2-3 in qwen-max calls). No technical blocker; awaiting decision.
+6. ~~**Phase 1 start gate.**~~ **Resolved 2026-05-17 (Draft v0.4)** — user gave autonomous-execution signoff. Phase 1 executed end-to-end on 2026-05-20.
+7. **Phase 1 outcome: swap or no-swap.** Open as of 2026-05-20. Challenger crushes 5/6 floors with 10× lift but misses the Format ≥96% pin by 6.2pp (89.8%). Per the make-the-failing-run-pass rule the Format gate is not weakened. User decides between: (a) **swap recommended** — Format pin downgraded to ≥85% for v2.11.0, Format recovery becomes v2.11.x task targeting ≥95% (chunk-content sanitization for scanned/form profile); (b) **no-swap** — literal gate read; v2.11.0 ships Phase 2 + Phase 3 dispositions only; swap returns as v2.12 Phase 1 with format-recovery work as prerequisite. The challenger collection and challenger soak report remain present on disk regardless of decision.
 
 ---
 
-**END OF DRAFT v0.3.** Phase 0 is closed; v2.10.0 has shipped; the soak gave us concrete numeric floors for Phase 1; the Qwen 3.6 Max Preview audit (2026-05-16) returned AUDIT PASS and the six low-priority refinements are folded in. Next checkpoint: user signoff on Phase 1 start (Qwen3-Embedding-4B pull + second-collection rebuild + comparison soak). Promotion to **Draft v1.0** at that signoff. The Phase 2 (validated-cloud) and Phase 3 (carry-forward dispositions) phases are independent of Phase 1's outcome and can run in parallel or interleaved.
+**END OF DRAFT v0.5.** Phase 0 + Phase 1 + Phase 2 + Phase 3 (dispositions) executed. **Phase 1 outcome: halted for user decision** on whether to swap to Dashscope `text-embedding-v4` as the v2.11.0 production embedder. Magnitude of lift on 5/6 embedder-attributable axes is decisive (10×-class); Format pin miss is structural (coverage-reveal of pre-existing OCR/format imperfections in scanned/form docs that the baseline's hub-collapse had hidden). The actual production-default flip in `scripts/ingest_to_qdrant.py` (and any associated tagging or v2.11.0 release artifact) is **NOT executed** by the autonomous run — it is staged for user sign-off. Promotion to **Draft v1.0** + v2.11.0 tag happens when the user decides.

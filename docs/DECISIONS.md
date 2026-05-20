@@ -756,3 +756,55 @@ Neither trigger is currently met.
 | 3e | Magazine rendered-region-crop | defer with soak-data rationale | revisit only on named triggers |
 
 No pure-defer-without-rationale. All five items have either an executed v2.11 alternative (3d), a documented workaround (3b), an explicit v2.12 candidate (3a), a paused user-decision point (3c), or a data-backed defer (3e).
+
+---
+
+## v2.11 Phase 1 Embedder Shootout Outcome (2026-05-20)
+
+**Context.** Phase 1 of v2.11 (per `docs/PLAN_V2.11.md` Draft v0.4 / v0.5) was the embedder shootout: compare the v2.10 baseline `mmrag_v2_8` collection (Ollama `llava` 4096-dim) against a challenger `mmrag_v2_8__qwen3_dashscope` (Dashscope `text-embedding-v4` 1024-dim) using identical chunks/queries from the v2.10 soak.
+
+**Numeric result.**
+
+| Axis | v2.10 baseline | v2.11 challenger | Δ (pp) | Multiple | Plan floor | Cleared? |
+|---|---:|---:|---:|---:|---:|---:|
+| Recall@1 chunk | 2.1% | 35.5% | +33.4 | 16.9× | ≥ 15% | ✅ (clears stretch ≥ 30%) |
+| Recall@5 chunk | 6.8% | 66.8% | +60.0 | 9.8× | ≥ 25% | ✅ (clears stretch ≥ 50%) |
+| Recall@5 doc | 54.2% | 91.7% | +37.5 | 1.7× | ≥ 70% | ✅ (clears stretch ≥ 85%) |
+| Relevance | 5.9% | 59.3% | +53.4 | 10.1× | ≥ 30% | ✅ |
+| Faithfulness | 4.7% | 50.6% | +45.9 | 10.8× | ≥ 25% | ✅ |
+| **Format (judge)** | 98.3% | 89.8% | **−8.5** | — | **≥ 96%** | ❌ **−6.2pp below pin** |
+
+**Plan-as-written close rule.** Per PLAN_V2.11 §"Done when" — "If challenger clears the floors on at least 3 of 4 embedder axes AND Format ≥ 96%: swap. If challenger fails the floors: no-swap." The challenger clears 5/5 embedder axes by wide margins. Format misses ≥96% pin by 6.2pp.
+
+**Make-the-failing-run-pass rule application.** The 10×-class lift on 5/5 embedder axes makes "no-swap" obviously wrong by magnitude. But the Format gate exists for a reason, and weakening it to ship a clean swap is exactly the failure mode the project's contract-violation-mode rule forbids. **The Format gate is not weakened in this decision; the production-default flip is deferred to user sign-off.**
+
+**Cause analysis of the Format regression.** −8.5pp is concentrated in three scanned/form-class docs whose underlying chunks have known OCR/structure imperfections:
+
+- `CarOK_voorraadtelling` — Format 68.8% (Dutch voorraadtelling form, scanned)
+- `Earthship_Vol1` — Format 71.9% (scanned-degraded engineering doc)
+- `IRJET_Modeling_of_Solar_PV` — Format 71.9% (academic PDF, OCR artifacts)
+
+The baseline llava embedder rarely retrieved these docs because of hub-collapse: `5b915c809145` (a single doc) was top-1 for 5 disparate queries in the baseline fingerprint (MCP, modules, Windows, greenhouse, solar PV). The challenger has no such collapse — top-1 docs are query-coherent in the challenger fingerprint. **The challenger now reaches chunks whose format problems already existed in v2.10, but were never retrieved.** This is coverage-reveal of pre-existing chunk-format debt, not a swap-induced regression.
+
+**Disposition options recorded.**
+
+1. **Swap with Format gate downgraded to ≥85% for v2.11.0** (recommended).
+   - Flip `scripts/ingest_to_qdrant.py` defaults to `--provider dashscope --model text-embedding-v4`.
+   - Retain `mmrag_v2_8` (llava) for 30 days as rollback.
+   - v2.11.x: chunk-content sanitization for scanned/form profile; target ≥95% Format on next soak.
+   - User must sign off on the Format gate downgrade explicitly.
+
+2. **No-swap on literal gate read** (default if no sign-off).
+   - v2.11.0 ships Phase 2 (validated-cloud CI) + Phase 3 (carry-forward dispositions) only.
+   - Challenger collection + soak report remain on disk as v2.12 input.
+   - v2.12 Phase 1: swap with format-recovery work as prerequisite.
+
+**Artifacts retained regardless of decision:**
+
+- `tests/fixtures/retrieval_regression_v2_11_qwen3.json` — challenger fingerprint (20 queries × top-5).
+- `output/soak/v2.11_qwen3/work.jsonl` — 518 challenger retrievals + judgments.
+- `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md` — full challenger soak report.
+- Qdrant collection `mmrag_v2_8__qwen3_dashscope` — 30,588 points, 1024-dim, status green.
+- `scripts/retrieval_regression.py` + `scripts/synthetic_soak.py` — both extended with `--provider`/`--collection`/`--embed-model` flags (durable measurement infrastructure for the next embedder candidate).
+
+**Decision recorded by:** autonomous run (Claude Code, Opus 4.7), 2026-05-20. **User sign-off pending.**
