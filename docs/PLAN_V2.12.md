@@ -1,6 +1,6 @@
 # Plan: v2.12 — Close the absolute-quality gap: reranker → hybrid retrieval → HyDE
 
-**Status:** **Draft v0.1** (2026-05-21). Authored after the v2.11.0
+**Status:** **Draft v0.2** (2026-05-21). Authored after the v2.11.0
 swap landed and was tagged (`c2a461c`, annotated `v2.11.0` on both
 remotes 2026-05-20/21). v2.11 closed the *embedder* bottleneck with a
 10× lift across every embedder-attributable axis; v2.12 closes the
@@ -9,6 +9,16 @@ are great, but the system still misses the right passage in the top-5
 about 1 query in 3 (Recall@5 chunk 66.8%). The user named this gap
 explicitly during the v2.11.0 close-out — this plan exists to address
 it, not to be agreed with after the fact.
+
+**v0.2 changes (2026-05-21):** §1 Goal 7 (latency budget) and §3
+Phase 1 latency-budget paragraph + §7 Open Question 1 revised in
+response to the empirical reranker-latency benchmark run on
+2026-05-21 (`scripts/measure_reranker_latency.py`; full data at
+`tests/fixtures/reranker_latency_2026-05-21.json`). The original
+1.5 s p99 target was incompatible with the actual network-floor
+costs of the Dashscope intl endpoint from the user's location;
+revised budget split into stage-level floors + a total-time target
+that's achievable.
 
 **Predecessor:** [`docs/PLAN_V2.11.md`](PLAN_V2.11.md) — Draft v1.0,
 Phase 1 swap executed 2026-05-20 on `c2a461c`, tag `v2.11.0` on
@@ -102,9 +112,42 @@ Format-recovery patch is Phase 0 here, see below).
    landed in Phase 0).
 6. **Strict-gate state unchanged at 34 PASS / 0 WARN / 0 FAIL**
    (extraction/chunking/validation untouched).
-7. **Production retrieval p99 latency ≤ 1.5 s** end-to-end (a soft
-   budget — reranker + HyDE add ~200-500 ms each; if total exceeds
-   1.5 s, ship reranker-only and defer HyDE).
+7. **Production retrieval p99 latency** — split budget, set
+   empirically (`tests/fixtures/reranker_latency_2026-05-21.json`,
+   240-sample benchmark from the user's network to Dashscope intl):
+
+   | Stage | p50 | p99 | Notes |
+   |---|---:|---:|---|
+   | Embed (text-embedding-v4) | 1.16 s | 1.35 s | Network round-trip dominated; floor cost for the intl endpoint from EU |
+   | Qdrant top-K search | 22 ms | 55 ms | Negligible, local LAN |
+   | Rerank K=10 → top-5 | 803 ms | 1.04 s | Per-call cost dominated by API round-trip, not pair-scoring |
+   | Rerank K=25 → top-5 | 952 ms | 1.70 s | Marginal cost vs K=10 ≈ 150 ms p50 |
+   | Rerank K=50 → top-5 | 1.09 s | 2.36 s | Tail-latency rises sharply past K=50 |
+   | Rerank K=100 → top-5 | 1.27 s | 3.29 s | Outliers up to 4.3 s; not recommended |
+
+   **Revised v2.12 latency targets** (the original 1.5 s p99 total
+   target was incompatible with the embed floor):
+
+   - **Stage-level floor:** embed p99 ≤ 1.4 s, Qdrant p99 ≤ 100 ms,
+     rerank p99 ≤ 1.7 s (at K=25). These are the "we can't beat the
+     network from here" baselines.
+   - **Total end-to-end p99 target (rerank-only):** ≤ 3.0 s with
+     K=25, ≤ 3.5 s with K=50. Documented as the v2.12.0 production
+     latency contract from the user's network.
+   - **With HyDE (Phase 3):** add ~1 s for the qwen-max generation
+     call → total p99 ≤ 4.5 s. If this is unacceptable, HyDE ships
+     opt-in (default off).
+   - **Future optimization paths** (out of scope for v2.12):
+     embedding cache for repeated/follow-up queries (saves the
+     ~1.2 s embed); switch to a regional Dashscope endpoint if
+     latency to that region is lower; or move to a local embedder
+     (v2.11 carry-forward 1; v2.13 candidate).
+
+   The honest read: this is a network-bound system from the user's
+   current location. Any production deployment hosted closer to
+   Dashscope's serving region (e.g., AWS ap-southeast or
+   eu-central) would see meaningfully lower numbers; the v2.12.0
+   contract uses the user's network as the worst-case baseline.
 8. **Cost per soak ≤ $10** in Dashscope spend (reranker calls,
    judge calls, optional HyDE calls). Bounded for the v2.12 cycle.
 
@@ -221,12 +264,28 @@ is the canonical fix.
   default behavior is rerank-on, and `--no-rerank` opts out.
 - **Reranker API.** `POST` to
   `https://dashscope-intl.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank`
-  with `model: "gte-rerank-v2"`. Same `DASHSCOPE_API_KEY` env var
-  as the embedder. Cost: ~$0.001 per query × ~50 candidates per
-  query → ~$0.05 per 1k queries. Soak run (518 queries): ~$0.03.
-  Production: bounded by query traffic.
-- **Latency budget.** Reranker adds ~200-400 ms per query (network
-  round-trip + scoring). Within the §1.8 p99 ≤ 1.5 s soft budget.
+  with `model: "gte-rerank"` (intl endpoint name — the cn endpoint
+  uses `gte-rerank-v2` for the same model; v0.1 of this plan had
+  the cn name and was corrected after the 2026-05-21 probe).
+  Same `DASHSCOPE_API_KEY` env var as the embedder. Cost: ~$0.001
+  per call × 240-call benchmark = ~$0.24 verified; per query in
+  production ~$0.001. Soak run (518 queries × 1 rerank each):
+  ~$0.50. Production: bounded by query traffic.
+- **Latency budget (empirically determined 2026-05-21,
+  `tests/fixtures/reranker_latency_2026-05-21.json`).** Per-call
+  rerank latency p99 from the user's network: 1.04 s at K=10,
+  1.70 s at K=25, 2.36 s at K=50, 3.29 s at K=100 (with outliers
+  up to 4.3 s). Marginal cost per +K pair is small (~150 ms p50
+  from K=10 → K=25); the round-trip dominates over the scoring.
+  **Recommended `top_k_retrieve` = 25** for the v2.12.0 default:
+  Phase-2-eligible (the candidate-set rationale below says K must
+  be > top_n_return = 5 by enough margin that the reranker can do
+  useful work); plays well with the 3.0 s p99 budget; tail-latency
+  outliers controlled. **K=50 is acceptable** if Phase 1 alone
+  doesn't clear the Recall@5 chunk ≥ 85% floor — the extra ~700 ms
+  p99 may be worth the wider candidate set. **K=100 is not
+  recommended** — the tail-latency outliers (4.3 s observed in 60
+  samples) are too large.
 
 **Approach.**
 
@@ -282,6 +341,13 @@ in the soak.
 **Cost class.** No re-ingestion. No reconversion. Soak run: ~$0.05.
 Production: query-traffic-bound.
 **Effort.** 2-3 days.
+
+**Surprise from the latency benchmark:** embedding latency dominates
+the total query time, not reranking. Embed p99 was 1.35 s — about
+30% of total query time at K=25 (rerank 1.70 s + embed 1.35 s +
+qdrant 0.06 s ≈ 3.1 s). Reranking is well-behaved for sub-K=100; the
+real future-latency lever is **embedding cache** for repeat /
+follow-up queries, which is v2.13 scope. Out of scope for v2.12.
 
 **Why Phase 1 alone may not suffice for Recall@5 chunk ≥ 85%.**
 Reranker improves *ordering within the retrieved candidate set*; it
@@ -528,9 +594,14 @@ Before the v2.12.0 tag is staged:
    matching tests green.
 7. `docs/DECISIONS.md` has decision rows for each phase that
    shipped (1, 2, 3, optionally 4).
-8. p99 production retrieval latency measured (sampled over 100
-   queries) ≤ 1.5 s **OR** HyDE shipped opt-in with a documented
-   latency trade-off.
+8. p99 production retrieval latency measured against the live
+   stack (sampled over ≥ 100 queries via
+   `scripts/measure_reranker_latency.py`) ≤ 3.0 s at K=25 **or**
+   ≤ 3.5 s at K=50 (network-floor adjusted; original 1.5 s target
+   was incompatible with the embed-stage floor — see §2 Goal 7).
+   HyDE-on path adds ~1 s; either fits within an extended ≤ 4.5 s
+   budget **OR** HyDE ships opt-in with the latency trade-off
+   documented.
 9. v2.12 cycle Dashscope spend tracked; total ≤ $25 (matches v2.11
    cap).
 10. v2.11.x Phase 0 recovery + 30-day rollback drop both completed.
@@ -557,14 +628,21 @@ Before the v2.12.0 tag is staged:
 | Date | Change |
 |---|---|
 | 2026-05-21 | Draft v0.1 authored after the v2.11.0 swap landed + was tagged. Order of phases driven by the v2.11 soak shape: Recall@5 doc 91.7% vs Recall@5 chunk 66.8% is a right-doc-wrong-chunk pattern → reranker is the highest-leverage first phase. Phase 2 (hybrid) and Phase 3 (HyDE) are conditional on Phase 1's floor outcomes. Phase 4 (per-doc-class chunking) is a stretch safety valve, not the planned path. Phase 0 closes the v2.11.x Format recovery + 30-day rollback drop before any retrieval work starts so the v2.12 measurements start from a clean Format baseline. |
+| 2026-05-21 | Promoted to Draft v0.2 after empirical reranker-latency benchmark (`scripts/measure_reranker_latency.py`; 240 samples across 20 queries × 4 K values × 3 repeats). Three substantive changes: (1) Correct model name from `gte-rerank-v2` to `gte-rerank` for the intl endpoint (v2 only on the cn endpoint; same model). (2) §2 Goal 7 latency budget revised — the original 1.5 s p99 target was incompatible with the empirical embed p99 of 1.35 s on its own; new split-stage budget plus a 3.0 s total p99 target at K=25 / 3.5 s at K=50 reflects what's achievable from the user's current network. The embed p99 (1.35 s) is the dominant cost, not the reranker — a counterintuitive but actionable finding that frames embedding-cache as the right next-cycle latency lever. (3) §3 Phase 1 default `top_k_retrieve` set to 25 (was unspecified); K=50 is the fallback if Phase 1 alone doesn't clear Recall@5 chunk ≥ 85%; K=100 is excluded due to 4.3 s tail-latency outliers in the benchmark. Open Question 1 marked resolved. |
 
 ---
 
 ## 7. Open questions
 
-1. **Reranker latency budget.** Empirical p99 measurement needed
-   before locking the `top_k_retrieve=50` choice. If reranker adds
-   > 500 ms on 50 pairs, drop to 25.
+1. ~~**Reranker latency budget.**~~ **Resolved 2026-05-21** by the
+   `scripts/measure_reranker_latency.py` 240-sample benchmark. Default
+   `top_k_retrieve = 25` (rerank p99 = 1.70 s — within the revised
+   3.0 s total-p99 budget); K=50 is the Phase-2-conditional fallback
+   (rerank p99 = 2.36 s, 3.5 s total); K=100 is excluded due to tail-
+   latency outliers (max 4.3 s in 60 samples). The bigger surprise:
+   embedding (1.35 s p99) is the dominant cost, not reranking; that
+   reframes embedding-cache as the right next-cycle latency lever
+   (v2.13 scope). Full data: §2 Goal 7 + `tests/fixtures/reranker_latency_2026-05-21.json`.
 2. **Phase 2 trigger condition.** Default-go vs. trigger-on-Phase-1-
    shortfall. Current draft says trigger-on-shortfall (the
    conservative path that minimizes re-ingestion cost). Reconsider
