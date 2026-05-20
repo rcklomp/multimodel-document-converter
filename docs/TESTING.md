@@ -1,7 +1,8 @@
-# Testing Guide (v2.10-dev)
+# Testing Guide (v2.11.0)
 
-**Version:** v2.10-dev (Phases 1-7 `validated-local`; Phase 8 pending)  
+**Version:** v2.11.0 (Phase 1 swap staged locally on `c2a461c`; tag pending user push)
 **Validation Policy:** Required for every test command
+**DashScope API key:** read from the `DASHSCOPE_API_KEY` env var by `scripts/ingest_to_qdrant.py`, `scripts/search_qdrant.py`, `scripts/retrieval_regression.py`, and `scripts/synthetic_soak.py`. As of v2.11.0 the production embedder is Dashscope `text-embedding-v4` — the key is required for any ingestion, search, or retrieval-regression run. The reranker call in `search_qdrant.py` degrades to vector-rank truncation when the key is unset; the embedding call hard-fails (returns 2). Test-suite skip-gates handle the unset case for CI (the production retrieval-regression test skips cleanly).
 
 ## Environment
 - Runner: `conda run -n mmrag-v2`

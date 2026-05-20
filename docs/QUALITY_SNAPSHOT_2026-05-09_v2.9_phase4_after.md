@@ -1,10 +1,16 @@
 # Quality Snapshot 2026-05-09 — v2.9 Phase 4 AFTER
 
+> ⚠ SUPERSEDED — historical Phase 4 reference only. Current ship state
+> is `docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`.
+> Terminology below predates the 2026-05-12 Option 1 release decision:
+> no intermediate final `v2.9.0` tag is planned; the deferrals now carry
+> forward as v2.10 production-tag blockers.
+
 > **Status:** Phase 4 closed with TWO signed v2.10 deferrals (Step 4 +
 > Step 6). User sign-off recorded 2026-05-10; this authorizes
-> `v2.9.0-rc1` Phase 5 execution only. Final `v2.9.0` remains blocked
-> until Firearms HEADING and KI EPUB meet the unchanged production
-> contracts.
+> `v2.9.0-rc1` Phase 5 execution only. Under the later Option 1
+> release model, Firearms HEADING and KI EPUB carry forward as v2.10
+> production-tag blockers.
 > Steps 1, 2, 3, 5 shipped; Steps 4 + 6 deferred to v2.10 with
 > sign-off recorded. Phase 4 Step 4 Path A was briefly shipped
 > (`5e58e6e`) and reverted (`cbd7fb4`) because the threshold tuning
@@ -80,13 +86,13 @@ These items moved to the v2.10 backlog from Phase 4:
 
 ## 5. Acceptance gate status
 
-Per `docs/PLAN_V2.9.md` §4 Acceptance Gate, before tagging final v2.9.0:
+Per the historical `docs/PLAN_V2.9.md` §4 Acceptance Gate:
 
 - [x] Adedeji p301 produces clean chunks. `qa_full_conversion.py --source-pdf` reports `TABLE_CORRUPTION=0`, `LOCALIZED_CORRUPTION=0`. **Met.**
 - [x] Combat p66 produces zero corrupted chunks. `LOCALIZED_CORRUPTION=0` after Step 3. **Met.** (Page is not "quarantined" per the original plan wording — instead, only the corrupted chunks are dropped at finalize. Image chunks remain. This is functionally equivalent and surgically smaller.)
-- [ ] Firearms HEADING ≥ 0.80. **Not met** — Firearms still FAILs the gate. Deferral to v2.10 (`OCR_PATH_HEADING_PROPAGATION`) signed off 2026-05-10 for `v2.9.0-rc1`; final `v2.9.0` remains blocked.
+- [ ] Firearms HEADING ≥ 0.80. **Not met** — Firearms still FAILs the gate. Deferral to v2.10 (`OCR_PATH_HEADING_PROPAGATION`) signed off 2026-05-10 for `v2.9.0-rc1`; carried forward as a v2.10 production-tag blocker.
 - [x] Adedeji `code_indentation_fidelity ≥ 0.90`. **Met** (cascade win from Step 2).
-- [ ] KI EPUB `UNIVERSAL_PASS`. **Not met** — deferred to v2.10 with explicit user sign-off recorded 2026-05-10; final `v2.9.0` remains blocked.
+- [ ] KI EPUB `UNIVERSAL_PASS`. **Not met** — deferred to v2.10 with explicit user sign-off recorded 2026-05-10; carried forward as a v2.10 production-tag blocker.
 - [x] No filename-specific production logic added.
 - [x] No negative test loosened. (Path A revert ensures the strict 0.80 HEADING gate stays unchanged.)
 - [x] `pytest tests/ -q` reports new test count (736 passed, was 685; +51 net new).
@@ -108,7 +114,7 @@ Per `docs/PLAN_V2.9.md` §4 Acceptance Gate, before tagging final v2.9.0:
 
 1. **Firearms HEADING deferral (Step 4).** Underlying defect: OCR-path heading propagation. Deferral to v2.10 as `OCR_PATH_HEADING_PROPAGATION` signed off 2026-05-10. Acceptance baseline = current 0.722 coverage. Strict gate stays `>= 0.80` global; Firearms continues to FAIL it until the OCR-path bug is fixed.
 2. **KI EPUB deferral (Step 6).** Deferral to v2.10 as `KI_EPUB_EXTRACTION_LANE_REWRITE` signed off 2026-05-10. Acceptance baseline metrics in `docs/archive/PLAN_V2.9__PHASE4.md` Step 6 for the v2.10 follow-up.
-3. **Phase 5 readiness.** With Steps 1, 2, 3, 5 closed and Steps 4 + 6 signed off as `v2.9.0-rc1` limitations, Phase 5 (broad reconversion + Qdrant migration + VLM enrichment + RC AFTER snapshot) became unblocked for RC execution. It was then attempted on 2026-05-10 and is currently blocked at Phase 5a by four conversion-time documents; see `docs/QUALITY_SNAPSHOT_2026-05-10_v2.9_phase5_attempt.md`. Final `v2.9.0` remains blocked by the two unchanged production contracts.
+3. **Phase 5 readiness.** With Steps 1, 2, 3, 5 closed and Steps 4 + 6 signed off as `v2.9.0-rc1` limitations, Phase 5 (broad reconversion + Qdrant migration + VLM enrichment + RC AFTER snapshot) became unblocked for RC execution. It was then attempted on 2026-05-10 and is currently blocked at Phase 5a by four conversion-time documents; see `docs/QUALITY_SNAPSHOT_2026-05-10_v2.9_phase5_attempt.md`. Under the later Option 1 release model, the two unchanged production contracts carry forward as v2.10 blockers.
 
 ## 8. Honest accounting (added 2026-05-09 after user challenged "are you overfitting?")
 

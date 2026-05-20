@@ -67,7 +67,7 @@ close-out)", `v2.9.0-rc1` is authorized with 8 signed deferrals:
 | 8 | Earthship_Vol1 | `B4B_FULL_DOC_PICTURE_DEDUP` (2026-05-11) | 1 / 287 | Marginal |
 
 User sign-off recorded 2026-05-11. Each row is a v2.10 production-tag
-blocker; `v2.9.0` final tag stays blocked until all 8 pass.
+blocker; no intermediate final `v2.9.0` tag is planned.
 
 ## 4. Per-document strict-gate state
 

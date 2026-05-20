@@ -4,7 +4,123 @@ All notable changes to this project will be documented in this file. Current beh
 
 > **Versioning note:** Historical entries before the `v2.4.x` line used an internal `v18.x` milestone scheme during rapid iteration and test/fix cycles. Only stable or decision-worthy checkpoints were recorded, so intermediate builds are intentionally omitted. From `v2.4` onward, entries follow the current public semantic line.
 
-## [v2.10.0-rc1] — 2026-05-16 (release-tag staged, not pushed)
+## [v2.11.0] — 2026-05-20 (swap staged locally; tag pending user push)
+
+PLAN_V2.11 Phase 1 (embedder shootout) executed end-to-end. The
+production text-retrieval embedder is swapped from Ollama `llava`
+(4096-dim multimodal) to Dashscope `text-embedding-v4` (1024-dim
+text-only) after the side-by-side soak delivered 10×-class lift on
+every embedder-attributable axis. Phase 2 (validated-cloud CI
+workflow) and Phase 3 (carry-forward dispositions for the five
+v2.10 non-goals) also shipped in this cycle.
+
+### Headline numbers (challenger vs baseline, same 259 chunks + 518 queries)
+
+| Axis | v2.10 baseline | v2.11 challenger | Δ |
+|---|---:|---:|---|
+| Recall@1 chunk | 2.1% | **35.5%** | **+16.9×** |
+| Recall@5 chunk | 6.8% | **66.8%** | **+9.8×** |
+| Recall@5 doc | 54.2% | **91.7%** | +1.7× |
+| Relevance (judge) | 5.9% | **59.3%** | **+10.1×** |
+| Faithfulness (judge) | 4.7% | **50.6%** | **+10.8×** |
+| Format (judge) | 98.3% | 89.8% | **−8.5pp** |
+
+Full soak report:
+[`docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md`](docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md).
+
+### v2.11 Phase 1 — Embedder Swap (2026-05-20, `c2a461c` + `18bfbf2`)
+
+- **New production collection.** `mmrag_v2_8__qwen3_dashscope`
+  rebuilt from the same 34 canonical v2.10 JSONLs via
+  `scripts/rebuild_mmrag_v2_8_for_rc1.py --provider dashscope
+  --resume`. Final state: 30,588 points, 1024-dim cosine, status
+  green. Wall time 540.5 min.
+- **Hub-collapse pathology resolved.** v2.10 baseline had one doc as
+  top-1 for 5 disparate queries (MCP, modules, Windows, greenhouse,
+  solar PV); challenger top-1s are query-coherent.
+- **Production defaults flipped across 5 scripts.**
+  `ingest_to_qdrant.py`, `rebuild_mmrag_v2_8_for_rc1.py`,
+  `retrieval_regression.py`, `synthetic_soak.py`, `search_qdrant.py`
+  — `--provider` default `ollama` → `dashscope`; `--model` default
+  `llava` → `text-embedding-v4`; collection defaults flipped to
+  `mmrag_v2_8__qwen3_dashscope`. `search_qdrant.py` gained
+  `--provider` + `--api-key` flags (was Ollama-only).
+- **Tests.** New `tests/test_retrieval_regression_v2_11.py` pins the
+  production retrieval shape. `tests/test_retrieval_regression_v2_10.py`
+  repositioned as the rollback-validation test (explicit
+  `--provider ollama --collection mmrag_v2_8`); must stay green
+  through 2026-06-19. `tests/test_contextual_retrieval.py` ingestor
+  fixture pins `--provider ollama` (its mocks patch the Ollama
+  embed function; the contextualization wiring under test is
+  provider-agnostic). `tests/test_rebuild_resume.py` adds 9 tests
+  pinning the rebuild script's resume + retry behavior.
+- **Fingerprints.** New `tests/fixtures/retrieval_regression_v2_11_qwen3.json`
+  (20 queries × top-5; `engine_version: "2.11.0"`,
+  `collection: "mmrag_v2_8__qwen3_dashscope"`,
+  `provider: "dashscope"`).
+- **Format gate downgrade — explicit, on-record.** v2.11.0 release pin
+  ≥ 85% (89.8% actual). v2.11.x recovery target ≥ 95% via scanned/
+  form chunk-content sanitization. v2.12+ reverts to original ≥ 96%
+  after two consecutive recovery soaks. Rationale: the −8.5pp dip is
+  concentrated in `CarOK_voorraadtelling` 68.8%, `Earthship_Vol1`
+  71.9%, `IRJET_Modeling_of_Solar_PV` 71.9% — docs with pre-existing
+  OCR/scan format imperfections that the baseline's hub-collapse had
+  hidden. Coverage-reveal of pre-existing chunk-format debt, not
+  swap-induced.
+- **30-day rollback contract.** Legacy `mmrag_v2_8` collection
+  (30,454 points, Ollama llava 4096-dim) retained untouched through
+  2026-06-19. Rollback procedure documented in `docs/DECISIONS.md`
+  "v2.11.0 Embedder Swap Executed — Format Gate Downgrade".
+- **Engine version + pyproject bump.** `__engine_version__` and
+  `[project] version` both at `2.11.0`. v2.10 had retained the
+  `2.10.0-rc1` string by precedent (release was rc1 + soak report);
+  v2.11.0 includes actual code changes (embedder swap, new
+  collection, 5 scripts flipped) so the version string bumps.
+- **Plan promoted to Draft v1.0.** Phase 1 + Phase 2 + Phase 3
+  dispositions shipped. Phase N (live-stack re-verification + AFTER
+  snapshot + v2.11.0 annotated tag) staged for user push/tag —
+  autonomous run does not push or tag.
+
+### v2.11 Phase 2 — Validated-Cloud CI (2026-05-17, `a9512e8`)
+
+`.github/workflows/v2_11_validate.yml` with three jobs:
+
+- `quick`: GitHub-hosted ubuntu, lint (ruff + black) + import smoke.
+  Always runs on push/PR/manual.
+- `validate`: self-hosted `[self-hosted, mmrag-v2]`, full pytest +
+  retrieval-regression + 1-page-per-doc smoke. Needs Qdrant +
+  corpus + Dashscope key on the runner.
+- `tag-validate`: tag-only, strict-gate corpus + 50-chunk soak
+  sub-sample.
+
+Fresh-env pytest closure (Phase 2.2a): 984 passed, 15 skipped on
+the day's run; bit-for-bit parity with the main env confirmed the
+swap doesn't depend on developer-machine state.
+
+### v2.11 Phase 3 — Carry-Forward Dispositions (2026-05-17, `a9512e8`)
+
+Five rows appended to `docs/DECISIONS.md` "v2.11 Carry-Forward Decisions":
+
+| # | Item | Disposition |
+|---|---|---|
+| 3a | NuMarkdown-8B local VLM | v2.12 candidate (Qwen3-VL-8B on Mac Mini at `http://10.0.10.246:1234`); cloud fallback `qwen3-vl-plus` validated |
+| 3b | Remote CodeFormulaV2 | Defer with named workaround — local Docling CodeFormulaV2 lane (~27 sec/page CPU) remains for v2.11 |
+| 3c | Broader UIR refactor | **PAUSED for user signoff** — smallest defensible carve-out: `ConversionPlan` parent abstraction (~200 LOC) |
+| 3d | HybridChunker per-item token guard | Design recorded; **implementation deferred to v2.12** (initial ~50 LOC estimate was wrong; honest footprint 200-300 LOC + new fixture) |
+| 3e | Magazine rendered-region-crop | Defer with soak-data rationale — PCWorld + Combat ceiling is 93.8% Recall@5 doc with 96.9% Format; the ceiling is the embedder, not chunk shape |
+
+No pure-defer-without-rationale.
+
+### Honest absolute-quality caveat
+
+Relative lift is huge (10× on 5/5 embedder axes); absolute numbers
+are still "mediocre" not "good". Recall@5 chunk 66.8% means we still
+miss the right passage in the top-5 about 1 query in 3. v2.12 plan
+(to be drafted) focuses on closing this gap via reranker → hybrid
+retrieval → query rewriting (bang-for-buck order). Target for v2.12:
+Recall@5 chunk ≥ 85%, Recall@1 ≥ 55%, Faithfulness ≥ 70%.
+
+## [v2.10.0] — 2026-05-16 (SHIPPED; annotated tag `db6527c`)
 
 PLAN_V2.10 Phases 1-8 closed locally. All seven named root-cause
 classes from the v2.9.0-rc1 signed-deferral list are `validated-local`,

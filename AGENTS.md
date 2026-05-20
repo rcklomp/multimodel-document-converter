@@ -86,11 +86,11 @@ Companion docs:
 1. Start sessions with the indexed handoff path:
    - `docs/PROJECT_STATUS.md`
    - `docs/README.md`
-   - `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` (current canonical baseline; v2.10.0 SHIPPED)
-   - `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md` (soak findings; retrieval-quality known-limitation feeding v2.11)
-   - `docs/PLAN_V2.11.md` (active v2.11 plan; Draft v0.1)
-   - `docs/PLAN_V2.10.md` (v2.10 execution history — Phases 1-8 SHIPPED 2026-05-16)
-   - `docs/PLAN_V2.9.md` (v2.9 execution history through the rc1 scope cut, if present)
+   - `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md` (current canonical baseline; v2.11 Phase 1 challenger soak — 10× lift on Recall@1/Relevance/Faithfulness)
+   - `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` (v2.10 strict-gate baseline; unchanged in v2.11 — retrieval-side swap only)
+   - `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md` (v2.10 soak; baseline for v2.11 Phase 1 delta column)
+   - `docs/PLAN_V2.11.md` (v2.11 plan; Draft v1.0 — Phase 1 swap staged 2026-05-20, tag pending user push)
+   - `docs/PLAN_V2.10.md` (v2.10 execution history — closed; tag `v2.10.0` on `db6527c` 2026-05-16)
 2. Use the three-layer documentation model:
    - Layer 0 contracts: this file, `CLAUDE.md`, `docs/AGENT_GOVERNANCE.md`, `docs/DECISIONS.md`, `docs/QUALITY_GATES.md`, `docs/ARCHITECTURE.md`, SRS.
    - Layer 1 current state: `docs/PROJECT_STATUS.md`, dated quality snapshots.
@@ -103,8 +103,8 @@ Companion docs:
 
 ## 📍 5. CURRENT STATE & DIRECTIVES (May 2026)
 
-**Engine version:** `v2.10.0-rc1` string retained in `src/mmrag_v2/version.py` and `pyproject.toml`; **release tag is `v2.10.0` SHIPPED 2026-05-16 on commit `db6527c`** (annotated tag pushed to GitHub). Schema version `2.7.0` — chunk-shape contract unchanged since v2.7.
-**Phase:** `v2.10.0` is the v2.10 ship state: PLAN_V2.10 Phases 1-8 closed; Qdrant `mmrag_v2_8` rebuilt to `status: green`, `points_count: 30,454`. All eight v2.9.0-rc1 signed deferrals are closed and corpus-wide re-verified; no v2.10 deferrals were created. The release is explicitly framed in its annotated tag as a **chunker baseline** (Format 98.3% per the v2.10 soak; Recall@1 2.1% on llava is documented as a v2.11 Phase 1 retrieval-quality concern, not a v2.10 chunker regression — see `docs/DECISIONS.md` "v2.10 chunker-quality ceiling"). Current canonical baseline: `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` + `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md`. Predecessors (kept for delta): `docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md` (v2.9.0-rc1 ship state, tag on `3e06d1b`) and `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md` (v2.8.0 SHIPPED reference).
+**Engine version:** `v2.11.0` in `src/mmrag_v2/version.py` and `pyproject.toml`. Annotated tag `v2.11.0` is **staged but NOT pushed** by the autonomous run — user pushes/tags after live-stack re-verification. Predecessor tag: `v2.10.0` SHIPPED 2026-05-16 on commit `db6527c`. Schema version `2.7.0` — chunk-shape contract unchanged since v2.7.
+**Phase:** `v2.11.0` is the v2.11 ship state: Phase 1 swapped the production text-retrieval embedder from Ollama `llava` (4096-dim multimodal) to Dashscope `text-embedding-v4` (1024-dim text-only) after the shootout delivered 10× lift on Recall@1, Relevance, and Faithfulness vs the v2.10 baseline. Production Qdrant collection is now `mmrag_v2_8__qwen3_dashscope` (30,588 points, status green). Legacy `mmrag_v2_8` retained through 2026-06-19 for 30-day rollback (both regression tests must stay green during the window). Phase 2 (validated-cloud CI workflow) and Phase 3 (carry-forward dispositions) also shipped. Format judge axis temporarily downgraded for v2.11.0 to ≥85% (89.8% actual; coverage-reveal of pre-existing OCR/scan format imperfections in scanned/form docs that the baseline's hub-collapse had hidden); v2.11.x recovery target ≥95%, v2.12 reverts to original ≥96%. Current canonical baseline: `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md` (v2.11 Phase 1 challenger soak — production). Predecessors (kept for delta): `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` + `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md` (v2.10 ship state); earlier snapshots are historical.
 
 **Active architecture decisions:**
 - PDF extraction pathway is determined by structural integrity pre-flight tests, not semantic profile. See `docs/DECISIONS.md` — "Structural Pathology over Semantic Profiling".
@@ -118,35 +118,45 @@ Companion docs:
 
 **QA policy:** All profiles use the standard 10% token variance tolerance. See `docs/QUALITY_GATES.md`.
 
-### Priority TODOs (Open — v2.11 cycle)
-Source: `docs/PLAN_V2.11.md` (Draft v0.1). v2.10 is SHIPPED (`v2.10.0`
-tag on `db6527c`, 2026-05-16). The next cycle's open items:
+### Priority TODOs (Open — v2.11.x recovery + v2.12 cycle)
+Source: `docs/PLAN_V2.11.md` (Draft v1.0). v2.11.0 swap is staged
+locally (commits `18bfbf2` + `c2a461c`); user pushes/tags after live-
+stack re-verification. The next cycle's open items:
 
-1. **Embedder shootout (v2.11 Phase 1).** Qwen3-Embedding-4B challenger
-   vs Ollama `llava` 4096-dim baseline. Side-by-side soak comparison.
-   Decision row in `docs/DECISIONS.md` after Phase 1. Driven by the
-   v2.10 soak finding Recall@1 = 2.1%.
-2. **Validated-cloud checkpoint (v2.11 Phase 2).** Move from
-   `validated-local` to a CI-on-self-hosted-runner workflow that runs
-   pytest + strict-gate + smoke + retrieval-regression on every push
-   to `main` and every annotated tag.
-3. **Carry-forward non-goal dispositions (v2.11 Phase 3).** Five rc1
-   non-goals (NuMarkdown reachability, remote CodeFormulaV2, broader
-   UIR refactor, HybridChunker per-item guard, magazine
-   rendered-region-crop) — each gets an explicit decision row in
-   `docs/DECISIONS.md` as in-scope sub-phase or formal further-defer.
-4. ~~Rotate the leaked Dashscope API key provider-side.~~ **Done
-   2026-05-16** — revoked at Alibaba Cloud Model Studio.
-5. ~~Push the staged `v2.10.0-rc1` annotated tag.~~ **Done 2026-05-16**
-   — both `v2.10.0-rc1` (`82c3639`) and `v2.10.0` (`db6527c`) are
-   public on GitHub.
+1. ~~**Embedder shootout (v2.11 Phase 1).**~~ **Done 2026-05-20** —
+   Dashscope `text-embedding-v4` swapped in; 10× lift on Recall@1.
+2. ~~**Validated-cloud checkpoint (v2.11 Phase 2).**~~ **Done
+   2026-05-17** — CI workflow at `.github/workflows/v2_11_validate.yml`
+   (GitHub-hosted lint/quick + self-hosted full validate).
+3. ~~**Carry-forward non-goal dispositions (v2.11 Phase 3).**~~ **Done
+   2026-05-17** — five rows in `docs/DECISIONS.md` "v2.11 Carry-
+   Forward Decisions"; 3a/3b/3e documented dispositions, 3c PAUSED
+   for user signoff, 3d design recorded + implementation deferred to
+   v2.12.
+4. **v2.11.x Format recovery (NEW carry-forward).** Scanned/form
+   chunk-content sanitization for `CarOK_voorraadtelling` 68.8%,
+   `Earthship_Vol1` 71.9%, `IRJET_Modeling_of_Solar_PV` 71.9%.
+   Acceptance: next soak Format ≥95% without regressing the other
+   five axes. Effort: ~1-2 days for the three named docs.
+5. **30-day rollback window (NEW carry-forward).** Legacy `mmrag_v2_8`
+   collection + `test_retrieval_regression_v2_10.py` retained
+   through 2026-06-19. Both regression tests must stay green during
+   the window. Drop date: 2026-06-19 (or sooner with user signoff).
+6. **v2.12 plan to be drafted (NEW).** Per Phase 1 outcome analysis,
+   absolute retrieval quality is still mediocre (Recall@5 chunk 66.8%
+   is "mediocre", not "good"). v2.12 should focus on closing this
+   gap via reranker → hybrid retrieval → query rewriting → per-doc-
+   class chunking, in that bang-for-buck order. Target: Recall@5 ≥
+   85%, Recall@1 ≥ 55%, Faithfulness ≥ 70%.
 
-Existing non-goals remain outside v2.10 unless Phase 8 explicitly
-promotes them: local VLM comparison (NuMarkdown-8B reachability),
-remote CodeFormulaV2 inference target, broader UIR refactor,
-HybridChunker per-item token guard, rendered-region-crop magazine
-image quality, and a broader EPUB engine rewrite beyond the Phase 7
-synthetic-pagination lane.
+Existing non-goals carried forward to v2.12+: 3a NuMarkdown-8B local
+VLM (proposed replacement: Qwen3-VL-8B on Mac Mini at
+`http://10.0.10.246:1234`), 3b remote CodeFormulaV2 (upstream-blocked
+on Docling 2.87+), 3c broader UIR refactor (PAUSED for user signoff
+on `ConversionPlan` parent-class carve-out scope), 3d HybridChunker
+per-item token guard (design recorded; implementation deferred), 3e
+magazine rendered-region-crop (defer with soak-data rationale — the
+ceiling is the embedder, not chunk shape).
 
 ### Recently Completed (Do Not Reopen)
 1. `--force-ocr` override is implemented.

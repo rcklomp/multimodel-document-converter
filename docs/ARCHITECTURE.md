@@ -1,8 +1,10 @@
 # 🏗️ Universal Multi-Format RAG Pipeline Architecture
 
-**Engine version:** v2.8.0 (schema version 2.7.0 — de-aliased in v2.8; chunk-shape contract unchanged since v2.7).
+**Engine version:** v2.11.0 (schema version 2.7.0 — chunk-shape contract unchanged since v2.7; v2.8 → v2.9 → v2.10 → v2.11 are all behavioral / quality-bar changes, not schema changes).
 **Date:** May 2026
-**Status:** PRODUCTION — v2.8.0 is current (tag `645ab2b`, shipped 2026-05-04).
+**Status:** PRODUCTION — v2.11.0 is current (commit `c2a461c`; annotated tag staged for user push). Predecessors: `v2.10.0` (2026-05-16, `db6527c`), `v2.9.0-rc1` (2026-05-12, `3e06d1b`), `v2.8.0` (2026-05-04, `645ab2b`).
+**Policy Update (v2.11.0):** Production text-retrieval embedder swapped from Ollama `llava` (4096-dim multimodal) to Dashscope `text-embedding-v4` (1024-dim text-only) after the Phase 1 shootout delivered 10× lift on Recall@1, Relevance, and Faithfulness vs the v2.10 baseline. Production Qdrant collection moved from `mmrag_v2_8` to `mmrag_v2_8__qwen3_dashscope` (30,588 points, status green). Legacy `mmrag_v2_8` retained through 2026-06-19 for 30-day rollback. Image chunks now embed via their VLM description text (dashscope is text-only); the VLM enrichment lane itself is unchanged. Format gate temporarily downgraded to ≥85% for v2.11.0, ≥95% for v2.11.x recovery, reverts to ≥96% in v2.12. See `docs/DECISIONS.md` "v2.11 Phase 1 Embedder Shootout Outcome" + "v2.11.0 Embedder Swap Executed — Format Gate Downgrade" and `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md`.
+**Policy Update (v2.10.0):** Phases 1-8 of PLAN_V2.10 closed the seven v2.9.0-rc1 signed deferrals corpus-wide. Strict-gate (`scripts/qa_full_conversion.py --source-pdf --allow-warnings`) reports 34 PASS / 0 WARN / 0 FAIL across the 34-doc canonical corpus. v2.10 framed itself as a chunker baseline release (Format 98.3% per soak; Recall@1 2.1% documented as retrieval-quality known limitation feeding v2.11). See `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md`.
 **Policy Update (v2.8.0):** PLAN_V2.8 production gaps closed (Workstreams B, C, F + adapter-invocation static guard). Form acceptance class added (scanned forms / invoices route to `FORM_AUDIT_PASS` lane). Schema validator `_strip_c0_controls` is keyword-aware (replace C0/DEL runs with `; ` or ` ` instead of strip). Adapter-invocation guard (`tests/test_pdf_conversion_plan.py::test_no_raw_converter_invocation_outside_adapter`) blocks raw `self._converter.convert(...)` outside the adapter. See `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md`.
 **Policy Update (v2.7.0):** Image extraction uses Docling layout model for all document types (PyMuPDF `page.get_images()` tested and reverted). 4 multimodal validation layers added: CorruptionInterceptor, POS Boundary Logic, Vision-Gated Hierarchy, Content-Type Classification. Encoding corruption uses heal-over strategy (keep HybridChunker + force refiner). TOC-based heading hierarchy via PyMuPDF bookmarks + content-based magazine TOC fallback. See `docs/DECISIONS.md`.
 **Policy Update (v2.5.0):** PDF extraction pathway is determined by **structural integrity tests** on the byte-stream, not by semantic content type. Three pre-flight checks (line-break health, visual-digital delta, geometry error rate) drive pathway decisions independently of the semantic profile.
@@ -17,7 +19,7 @@
 
 ## 1. Executive Summary
 
-This document describes the current MM-Converter v2.8.0 architecture for robust multimodal ingestion across supported formats. (Section headers below tagged "(v2.7.0)" reflect when individual subsystems were introduced; they are still accurate descriptions of current behavior unless explicitly noted.)
+This document describes the current MM-Converter v2.11.0 architecture for robust multimodal ingestion across supported formats. (Section headers below tagged "(v2.7.0)" reflect when individual subsystems were introduced; they are still accurate descriptions of current behavior unless explicitly noted. v2.11.0 changed the *retrieval-side* embedder only — text/image extraction, chunking, validation, and enrichment lanes are unchanged from v2.10.)
 
 ### Problem Statement
 

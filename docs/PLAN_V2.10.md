@@ -1,8 +1,10 @@
 # Plan: v2.10 — Close the v2.9.0-rc1 Signed Deferrals and Ship the Next Production Baseline
 
-**Status:** Phases 1-7 `validated-local` (2026-05-15); Phase 8
-`implemented` (2026-05-16, pending the AFTER snapshot commit that
-moves it to `validated-local`).
+**Status:** **CLOSED.** All eight phases SHIPPED 2026-05-16; annotated
+tag `v2.10.0` on commit `db6527c` is public on GitHub. This document
+is retained as v2.10 execution history; current plan is
+`docs/PLAN_V2.11.md` (Draft v1.0; Phase 1 swap staged 2026-05-20 on
+commit `c2a461c`).
 
 Phase 8 closes the v2.10 release-prep workstream: corpus-wide
 strict-gate re-verification on the 34-doc canonical corpus

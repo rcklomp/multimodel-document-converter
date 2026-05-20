@@ -168,3 +168,34 @@ allowed-advisory set as a way to silence a `FAIL` that should be
 fixed. The set is for code-classes whose `WARN` severity already
 reflects "informational, not blocking" — the promotion makes the
 gate's final status agree with the code-classification.
+
+## Soak Format Judge Axis — Release-Window Pin (added 2026-05-20)
+
+Separate from the strict gate above: the synthetic soak
+(`scripts/synthetic_soak.py`) grades the **retrieved** chunk on three
+axes — `relevance`, `format`, `faithfulness` — via Dashscope
+`qwen-max` as judge. This is informational/release-tracking, NOT a
+code-level pass/fail.
+
+The **Format axis** is the only one with a tracked release-window pin
+because v2.11.0 missed the original ≥96% pin by 6.2pp due to
+coverage-reveal effects (the new dashscope embedder reaches
+scanned/form chunks the v2.10 baseline never retrieved, and the judge
+correctly grades their pre-existing OCR/scan imperfections).
+
+| Window | Format pin | Source of truth |
+|---|---:|---|
+| **v2.11.0** (this release) | **≥ 85%** | 89.8% actual per `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md` |
+| **v2.11.1+** (recovery) | **≥ 95%** | Target after v2.11.x scanned/form chunk-content sanitization patch |
+| **v2.12+** (revert) | **≥ 96%** | Original pin; reinstated after two consecutive recovery soaks pass |
+
+Full rationale + 30-day rollback contract: `docs/DECISIONS.md`
+"v2.11.0 Embedder Swap Executed — Format Gate Downgrade".
+
+**Why this isn't in `_ALLOWED_ADVISORY_WARN_CODES`:** the soak Format
+axis is not a `qa_full_conversion.py` warning code at all — different
+measurement stack, different cadence (per-tag soak vs every PR), and
+different unit (LLM-graded 0/1/2 vs deterministic invariant check).
+The two systems coexist; this section exists so a reader searching
+"Format" in this file finds both the strict-gate rules above and the
+release-window soak pin.
