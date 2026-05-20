@@ -13,8 +13,8 @@ This file provides guidance to Claude Code when working with this repository.
 8. `docs/ARCHITECTURE.md`
 9. `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` (current canonical baseline; v2.10.0 SHIPPED)
 10. `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md` (v2.10 soak — Format 98.3%, Recall@1 2.1%; retrieval-quality known-limitation feeding v2.11)
-11. `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md` (v2.11 Phase 1 challenger soak — Recall@1 35.5% (+16.9×), Format 89.8% (−8.5pp); user sign-off pending on swap)
-12. `docs/PLAN_V2.11.md` (active v2.11 plan; Draft v0.5 — Phase 1 halted for user decision)
+11. `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md` (v2.11 Phase 1 challenger soak — Recall@1 35.5% (+16.9×), Format 89.8% (−8.5pp); v2.11.0 production soak baseline)
+12. `docs/PLAN_V2.11.md` (active v2.11 plan; Draft v1.0 — swap executed 2026-05-20, Phase N staged for user push/tag)
 13. `docs/PLAN_V2.10.md` (v2.10 execution history — Phases 1-8 SHIPPED 2026-05-16, tag `v2.10.0` on `db6527c`)
 14. `docs/PLAN_V2.9.md` (v2.9 execution history through the rc1 scope cut, if present)
 15. `docs/archive/SRS_Multimodal_Ingestion_V2.5.md`

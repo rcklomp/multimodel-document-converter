@@ -1,9 +1,17 @@
-"""v2.10 retrieval-regression pytest harness.
+"""v2.10 retrieval-regression pytest harness (legacy lane / rollback validation).
 
 Wraps `scripts/retrieval_regression.py` so the v2.10.0-rc1 retrieval
-shape (top-K results per query against `mmrag_v2_8`) is a pinned
-regression contract. The script writes/verifies the tracked fingerprint
-at `tests/fixtures/retrieval_regression_v2_10.json`.
+shape (top-K results per query against the legacy `mmrag_v2_8`
+collection built with Ollama `llava` 4096-dim) is a pinned regression
+contract. The script writes/verifies the tracked fingerprint at
+`tests/fixtures/retrieval_regression_v2_10.json`.
+
+**Role since v2.11.0 (2026-05-20):** the production embedder swapped
+to Dashscope `text-embedding-v4` against `mmrag_v2_8__qwen3_dashscope`
+(see `test_retrieval_regression_v2_11.py`). This test now validates
+the **30-day rollback lane** — the legacy llava collection is retained
+through 2026-06-19 so a fast rollback path exists. Both tests must
+pass on the live local stack during the rollback window.
 
 Two services are required for execution:
   - Qdrant on http://localhost:6333 with the `mmrag_v2_8` collection
@@ -11,8 +19,8 @@ Two services are required for execution:
 
 Both are skipped (not failed) when unreachable so a clean checkout
 without the runtime still completes pytest. The Phase 8 release
-contract requires this test to PASS on a live local stack before any
-v2.10.x tag push.
+contract required this test to PASS on a live local stack before the
+v2.10.0 tag push; the v2.11.0 contract requires it through 2026-06-19.
 
 Drift semantics (per `scripts/retrieval_regression.py`):
   - STRICT pass: top-3 chunk_ids match the baseline exactly.
@@ -21,10 +29,11 @@ Drift semantics (per `scripts/retrieval_regression.py`):
     failing).
   - FAIL: top-1 doc_id changed for any query.
 
-To refresh the fingerprint after an intentional retrieval change
-(rebuild, embedder swap, etc.):
+To refresh the legacy fingerprint after an intentional retrieval change
+in the rollback lane:
 
-  conda run -n mmrag-v2 python scripts/retrieval_regression.py --capture
+  conda run -n mmrag-v2 python scripts/retrieval_regression.py --capture \\
+      --provider ollama --collection mmrag_v2_8
 
 Then commit the updated `retrieval_regression_v2_10.json`.
 """
@@ -103,7 +112,10 @@ def test_retrieval_regression_against_fingerprint(capsys) -> None:
     promotion to a final v2.10.0 tag.
     """
     proc = subprocess.run(
-        [sys.executable, str(SCRIPT)],
+        [sys.executable, str(SCRIPT),
+         "--provider", "ollama",
+         "--collection", COLLECTION,
+         "--fixture", str(FIXTURE)],
         cwd=str(REPO_ROOT),
         text=True,
         capture_output=True,

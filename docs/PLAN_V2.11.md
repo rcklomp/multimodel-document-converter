@@ -1,22 +1,22 @@
 # Plan: v2.11 — Embedder shootout, validated-cloud, and the rc1/rc2 non-goal closure
 
-**Status:** **Draft v0.5** — Phase 1 executed end-to-end
-(2026-05-20). Challenger collection `mmrag_v2_8__qwen3_dashscope`
-rebuilt (30,588 points, 1024-dim, status green); challenger
-fingerprint captured; challenger soak completed (518/518 judged).
-**Phase 1 result: 5/6 floors crushed with 10× lift on retrieval +
-relevance + faithfulness, but Format pin missed by −6.2pp**
-(see §"Phase 1 outcome" below for full numbers). **Per the
-contract-violation-mode rule** the literal-gate read is "fails
-Format → no-swap"; per the magnitude read "10× recall lift
-dominates Format coverage-reveal." **Both reads are documented;
-the actual production-default flip is deferred to user sign-off.**
-Phase 2 (validated-cloud CI workflow + fresh-env pytest) landed.
-Phase 3 dispositions landed in DECISIONS.md. Promotion to Draft v1.0
-happens when the user decides swap vs no-swap and the v2.11.0 tag is
-cut.
+**Status:** **Draft v1.0** — **SWAP EXECUTED** (2026-05-20). User
+signed off on the swap. Production defaults across the data-path
+scripts (`ingest_to_qdrant.py`, `rebuild_mmrag_v2_8_for_rc1.py`,
+`retrieval_regression.py`, `synthetic_soak.py`, `search_qdrant.py`)
+flipped to Dashscope `text-embedding-v4` against
+`mmrag_v2_8__qwen3_dashscope`. Legacy `mmrag_v2_8` (Ollama llava)
+retained for 30-day rollback through 2026-06-19. Format gate
+downgraded for v2.11.0 to ≥ 85% (89.8% actual), explicitly recorded
+in `docs/DECISIONS.md` §"v2.11.0 Embedder Swap Executed — Format
+Gate Downgrade"; v2.11.x patch target ≥ 95%, v2.12 reverts to
+original ≥ 96% pin after two consecutive recovery soaks. Phase 2
+(validated-cloud CI) + Phase 3 dispositions shipped. Phase N
+(re-verification, AFTER snapshot, v2.11.0 tag) **staged for user
+push/tag** — autonomous run does not push or tag.
 
 Predecessor versions:
+- Draft v0.5 (2026-05-20): Phase 1 executed; halted for user swap/no-swap decision.
 - Draft v0.4 (2026-05-17): Path B cloud-first finalized; spend cap $25; default no-swap if borderline.
 - Draft v0.3 (2026-05-16): Qwen 3.6 Max Preview audit-driven refinements.
 - Draft v0.2 (2026-05-16): post-soak data folded in; Phase 0 closed.
@@ -354,8 +354,14 @@ validated-cloud CI workflow + Phase 3 dispositions, Phase 1
 infrastructure remains in place, and the swap returns as v2.12
 Phase 1 with format-recovery work as a prerequisite.
 
-**Halted for user decision** — see §6 Decision log row "v2.11 Phase 1
-embedder swap" (to be populated upon decision).
+**User decision (2026-05-20):** **SWAP executed.** User signed off on
+the Format gate downgrade. Production defaults flipped; legacy lane
+retained for 30 days through 2026-06-19. Full action list in
+`docs/DECISIONS.md` §"v2.11.0 Embedder Swap Executed — Format Gate
+Downgrade (2026-05-20)".
+
+**Carry-forward to v2.11.x:** Format recovery patch for scanned/form
+chunk-content sanitization, target ≥ 95% on next soak.
 
 ---
 
@@ -521,6 +527,7 @@ These remain non-goals for v2.11 unless explicitly promoted:
 | 2026-05-17 | **Promoted to Draft v0.3** after audit by Qwen 3.6 Max Preview (AUDIT PASS across all six quality dimensions, six low-priority refinements). Applied: (1) `[D-1/D-2]` test-count reconciliation — v2.10 AFTER snapshot §6 gets a new row for the 973 → 975 transition (the +2 retrieval-regression pins landed after Phase 8 close, same day). (2) `[C-1]` Phase N gains explicit Risk + Cost blocks. (3) `[C-2]` Phase 2 gains an "Independent of Phase 1" sub-section clarifying that validated-cloud CI runs against whichever embedder is current and can start in parallel with Phase 1's rebuild. (4) `[C-3]` Phase N approach #5 now documents version-string handling (bump or retain following v2.10.0's pattern). (5) `[C-4]` Phase 1 approach gains a new step 0 — `scripts/rebuild_mmrag_v2_8_for_rc1.py` `--resume` flag + retry-on-URLError wrapper, as defensive ~30 min of work to prevent repeating the v2.10 Phase 8 mid-rebuild recovery. (6) `[S-1]` §2b section reference fixed to name PLAN_V2.10 §2b/§2c/§2d explicitly. Auditor's `[S-2]` ("Phase N" naming) acknowledged as intentional; no change. No data-accuracy or architectural concerns surfaced. |
 | 2026-05-17 | **Promoted to Draft v0.4** — autonomous-execution signoff. User answered the 7-item pre-flight checklist and authorized `.claude/settings.local.json` for unattended runs. Substantive changes: (1) Phase 1 architecture finalized as **Path B cloud-first** — Dashscope `text-embedding-v3`/v4 as the challenger; LM Studio + MLX local-hosting deferred to v2.12 because `mlx-community/Qwen3-Embedding-8B-mxfp8` fails LM Studio's loader (missing `lm_head.weight`, expected for chat/completion models but not embedders). Mac Mini endpoint `http://10.0.10.246:1234` documented for v2.12. (2) Spend cap raised $5 → $25 for Phase 1 soak. (3) Default disposition on borderline Phase 1 outcome is **no-swap** (user explicitly hedged for the clear-loss scenario). (4) Phase 2 scope expanded — author CI workflow YAML (2b) autonomously; halt before pushing. (5) Phase 3 dispositions converted from pure-defer to concrete alternatives: 3a Qwen3-VL-8B-on-Mini as v2.12 VLM candidate; 3b local Docling CodeFormulaV2 as v2.11 workaround; 3c PAUSED (smallest carve-out is `ConversionPlan` parent class); 3d opt-in `--strict-hybrid-guard` flag built in v2.11 (default off, preserves v2.10 chunker); 3e magazine rendered-region-crop deferred with soak-data rationale (embedder is the ceiling). (6) Halt triggers updated: Qdrant/Dashscope unreachable >15 min halts; Ollama on M1 expected absent and is not a halt condition. |
 | 2026-05-20 | **Promoted to Draft v0.5** — Phase 1 executed end-to-end. Challenger collection `mmrag_v2_8__qwen3_dashscope` rebuilt (30,588 points, 1024-dim cosine, status green; wall time 540.5 min via `--provider dashscope --resume`). Challenger fingerprint captured (`tests/fixtures/retrieval_regression_v2_11_qwen3.json`). Challenger soak completed end-to-end (518/518 judged; report at `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md`). **Phase 1 result: 5/6 floors crushed with 10× lift; Format pin missed by −6.2pp.** Specifics: Recall@1 chunk 2.1%→35.5% (+16.9×, clears stretch ≥30%); Recall@5 chunk 6.8%→66.8% (+9.8×); Recall@5 doc 54.2%→91.7%; Relevance 5.9%→59.3% (+10.1×); Faithfulness 4.7%→50.6% (+10.8×); Format 98.3%→89.8% (below ≥96% pin). v2.10 hub-collapse pathology (one doc as top-1 for 5 disparate queries) is gone in the challenger. Format dip concentrated in scanned/form docs (`CarOK_voorraadtelling` 68.8%, `Earthship_Vol1` 71.9%, `IRJET_Modeling_of_Solar_PV` 71.9%) — coverage-reveal of pre-existing OCR/scan format imperfections that the baseline's hub-collapse had hidden, not a swap-introduced regression. Per the make-the-failing-run-pass rule, the Format gate is **not** weakened to declare a clean swap; the production-default flip is **deferred to user sign-off**. Both swap-recommended (with Format pin downgraded for v2.11.0 + v2.11.x recovery task) and no-swap (literal gate read) interpretations are recorded above. `scripts/synthetic_soak.py` extended with `--collection`/`--provider`/`--embed-model` flags. `scripts/retrieval_regression.py` extended similarly. Open question 6 closed (user already signed off in Draft v0.4). New open question 7 added below. |
+| 2026-05-20 | **Promoted to Draft v1.0** — **swap executed**. User sign-off on swap with explicit Format gate downgrade. Production defaults flipped across 5 scripts (`ingest_to_qdrant.py`, `rebuild_mmrag_v2_8_for_rc1.py`, `retrieval_regression.py`, `synthetic_soak.py`, `search_qdrant.py`) — `--provider` default ollama → dashscope; `--model` default llava → text-embedding-v4; collection defaults flipped to `mmrag_v2_8__qwen3_dashscope`. `search_qdrant.py` gained provider + api-key flags (was Ollama-only). `tests/test_retrieval_regression_v2_10.py` repositioned as rollback-validation test (explicit `--provider ollama --collection mmrag_v2_8`). New `tests/test_retrieval_regression_v2_11.py` is the production retrieval-shape pin. Fingerprint `retrieval_regression_v2_11_qwen3.json` engine_version promoted `2.11.0-candidate` → `2.11.0`. Format gate downgraded explicitly and on-record: v2.11.0 ≥ 85% (89.8% actual), v2.11.1+ ≥ 95% recovery target, v2.12 reverts to original ≥ 96% after two consecutive recovery soaks. 30-day rollback contract: legacy `mmrag_v2_8` retained through 2026-06-19. v2.11.x format recovery for scanned/form docs is the new carry-forward. Open question 7 closed (swap). New open questions: none. Phase N (re-verification + AFTER snapshot + v2.11.0 tag) staged for user push/tag — autonomous run does not push or tag. |
 
 ---
 
@@ -534,8 +541,8 @@ Status as of Draft v0.2 (2026-05-16). Answered questions are kept for traceabili
 4. **CI runner topology.** Open. Self-hosted on the same network as Qdrant + Ollama is the recommended path (2b in Phase 2); GitHub-hosted with private data bucket (2c) deferred to v2.12 unless 2b proves insufficient.
 5. ~~**EPUB engine.**~~ **Resolved 2026-05-16.** Soak data shows EPUB recall is embedder-bound (KI dominates ChatGPT because llava can't disambiguate, not because the EPUB lane is broken). Phase 4 deferred to v2.12+. The marker workaround stays.
 6. ~~**Phase 1 start gate.**~~ **Resolved 2026-05-17 (Draft v0.4)** — user gave autonomous-execution signoff. Phase 1 executed end-to-end on 2026-05-20.
-7. **Phase 1 outcome: swap or no-swap.** Open as of 2026-05-20. Challenger crushes 5/6 floors with 10× lift but misses the Format ≥96% pin by 6.2pp (89.8%). Per the make-the-failing-run-pass rule the Format gate is not weakened. User decides between: (a) **swap recommended** — Format pin downgraded to ≥85% for v2.11.0, Format recovery becomes v2.11.x task targeting ≥95% (chunk-content sanitization for scanned/form profile); (b) **no-swap** — literal gate read; v2.11.0 ships Phase 2 + Phase 3 dispositions only; swap returns as v2.12 Phase 1 with format-recovery work as prerequisite. The challenger collection and challenger soak report remain present on disk regardless of decision.
+7. ~~**Phase 1 outcome: swap or no-swap.**~~ **Resolved 2026-05-20.** User signed off on swap with explicit Format gate downgrade. Production defaults flipped; legacy lane retained 30 days for rollback; v2.11.x format recovery is new carry-forward.
 
 ---
 
-**END OF DRAFT v0.5.** Phase 0 + Phase 1 + Phase 2 + Phase 3 (dispositions) executed. **Phase 1 outcome: halted for user decision** on whether to swap to Dashscope `text-embedding-v4` as the v2.11.0 production embedder. Magnitude of lift on 5/6 embedder-attributable axes is decisive (10×-class); Format pin miss is structural (coverage-reveal of pre-existing OCR/format imperfections in scanned/form docs that the baseline's hub-collapse had hidden). The actual production-default flip in `scripts/ingest_to_qdrant.py` (and any associated tagging or v2.11.0 release artifact) is **NOT executed** by the autonomous run — it is staged for user sign-off. Promotion to **Draft v1.0** + v2.11.0 tag happens when the user decides.
+**END OF DRAFT v1.0.** Phase 0 + Phase 1 (executed swap) + Phase 2 + Phase 3 dispositions all landed. **Production embedder is Dashscope `text-embedding-v4` against `mmrag_v2_8__qwen3_dashscope` as of 2026-05-20.** Legacy `mmrag_v2_8` (Ollama llava) retained through 2026-06-19 for rollback; both regression tests (`test_retrieval_regression_v2_10.py` legacy, `test_retrieval_regression_v2_11.py` production) must pass during the rollback window. Format gate downgraded explicitly for v2.11.0 (≥85%); v2.11.x patch targets ≥95% recovery via scanned/form chunk-content sanitization; v2.12 reverts to ≥96% after two consecutive recovery soaks. Phase N (re-verification on live local stack + AFTER snapshot doc + v2.11.0 annotated tag) **staged for user push/tag** — autonomous run does not push or tag per user's bright-line constraint.

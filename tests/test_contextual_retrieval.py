@@ -582,7 +582,14 @@ def ingestor_capture(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "qdrant_request", fake_qdrant_request)
 
     def run(extra_args=None):
-        argv = ["ingest_to_qdrant.py", str(jsonl_path), "--collection", "probe"]
+        # Pin to provider=ollama because the fixture monkeypatches
+        # `embed_text` (Ollama-side). The contextualization wiring under test
+        # is provider-agnostic (text-to-embed is assembled BEFORE the provider
+        # dispatch in main()), so this is not a coverage regression — the same
+        # text would be passed to embed_text_dashscope in the production
+        # default path. Pinning here lets the fixture's mocks intercept.
+        argv = ["ingest_to_qdrant.py", str(jsonl_path),
+                "--collection", "probe", "--provider", "ollama"]
         if extra_args:
             argv.extend(extra_args)
         monkeypatch.setattr(sys, "argv", argv)

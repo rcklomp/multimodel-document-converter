@@ -49,8 +49,10 @@ if str(SCRIPTS) not in sys.path:
 from search_qdrant import embed as _embed_ollama, search  # noqa: E402
 from ingest_to_qdrant import embed_text_dashscope  # noqa: E402
 
-FIXTURE_PATH_DEFAULT = REPO_ROOT / "tests" / "fixtures" / "retrieval_regression_v2_10.json"
-COLLECTION_DEFAULT = "mmrag_v2_8"
+FIXTURE_PATH_DEFAULT_DASHSCOPE = REPO_ROOT / "tests" / "fixtures" / "retrieval_regression_v2_11_qwen3.json"
+FIXTURE_PATH_DEFAULT_OLLAMA = REPO_ROOT / "tests" / "fixtures" / "retrieval_regression_v2_10.json"
+COLLECTION_DEFAULT_DASHSCOPE = "mmrag_v2_8__qwen3_dashscope"
+COLLECTION_DEFAULT_OLLAMA = "mmrag_v2_8"
 EMBED_MODEL_DEFAULT_OLLAMA = "llava"
 EMBED_MODEL_DEFAULT_DASHSCOPE = "text-embedding-v4"
 TOP_K = 5
@@ -232,21 +234,23 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--capture", action="store_true",
                         help="capture fingerprint (overwrites the target fixture)")
-    parser.add_argument("--collection", default=COLLECTION_DEFAULT,
-                        help=f"Target Qdrant collection (default: {COLLECTION_DEFAULT})")
+    parser.add_argument("--collection", default=None,
+                        help="Target Qdrant collection. Provider-aware defaults: "
+                             f"'{COLLECTION_DEFAULT_DASHSCOPE}' (dashscope), "
+                             f"'{COLLECTION_DEFAULT_OLLAMA}' (ollama).")
     parser.add_argument("--fixture", default=None,
-                        help="Fixture JSON path. Defaults: tests/fixtures/retrieval_regression_v2_10.json "
-                             "(provider=ollama), tests/fixtures/retrieval_regression_v2_11_qwen3.json "
-                             "(provider=dashscope).")
-    parser.add_argument("--provider", default="ollama", choices=["ollama", "dashscope"],
-                        help="Embedding provider for query side. Must match how the target "
-                             "collection was built.")
+                        help="Fixture JSON path. Defaults: tests/fixtures/retrieval_regression_v2_11_qwen3.json "
+                             "(provider=dashscope, current production), "
+                             "tests/fixtures/retrieval_regression_v2_10.json (provider=ollama, legacy).")
+    parser.add_argument("--provider", default="dashscope", choices=["ollama", "dashscope"],
+                        help="Embedding provider for query side (default: dashscope as of v2.11.0). "
+                             "Must match how the target collection was built.")
     parser.add_argument("--model", default=None,
-                        help="Embedding model. Default 'llava' for ollama; "
-                             "'text-embedding-v4' for dashscope.")
+                        help="Embedding model. Default 'text-embedding-v4' for dashscope; "
+                             "'llava' for ollama.")
     parser.add_argument("--engine-version", default=None,
                         help="Engine version string written into the captured fixture. "
-                             "Defaults: '2.10.0' (ollama) / '2.11.0-candidate' (dashscope).")
+                             "Defaults: '2.11.0' (dashscope) / '2.10.0' (ollama).")
     parser.add_argument("--qdrant-url", default=os.environ.get("QDRANT_URL", "http://localhost:6333"))
     parser.add_argument("--ollama-url", default=os.environ.get("OLLAMA_URL", "http://localhost:11434"))
     parser.add_argument("--api-key", default=None,
@@ -254,18 +258,18 @@ def main() -> int:
     args = parser.parse_args()
 
     # Provider-aware defaults.
+    if args.collection is None:
+        args.collection = (COLLECTION_DEFAULT_DASHSCOPE if args.provider == "dashscope"
+                          else COLLECTION_DEFAULT_OLLAMA)
     if args.model is None:
-        args.model = (EMBED_MODEL_DEFAULT_OLLAMA if args.provider == "ollama"
-                      else EMBED_MODEL_DEFAULT_DASHSCOPE)
+        args.model = (EMBED_MODEL_DEFAULT_DASHSCOPE if args.provider == "dashscope"
+                      else EMBED_MODEL_DEFAULT_OLLAMA)
     if args.fixture is None:
-        if args.provider == "ollama":
-            args.fixture = str(FIXTURE_PATH_DEFAULT)
-        else:
-            args.fixture = str(REPO_ROOT / "tests" / "fixtures"
-                              / "retrieval_regression_v2_11_qwen3.json")
+        args.fixture = str(FIXTURE_PATH_DEFAULT_DASHSCOPE if args.provider == "dashscope"
+                          else FIXTURE_PATH_DEFAULT_OLLAMA)
     if args.engine_version is None:
-        args.engine_version = ("2.10.0" if args.provider == "ollama"
-                              else "2.11.0-candidate")
+        args.engine_version = ("2.11.0" if args.provider == "dashscope"
+                              else "2.10.0")
     if args.api_key is None:
         args.api_key = os.environ.get("DASHSCOPE_API_KEY", "")
     if args.provider == "dashscope" and not args.api_key:

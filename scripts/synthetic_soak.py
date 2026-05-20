@@ -64,7 +64,8 @@ DEFAULT_REPORT_PATH = REPO_ROOT / "docs" / (
     f"QUALITY_SNAPSHOT_{datetime.now().strftime('%Y-%m-%d')}_v2.10_soak.md"
 )
 DOCS_ROOT = REPO_ROOT / "output"
-COLLECTION_DEFAULT = "mmrag_v2_8"
+COLLECTION_DEFAULT_DASHSCOPE = "mmrag_v2_8__qwen3_dashscope"
+COLLECTION_DEFAULT_OLLAMA = "mmrag_v2_8"
 EMBED_MODEL_OLLAMA = "llava"
 EMBED_MODEL_DASHSCOPE = "text-embedding-v4"
 TOP_K = 5
@@ -627,12 +628,15 @@ def main() -> int:
     parser.add_argument("--report-path", default=str(DEFAULT_REPORT_PATH))
     parser.add_argument("--qdrant-url", default=os.environ.get("QDRANT_URL", "http://localhost:6333"))
     parser.add_argument("--ollama-url", default=os.environ.get("OLLAMA_URL", "http://localhost:11434"))
-    parser.add_argument("--collection", default=COLLECTION_DEFAULT,
-                        help=f"Qdrant collection to retrieve from (default: {COLLECTION_DEFAULT})")
-    parser.add_argument("--provider", default="ollama", choices=["ollama", "dashscope"],
-                        help="Embedding provider for query-side. Must match how the target collection was built.")
+    parser.add_argument("--collection", default=None,
+                        help="Qdrant collection to retrieve from. Provider-aware defaults: "
+                             f"'{COLLECTION_DEFAULT_DASHSCOPE}' (dashscope), "
+                             f"'{COLLECTION_DEFAULT_OLLAMA}' (ollama).")
+    parser.add_argument("--provider", default="dashscope", choices=["ollama", "dashscope"],
+                        help="Embedding provider for query-side (default: dashscope as of v2.11.0). "
+                             "Must match how the target collection was built.")
     parser.add_argument("--embed-model", default=None,
-                        help="Query-side embedding model. Default 'llava' for ollama; 'text-embedding-v4' for dashscope.")
+                        help="Query-side embedding model. Default 'text-embedding-v4' for dashscope; 'llava' for ollama.")
     args = parser.parse_args()
 
     work_path = Path(args.work_path)
@@ -646,9 +650,12 @@ def main() -> int:
               "and for retrieve when --provider dashscope.", file=sys.stderr)
         return 2
 
+    if args.collection is None:
+        args.collection = (COLLECTION_DEFAULT_DASHSCOPE if args.provider == "dashscope"
+                          else COLLECTION_DEFAULT_OLLAMA)
     if args.embed_model is None:
-        args.embed_model = (EMBED_MODEL_OLLAMA if args.provider == "ollama"
-                            else EMBED_MODEL_DASHSCOPE)
+        args.embed_model = (EMBED_MODEL_DASHSCOPE if args.provider == "dashscope"
+                            else EMBED_MODEL_OLLAMA)
 
     if args.stage in ("sample", "all"):
         print("[stage] sample")

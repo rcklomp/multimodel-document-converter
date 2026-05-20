@@ -390,10 +390,20 @@ def main():
     parser.add_argument("--min-score", type=float, default=MIN_SCORE, help="Minimum relevance")
     parser.add_argument("--qdrant-url", default="http://localhost:6333")
     parser.add_argument("--ollama-url", default="http://localhost:11434")
-    parser.add_argument("--model", default="llava",
-                        help="Ollama embed model (must match the model the collection was built with; "
-                             "mmrag_v2_8 was built with llava)")
+    parser.add_argument("--provider", default="dashscope", choices=["ollama", "dashscope"],
+                        help="Embedding provider (default: dashscope as of v2.11.0). Must match how "
+                             "the target collection was built (mmrag_v2_8__qwen3_dashscope = "
+                             "dashscope/text-embedding-v4; legacy mmrag_v2_8 = ollama/llava).")
+    parser.add_argument("--model", default=None,
+                        help="Embed model. Default 'text-embedding-v4' (dashscope) / 'llava' (ollama). "
+                             "Must match the model the target collection was built with.")
+    parser.add_argument("--api-key", default=None,
+                        help="API key for dashscope provider. Defaults to DASHSCOPE_API_KEY env var.")
     args = parser.parse_args()
+    if args.model is None:
+        args.model = "text-embedding-v4" if args.provider == "dashscope" else "llava"
+    if args.provider == "dashscope" and not args.api_key:
+        args.api_key = os.environ.get("DASHSCOPE_API_KEY", "")
 
     # Resolve collection name from partial match
     resolved_collection = None
@@ -444,7 +454,20 @@ def main():
     query = args.query
     targets = [resolved_collection] if resolved_collection else [c["name"] for c in list_collections(args.qdrant_url)]
 
-    vector = embed(query, model=args.model, ollama_url=args.ollama_url)
+    if args.provider == "dashscope":
+        if not args.api_key:
+            print(f"{RED}--provider dashscope requires --api-key or DASHSCOPE_API_KEY env var{RESET}",
+                  file=sys.stderr)
+            return 2
+        import sys as _sys
+        from pathlib import Path as _Path
+        _scripts_dir = _Path(__file__).resolve().parent
+        if str(_scripts_dir) not in _sys.path:
+            _sys.path.insert(0, str(_scripts_dir))
+        from ingest_to_qdrant import embed_text_dashscope  # noqa: E402
+        vector = embed_text_dashscope(query, args.model, args.api_key)
+    else:
+        vector = embed(query, model=args.model, ollama_url=args.ollama_url)
     use_rerank = not args.no_rerank
 
     if not args.json:

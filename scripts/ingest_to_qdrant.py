@@ -13,7 +13,13 @@ Options:
     --collection    Collection name (default: derived from source_file)
     --qdrant-url    Qdrant URL (default: http://localhost:6333)
     --ollama-url    Ollama URL (default: http://localhost:11434)
-    --model         Embedding model (default: llava)
+    --provider      Embedding provider (default: dashscope) — flipped from
+                    ollama/llava in v2.11.0 after Phase 1 shootout: Dashscope
+                    text-embedding-v4 delivered 10× lift on Recall@1/Relevance
+                    /Faithfulness vs llava. Pass --provider ollama to use the
+                    legacy lane.
+    --model         Embedding model (default: text-embedding-v4 for dashscope,
+                    llava for ollama)
     --batch-size    Chunks per embedding batch (default: 10)
     --recreate      Drop and recreate collection if it exists
     --no-contextual  Disable contextual retrieval (fallback to breadcrumb-only)
@@ -385,13 +391,15 @@ def main():
     parser.add_argument("--collection", type=str, default=None)
     parser.add_argument("--qdrant-url", type=str, default="http://localhost:6333")
     parser.add_argument("--ollama-url", type=str, default="http://localhost:11434")
-    parser.add_argument("--provider", type=str, default="ollama",
+    parser.add_argument("--provider", type=str, default="dashscope",
                         choices=["ollama", "dashscope"],
-                        help="Embedding provider. 'ollama' = local Ollama (default, llava 4096-dim multimodal). "
-                             "'dashscope' = Dashscope cloud text-embedding (v2.11 Phase 1 challenger; "
-                             "1024-dim, text-only — image chunks embed via their VLM description).")
+                        help="Embedding provider. 'dashscope' = Dashscope cloud text-embedding "
+                             "(default since v2.11.0 after Phase 1 shootout: 10× lift on retrieval "
+                             "vs llava; 1024-dim, text-only — image chunks embed via VLM description). "
+                             "'ollama' = legacy local Ollama (llava 4096-dim multimodal; v2.10 baseline, "
+                             "retained for rollback).")
     parser.add_argument("--model", type=str, default=None,
-                        help="Embedding model. Default 'llava' for ollama; 'text-embedding-v4' for dashscope.")
+                        help="Embedding model. Default 'text-embedding-v4' for dashscope; 'llava' for ollama.")
     parser.add_argument("--api-key", type=str, default=None,
                         help="API key for dashscope provider. Defaults to DASHSCOPE_API_KEY env var.")
     parser.add_argument("--batch-size", type=int, default=10)
@@ -401,7 +409,7 @@ def main():
     args = parser.parse_args()
     # Provider-specific defaults.
     if args.model is None:
-        args.model = "llava" if args.provider == "ollama" else "text-embedding-v4"
+        args.model = "text-embedding-v4" if args.provider == "dashscope" else "llava"
     if args.provider == "dashscope" and not args.api_key:
         args.api_key = os.environ.get("DASHSCOPE_API_KEY", "")
         if not args.api_key:

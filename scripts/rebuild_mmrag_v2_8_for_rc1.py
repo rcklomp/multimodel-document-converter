@@ -54,7 +54,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "output"
 LOG_DEFAULT = OUTPUT / "_logs" / "phase_i_rebuild.log"
-COLLECTION_DEFAULT = "mmrag_v2_8"
+COLLECTION_DEFAULT = "mmrag_v2_8__qwen3_dashscope"
+COLLECTION_LEGACY = "mmrag_v2_8"  # v2.10 baseline (llava 4096-dim), retained for 30-day rollback
 QDRANT_URL_DEFAULT = "http://localhost:6333"
 
 CANONICAL_34 = [
@@ -224,12 +225,13 @@ def main() -> int:
     parser.add_argument("--collection", type=str, default=COLLECTION_DEFAULT,
                         help=f"Target Qdrant collection (default: {COLLECTION_DEFAULT})")
     parser.add_argument("--qdrant-url", type=str, default=QDRANT_URL_DEFAULT)
-    parser.add_argument("--provider", type=str, default="ollama",
+    parser.add_argument("--provider", type=str, default="dashscope",
                         choices=["ollama", "dashscope"],
-                        help="Embedding provider (default: ollama)")
+                        help="Embedding provider (default: dashscope as of v2.11.0; pass "
+                             "ollama for legacy llava rebuild against mmrag_v2_8)")
     parser.add_argument("--model", type=str, default=None,
-                        help="Embedding model. Default 'llava' for ollama; "
-                             "'text-embedding-v4' for dashscope.")
+                        help="Embedding model. Default 'text-embedding-v4' for dashscope; "
+                             "'llava' for ollama.")
     parser.add_argument("--api-key", type=str, default=None,
                         help="API key for dashscope provider. "
                              "Defaults to DASHSCOPE_API_KEY env var.")

@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "engine_version": "2.11.0-candidate",
+  "engine_version": "2.11.0",
   "collection": "mmrag_v2_8__qwen3_dashscope",
   "provider": "dashscope",
   "embed_model": "text-embedding-v4",
