@@ -1,21 +1,25 @@
 # Plan: v2.12 — Close the absolute-quality gap: reranker → hybrid retrieval → HyDE
 
-**Status:** **Draft v0.5** (2026-05-21). Phase 0 executed; outcome
-is a partial win — Format ≥95% target NOT met on the three affected
-docs (aggregate 77.1%, off by 17.9pp). Root cause was a
-preference-staleness bug in `scripts/ingest_to_qdrant.py` (preferred
-`metadata.refined_content` over `chunk.content`; the latter had
-later normalization passes the former lacked). Preference swapped;
-3 docs re-ingested; partial soak measured. IRJET responded as
-expected (+15.6pp Format) but Earthship has unfixable OCR layout
-damage and CarOK is form-class data the LLM judge inherently penalizes.
-Both carry forward to v2.13 as named recovery work. The Format gate
-for v2.12.0 remains ≥95%; whether that's met depends on the
-cumulative Phase 0 + Phase 1 + Phase 2 lift, not Phase 0 alone. See
-`docs/DECISIONS.md` "v2.12 Phase 0 Outcome" for full numbers.
+**Status:** **Draft v0.6** (2026-05-21). Phase 1 SHIPPED locally.
+Local ModernBERT reranker (`gte-reranker-modernbert-base-mlx` via
+omlx-server at `http://10.0.10.246:8000`) won the Phase 1 shootout
+decisively on all 4 embedder-attributable axes vs cloud `gte-rerank`:
+Recall@1 chunk 35.5% (v2.11) → 53.9% (cloud) → **61.8% (omlx)**;
+Recall@5 chunk 66.8% → 66.8% → **81.3%**; Relevance 59.3% → 74.5% →
+**78.3%**; Faithfulness 50.6% → 64.2% → **69.4%**. Production
+default flipped via `src/mmrag_v2/retrieval/config.py`
+`_COMPILE_DEFAULT = "omlx"`. End-to-end p99 latency ~1.85s (well
+within 3.0s budget). Zero per-query reranker cost (LAN-local).
+**Phase 2 TRIGGERED:** Recall@5 chunk 81.3% < 85% floor by 3.7pp;
+hybrid retrieval (BM25 + dense + RRF) follows. **Phase 3 TRIGGERED:**
+Faithfulness 69.4% < 70% floor by 0.6pp (borderline within
+judge-noise); HyDE module to be built per plan. See
+`docs/DECISIONS.md` "v2.12 Phase 1 Reranker Shootout Outcome" for
+the full numbers + reports at
+`docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_p1_{cloud,omlx}.md`.
 
-**Predecessor:** Draft v0.4 (2026-05-21) — local ModernBERT reranker
-became leading Phase 1 candidate after the local/cloud bake-off.
+**Predecessor:** Draft v0.5 (2026-05-21) — Phase 0 partial win
+(IRJET +15.6pp Format; Earthship + CarOK rolled to v2.13).
 swap landed and was tagged (`c2a461c`, annotated `v2.11.0` on both
 remotes 2026-05-20/21). v2.11 closed the *embedder* bottleneck with a
 10× lift across every embedder-attributable axis; v2.12 closes the
@@ -797,6 +801,7 @@ Before the v2.12.0 tag is staged:
 | 2026-05-21 | Promoted to Draft v0.3 after a local-vs-cloud reranker bake-off against the user's self-hosted `mlx-community_Qwen3-Reranker-8B-mxfp8` at `http://10.0.10.246:8000`. Benchmark script extended with `--rerank-backend` flag; new `scripts/compare_reranker_quality.py` runs the same query+candidates through both rerankers side-by-side. Local reranker rejected for v2.12 Phase 1 on two independent grounds: (a) **Latency 17.5× worse than cloud** — K=10 p99 = 12.2 s, K=25 p99 = 30.7 s (per-pair compute ~750 ms on Apple Silicon for an 8B-param causal-LM cross-encoder). (b) **Score-distribution pattern indicates a yes/no-token-classification head** rather than a regression head — local scores bunch in 0.75-0.85 vs cloud's 0.006-0.75 range, meaning the local reranker's within-band ordering is closer to noise than signal. Top-1 agreement between the two rerankers was 5% (1/20), mean top-5 Jaccard 0.127 — functionally independent decisions, but the benchmarks alone can't tell which is RIGHT (both could be wrong). Deferred to v2.13+ pending either 10× local-latency improvement or a privacy/data-residency driver. Cloud `gte-rerank` confirmed as the Phase 1 reranker; new fixtures committed for future delta reproducibility. Open Question 1 sub-clause (local reranker) marked resolved. |
 | 2026-05-21 | Promoted to Draft v0.4 after the user found `afanjul/gte-reranker-modernbert-base-mlx` — the *right* shape of local reranker (150M-param cross-encoder with regression head, vs the rejected 8B causal-LM with yes/no head from v0.3). Discussion of why reranker model size is decoupled from reranker quality: standard production rerankers (BGE/GTE families) sit in the 200-600M-param range; the 8B Qwen3 was the architectural outlier. ModernBERT model pulled onto omlx-server and benchmarked: (a) **Latency 3× FASTER than cloud** — K=25 p99 = 0.55 s vs cloud 1.70 s. Per-pair compute ~15 ms on the Mini (50× faster than Qwen3-8B). (b) **Score distribution wide** (0.0–0.951) — proper cross-encoder behavior, decisive ordering. (c) **Quality vs cloud unresolved** — top-1 agreement 15% (3/20), mean Jaccard 0.239. Better than Qwen3 on every axis but agreement-rate alone can't tell us which reranker picks BETTER chunks (both could be valid-but-different gte-family generations). **Decision deferred into Phase 1 itself** — the Phase 1 soak (518 queries × LLM-judge) will pick the winner; whichever scores better ships. Cloud remains the fallback if local ModernBERT loses the soak or the Q16 all-zero anomaly turns out to be a model defect. New scripts/fixtures: `scripts/compare_reranker_quality.py` gains `--local-model` flag; `tests/fixtures/reranker_latency_modernbert_2026-05-21.json` (60 samples × 3 K values) and `tests/fixtures/reranker_quality_modernbert_2026-05-21.json` (20-query head-to-head). |
 | 2026-05-21 | **Promoted to Draft v0.5 after Phase 0 execution.** Phase 0 (v2.11.x Format recovery) executed end-to-end. Root cause of the v2.11 Format dips on the three named docs turned out to be NOT a chunk-quality issue but a preference-staleness bug in `scripts/ingest_to_qdrant.py`: lines 351 + 483 preferred `metadata.refined_content` over `chunk.content`, but `refined_content` is the raw VLM refiner output preserved for provenance while `content` carries later normalization passes (v2.10 audit cleanup, whitespace collapse, page-header strip). The semantics of "which field is newer" inverted as the chunker evolved, but the ingest preference wasn't updated. One-line fix swapped the preference; 3 docs re-ingested (1146 chunks, 0 errors); partial soak ran on the same 48 queries the v2.11 soak used for these docs. Results: **IRJET +15.6pp Format** (71.9% → 87.5%) — clean win on the header-noise stripping. **CarOK +3.1pp Format** (68.8% → 71.9%) — barely moved; chunks correctly represent inventory data, LLM judge inherently penalizes form-class content. **Earthship +0pp Format** (71.9% → 71.9%) — Format defect is OCR layout damage (multi-column interleaving, mid-word linebreaks), not whitespace. Aggregate 77.1% on the 3 docs misses the ≥95% Phase 0 target by 17.9pp. Honest call: Phase 0 ships the genuine win (preference swap + 4 regression tests pinned in `tests/test_ingest_content_preference.py`); Earthship + CarOK roll forward to v2.13 as named recovery work (Earthship re-OCR; CarOK form-shape decision). The v2.12.0 Format gate stays at ≥95% pending the cumulative Phase 1 + Phase 2 lift. Side-channel deltas (Earthship Faithfulness −9.4pp, IRJET Relevance −9.4pp) are likely 1-2-query noise on a 16-query sample and will be re-measured in the full Phase 1 soak. Test suite after Phase 0: 990 passed, 15 skipped, 0 failed (+4 over the v2.11.0 baseline 986). |
+| 2026-05-21 | **Promoted to Draft v0.6 after Phase 1 shootout.** Phase 1 (reranker shootout) executed end-to-end. Two candidate rerankers ran the same 518-query × 259-chunk soak fixture: cloud `gte-rerank` (Dashscope intl) and local `gte-reranker-modernbert-base-mlx` (omlx-server). Same embedder (text-embedding-v4), same Qdrant collection, same judge (qwen-max). **Local ModernBERT wins decisively on all 4 embedder-attributable axes:** Recall@1 chunk 35.5% (v2.11.0) → 53.9% (cloud) → 61.8% (omlx); Recall@5 chunk 66.8% → 66.8% → 81.3%; Relevance 59.3% → 74.5% → 78.3%; Faithfulness 50.6% → 64.2% → 69.4%. Key insight: cloud `gte-rerank` only reordered the top-5 Qdrant already returned (Recall@5 chunk identical to baseline); ModernBERT actually picked *different* 5 chunks from the top-25 candidate set, finding gold chunks deeper. That's stronger reranking discrimination, consistent with ModernBERT being a 150M-param cross-encoder built on the newer Dec-2024 ModernBERT backbone vs cloud's older distilled multilingual model. **Phase 1 close-out:** `src/mmrag_v2/retrieval/config.py` `_COMPILE_DEFAULT` set to `"omlx"` so production picks ModernBERT by default; cloud remains the fallback via `RERANKER_BACKEND=dashscope` env var. End-to-end p99 latency ~1.85s (well within 3.0s budget). Zero per-query reranker cost in production. **Phase 2 TRIGGERED** because Recall@5 chunk = 81.3% < 85% floor (3.7pp gap). **Phase 3 TRIGGERED** because Faithfulness 69.4% < 70% floor (0.6pp gap — borderline within judge-noise; HyDE module built per plan, ship-on-by-default depends on Phase 3 soak's actual lift). Reports: `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_p1_cloud.md` + `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_p1_omlx.md`. Full numbers in `docs/DECISIONS.md` "v2.12 Phase 1 Reranker Shootout Outcome". Test suite after Phase 1: 1006 passed, 15 skipped, 0 failed. |
 
 ---
 

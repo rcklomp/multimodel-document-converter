@@ -135,10 +135,41 @@ def test_factory_unknown_backend_raises(monkeypatch):
         get_reranker("bogus")
 
 
-def test_factory_no_backend_resolved_raises(monkeypatch):
+def test_factory_uses_compile_default_after_phase_1():
+    """After the v2.12 Phase 1 shootout (2026-05-21), the compile-time
+    default in `mmrag_v2.retrieval.config._COMPILE_DEFAULT` is `omlx`
+    (local ModernBERT, the Phase 1 winner). With no arg + no env var,
+    the factory returns the omlx reranker — so callers don't have to
+    re-pick after every release."""
+    import os
+    from mmrag_v2.retrieval import config as cfg
+    # Save / restore around the test to avoid leaking env state.
+    saved_env = os.environ.pop("RERANKER_BACKEND", None)
+    saved_mlx = os.environ.get("MLX_API_KEY")
+    try:
+        os.environ["MLX_API_KEY"] = "omlx-test-fake"
+        assert cfg._COMPILE_DEFAULT == "omlx", (
+            "v2.12 Phase 1 set the compile-time reranker default to 'omlx' "
+            "(local ModernBERT, the shootout winner). If this assertion "
+            "fails, the default reverted unexpectedly — re-verify against "
+            "the Phase 1 soak data before changing."
+        )
+        r = get_reranker()
+        assert r.name == "omlx"
+    finally:
+        if saved_env is not None:
+            os.environ["RERANKER_BACKEND"] = saved_env
+        if saved_mlx is None:
+            os.environ.pop("MLX_API_KEY", None)
+
+
+def test_factory_no_backend_resolvable_after_clearing_default(monkeypatch):
+    """If the compile-time default is cleared AND no env var / arg is
+    given, the factory raises. Pins the resolution-order contract:
+    explicit > env > compile-default."""
     monkeypatch.delenv("RERANKER_BACKEND", raising=False)
-    # Need to also bypass the compile-time default — but it's None by
-    # default at this point in v2.12 development (set after Phase 1 soak).
+    from mmrag_v2.retrieval import config as cfg
+    monkeypatch.setattr(cfg, "_COMPILE_DEFAULT", None)
     with pytest.raises(ValueError, match="No reranker backend resolved"):
         get_reranker()
 

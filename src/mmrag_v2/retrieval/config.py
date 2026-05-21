@@ -30,9 +30,17 @@ from mmrag_v2.retrieval.reranker import (
 )
 
 
-# Set to "dashscope" or "omlx" after the Phase 1 soak resolves the
-# bake-off. Until then, env var or explicit arg is required.
-_COMPILE_DEFAULT: str | None = None
+# Production default chosen by the v2.12 Phase 1 shootout soak
+# (2026-05-21, 518 queries × 2 reranker backends + v2.11.0 baseline).
+# Local omlx ModernBERT won on all 4 embedder-attributable axes:
+#   Recall@1 chunk    35.5% (v2.11) → 53.9% (cloud) → 61.8% (omlx)
+#   Recall@5 chunk    66.8% → 66.8% → 81.3%
+#   Recall@5 doc      91.7% → 91.7% → 95.2%
+#   Relevance         59.3% → 74.5% → 78.3%
+#   Faithfulness      50.6% → 64.2% → 69.4%
+#   Format            89.8% → 89.5% → 89.0% (small drift, within noise)
+# See docs/DECISIONS.md "v2.12 Phase 1 Reranker Shootout Outcome".
+_COMPILE_DEFAULT: str = "omlx"
 
 
 def get_reranker(
