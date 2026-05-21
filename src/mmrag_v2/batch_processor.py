@@ -640,13 +640,37 @@ class BatchProcessor:
         self._suppress_layout_label_text = plan.suppress_layout_label_text
         self._intelligence_metadata = plan.chunk_factory_metadata()
 
+        # v2.13 Phase 2: when the plan requests force_full_page_ocr (scanned
+        # profiles), route through the Docling-direct (legacy) OCR path so
+        # the flag actually reaches Docling. The layout-aware OCR mode runs
+        # its own per-region OCR via LayoutAwareOCRProcessor / EnhancedOCREngine
+        # and does NOT consult the Docling adapter's PdfPipelineOptions.
+        # For scanned multi-column docs (Earthship), layout-aware misjudges
+        # column boundaries and produces interleaved text; full-page OCR via
+        # Docling fixes it. The Phase-6 _promote_ocr_section_headers fallback
+        # path preserves heading attribution in legacy mode.
+        if (
+            getattr(plan, "force_full_page_ocr", False)
+            and getattr(self, "ocr_mode", "legacy") == "layout-aware"
+            and getattr(self, "enable_ocr", True)
+        ):
+            logger.info(
+                "[OCR-GOVERNANCE] plan.force_full_page_ocr=True; "
+                "overriding ocr_mode 'layout-aware' -> 'legacy' so "
+                "Docling's force_full_page_ocr setting is honored. "
+                "Heading attribution falls back to _promote_ocr_section_headers."
+            )
+            self.ocr_mode = "legacy"
+
         logger.info(
             f"[PDF-PLAN] Conversion plan set: profile={plan.profile_type}, "
             f"modality={plan.document_modality}, ocr={plan.do_ocr}, "
             f"code_enrich={plan.needs_code_enrichment}, "
             f"encoding_corrupt={plan.has_encoding_corruption}, "
             f"route={plan.extraction_route}, "
-            f"reading_order={plan.reading_order_strategy}"
+            f"reading_order={plan.reading_order_strategy}, "
+            f"force_full_page_ocr={getattr(plan, 'force_full_page_ocr', False)}, "
+            f"effective_ocr_mode={getattr(self, 'ocr_mode', 'legacy')}"
         )
 
     def _build_legacy_conversion_plan(self) -> PdfConversionPlan:
