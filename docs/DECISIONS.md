@@ -856,3 +856,44 @@ The pin is a *gate*, not a *measurement floor* — Format scores reported in eve
 **Carry-forward.** v2.11.x format recovery, v2.11.x legacy-collection drop (2026-06-19), v2.12 Format pin revert to ≥ 96%.
 
 **Decision recorded by:** user sign-off on swap; autonomous run executes scripts/test changes. 2026-05-20.
+
+---
+
+## v2.12 Phase 0 Outcome — Content vs Refined Content Drift (2026-05-21)
+
+**Context.** v2.11 Phase 1 soak reported Format 89.8% (vs ≥96% pin) with the dip concentrated in three scanned/form docs: `CarOK_voorraadtelling` (68.8%), `Earthship_Vol1` (71.9%), `IRJET_Modeling_of_Solar_PV` (71.9%). Phase 0 of v2.12 was scoped to recover these to ≥95% Format before the reranker work.
+
+**Root cause discovered.** Not a chunker defect — a **field-staleness bug** in `scripts/ingest_to_qdrant.py`. The script preferred `metadata.refined_content` over `chunk.content` in two places (lines 351, 483 pre-fix). `refined_content` is the raw VLM refiner output preserved for provenance; subsequent normalization passes (v2.10 audit cleanup, whitespace collapse, page-header strip) updated the top-level `content` but not `refined_content`. The semantics of which field was "newer" inverted as the chunker evolved, but the ingest preference wasn't updated. Result: Qdrant stored the older, dirtier version even though clean content existed in the JSONL on disk.
+
+**Fix.** One-line preference swap in both call sites: `content` now canonical, `refined_content` only used as fallback when `content` is missing/empty. Comment updated to document the inversion explicitly. Four regression tests pinned in `tests/test_ingest_content_preference.py` (positive case, two fallback cases, source-grep to prevent silent revert).
+
+**Verification.** Re-ingested the 3 affected docs (1146 chunks, 0 errors, ~22 min wall time). Spot-checks confirm Qdrant content now matches the clean JSONL. Partial soak (same 48 queries the v2.11 soak ran on these 3 docs):
+
+| Doc | Format (v2.11 → post-Phase-0) | Relevance Δ | Faithfulness Δ |
+|---|---:|---:|---:|
+| IRJET_Modeling_of_Solar_PV | 71.9% → **87.5%** (+15.6pp) | −9.4pp | −3.1pp |
+| Earthship_Vol1 | 71.9% → 71.9% (0pp) | 0pp | −9.4pp |
+| CarOK_voorraadtelling | 68.8% → 71.9% (+3.1pp) | +6.3pp | +6.2pp |
+| **Aggregate (3 docs)** | **77.1%** | 57.3% | 39.6% |
+
+**Outcome: partial win, Format ≥95% target NOT met on the 3 docs.** The pin is missed by 17.9pp on the aggregate. Three reasons:
+
+1. **IRJET responded as expected** (+15.6pp) — the page-header noise (`www.irjet.net  p-ISSN: 2395-0072` with excess whitespace) was the dominant Format defect, and the cleaner top-level `content` stripped it. Still below 95% because some chunks have unfixable defects (e.g., truncated text at the end of chunks).
+
+2. **Earthship Format didn't budge** because the defect is OCR layout damage (multi-column interleaving, broken words mid-line: `'NOT ENOUGH SUN tage of front face shading\ns that in extremely cold clin'`), not whitespace. The content-preference swap can't fix this — needs re-OCR with different layout settings, or chunk-level filtering of severely-broken chunks. Carried forward as `v2.13 Earthship re-OCR`.
+
+3. **CarOK barely moved** because the chunks correctly represent automotive-parts inventory data (`merk = AC529481D. 1 AC Delco, ink.ex.BTW Titel = 1,00 Remblokkenset...`). The LLM judge marks them down for not reading like prose, but the data IS what it is. Fix options: restructure chunks (one inventory row per chunk → more readable but bigger chunk count) or accept that form-class docs have inherently lower Format scores. Carried forward as `v2.13 CarOK form-shape decision`.
+
+**Side-channel deltas — likely noise.** Earthship Faithfulness −9.4pp and IRJET Relevance −9.4pp on 16-query samples (one or two queries differing = ~6pp swing). Re-embedding chunks with cleaner content will produce different top-1 retrievals, and the new top-1s aren't guaranteed to be MORE relevant — just retrieved differently. Will be re-measured against the full v2.11 fixture during the Phase 1 / Phase 2 soak when the reranker is in place.
+
+**Carried forward to v2.13:**
+
+1. **Earthship re-OCR** — re-process source PDF with Docling's layout-aware OCR settings tuned for multi-column scanned pages. Chunk-level filtering of severely-broken chunks (heuristic: high non-word-character density, mid-word linebreak frequency).
+
+2. **CarOK form-shape decision** — choose between (a) restructure chunks to one inventory row per chunk (cleaner Format score, smaller chunks, more chunk-id churn) and (b) carve-out a form-class Format gate that doesn't penalize structured-data chunks (matches the existing `FORM_AUDIT_PASS` precedent for the strict gate).
+
+3. **Full-corpus re-ingest** — if other docs have similar `content` / `refined_content` drift, the corpus-wide Format may also improve. Triggered automatically when Phase 2 (hybrid retrieval) adds sparse vectors to Qdrant — one rebuild covers both.
+
+**Format gate target unchanged for v2.12.0:** ≥95%. Whether v2.12.0 reaches it depends on Phase 1 + Phase 2 work, not Phase 0 alone. If Phase 0 + Phase 1 cumulative reaches ≥95% corpus-wide, v2.12.0 ships; if not, the gate downgrade rolls forward into v2.13 with named recovery work.
+
+**Decision recorded by:** autonomous run, 2026-05-21.

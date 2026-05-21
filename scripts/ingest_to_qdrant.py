@@ -348,7 +348,16 @@ def build_qdrant_payload(
     chunk_id = chunk.get("chunk_id", "")
     modality = chunk.get("modality", "text")
     metadata = chunk.get("metadata") or {}
-    content = metadata.get("refined_content") or chunk.get("content", "")
+    # Canonical content is the top-level `content` field — it carries any
+    # post-refinement normalization passes (v2.10 audit cleanup, whitespace
+    # collapsing, page-header strip, etc.). `metadata.refined_content` is
+    # the raw VLM refiner output kept for provenance; it predates the
+    # later cleanup passes and is only used as a fallback when the
+    # canonical `content` is missing/empty. (Preference flipped 2026-05-21
+    # in v2.12 Phase 0; pre-Phase-0 ingest preferred refined_content and
+    # the v2.11 soak's Format dips on IRJET/Earthship/CarOK traced back
+    # to that staleness — see docs/PLAN_V2.12.md Phase 0.)
+    content = chunk.get("content") or metadata.get("refined_content", "")
     page = metadata.get("page_number", 0)
     hierarchy = metadata.get("hierarchy") or {}
 
@@ -479,8 +488,12 @@ def main():
         chunk_id = chunk.get("chunk_id", f"chunk_{i}")
         modality = chunk.get("modality", "text")
         metadata = chunk.get("metadata") or {}
-        # Prefer refined_content (has hyphenation fixes, OCR cleanup) over raw content
-        content = metadata.get("refined_content") or chunk.get("content", "")
+        # Canonical content is the top-level `content` (carries post-
+        # refinement normalization passes); `refined_content` is the
+        # raw VLM refiner output kept for provenance and only used as a
+        # fallback. See build_qdrant_payload() comment for the full
+        # rationale.
+        content = chunk.get("content") or metadata.get("refined_content", "")
         page = metadata.get("page_number", 0)
 
         # Build embedding
