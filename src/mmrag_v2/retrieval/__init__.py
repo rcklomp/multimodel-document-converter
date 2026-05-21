@@ -23,7 +23,10 @@ Public API:
 
 See `docs/PLAN_V2.12.md` Phase 1 for the design rationale.
 """
-from mmrag_v2.retrieval.pipeline import retrieve_reranked  # noqa: F401
+from mmrag_v2.retrieval.pipeline import (  # noqa: F401
+    retrieve_reranked,
+    retrieve_hybrid_reranked,
+)
 from mmrag_v2.retrieval.reranker import (  # noqa: F401
     DashscopeReranker,
     LocalOmlxReranker,
@@ -31,12 +34,29 @@ from mmrag_v2.retrieval.reranker import (  # noqa: F401
     RerankerError,
 )
 from mmrag_v2.retrieval.config import get_reranker  # noqa: F401
+from mmrag_v2.retrieval.sparse import (  # noqa: F401
+    BM25Index,
+    rrf_fuse,
+    tokenize,
+)
+from mmrag_v2.retrieval.hyde import (  # noqa: F401
+    HydeError,
+    generate_hypothetical_answer,
+    generate_with_fallback,
+)
 
 __all__ = [
     "retrieve_reranked",
+    "retrieve_hybrid_reranked",
     "get_reranker",
     "Reranker",
     "DashscopeReranker",
     "LocalOmlxReranker",
     "RerankerError",
+    "BM25Index",
+    "rrf_fuse",
+    "tokenize",
+    "HydeError",
+    "generate_hypothetical_answer",
+    "generate_with_fallback",
 ]

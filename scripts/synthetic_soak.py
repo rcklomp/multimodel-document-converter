@@ -339,7 +339,11 @@ def stage_retrieve(work_path: Path, qdrant_url: str, ollama_url: str,
                    api_key: str, *,
                    rerank_backend: str | None = None,
                    top_k_retrieve: int = TOP_K,
-                   top_n_return: int = TOP_K) -> None:
+                   top_n_return: int = TOP_K,
+                   hybrid: bool = False,
+                   sparse_collection: str = "mmrag_v2_8__bm25_sparse",
+                   bm25_index_path: str = "tests/fixtures/bm25_index_v2_12.json",
+                   use_hyde: bool = False) -> None:
     """Retrieve top-K candidates per query and store them on the row.
 
     When `rerank_backend` is None (default), behavior is identical to
@@ -376,13 +380,78 @@ def stage_retrieve(work_path: Path, qdrant_url: str, ollama_url: str,
                   file=sys.stderr)
             return
 
+    # Hybrid retrieve uses the full mmrag_v2.retrieval pipeline so we get
+    # consistent dense + sparse + RRF + rerank composition.
+    hybrid_retrieve = None
+    if hybrid:
+        sys.path.insert(0, str(REPO_ROOT / "src"))
+        from mmrag_v2.retrieval import retrieve_hybrid_reranked  # noqa: E402
+        hybrid_retrieve = retrieve_hybrid_reranked
+        print(f"    hybrid mode: dense={collection} + sparse={sparse_collection} + RRF")
+
     flushed = 0
     for r in rows:
         for q in (r.get("queries") or []):
             if q.get("retrieval"):
                 continue
+
+            # Branch A: hybrid retrieval (does its own embed + dense + sparse + RRF + rerank).
+            if hybrid_retrieve is not None:
+                try:
+                    reranked = hybrid_retrieve(
+                        q["query_text"],
+                        dense_collection=collection,
+                        sparse_collection=sparse_collection,
+                        bm25_index_path=bm25_index_path,
+                        top_k_retrieve=top_k_retrieve,
+                        top_n_fuse=top_k_retrieve,
+                        top_n_return=top_n_return,
+                        embed_provider=provider,
+                        embed_model=embed_model,
+                        embed_api_key=api_key,
+                        qdrant_url=qdrant_url,
+                        reranker=reranker,
+                        use_hyde=use_hyde,
+                    )
+                except Exception as e:
+                    print(f"    ! hybrid retrieval failed for {q['query_id']}: {e}",
+                          file=sys.stderr)
+                    continue
+                top = []
+                for hit in reranked:
+                    payload = hit.get("payload") or {}
+                    top.append({
+                        "chunk_id": payload.get("chunk_id") or str(hit.get("id")),
+                        "doc_id": payload.get("doc_id"),
+                        "source_file": payload.get("source_file"),
+                        "page_number": payload.get("page_number"),
+                        "modality": payload.get("modality"),
+                        "score": round(float(hit.get("score") or 0.0), 6),
+                        "rerank_score": round(float(hit.get("rerank_score") or 0.0), 6),
+                        "rerank_index": int(hit.get("rerank_index", -1)),
+                        "content": (payload.get("content") or "").strip()[:1500],
+                    })
+                q["retrieval"] = {
+                    "top_k": top,
+                    "rerank_backend": rerank_backend,
+                    "top_k_retrieve": top_k_retrieve,
+                    "hybrid": True,
+                    "sparse_collection": sparse_collection,
+                }
+                flushed += 1
+                if flushed % 20 == 0:
+                    _write_work(work_path, rows)
+                continue
+
+            # Branch B (legacy): dense-only retrieve + optional rerank.
+            embed_text = q["query_text"]
+            if use_hyde:
+                # Lazy import — only when needed.
+                sys.path.insert(0, str(REPO_ROOT / "src"))
+                from mmrag_v2.retrieval.hyde import generate_with_fallback  # noqa: E402
+                embed_text = generate_with_fallback(q["query_text"], api_key)
             try:
-                vec = _embed_query(q["query_text"], provider, embed_model,
+                vec = _embed_query(embed_text, provider, embed_model,
                                     ollama_url, api_key)
                 results = search(vec, collection, limit=top_k_retrieve,
                                  qdrant_url=qdrant_url)
@@ -733,6 +802,20 @@ def main() -> int:
                         help="Number of Qdrant candidates the reranker sees per query. "
                              "Only used when --rerank-backend is set. Default 25 in that case; "
                              "ignored when reranker is off (top-K and top-N collapse to TOP_K=5).")
+    parser.add_argument("--hybrid", action="store_true",
+                        help="Use hybrid retrieval (dense + BM25 sparse + RRF fusion). "
+                             "Requires the sparse side-collection populated via "
+                             "scripts/ingest_bm25_sparse.py. Implies --rerank-backend if "
+                             "no reranker is specified (defaults to omlx).")
+    parser.add_argument("--sparse-collection", default="mmrag_v2_8__bm25_sparse",
+                        help="Sparse side-collection for hybrid mode.")
+    parser.add_argument("--bm25-index-path", default="tests/fixtures/bm25_index_v2_12.json",
+                        help="Path to the BM25 index JSON for hybrid mode.")
+    parser.add_argument("--hyde", action="store_true",
+                        help="Use HyDE: generate a hypothetical answer via qwen-max and embed "
+                             "that instead of the literal query. Adds ~1s + ~$0.001 per query "
+                             "but improves retrieval when the question and answer have different "
+                             "vocabulary.")
     args = parser.parse_args()
 
     work_path = Path(args.work_path)
@@ -761,16 +844,25 @@ def main() -> int:
         stage_generate(work_path, api_key)
     if args.stage in ("retrieve", "all"):
         print("[stage] retrieve")
+        # Hybrid mode implies reranking; default reranker if user
+        # didn't pass one explicitly.
+        effective_rerank_backend = args.rerank_backend
+        if args.hybrid and effective_rerank_backend is None:
+            effective_rerank_backend = "omlx"
         top_k_retrieve_resolved = (
             args.top_k_retrieve if args.top_k_retrieve is not None
-            else (25 if args.rerank_backend else TOP_K)
+            else (25 if effective_rerank_backend else TOP_K)
         )
         stage_retrieve(
             work_path, args.qdrant_url, args.ollama_url,
             args.collection, args.provider, args.embed_model, api_key,
-            rerank_backend=args.rerank_backend,
+            rerank_backend=effective_rerank_backend,
             top_k_retrieve=top_k_retrieve_resolved,
             top_n_return=TOP_K,
+            hybrid=args.hybrid,
+            sparse_collection=args.sparse_collection,
+            bm25_index_path=args.bm25_index_path,
+            use_hyde=args.hyde,
         )
     if args.stage in ("judge", "all"):
         print("[stage] judge")
