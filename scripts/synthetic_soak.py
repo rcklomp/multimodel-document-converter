@@ -336,15 +336,46 @@ def _embed_query(text: str, provider: str, model: str,
 
 def stage_retrieve(work_path: Path, qdrant_url: str, ollama_url: str,
                    collection: str, provider: str, embed_model: str,
-                   api_key: str) -> None:
+                   api_key: str, *,
+                   rerank_backend: str | None = None,
+                   top_k_retrieve: int = TOP_K,
+                   top_n_return: int = TOP_K) -> None:
+    """Retrieve top-K candidates per query and store them on the row.
+
+    When `rerank_backend` is None (default), behavior is identical to
+    pre-v2.12: Qdrant top-`top_n_return` is stored verbatim.
+
+    When `rerank_backend` is set (`dashscope` or `omlx`), the pipeline
+    becomes: embed → Qdrant top-`top_k_retrieve` → reranker → top-
+    `top_n_return`. The stored entry includes `rerank_score` and
+    `rerank_index` on each chunk so the Phase 1 soak can compare
+    reranker output across backends.
+    """
     rows = _read_work(work_path)
     if not rows:
         print("  retrieve: no work file", file=sys.stderr)
         return
     queries_total = sum(len(r.get("queries") or []) for r in rows)
     queries_done = sum(1 for r in rows for q in (r.get("queries") or []) if q.get("retrieval"))
+    rerank_desc = f" rerank={rerank_backend}" if rerank_backend else " (no rerank)"
     print(f"  retrieve: {queries_done}/{queries_total} queries already retrieved "
-          f"(collection={collection}, provider={provider}, model={embed_model})")
+          f"(collection={collection}, provider={provider}, model={embed_model}{rerank_desc}, "
+          f"top_k_retrieve={top_k_retrieve}, top_n_return={top_n_return})")
+
+    # Lazy-construct the reranker so the import path stays optional.
+    reranker = None
+    if rerank_backend:
+        # Import via the public mmrag_v2.retrieval API.
+        try:
+            sys.path.insert(0, str(REPO_ROOT / "src"))
+            from mmrag_v2.retrieval import get_reranker  # noqa: E402
+            reranker = get_reranker(rerank_backend)
+            print(f"    reranker constructed: backend={reranker.name} model={reranker.model}")
+        except Exception as e:
+            print(f"    ! could not construct reranker '{rerank_backend}': {e}",
+                  file=sys.stderr)
+            return
+
     flushed = 0
     for r in rows:
         for q in (r.get("queries") or []):
@@ -353,23 +384,66 @@ def stage_retrieve(work_path: Path, qdrant_url: str, ollama_url: str,
             try:
                 vec = _embed_query(q["query_text"], provider, embed_model,
                                     ollama_url, api_key)
-                results = search(vec, collection, limit=TOP_K, qdrant_url=qdrant_url)
+                results = search(vec, collection, limit=top_k_retrieve,
+                                 qdrant_url=qdrant_url)
             except Exception as e:
                 print(f"    ! retrieval failed for {q['query_id']}: {e}", file=sys.stderr)
                 continue
-            top = []
-            for hit in results[:TOP_K]:
-                payload = hit.get("payload") or {}
-                top.append({
-                    "chunk_id": payload.get("chunk_id") or str(hit.get("id")),
-                    "doc_id": payload.get("doc_id"),
-                    "source_file": payload.get("source_file"),
-                    "page_number": payload.get("page_number"),
-                    "modality": payload.get("modality"),
-                    "score": round(float(hit.get("score") or 0.0), 6),
-                    "content": (payload.get("content") or "").strip()[:1500],
-                })
-            q["retrieval"] = {"top_k": top}
+
+            # Optionally rerank the Qdrant top-K.
+            if reranker is not None:
+                rerank_inputs = []
+                for i, hit in enumerate(results):
+                    payload = hit.get("payload") or {}
+                    rerank_inputs.append({
+                        "chunk_id": payload.get("chunk_id") or str(hit.get("id")),
+                        "content": (payload.get("content") or "")[:1500],
+                        "_hit": hit,
+                    })
+                try:
+                    reranked = reranker.rerank(
+                        q["query_text"], rerank_inputs, top_n=top_n_return
+                    )
+                except Exception as e:
+                    print(f"    ! rerank failed for {q['query_id']}: {e}; "
+                          f"falling back to vector-rank order", file=sys.stderr)
+                    reranked = [
+                        {**rerank_inputs[i], "rerank_score": 0.0, "rerank_index": i}
+                        for i in range(min(top_n_return, len(rerank_inputs)))
+                    ]
+                top = []
+                for r_item in reranked:
+                    hit = r_item.get("_hit") or {}
+                    payload = hit.get("payload") or {}
+                    top.append({
+                        "chunk_id": payload.get("chunk_id") or str(hit.get("id")),
+                        "doc_id": payload.get("doc_id"),
+                        "source_file": payload.get("source_file"),
+                        "page_number": payload.get("page_number"),
+                        "modality": payload.get("modality"),
+                        "score": round(float(hit.get("score") or 0.0), 6),
+                        "rerank_score": round(float(r_item.get("rerank_score") or 0.0), 6),
+                        "rerank_index": int(r_item.get("rerank_index", -1)),
+                        "content": (payload.get("content") or "").strip()[:1500],
+                    })
+            else:
+                top = []
+                for hit in results[:top_n_return]:
+                    payload = hit.get("payload") or {}
+                    top.append({
+                        "chunk_id": payload.get("chunk_id") or str(hit.get("id")),
+                        "doc_id": payload.get("doc_id"),
+                        "source_file": payload.get("source_file"),
+                        "page_number": payload.get("page_number"),
+                        "modality": payload.get("modality"),
+                        "score": round(float(hit.get("score") or 0.0), 6),
+                        "content": (payload.get("content") or "").strip()[:1500],
+                    })
+            q["retrieval"] = {
+                "top_k": top,
+                "rerank_backend": rerank_backend,
+                "top_k_retrieve": top_k_retrieve,
+            }
             flushed += 1
             if flushed % 20 == 0:
                 _write_work(work_path, rows)
@@ -547,7 +621,19 @@ def stage_report(work_path: Path, report_path: Path,
     except ValueError:
         rel_src = work_path
     lines.append(f"> Source: `{rel_src}`.")
-    lines.append(f"> Judge: Dashscope `{JUDGE_MODEL}`. Generator: `{GENERATOR_MODEL}`. Embedder: `{embed_model}` (provider={provider}). Collection: `{collection}`.")
+    # Inspect what reranker was used (if any) from the work-file metadata.
+    rerank_seen: set[str] = set()
+    for r in rows:
+        for q in (r.get("queries") or []):
+            ret = q.get("retrieval") or {}
+            rb = ret.get("rerank_backend")
+            if rb:
+                rerank_seen.add(rb)
+    rerank_desc = (
+        f"`{','.join(sorted(rerank_seen))}`" if rerank_seen
+        else "(none — vector-rank only)"
+    )
+    lines.append(f"> Judge: Dashscope `{JUDGE_MODEL}`. Generator: `{GENERATOR_MODEL}`. Embedder: `{embed_model}` (provider={provider}). Collection: `{collection}`. Reranker: {rerank_desc}.")
     lines.append("> No QA threshold; this snapshot is informational.")
     lines.append("")
     lines.append("## 1. Corpus summary")
@@ -637,6 +723,16 @@ def main() -> int:
                              "Must match how the target collection was built.")
     parser.add_argument("--embed-model", default=None,
                         help="Query-side embedding model. Default 'text-embedding-v4' for dashscope; 'llava' for ollama.")
+    parser.add_argument("--rerank-backend", default=None,
+                        choices=["dashscope", "omlx", "null", None],
+                        help="When set, the retrieve stage runs the Qdrant top-K candidates through "
+                             "the named reranker before storing the top-N. Default off (pre-v2.12 "
+                             "behavior). 'dashscope' = cloud gte-rerank; 'omlx' = local "
+                             "gte-reranker-modernbert-base-mlx; 'null' = pass-through (debug).")
+    parser.add_argument("--top-k-retrieve", type=int, default=None,
+                        help="Number of Qdrant candidates the reranker sees per query. "
+                             "Only used when --rerank-backend is set. Default 25 in that case; "
+                             "ignored when reranker is off (top-K and top-N collapse to TOP_K=5).")
     args = parser.parse_args()
 
     work_path = Path(args.work_path)
@@ -665,8 +761,17 @@ def main() -> int:
         stage_generate(work_path, api_key)
     if args.stage in ("retrieve", "all"):
         print("[stage] retrieve")
-        stage_retrieve(work_path, args.qdrant_url, args.ollama_url,
-                       args.collection, args.provider, args.embed_model, api_key)
+        top_k_retrieve_resolved = (
+            args.top_k_retrieve if args.top_k_retrieve is not None
+            else (25 if args.rerank_backend else TOP_K)
+        )
+        stage_retrieve(
+            work_path, args.qdrant_url, args.ollama_url,
+            args.collection, args.provider, args.embed_model, api_key,
+            rerank_backend=args.rerank_backend,
+            top_k_retrieve=top_k_retrieve_resolved,
+            top_n_return=TOP_K,
+        )
     if args.stage in ("judge", "all"):
         print("[stage] judge")
         stage_judge(work_path, api_key)
