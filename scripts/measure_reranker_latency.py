@@ -42,8 +42,11 @@ if str(SCRIPTS) not in sys.path:
 from ingest_to_qdrant import embed_text_dashscope  # noqa: E402
 from search_qdrant import search  # noqa: E402
 
-RERANK_URL = "https://dashscope-intl.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
-RERANK_MODEL = "gte-rerank"
+DEFAULT_RERANK_URL_DASHSCOPE = "https://dashscope-intl.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+DEFAULT_RERANK_MODEL_DASHSCOPE = "gte-rerank"
+
+DEFAULT_RERANK_URL_OMLX = "http://10.0.10.246:8000/v1/rerank"
+DEFAULT_RERANK_MODEL_OMLX = "mlx-community_Qwen3-Reranker-8B-mxfp8"
 
 # 20 queries lifted from scripts/retrieval_regression.py (single source).
 QUERIES = [
@@ -71,21 +74,41 @@ QUERIES = [
 
 
 def rerank_call(query: str, documents: list[str], api_key: str,
-                top_n: int = 5, timeout: int = 30) -> tuple[list[dict], float]:
-    """Call Dashscope gte-rerank. Returns (results, elapsed_seconds)."""
-    body = json.dumps({
-        "model": RERANK_MODEL,
-        "input": {"query": query, "documents": documents},
-        "parameters": {"top_n": top_n, "return_documents": False},
-    }).encode("utf-8")
-    req = urllib.request.Request(RERANK_URL, data=body, method="POST")
+                url: str, model: str, top_n: int = 5,
+                timeout: int = 60) -> tuple[list[dict], float]:
+    """Call a rerank endpoint. Returns (results, elapsed_seconds).
+
+    Supports two payload shapes:
+      - Dashscope `gte-rerank` (input/parameters wrapper)
+      - Cohere-style `rerank` (top-level query/documents, e.g. omlx)
+    """
+    is_dashscope = "dashscope" in url
+    if is_dashscope:
+        body = json.dumps({
+            "model": model,
+            "input": {"query": query, "documents": documents},
+            "parameters": {"top_n": top_n, "return_documents": False},
+        }).encode("utf-8")
+    else:
+        body = json.dumps({
+            "model": model,
+            "query": query,
+            "documents": documents,
+            "top_n": top_n,
+            "return_documents": False,
+        }).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="POST")
     req.add_header("Authorization", f"Bearer {api_key}")
     req.add_header("Content-Type", "application/json")
     start = time.perf_counter()
     resp = urllib.request.urlopen(req, timeout=timeout)
     payload = json.loads(resp.read())
     elapsed = time.perf_counter() - start
-    return payload.get("output", {}).get("results", []), elapsed
+    if is_dashscope:
+        results = payload.get("output", {}).get("results", [])
+    else:
+        results = payload.get("results", [])
+    return results, elapsed
 
 
 def percentile(values: list[float], p: float) -> float:
@@ -114,8 +137,22 @@ def main() -> int:
                         help="Number of timing samples per (query, K).")
     parser.add_argument("--top-n", type=int, default=5,
                         help="top_n returned by the reranker (production default: 5).")
-    parser.add_argument("--api-key", default=None)
+    parser.add_argument("--api-key", default=None,
+                        help="Embed-side API key (Dashscope). Default: DASHSCOPE_API_KEY env.")
     parser.add_argument("--embed-model", default="text-embedding-v4")
+    parser.add_argument("--rerank-backend", default="dashscope",
+                        choices=["dashscope", "omlx"],
+                        help="Reranker backend. 'dashscope' = cloud gte-rerank "
+                             "(intl endpoint). 'omlx' = local mlx-omni-server "
+                             f"at {DEFAULT_RERANK_URL_OMLX}.")
+    parser.add_argument("--rerank-url", default=None,
+                        help="Override rerank URL.")
+    parser.add_argument("--rerank-model", default=None,
+                        help="Override rerank model name.")
+    parser.add_argument("--rerank-api-key-env", default=None,
+                        help="Env var name to read the rerank API key from. "
+                             "Default: DASHSCOPE_API_KEY (dashscope) or "
+                             "MLX_API_KEY (omlx).")
     parser.add_argument("--max-chunk-chars", type=int, default=1500,
                         help="Truncate each chunk's content to this many chars "
                              "before sending to the reranker (matches typical "
@@ -124,13 +161,30 @@ def main() -> int:
                         help="Optional path to dump the full per-call timing data.")
     args = parser.parse_args()
 
+    # Embed-side API key (Dashscope for production embedder).
     api_key = args.api_key or os.environ.get("DASHSCOPE_API_KEY", "")
     if not api_key:
-        print("ERROR: DASHSCOPE_API_KEY env var required.", file=sys.stderr)
+        print("ERROR: DASHSCOPE_API_KEY env var required for embedding.", file=sys.stderr)
+        return 2
+
+    # Rerank-side endpoint, model, api key.
+    if args.rerank_backend == "dashscope":
+        rerank_url = args.rerank_url or DEFAULT_RERANK_URL_DASHSCOPE
+        rerank_model = args.rerank_model or DEFAULT_RERANK_MODEL_DASHSCOPE
+        rerank_api_key_env = args.rerank_api_key_env or "DASHSCOPE_API_KEY"
+    else:  # omlx
+        rerank_url = args.rerank_url or DEFAULT_RERANK_URL_OMLX
+        rerank_model = args.rerank_model or DEFAULT_RERANK_MODEL_OMLX
+        rerank_api_key_env = args.rerank_api_key_env or "MLX_API_KEY"
+    rerank_api_key = os.environ.get(rerank_api_key_env, "")
+    if not rerank_api_key:
+        print(f"ERROR: {rerank_api_key_env} env var required for rerank backend "
+              f"'{args.rerank_backend}'.", file=sys.stderr)
         return 2
 
     k_values = [int(k) for k in args.k_values.split(",")]
-    print(f"=== Reranker latency benchmark — {RERANK_MODEL} ===")
+    print(f"=== Reranker latency benchmark — {rerank_model} ===")
+    print(f"Backend:    {args.rerank_backend} ({rerank_url})")
     print(f"Collection: {args.collection}")
     print(f"K values:   {k_values}")
     print(f"Samples:    {args.samples} per (query, K)")
@@ -171,7 +225,10 @@ def main() -> int:
             ]
             for s in range(args.samples):
                 try:
-                    _results, elapsed = rerank_call(qtext, docs, api_key, top_n=args.top_n)
+                    rerank_results, elapsed = rerank_call(
+                        qtext, docs, rerank_api_key,
+                        rerank_url, rerank_model, top_n=args.top_n,
+                    )
                 except urllib.error.HTTPError as e:
                     print(f"    ! HTTPError {e.code} on {qid} K={k} sample={s}: {e.read()[:120]}",
                           file=sys.stderr)
@@ -187,6 +244,8 @@ def main() -> int:
                     "sample": s,
                     "elapsed_seconds": elapsed,
                     "candidates_sent": len(docs),
+                    "top_indices": [r.get("index") for r in rerank_results[:args.top_n]],
+                    "top_scores": [r.get("relevance_score") for r in rerank_results[:args.top_n]],
                 })
         print(f"  {qid:14s} samples for K in {k_values} captured")
     print()
@@ -246,10 +305,15 @@ def main() -> int:
         out_path = Path(args.output_json)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps({
-            "model": RERANK_MODEL,
+            "backend": args.rerank_backend,
+            "rerank_url": rerank_url,
+            "rerank_model": rerank_model,
+            "embed_model": args.embed_model,
             "collection": args.collection,
             "k_values": k_values,
             "samples_per_combo": args.samples,
+            "top_n_returned": args.top_n,
+            "max_chunk_chars": args.max_chunk_chars,
             "embed_times_seconds": embed_times,
             "qdrant_times_seconds": qdrant_times,
             "rerank_timings_seconds": {str(k): v for k, v in timings.items()},

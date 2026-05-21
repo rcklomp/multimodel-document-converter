@@ -1,6 +1,6 @@
 # Plan: v2.12 — Close the absolute-quality gap: reranker → hybrid retrieval → HyDE
 
-**Status:** **Draft v0.2** (2026-05-21). Authored after the v2.11.0
+**Status:** **Draft v0.3** (2026-05-21). Authored after the v2.11.0
 swap landed and was tagged (`c2a461c`, annotated `v2.11.0` on both
 remotes 2026-05-20/21). v2.11 closed the *embedder* bottleneck with a
 10× lift across every embedder-attributable axis; v2.12 closes the
@@ -12,13 +12,24 @@ it, not to be agreed with after the fact.
 
 **v0.2 changes (2026-05-21):** §1 Goal 7 (latency budget) and §3
 Phase 1 latency-budget paragraph + §7 Open Question 1 revised in
-response to the empirical reranker-latency benchmark run on
-2026-05-21 (`scripts/measure_reranker_latency.py`; full data at
-`tests/fixtures/reranker_latency_2026-05-21.json`). The original
-1.5 s p99 target was incompatible with the actual network-floor
-costs of the Dashscope intl endpoint from the user's location;
-revised budget split into stage-level floors + a total-time target
-that's achievable.
+response to the empirical reranker-latency benchmark
+(`scripts/measure_reranker_latency.py`; data at
+`tests/fixtures/reranker_latency_2026-05-21.json`). Original 1.5 s
+p99 target was incompatible with the empirical embed floor;
+revised to a stage-level + total-time budget.
+
+**v0.3 changes (2026-05-21):** §3 Phase 1 reranker-choice rationale
+expanded after a local-vs-cloud comparison against the user's
+self-hosted Qwen3-Reranker-8B at `http://10.0.10.246:8000`. Two
+benchmarks added: latency-only against the local server
+(`tests/fixtures/reranker_latency_omlx_2026-05-21.json`) and
+side-by-side quality vs the cloud reranker on the same query+
+candidate pairs (`tests/fixtures/reranker_quality_2026-05-21.json`).
+Local reranker rejected for v2.12 Phase 1 on both latency (17.5×
+slower) and quality-signal grounds (score bunching pattern
+consistent with a yes/no-token-classification head; top-1
+agreement with cloud is 5% but both could be wrong). Cloud
+`gte-rerank` confirmed as the Phase 1 reranker.
 
 **Predecessor:** [`docs/PLAN_V2.11.md`](PLAN_V2.11.md) — Draft v1.0,
 Phase 1 swap executed 2026-05-20 on `c2a461c`, tag `v2.11.0` on
@@ -349,6 +360,75 @@ qdrant 0.06 s ≈ 3.1 s). Reranking is well-behaved for sub-K=100; the
 real future-latency lever is **embedding cache** for repeat /
 follow-up queries, which is v2.13 scope. Out of scope for v2.12.
 
+**Why not the local Qwen3-Reranker-8B?** A local
+`mlx-community_Qwen3-Reranker-8B-mxfp8` is reachable on the user's
+LAN at `http://10.0.10.246:8000/v1/rerank`. It was benchmarked
+on 2026-05-21 to determine whether it should be the v2.12 Phase 1
+reranker instead of the cloud `gte-rerank`. Two reasons it was
+rejected:
+
+1. **Latency is 17.5× worse than cloud.** Steady-state per-call
+   numbers (40 samples per K from
+   `tests/fixtures/reranker_latency_omlx_2026-05-21.json`):
+
+   | Backend | K=10 p50 / p99 | K=25 p50 / p99 |
+   |---|---:|---:|
+   | Cloud `gte-rerank` | 0.80 s / 1.04 s | 0.95 s / 1.70 s |
+   | Local Qwen3-Reranker-8B | 7.4 s / 12.2 s | 19.3 s / 30.7 s |
+
+   Per-pair compute cost on the local server is ~750 ms/pair —
+   consistent with an 8B-parameter causal-LM cross-encoder doing a
+   sequential forward pass per pair on Apple Silicon. Network
+   round-trip is negligible (LAN, ~5 ms) — the cost is pure compute.
+   Even at K=10 the local reranker exceeds any reasonable production
+   p99 budget by 5-10×.
+
+2. **Score-distribution pattern suggests the local reranker has a
+   yes/no classification head, not a regression head.** From the
+   side-by-side quality benchmark
+   (`tests/fixtures/reranker_quality_2026-05-21.json`, 20 queries
+   × top-25 candidates → top-5 returned by each reranker):
+
+   | Reranker | Score range observed | Typical top-5 spread |
+   |---|---|---|
+   | Cloud `gte-rerank` | 0.006 — 0.753 | Wide; clear winner usually 2-4× the runner-up |
+   | Local Qwen3-Reranker-8B | 0.617 — 0.836 | Narrow; everything bunched in 0.75-0.85 |
+
+   Qwen3-Reranker is a causal-LM-with-yes/no-token-classification
+   architecture — relevance score = `softmax(logits_yes_no)["yes"]`.
+   Trained that way, it tends to be overconfident on the positive
+   class. The score gap between the cloud's top-1 and top-5 is
+   typically 0.3-0.5; on the local model it's typically 0.05. With
+   such a narrow band, the ordering within the band is dominated by
+   noise rather than signal — exactly the opposite of what a
+   reranker should do.
+
+   The top-1 agreement rate between the two rerankers was **5%**
+   (1/20 queries). Mean top-5 Jaccard overlap was **0.127** —
+   functionally independent decisions. The cloud reranker's ordering
+   correlates with the embedder's similarity score (re-orders within
+   a topic-coherent candidate set); the local reranker's ordering
+   appears to be near-random within its bunched-score band.
+
+3. **What we cannot conclude from these benchmarks alone.**
+   "Local picks different chunks than cloud" doesn't tell us which
+   one picks BETTER chunks — both could be wrong (both could be
+   right, picking different valid chunks). The definitive answer
+   requires running the full Phase 1 soak (518 queries × LLM-as-
+   judge grading) against each reranker. Doing that at the local
+   reranker's latency would take roughly 518 × 19 s = ~2.7 hours of
+   wall time for the retrieve stage alone. **Deferred.** Re-open
+   only if (a) local inference latency improves by ≥ 10× (smaller
+   model, different hardware, batched inference) or (b) a privacy/
+   data-residency requirement forces local-only retrieval.
+
+**v2.13 candidate.** A faster local reranker (e.g.,
+`mlx-community/bge-reranker-base` at ~110M params, or a future MLX
+batch-inference path) could re-enter contention in v2.13. The
+benchmark + quality-comparison scripts are reusable —
+`scripts/measure_reranker_latency.py --rerank-backend omlx` and
+`scripts/compare_reranker_quality.py` measure both at any time.
+
 **Why Phase 1 alone may not suffice for Recall@5 chunk ≥ 85%.**
 Reranker improves *ordering within the retrieved candidate set*; it
 does not change which chunks are in the set. If the right chunk
@@ -629,6 +709,7 @@ Before the v2.12.0 tag is staged:
 |---|---|
 | 2026-05-21 | Draft v0.1 authored after the v2.11.0 swap landed + was tagged. Order of phases driven by the v2.11 soak shape: Recall@5 doc 91.7% vs Recall@5 chunk 66.8% is a right-doc-wrong-chunk pattern → reranker is the highest-leverage first phase. Phase 2 (hybrid) and Phase 3 (HyDE) are conditional on Phase 1's floor outcomes. Phase 4 (per-doc-class chunking) is a stretch safety valve, not the planned path. Phase 0 closes the v2.11.x Format recovery + 30-day rollback drop before any retrieval work starts so the v2.12 measurements start from a clean Format baseline. |
 | 2026-05-21 | Promoted to Draft v0.2 after empirical reranker-latency benchmark (`scripts/measure_reranker_latency.py`; 240 samples across 20 queries × 4 K values × 3 repeats). Three substantive changes: (1) Correct model name from `gte-rerank-v2` to `gte-rerank` for the intl endpoint (v2 only on the cn endpoint; same model). (2) §2 Goal 7 latency budget revised — the original 1.5 s p99 target was incompatible with the empirical embed p99 of 1.35 s on its own; new split-stage budget plus a 3.0 s total p99 target at K=25 / 3.5 s at K=50 reflects what's achievable from the user's current network. The embed p99 (1.35 s) is the dominant cost, not the reranker — a counterintuitive but actionable finding that frames embedding-cache as the right next-cycle latency lever. (3) §3 Phase 1 default `top_k_retrieve` set to 25 (was unspecified); K=50 is the fallback if Phase 1 alone doesn't clear Recall@5 chunk ≥ 85%; K=100 is excluded due to 4.3 s tail-latency outliers in the benchmark. Open Question 1 marked resolved. |
+| 2026-05-21 | Promoted to Draft v0.3 after a local-vs-cloud reranker bake-off against the user's self-hosted `mlx-community_Qwen3-Reranker-8B-mxfp8` at `http://10.0.10.246:8000`. Benchmark script extended with `--rerank-backend` flag; new `scripts/compare_reranker_quality.py` runs the same query+candidates through both rerankers side-by-side. Local reranker rejected for v2.12 Phase 1 on two independent grounds: (a) **Latency 17.5× worse than cloud** — K=10 p99 = 12.2 s, K=25 p99 = 30.7 s (per-pair compute ~750 ms on Apple Silicon for an 8B-param causal-LM cross-encoder). (b) **Score-distribution pattern indicates a yes/no-token-classification head** rather than a regression head — local scores bunch in 0.75-0.85 vs cloud's 0.006-0.75 range, meaning the local reranker's within-band ordering is closer to noise than signal. Top-1 agreement between the two rerankers was 5% (1/20), mean top-5 Jaccard 0.127 — functionally independent decisions, but the benchmarks alone can't tell which is RIGHT (both could be wrong). Deferred to v2.13+ pending either 10× local-latency improvement or a privacy/data-residency driver. Cloud `gte-rerank` confirmed as the Phase 1 reranker; new fixtures committed for future delta reproducibility. Open Question 1 sub-clause (local reranker) marked resolved. |
 
 ---
 
