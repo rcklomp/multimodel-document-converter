@@ -30,16 +30,19 @@ from mmrag_v2.retrieval.reranker import (
 )
 
 
-# Production default chosen by the v2.12 Phase 1 shootout soak
-# (2026-05-21, 518 queries × 2 reranker backends + v2.11.0 baseline).
-# Local omlx ModernBERT won on all 4 embedder-attributable axes:
-#   Recall@1 chunk    35.5% (v2.11) → 53.9% (cloud) → 61.8% (omlx)
-#   Recall@5 chunk    66.8% → 66.8% → 81.3%
-#   Recall@5 doc      91.7% → 91.7% → 95.2%
-#   Relevance         59.3% → 74.5% → 78.3%
-#   Faithfulness      50.6% → 64.2% → 69.4%
-#   Format            89.8% → 89.5% → 89.0% (small drift, within noise)
-# See docs/DECISIONS.md "v2.12 Phase 1 Reranker Shootout Outcome".
+# Production reranker chosen by the v2.12 Phase 1 shootout (2026-05-21).
+# v2.12 Phase 2 then promoted *hybrid* (BM25 + dense + RRF + rerank)
+# as the production retrieval flow — same reranker, wider candidate
+# set. See `retrieve_hybrid_reranked()` in pipeline.py.
+#
+# Phase 1 (dense + rerank only) -> Phase 2 (hybrid + rerank):
+#   Recall@1 chunk    35.5% (v2.11) → 61.8% (P1) → 67.8% (P2)
+#   Recall@5 chunk    66.8% → 81.3% → 90.2%   <-- STRETCH target met
+#   Recall@5 doc      91.7% → 95.2% → 98.6%   <-- STRETCH target met
+#   Relevance         59.3% → 78.3% → 82.1%
+#   Faithfulness      50.6% → 69.4% → 72.6%   <-- floor target met
+#   Format            89.8% → 89.0% → 88.4%
+# See docs/DECISIONS.md "v2.12 Phase 1/2 Outcome".
 _COMPILE_DEFAULT: str = "omlx"
 
 
