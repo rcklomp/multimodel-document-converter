@@ -984,3 +984,48 @@ Reports retained:
 **Format gate carry-forward.** Format 88.4% is still ~8pp below the ≥96% pin. Phase 0 partial fix improved IRJET only; Earthship + CarOK chunk-level OCR damage remains. The v2.12.0 release will ship with a documented Format gate downgrade (same shape as the v2.11.0 swap) targeting ≥95% in v2.13 via Earthship re-OCR + CarOK form-shape work. Document at PLAN_V2.12 §"Acceptance Gate".
 
 **Decision recorded by:** autonomous run, 2026-05-21.
+
+---
+
+## v2.12 Phase 3 Outcome — HyDE Ships Opt-In Only (2026-05-21)
+
+**Context.** Per the v2.12 Phase 1 close-out, Phase 3 (HyDE) was nominally TRIGGERED because Faithfulness 69.4% fell 0.6pp below the ≥70% floor. After Phase 2 (hybrid retrieval) ran, Faithfulness lifted to 72.6% (floor met), so the trigger no longer fires under the plan's strict logic. The HyDE soak ran as a MEASUREMENT to determine whether HyDE adds anything on top of the strong Phase 2 baseline, since the code is already built.
+
+**Protocol.** Same 518-query × 259-chunk soak fixture, same hybrid retrieval + ModernBERT reranker, same judge (qwen-max). The only difference: `use_hyde=True`. For each query, generate a hypothetical answer via qwen-max (temperature 0.3), embed that answer, then proceed with the standard dense + sparse + RRF + rerank pipeline. Total wall time 52 min (HyDE adds ~1s/query to retrieve stage). Cumulative spend ~$3-4.
+
+**Numeric result — every delta is within noise:**
+
+| Axis | P2 hybrid+rerank | **P3 hybrid+rerank+HyDE** | Δ |
+|---|---:|---:|---:|
+| Recall@1 chunk | 67.8% | 68.3% | +0.5pp (noise) |
+| Recall@5 chunk | 90.2% | 90.2% | 0pp (tie) |
+| Recall@5 doc | 98.6% | 98.5% | −0.1pp (tie) |
+| Relevance (judge) | 82.1% | 82.0% | −0.1pp (tie) |
+| Faithfulness (judge) | 72.6% | 73.5% | +0.9pp (noise) |
+| Format (judge) | 88.4% | 87.7% | −0.7pp (noise) |
+
+**Honest read: HyDE does nothing meaningful on this corpus + this query distribution.** All deltas are within ±1pp on 518 queries × 1036 grade points — easily a handful of queries differing. The soak comparator script flagged P3 as the axis-level winner (2 wins vs 1) but the magnitudes don't justify shipping.
+
+**Decision: ship HyDE as opt-in only.**
+
+- `mmrag_v2.retrieval.pipeline.retrieve_reranked(use_hyde=False)` and `retrieve_hybrid_reranked(use_hyde=False)` — default OFF.
+- Callers can opt in by passing `use_hyde=True` or setting the equivalent flag in synthetic_soak.py / search_qdrant.py if/when those are wired.
+- The module (`mmrag_v2.retrieval.hyde`) stays as documented retrieval infrastructure for v2.13+ experiments; tests pin the API + fallback semantics.
+
+**Why HyDE didn't help here.** Two plausible explanations:
+
+1. **The retrieval is already strong.** With hybrid + rerank, the system is finding the right doc 98.6% of the time and the right chunk in top-5 90.2% of the time. The ceiling is now the LLM-as-judge's grading variance, not the retrieval. HyDE's main mechanism — bridging question/answer vocabulary mismatch — is most valuable when retrieval is weak; on a strong baseline there's little headroom.
+
+2. **BM25 already provides keyword-bridge.** HyDE's other claimed benefit is recovering exact-keyword matches. But our hybrid pipeline already does that via the BM25 sparse leg. HyDE on the dense leg and BM25 on the sparse leg may be partially redundant.
+
+**Latency / cost trade-off.** Even if the gains were real, the cost is:
+- +1s p99 latency per query (qwen-max generation round-trip)
+- ~$0.001 per query in Dashscope spend
+- Adds an LLM-in-the-loop failure mode (handled by the fallback to literal-query embed, but increases pipeline surface area)
+
+For a +0.5pp Recall@1 gain that's within noise, the trade-off is unfavorable.
+
+Reports retained:
+- `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_p3_hyde.md` (518 judged)
+
+**Decision recorded by:** autonomous run, 2026-05-21.

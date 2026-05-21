@@ -1,22 +1,34 @@
 # Plan: v2.12 — Close the absolute-quality gap: reranker → hybrid retrieval → HyDE
 
-**Status:** **Draft v0.7** (2026-05-21). Phase 2 SHIPPED locally.
-Hybrid retrieval (BM25 sparse + dense + RRF + ModernBERT rerank) is
-the new v2.12.0 production default. **All 5 embedder-attributable
-floors cleared, two hit stretch targets:** Recall@1 chunk 67.8%
-(floor 55% ✓), Recall@5 chunk **90.2% STRETCH** (≥90%), Recall@5
-doc **98.6% STRETCH** (≥97%), Relevance 82.1% (floor 75% ✓),
-Faithfulness 72.6% (floor 70% ✓). Format 88.4% remains below the
-≥96% pin (Earthship + CarOK carry-forward from Phase 0). End-to-end
-p99 latency ~2.1s (within 3.0s soft budget). Phase 3 (HyDE)
-trigger no longer fires under the plan's strict logic; will run a
-Phase 3 measurement soak to determine if HyDE adds anything on top
-of hybrid+rerank, then ship opt-in or skip. See
-`docs/DECISIONS.md` "v2.12 Phase 2 Outcome" + report at
-`docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_p2_hybrid.md`.
+**Status:** **Draft v0.8** (2026-05-21). Phase 3 measurement soak
+complete. **HyDE adds nothing meaningful on top of hybrid+rerank**
+— all deltas within ±1pp on 518 queries (R@1 +0.5pp, R@5 chunk 0,
+R@5 doc −0.1pp, Relevance −0.1pp, Faithfulness +0.9pp, Format
+−0.7pp). Decision: **HyDE ships as opt-in only** (default off).
+The module stays as durable v2.13 measurement infrastructure.
 
-**Predecessor:** Draft v0.6 (2026-05-21) — Phase 1 reranker shootout;
-ModernBERT won 4/4 embedder axes vs cloud `gte-rerank`.
+**v2.12.0 production retrieval stack:**
+- Embed: Dashscope `text-embedding-v4` (1024-dim cloud)
+- Dense Qdrant: `mmrag_v2_8__qwen3_dashscope` top-25
+- Sparse Qdrant: `mmrag_v2_8__bm25_sparse` top-25 (BM25)
+- RRF fusion (k=60, equal weights)
+- Rerank: local `gte-reranker-modernbert-base-mlx` via omlx-server
+- Return: top-5
+- End-to-end p99 latency: ~2.1s (within 3.0s soft budget)
+
+**Final quality vs v2.11.0 baseline:** Recall@1 35.5%→**67.8%**;
+Recall@5 chunk 66.8%→**90.2%** (STRETCH); Recall@5 doc 91.7%→**98.6%**
+(STRETCH); Relevance 59.3%→**82.1%**; Faithfulness 50.6%→**72.6%**.
+Format 89.8%→88.4% remains below ≥96% pin (Earthship + CarOK Phase 0
+carry-forward to v2.13).
+
+Phase 4 (per-doc-class chunking) NOT triggered — Phases 1+2 already
+clear all embedder-attributable floors with room to spare. **Phase N
+is now the only remaining step**: AFTER snapshot + version bump +
+docs sweep + stage v2.12.0 tag (user pushes/tags).
+
+**Predecessor:** Draft v0.7 (2026-05-21) — Phase 2 hybrid retrieval
+shipped; Phase 3 trigger no longer fires.
 
 **Predecessor:** Draft v0.5 (2026-05-21) — Phase 0 partial win
 (IRJET +15.6pp Format; Earthship + CarOK rolled to v2.13).
@@ -803,6 +815,7 @@ Before the v2.12.0 tag is staged:
 | 2026-05-21 | **Promoted to Draft v0.5 after Phase 0 execution.** Phase 0 (v2.11.x Format recovery) executed end-to-end. Root cause of the v2.11 Format dips on the three named docs turned out to be NOT a chunk-quality issue but a preference-staleness bug in `scripts/ingest_to_qdrant.py`: lines 351 + 483 preferred `metadata.refined_content` over `chunk.content`, but `refined_content` is the raw VLM refiner output preserved for provenance while `content` carries later normalization passes (v2.10 audit cleanup, whitespace collapse, page-header strip). The semantics of "which field is newer" inverted as the chunker evolved, but the ingest preference wasn't updated. One-line fix swapped the preference; 3 docs re-ingested (1146 chunks, 0 errors); partial soak ran on the same 48 queries the v2.11 soak used for these docs. Results: **IRJET +15.6pp Format** (71.9% → 87.5%) — clean win on the header-noise stripping. **CarOK +3.1pp Format** (68.8% → 71.9%) — barely moved; chunks correctly represent inventory data, LLM judge inherently penalizes form-class content. **Earthship +0pp Format** (71.9% → 71.9%) — Format defect is OCR layout damage (multi-column interleaving, mid-word linebreaks), not whitespace. Aggregate 77.1% on the 3 docs misses the ≥95% Phase 0 target by 17.9pp. Honest call: Phase 0 ships the genuine win (preference swap + 4 regression tests pinned in `tests/test_ingest_content_preference.py`); Earthship + CarOK roll forward to v2.13 as named recovery work (Earthship re-OCR; CarOK form-shape decision). The v2.12.0 Format gate stays at ≥95% pending the cumulative Phase 1 + Phase 2 lift. Side-channel deltas (Earthship Faithfulness −9.4pp, IRJET Relevance −9.4pp) are likely 1-2-query noise on a 16-query sample and will be re-measured in the full Phase 1 soak. Test suite after Phase 0: 990 passed, 15 skipped, 0 failed (+4 over the v2.11.0 baseline 986). |
 | 2026-05-21 | **Promoted to Draft v0.6 after Phase 1 shootout.** Phase 1 (reranker shootout) executed end-to-end. Two candidate rerankers ran the same 518-query × 259-chunk soak fixture: cloud `gte-rerank` (Dashscope intl) and local `gte-reranker-modernbert-base-mlx` (omlx-server). Same embedder (text-embedding-v4), same Qdrant collection, same judge (qwen-max). **Local ModernBERT wins decisively on all 4 embedder-attributable axes:** Recall@1 chunk 35.5% (v2.11.0) → 53.9% (cloud) → 61.8% (omlx); Recall@5 chunk 66.8% → 66.8% → 81.3%; Relevance 59.3% → 74.5% → 78.3%; Faithfulness 50.6% → 64.2% → 69.4%. Key insight: cloud `gte-rerank` only reordered the top-5 Qdrant already returned (Recall@5 chunk identical to baseline); ModernBERT actually picked *different* 5 chunks from the top-25 candidate set, finding gold chunks deeper. That's stronger reranking discrimination, consistent with ModernBERT being a 150M-param cross-encoder built on the newer Dec-2024 ModernBERT backbone vs cloud's older distilled multilingual model. **Phase 1 close-out:** `src/mmrag_v2/retrieval/config.py` `_COMPILE_DEFAULT` set to `"omlx"` so production picks ModernBERT by default; cloud remains the fallback via `RERANKER_BACKEND=dashscope` env var. End-to-end p99 latency ~1.85s (well within 3.0s budget). Zero per-query reranker cost in production. **Phase 2 TRIGGERED** because Recall@5 chunk = 81.3% < 85% floor (3.7pp gap). **Phase 3 TRIGGERED** because Faithfulness 69.4% < 70% floor (0.6pp gap — borderline within judge-noise; HyDE module built per plan, ship-on-by-default depends on Phase 3 soak's actual lift). Reports: `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_p1_cloud.md` + `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_p1_omlx.md`. Full numbers in `docs/DECISIONS.md` "v2.12 Phase 1 Reranker Shootout Outcome". Test suite after Phase 1: 1006 passed, 15 skipped, 0 failed. |
 | 2026-05-21 | **Promoted to Draft v0.7 after Phase 2 hybrid soak.** Phase 2 executed end-to-end: BM25 + dense + RRF fusion as the candidate-set-shaping layer, same ModernBERT reranker downstream. Same 518-query × 259-chunk fixture. Sparse side-collection `mmrag_v2_8__bm25_sparse` (25,623 chunks, 5.7s ingest, ~$0 cost) plus the existing dense collection. RRF k=60, equal weights. **All embedder-attributable floors cleared; two hit STRETCH targets**: Recall@1 chunk 67.8% (was 61.8% P1; floor 55%); **Recall@5 chunk 90.2%** (was 81.3% P1; STRETCH 90% ✓ — +8.9pp from adding BM25 fusion); **Recall@5 doc 98.6%** (was 95.2% P1; STRETCH 97% ✓); Relevance 82.1% (was 78.3%; floor 75%); **Faithfulness 72.6%** (was 69.4%; floor 70% ✓). Only Format 88.4% remains below the ≥96% pin (Earthship + CarOK Phase 0 carry-forward; chunk-level OCR damage not fixable by retrieval-side work). **Decision: hybrid retrieval is the v2.12.0 production default.** End-to-end p99 latency ~2.1s (embed 1.35s + dense 0.05s + sparse 0.05s + RRF + rerank 0.55s; still within 3.0s budget). Code: new `scripts/build_bm25_index.py` (25,649 chunks → 2MB tracked index), `scripts/ingest_bm25_sparse.py` (4500 chunks/sec ingest), `src/mmrag_v2/retrieval/sparse.py` (BM25 + RRF, 80 LOC, no new dep), `retrieve_hybrid_reranked()` added to `pipeline.py`. **Phase 3 (HyDE) trigger no longer fires** under the plan's strict logic (Faithfulness 72.6% ≥ 70% floor, Recall@1 67.8% well above 55%). Will still run a Phase 3 measurement soak to determine if HyDE adds anything on top of hybrid+rerank; result determines ship opt-in or skip. Test suite: 1032 passed, 15 skipped, 0 failed (+26 over Phase 1: sparse_bm25 + hyde + pipeline tests). |
+| 2026-05-21 | **Promoted to Draft v0.8 after Phase 3 HyDE measurement.** Phase 3 ran end-to-end as a measurement (trigger condition no longer fired after Phase 2). Same 518-query soak fixture, hybrid + rerank + HyDE pipeline. Total wall time 52 min; cumulative spend ~$3-4. **Result: every delta within ±1pp on 518 queries — HyDE does nothing meaningful on top of hybrid+rerank.** Recall@1 +0.5pp (68.3% vs 67.8%); Recall@5 chunk 0 (tie at 90.2%); Recall@5 doc −0.1pp (tie); Relevance −0.1pp (tie); Faithfulness +0.9pp (73.5% vs 72.6%); Format −0.7pp. Comparator script flagged P3 as the axis-level winner (2 wins vs 1) but the magnitudes don't justify the +1s/query latency + $0.001/query Dashscope cost. **Decision: ship HyDE as opt-in only.** `retrieve_reranked(use_hyde=False)` and `retrieve_hybrid_reranked(use_hyde=False)` — default OFF. The module stays as durable v2.13 measurement infrastructure for experiments. Why HyDE didn't help: (a) retrieval is already strong (R@5 doc 98.6%); the ceiling is now LLM-judge variance, not the retrieval; (b) BM25 already provides the keyword-bridge HyDE was supposed to add. Phase 4 (per-doc-class chunking) NOT triggered — Phases 1+2 already clear all embedder-attributable floors. The only remaining step is Phase N (AFTER snapshot + version bump + docs + stage v2.12.0 tag). Report: `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_p3_hyde.md`. |
 
 ---
 
