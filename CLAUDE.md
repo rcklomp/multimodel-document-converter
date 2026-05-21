@@ -11,11 +11,12 @@ This file provides guidance to Claude Code when working with this repository.
 6. `docs/TESTING.md`
 7. `docs/QUALITY_GATES.md`
 8. `docs/ARCHITECTURE.md`
-9. `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md` (**current canonical baseline**; v2.11 Phase 1 challenger soak — Recall@1 35.5% (+16.9×), Recall@5 chunk 66.8% (+9.8×), Format 89.8% (−8.5pp); v2.11.0 production soak baseline)
-10. `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` (v2.10 strict-gate baseline — 34/34 PASS; unchanged in v2.11 because the swap is retrieval-side only)
-11. `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md` (v2.10 soak — Format 98.3%, Recall@1 2.1%; baseline for v2.11 Phase 1 delta column)
-12. `docs/PLAN_V2.11.md` (active v2.11 plan; Draft v1.0 — swap executed 2026-05-20 on `c2a461c`; v2.11.0 annotated tag staged for user push)
-13. `docs/PLAN_V2.10.md` (v2.10 execution history — CLOSED 2026-05-16, tag `v2.10.0` on `db6527c` public on GitHub)
+9. `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md` (**current canonical baseline**; v2.12.0 retrieval stack staged 2026-05-21 — Recall@1 67.8% (+32.3pp over v2.11), Recall@5 chunk 90.2% STRETCH, Recall@5 doc 98.6% STRETCH, Faithfulness 72.6%; Format 88.4% < ≥96% pin pending v2.13 chunk-level recovery)
+10. `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md` (v2.11 baseline soak — Recall@1 35.5%; the 518-query fixture every v2.12 soak ran against)
+11. `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` (v2.10 strict-gate baseline — 34/34 PASS; unchanged in v2.11 + v2.12 because both cycles touched retrieval-side only)
+12. `docs/PLAN_V2.12.md` (active v2.12 plan; Draft v0.8 — Phase 0-3 shipped 2026-05-21, Phase 4 NOT triggered, Phase N staged for user push/tag)
+13. `docs/PLAN_V2.11.md` (v2.11 execution history — CLOSED 2026-05-20, tag `v2.11.0` on `c2a461c` public on GitHub)
+14. `docs/PLAN_V2.10.md` (v2.10 execution history — CLOSED 2026-05-16, tag `v2.10.0` on `db6527c` public on GitHub)
 
 Use the three-layer docs model:
 - Layer 0 contracts: invariants, governance, decisions, architecture, quality gates.

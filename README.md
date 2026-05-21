@@ -4,75 +4,82 @@ Convert PDF, EPUB, HTML, and Office documents into structured JSONL datasets for
 
 The converter extracts text, images, and tables from complex documents while preserving spatial layout, document hierarchy, and semantic context. It handles everything from born-digital magazines to degraded scanned manuals.
 
-**Version 2.11.0** (swap staged 2026-05-20; user pushes/tags after live-stack re-verification) | predecessor `v2.10.0` (`db6527c`, 2026-05-16 — chunker baseline) → `v2.9.0-rc1` (`3e06d1b`, 2026-05-12) → `v2.8.0` | Python 3.10 | Apple Silicon native | Docling 2.86.0 | Schema 2.7.0
+**Version 2.12.0** (retrieval stack staged 2026-05-21; user pushes/tags after live-stack re-verification) | predecessor `v2.11.0` (`c2a461c`, 2026-05-20 — embedder swap) → `v2.10.0` (`db6527c`, 2026-05-16) → `v2.9.0-rc1` (`3e06d1b`, 2026-05-12) → `v2.8.0` | Python 3.10 | Apple Silicon native | Docling 2.86.0 | Schema 2.7.0
 
-> **v2.11.0 — embedder swap release.** Local commits `18bfbf2` +
-> `c2a461c` staged; v2.11.0 annotated tag NOT yet pushed. Phase 1
-> (embedder shootout) swapped the production text-retrieval embedder
-> from Ollama `llava` (4096-dim multimodal) to Dashscope
-> `text-embedding-v4` (1024-dim text-only) after the side-by-side
-> soak delivered 10×-class lift on every embedder-attributable axis.
+> **v2.12.0 — retrieval stack release.** v2.12 closes the absolute-
+> quality gap the v2.11 soak revealed. v2.11 fixed the embedder;
+> v2.12 adds the retrieval-side stack on top — cross-encoder
+> reranker, BM25 sparse, RRF fusion. HyDE was measured but ships
+> opt-in (no meaningful lift on top of hybrid+rerank).
 >
-> | Axis | v2.10 baseline | v2.11 challenger | Δ |
+> | Axis | v2.11.0 baseline | **v2.12.0** | Δ |
 > |---|---:|---:|---|
-> | Recall@1 chunk | 2.1% | **35.5%** | **+16.9×** |
-> | Recall@5 chunk | 6.8% | **66.8%** | **+9.8×** |
-> | Recall@5 doc | 54.2% | **91.7%** | +1.7× |
-> | Relevance (judge) | 5.9% | **59.3%** | **+10.1×** |
-> | Faithfulness (judge) | 4.7% | **50.6%** | **+10.8×** |
-> | Format (judge) | 98.3% | 89.8% | −8.5pp |
+> | Recall@1 chunk | 35.5% | **67.8%** | **+32.3pp (1.9×)** |
+> | Recall@5 chunk | 66.8% | **90.2%** | **+23.4pp (STRETCH ✓)** |
+> | Recall@5 doc | 91.7% | **98.6%** | +6.9pp (STRETCH ✓) |
+> | Relevance (judge) | 59.3% | **82.1%** | +22.8pp |
+> | Faithfulness (judge) | 50.6% | **72.6%** | +22.0pp |
+> | Format (judge) | 89.8% | 88.4% | −1.4pp (Phase 0 carry-forward) |
 >
-> Production Qdrant collection moved from `mmrag_v2_8` (llava
-> 4096-dim) to `mmrag_v2_8__qwen3_dashscope` (text-embedding-v4
-> 1024-dim, 30,588 points, status green). The legacy `mmrag_v2_8`
-> collection is retained through **2026-06-19** as the 30-day
-> rollback baseline. Both regression tests
-> (`test_retrieval_regression_v2_10.py` = rollback,
-> `test_retrieval_regression_v2_11.py` = production) must stay green
-> during the window.
+> **Production retrieval stack (v2.12.0):**
 >
-> Format judge axis temporarily downgraded for the v2.11.0 release
-> window to **≥85%** (89.8% actual) with explicit on-record rationale
-> in [`docs/DECISIONS.md`](docs/DECISIONS.md) "v2.11.0 Embedder Swap
-> Executed — Format Gate Downgrade". The −8.5pp dip is concentrated
-> in three scanned/form documents whose chunks have pre-existing
-> OCR/scan format imperfections that the baseline's hub-collapse had
-> hidden; **the regression is coverage-reveal, not swap-introduced.**
-> v2.11.x recovery target ≥95% via chunk-content sanitization;
-> v2.12+ reverts to original ≥96% pin after two consecutive recovery
-> soaks.
+> ```
+> query
+>   → embed (Dashscope text-embedding-v4)
+>   → dense Qdrant top-25 (mmrag_v2_8__qwen3_dashscope)
+>   + sparse Qdrant top-25 (mmrag_v2_8__bm25_sparse, BM25)
+>   → RRF fusion (k=60, equal weights)
+>   → rerank (local gte-reranker-modernbert-base-mlx via omlx-server)
+>   → top-5 return
 >
-> Test suite: **986 passed**, 15 skipped, 0 failed. v2.10 strict-gate
-> state unchanged at **34 PASS / 0 WARN / 0 FAIL** (the swap touches
-> retrieval-side only, not extraction / chunking / validation).
+> End-to-end p99 latency: ~2.05 s (within 3.0 s budget)
+> Per-query cost: ~$0.001 (Dashscope embed only — reranker is local)
+> ```
 >
-> v2.11 Phase 1 soak (current canonical baseline):
-> [`docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md`](docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md).
-> v2.10 predecessor baselines (kept for delta):
-> [`docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md`](docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md),
-> [`docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md`](docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md).
-> Plan: [`docs/PLAN_V2.11.md`](docs/PLAN_V2.11.md) (Draft v1.0).
+> Five of six embedder-attributable axes pass their floors; two hit
+> **STRETCH** targets. Format remains below ≥96% pin (chunk-level
+> OCR damage in scanned/form docs; carry-forward to v2.13 via
+> Earthship re-OCR + CarOK form-shape decision).
 >
-> v2.10 closed the seven v2.9.0-rc1 named root-cause classes
-> (`OCR_PATH_HEADING_PROPAGATION` on Firearms; `KI_EPUB_EXTRACTION_LANE_REWRITE`
-> on the KI EPUB; `HYBRID_CHUNKER_HEADING_PROPAGATION` on Devlin;
-> `CROSS_PAGE_SPLIT_PAGE_ATTRIBUTION` on Python_Cookbook + part of
-> Python_Distilled; `B4B_FULL_DOC_PICTURE_DEDUP` on Earthship + part
-> of Python_Distilled; `TEXT_INTEGRITY_SCOUT_FULL_DOC_SENSITIVITY`
-> on Fluent_Python; `TEXT_LABEL_TOC_DENSE_INDEX_ROUTER_MISS` on
-> Chaubal p11) plus the three rc1 housekeeping items. See
-> [`docs/PLAN_V2.10.md`](docs/PLAN_V2.10.md) for the Phase 1-8
-> execution narrative.
+> **Phase contributions:**
 >
-> **Recommendation:** use v2.11.0 as the production embedding and
-> retrieval baseline. **Honest caveat:** absolute retrieval quality
-> is "mediocre" not "good" (Recall@5 chunk 66.8%, Faithfulness
-> 50.6%); v2.12 plan focuses on closing this gap via reranker →
-> hybrid retrieval → query rewriting (target Recall@5 ≥85%, Recall@1
-> ≥55%, Faithfulness ≥70%).
+> - Phase 0: `content/refined_content` preference fix in ingest →
+>   IRJET Format +15.6pp.
+> - Phase 1: cross-encoder reranker (local ModernBERT wins 4/4 vs
+>   cloud `gte-rerank`) → R@1 chunk +26.3pp.
+> - Phase 2: hybrid retrieval (BM25 + dense + RRF) → R@5 chunk +8.9pp.
+> - Phase 3: HyDE measured but ships opt-in (all deltas within ±1pp
+>   on top of Phase 2).
+> - Phase 4: NOT triggered — floors met by Phase 1+2.
 >
-> No QA threshold weakening was silent. The Format gate downgrade is
-> explicit, time-bounded, and on the record.
+> Test suite: **1032 passed**, 15 skipped, 0 failed (+46 over the
+> v2.11.0 baseline). v2.10 strict-gate corpus state unchanged at
+> **34 PASS / 0 WARN / 0 FAIL** (v2.11 + v2.12 changed only the
+> retrieval side; extraction/chunking/validation untouched).
+>
+> AFTER snapshot:
+> [`docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md`](docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md).
+> Plan: [`docs/PLAN_V2.12.md`](docs/PLAN_V2.12.md) (Draft v0.8).
+> Per-phase soak reports retained in `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_p{1_cloud,1_omlx,2_hybrid,3_hyde}.md`.
+>
+> **Cumulative v2.10 → v2.12 trajectory on Recall@1 chunk:**
+>
+> ```
+> v2.10  ====                                          2.1%   (llava embedder)
+> v2.11  ==============                               35.5%   (dashscope embedder)
+> v2.12  ==============================               67.8%   (hybrid + rerank)
+>         0%       20%       40%       60%       80%
+> ```
+>
+> **Recommendation:** use v2.12.0 as the production retrieval stack.
+> The system is now in "good" territory across every embedder-
+> attributable axis. Format remains the only laggard; v2.13 carry-
+> forward addresses it via chunk-level OCR work on the three named
+> docs (Earthship, CarOK, IRJET still has residual issues).
+>
+> No QA threshold weakening was silent. The Format gate downgrade
+> from v2.11.0 carries forward into v2.12.0 explicitly, on the
+> record, and time-bounded by v2.13's named recovery work.
 
 ---
 

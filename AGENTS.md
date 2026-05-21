@@ -86,10 +86,11 @@ Companion docs:
 1. Start sessions with the indexed handoff path:
    - `docs/PROJECT_STATUS.md`
    - `docs/README.md`
-   - `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md` (current canonical baseline; v2.11 Phase 1 challenger soak — 10× lift on Recall@1/Relevance/Faithfulness)
-   - `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` (v2.10 strict-gate baseline; unchanged in v2.11 — retrieval-side swap only)
-   - `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md` (v2.10 soak; baseline for v2.11 Phase 1 delta column)
-   - `docs/PLAN_V2.11.md` (v2.11 plan; Draft v1.0 — Phase 1 swap staged 2026-05-20, tag pending user push)
+   - `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md` (current canonical baseline; v2.12.0 retrieval stack — Recall@1 67.8%, Recall@5 chunk 90.2% STRETCH)
+   - `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md` (v2.11.0 baseline soak; the 518-query fixture every v2.12 phase ran against)
+   - `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` (v2.10 strict-gate baseline; unchanged in v2.11 + v2.12 — both cycles touched retrieval-side only)
+   - `docs/PLAN_V2.12.md` (v2.12 plan; Draft v0.8 — Phase 0-3 shipped 2026-05-21, Phase 4 NOT triggered, Phase N staged for user push/tag)
+   - `docs/PLAN_V2.11.md` (v2.11 execution history — closed; tag `v2.11.0` on `c2a461c` 2026-05-20)
    - `docs/PLAN_V2.10.md` (v2.10 execution history — closed; tag `v2.10.0` on `db6527c` 2026-05-16)
 2. Use the three-layer documentation model:
    - Layer 0 contracts: this file, `CLAUDE.md`, `docs/AGENT_GOVERNANCE.md`, `docs/DECISIONS.md`, `docs/QUALITY_GATES.md`, `docs/ARCHITECTURE.md`, SRS.
@@ -103,8 +104,8 @@ Companion docs:
 
 ## 📍 5. CURRENT STATE & DIRECTIVES (May 2026)
 
-**Engine version:** `v2.11.0` in `src/mmrag_v2/version.py` and `pyproject.toml`. Annotated tag `v2.11.0` is **staged but NOT pushed** by the autonomous run — user pushes/tags after live-stack re-verification. Predecessor tag: `v2.10.0` SHIPPED 2026-05-16 on commit `db6527c`. Schema version `2.7.0` — chunk-shape contract unchanged since v2.7.
-**Phase:** `v2.11.0` is the v2.11 ship state: Phase 1 swapped the production text-retrieval embedder from Ollama `llava` (4096-dim multimodal) to Dashscope `text-embedding-v4` (1024-dim text-only) after the shootout delivered 10× lift on Recall@1, Relevance, and Faithfulness vs the v2.10 baseline. Production Qdrant collection is now `mmrag_v2_8__qwen3_dashscope` (30,588 points, status green). Legacy `mmrag_v2_8` retained through 2026-06-19 for 30-day rollback (both regression tests must stay green during the window). Phase 2 (validated-cloud CI workflow) and Phase 3 (carry-forward dispositions) also shipped. Format judge axis temporarily downgraded for v2.11.0 to ≥85% (89.8% actual; coverage-reveal of pre-existing OCR/scan format imperfections in scanned/form docs that the baseline's hub-collapse had hidden); v2.11.x recovery target ≥95%, v2.12 reverts to original ≥96%. Current canonical baseline: `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md` (v2.11 Phase 1 challenger soak — production). Predecessors (kept for delta): `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` + `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md` (v2.10 ship state); earlier snapshots are historical.
+**Engine version:** `v2.12.0` in `src/mmrag_v2/version.py` and `pyproject.toml`. Annotated tag `v2.12.0` is **staged but NOT pushed** by the autonomous run — user pushes/tags after live-stack re-verification. Predecessor tag: `v2.11.0` SHIPPED 2026-05-20 on commit `c2a461c`. Schema version `2.7.0` — chunk-shape contract unchanged since v2.7 (v2.12 added retrieval-side infrastructure only).
+**Phase:** `v2.12.0` is the v2.12 ship state: full production retrieval stack. Phase 0 fixed the `content/refined_content` preference in ingest. Phase 1 added a cross-encoder reranker (local `gte-reranker-modernbert-base-mlx` via omlx-server won 4/4 embedder axes vs cloud `gte-rerank`). Phase 2 added hybrid retrieval (BM25 sparse + dense + RRF fusion). Phase 3 measured HyDE but it ships opt-in only (no meaningful lift on top of hybrid+rerank). Phase 4 NOT triggered. Cumulative lift over v2.11.0: Recall@1 chunk 35.5% → **67.8%** (+32.3pp); Recall@5 chunk 66.8% → **90.2% STRETCH**; Recall@5 doc 91.7% → **98.6% STRETCH**; Relevance 59.3% → **82.1%**; Faithfulness 50.6% → **72.6%**. Format 89.8% → 88.4% (Phase 0 carry-forward to v2.13). End-to-end p99 latency ~2.05 s. Production collections: `mmrag_v2_8__qwen3_dashscope` (dense, 30,588 pts) + `mmrag_v2_8__bm25_sparse` (sparse, 25,623 pts, NEW in v2.12). Current canonical baseline: `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md`. Predecessors (kept for delta): `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md` (v2.11.0 baseline — same fixture every v2.12 soak ran against); `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` (v2.10 strict-gate baseline, unchanged in v2.11/v2.12).
 
 **Active architecture decisions:**
 - PDF extraction pathway is determined by structural integrity pre-flight tests, not semantic profile. See `docs/DECISIONS.md` — "Structural Pathology over Semantic Profiling".

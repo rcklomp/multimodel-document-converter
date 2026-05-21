@@ -4,6 +4,152 @@ All notable changes to this project will be documented in this file. Current beh
 
 > **Versioning note:** Historical entries before the `v2.4.x` line used an internal `v18.x` milestone scheme during rapid iteration and test/fix cycles. Only stable or decision-worthy checkpoints were recorded, so intermediate builds are intentionally omitted. From `v2.4` onward, entries follow the current public semantic line.
 
+## [v2.12.0] — 2026-05-21 (retrieval stack staged locally; tag pending user push)
+
+v2.12 closes the absolute-quality gap the v2.11 soak revealed. The
+v2.11.0 embedder swap fixed the embedder; v2.12 adds the retrieval-
+side stack on top: cross-encoder reranker + hybrid (BM25 + dense +
+RRF). HyDE was measured but doesn't help on top of hybrid+rerank
+on this corpus, so it ships opt-in only.
+
+### Headline numbers (518-query × 259-chunk soak, same fixture every cycle)
+
+| Axis | v2.11.0 | **v2.12.0** | Δ |
+|---|---:|---:|---|
+| Recall@1 chunk | 35.5% | **67.8%** | +32.3pp (1.9×) |
+| Recall@5 chunk | 66.8% | **90.2%** | +23.4pp (STRETCH ≥90% ✓) |
+| Recall@5 doc | 91.7% | **98.6%** | +6.9pp (STRETCH ≥97% ✓) |
+| Relevance (judge) | 59.3% | **82.1%** | +22.8pp |
+| Faithfulness (judge) | 50.6% | **72.6%** | +22.0pp |
+| Format (judge) | 89.8% | 88.4% | −1.4pp (Phase 0 carry-forward) |
+
+Full report:
+[`docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md`](docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md).
+
+### Phase 0 — content preference fix (`0d731b1`)
+
+Root cause of the v2.11 Format dips: `scripts/ingest_to_qdrant.py`
+preferred `metadata.refined_content` (raw VLM refiner output)
+over the top-level `content` (post-normalization). One-line
+preference swap; 3 docs re-ingested. IRJET Format 71.9% → 87.5%;
+Earthship + CarOK identified as deeper chunk-level OCR damage
+(rolled to v2.13). Carry-forward register row 1b added. 4 regression
+tests in `tests/test_ingest_content_preference.py`.
+
+### Phase 1 — Cross-encoder reranker shootout (`988fcaf`, `65a5ba7`)
+
+New `src/mmrag_v2/retrieval/` module — provider-pluggable Reranker
+protocol with two implementations:
+
+- `DashscopeReranker` — cloud `gte-rerank` (intl endpoint)
+- `LocalOmlxReranker` — local `gte-reranker-modernbert-base-mlx`
+  served by omlx-server at `http://10.0.10.246:8000`
+
+Both ran the same 518-query soak. **Local ModernBERT won 4/4
+embedder-attributable axes** by significant margins: R@1 chunk +7.9pp
+over cloud (61.8% vs 53.9%); R@5 chunk +14.5pp (81.3% vs 66.8% —
+cloud didn't move R@5 at all because it only reordered the same
+top-5); Relevance +3.8pp; Faithfulness +5.2pp. Production default
+flipped via `src/mmrag_v2/retrieval/config.py` `_COMPILE_DEFAULT =
+"omlx"`. Cloud retained as fallback via `RERANKER_BACKEND=dashscope`
+env var. 17 mock-driven pipeline tests pinning the composition shape.
+
+### Phase 2 — Hybrid retrieval (`d7a0bfd`, `51ab67c`)
+
+New `src/mmrag_v2/retrieval/sparse.py` — in-house BM25 (no external
+dependency, 80 LOC). Pre-computed BM25 weights so Qdrant sparse
+search reduces to a dot product. 18 unit tests pin the classical
+BM25 formula match + RRF fusion math.
+
+New `scripts/build_bm25_index.py` — build the index over the 34-doc
+corpus (25,649 text chunks, 54,307 unique tokens, ~1.7s build wall
+time). Tracked at `tests/fixtures/bm25_index_v2_12.json` (2 MB).
+
+New `scripts/ingest_bm25_sparse.py` — create + populate the
+`mmrag_v2_8__bm25_sparse` side collection (25,623 sparse vectors,
+5.7s ingest, ~4,500 chunks/sec). Side collection chosen over named
+sparse vector on the dense collection because Qdrant 1.17 doesn't
+allow adding sparse vectors to an existing collection via PATCH.
+
+New `retrieve_hybrid_reranked()` in pipeline.py — composes embed →
+dense top-25 + sparse top-25 → RRF fusion (k=60) → top-25 → rerank
+→ top-5. Lifts Recall@5 chunk from 81.3% (Phase 1) to 90.2% (Phase
+2) — the +8.9pp jump from BM25's lexical-match coverage of the
+candidate set.
+
+### Phase 3 — HyDE (`d7a0bfd` infra; `181a5a1` close-out)
+
+New `src/mmrag_v2/retrieval/hyde.py` — single-shot hypothetical-
+answer generation via Dashscope `qwen-max`. 7 mock-driven tests
+pin the API + fallback semantics.
+
+Phase 3 ran as a MEASUREMENT after Phase 2 lifted Faithfulness to
+72.6% (above the ≥70% floor). All deltas vs Phase 2 within ±1pp on
+518 queries: R@1 +0.5pp, R@5 chunk 0, Faithfulness +0.9pp. The
++1s/query latency + $0.001/query Dashscope cost don't justify
+shipping HyDE on by default.
+
+**Decision: HyDE ships opt-in.** `use_hyde=False` is the default
+on both `retrieve_reranked()` and `retrieve_hybrid_reranked()`.
+Callers opt in via the flag.
+
+### Phase 4 — NOT triggered
+
+Phase 4 was the safety-valve "if Phases 1-3 don't reach the floors,
+reconvert the corpus with per-doc-class chunking." Floors are
+clearly met by Phase 1 + Phase 2. Phase 4 stays as a v2.13+
+candidate only if Format recovery work surfaces chunker-level defects.
+
+### Phase N — Tag staging (this commit cycle)
+
+- Engine version bumped 2.11.0 → 2.12.0 in `src/mmrag_v2/version.py`
+  + `pyproject.toml`.
+- v2.12 production retrieval-regression fingerprint captured at
+  `tests/fixtures/retrieval_regression_v2_12_hybrid.json`. New
+  `tests/test_retrieval_regression_v2_12.py` pins it.
+- AFTER snapshot:
+  `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md`.
+- v2.12.0 annotated tag staged but NOT pushed; user pushes/tags
+  after live-stack re-verification.
+
+### Test suite
+
+**1032 passed**, 15 skipped, 0 failed (+46 over the v2.11.0 baseline
+of 986). New test files:
+
+- `tests/test_retrieval_pipeline.py` (17 tests)
+- `tests/test_sparse_bm25.py` (18 tests)
+- `tests/test_hyde.py` (7 tests)
+- `tests/test_retrieval_regression_v2_12.py` (live-stack regression)
+- `tests/test_ingest_content_preference.py` (4 tests for Phase 0)
+
+### Production retrieval stack (v2.12.0)
+
+```
+query
+  → embed (Dashscope text-embedding-v4, 1024-dim)
+  → dense Qdrant top-25 (mmrag_v2_8__qwen3_dashscope)
+  + sparse Qdrant top-25 (mmrag_v2_8__bm25_sparse, BM25)
+  → RRF fusion (k=60, equal weights)
+  → rerank (local gte-reranker-modernbert-base-mlx via omlx-server)
+  → top-5 return
+
+End-to-end p99 latency: ~2.05 s (within 3.0 s soft budget)
+Per-query cost: ~$0.001 (Dashscope embed only)
+```
+
+### Carry-forwards to v2.13
+
+1. **Format gate recovery.** Format 88.4% vs ≥96% pin. Earthship
+   re-OCR + CarOK form-shape decision are the named work.
+2. **30-day rollback drop on 2026-06-19.** Legacy `mmrag_v2_8` +
+   `tests/test_retrieval_regression_v2_10.py`.
+3. **Local Qwen3-Embedding-8B opportunity.** Benchmarked at 7×
+   faster than cloud embed; would deliver sub-1s p99 end-to-end
+   retrieval.
+4. **v2.11 carry-forwards 3a / 3c / 3e** (VLM swap, UIR refactor,
+   magazine rendered-region-crop) — still deferred.
+
 ## [v2.11.0] — 2026-05-20 (swap staged locally; tag pending user push)
 
 PLAN_V2.11 Phase 1 (embedder shootout) executed end-to-end. The

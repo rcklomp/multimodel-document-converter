@@ -16,14 +16,20 @@ scattering across the codebase.
 # chunk_id for cross-version mapping must rebuild from v2.9 outputs.
 __schema_version__ = "2.7.0"
 
-# Engine/runtime version. v2.10.0 shipped 2026-05-16 (annotated tag
-# on commit db6527c; same tree as v2.10.0-rc1 / 82c3639). v2.11.0
-# Phase 1 swapped the production embedder from Ollama llava (4096-dim
-# multimodal) to Dashscope text-embedding-v4 (1024-dim text-only) —
-# 10× lift on Recall@1/Relevance/Faithfulness; Format pin temporarily
-# downgraded to ≥85% with v2.11.x recovery target ≥95% (see
-# docs/DECISIONS.md "v2.11.0 Embedder Swap Executed — Format Gate
-# Downgrade" and docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md).
-# v2.11.0 annotated tag is STAGED but not pushed by the autonomous
+# Engine/runtime version. v2.12.0 adds the retrieval-side stack on
+# top of v2.11.0's embedder swap:
+#   Phase 0   content/refined_content preference fix (Format +partial)
+#   Phase 1   cross-encoder reranker (local ModernBERT via omlx-server)
+#   Phase 2   hybrid retrieval (BM25 sparse + dense + RRF fusion)
+#   Phase 3   HyDE — measured but ships opt-in (default off)
+# Final v2.12 vs v2.11.0:
+#   Recall@1 chunk    35.5% → 67.8%   (+32.3pp, 1.9×)
+#   Recall@5 chunk    66.8% → 90.2%   (+23.4pp, STRETCH met)
+#   Recall@5 doc      91.7% → 98.6%   (STRETCH met)
+#   Relevance         59.3% → 82.1%
+#   Faithfulness      50.6% → 72.6%
+#   Format            89.8% → 88.4%   (Phase 0 carry-forward to v2.13)
+# v2.12.0 annotated tag is STAGED but not pushed by the autonomous
 # run; the user pushes/tags after live-stack re-verification.
-__engine_version__ = "2.11.0"
+# Predecessor: v2.11.0 (2026-05-20, c2a461c).
+__engine_version__ = "2.12.0"

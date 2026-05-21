@@ -10,27 +10,31 @@ This folder uses a three-layer documentation structure so a new coding session c
    - current quality baseline
    - immediate next work and per-phase status
 
-2. `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md`
-   - current canonical baseline (v2.11 Phase 1 soak — production
-     embedder Dashscope `text-embedding-v4`; Recall@1 35.5%,
-     Recall@5 chunk 66.8%, Format 89.8%)
+2. `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md`
+   - **current canonical baseline** (v2.12.0 retrieval stack —
+     hybrid + ModernBERT rerank; Recall@1 67.8%, Recall@5 chunk
+     90.2% STRETCH, Recall@5 doc 98.6% STRETCH, Faithfulness 72.6%;
+     Format 88.4% pending v2.13 chunk-level recovery)
 
-2b. `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md`
+2b. `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md`
+   - v2.11.0 baseline soak; the 518-query × 259-chunk fixture every
+     v2.12 phase soak ran against (apples-to-apples deltas)
+
+2c. `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md`
    - v2.10 strict-gate baseline (corpus 34/34 PASS; unchanged in
-     v2.11 because the swap is retrieval-side only)
+     v2.11 + v2.12 — both cycles changed only the retrieval side)
 
-2c. `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md`
-   - v2.10 soak (Format 98.3%, Recall@1 2.1%); the baseline that the
-     v2.11 Phase 1 numbers compare against
+3. `docs/PLAN_V2.12.md`
+   - active v2.12 plan (Draft v0.8); Phase 0-3 SHIPPED locally,
+     Phase 4 NOT triggered, Phase N staged for user push/tag.
 
-3. `docs/PLAN_V2.11.md`
-   - v2.11 plan (Draft v1.0); Phase 1 swap SHIPPED locally
-     (`c2a461c`); Phase 2 CI + Phase 3 carry-forward dispositions
-     SHIPPED. v2.11.0 tag staged for user push.
+3b. `docs/PLAN_V2.11.md`
+   - v2.11 execution history — CLOSED 2026-05-20; tag `v2.11.0` on
+     commit `c2a461c` public on GitHub.
 
-3b. `docs/PLAN_V2.10.md`
-   - v2.10 execution history — Phases 1-8 SHIPPED 2026-05-16
-   - tag `v2.10.0` on commit `db6527c` pushed to GitHub
+3c. `docs/PLAN_V2.10.md`
+   - v2.10 execution history — CLOSED 2026-05-16; tag `v2.10.0` on
+     commit `db6527c` public on GitHub.
 
 4. `AGENTS.md`
    - hard project invariants
