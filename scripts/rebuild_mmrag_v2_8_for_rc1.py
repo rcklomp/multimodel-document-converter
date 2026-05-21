@@ -226,15 +226,16 @@ def main() -> int:
                         help=f"Target Qdrant collection (default: {COLLECTION_DEFAULT})")
     parser.add_argument("--qdrant-url", type=str, default=QDRANT_URL_DEFAULT)
     parser.add_argument("--provider", type=str, default="dashscope",
-                        choices=["ollama", "dashscope"],
-                        help="Embedding provider (default: dashscope as of v2.11.0; pass "
-                             "ollama for legacy llava rebuild against mmrag_v2_8)")
+                        choices=["ollama", "dashscope", "omlx"],
+                        help="Embedding provider. 'dashscope' (v2.11.0 default) / "
+                             "'omlx' (v2.13 candidate: local Qwen3-Embedding-8B-mxfp8) / "
+                             "'ollama' (legacy llava 4096-dim).")
     parser.add_argument("--model", type=str, default=None,
-                        help="Embedding model. Default 'text-embedding-v4' for dashscope; "
-                             "'llava' for ollama.")
+                        help="Embedding model. Defaults: 'text-embedding-v4' (dashscope), "
+                             "'Qwen3-Embedding-8B-mxfp8' (omlx), 'llava' (ollama).")
     parser.add_argument("--api-key", type=str, default=None,
-                        help="API key for dashscope provider. "
-                             "Defaults to DASHSCOPE_API_KEY env var.")
+                        help="API key. dashscope reads DASHSCOPE_API_KEY by default; "
+                             "omlx reads MLX_API_KEY by default; ollama needs no key.")
     parser.add_argument("--resume", action="store_true",
                         help="Skip docs already fully ingested (≥90 %% of "
                              "chunk_ids present in the target collection). "
@@ -250,6 +251,12 @@ def main() -> int:
         args.api_key = os.environ.get("DASHSCOPE_API_KEY", "")
         if not args.api_key:
             print("ERROR: --provider dashscope requires --api-key or DASHSCOPE_API_KEY env var",
+                  file=sys.stderr)
+            return 2
+    if args.provider == "omlx" and not args.api_key:
+        args.api_key = os.environ.get("MLX_API_KEY", "")
+        if not args.api_key:
+            print("ERROR: --provider omlx requires --api-key or MLX_API_KEY env var",
                   file=sys.stderr)
             return 2
 

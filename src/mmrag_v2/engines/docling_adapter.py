@@ -102,6 +102,19 @@ class DoclingPdfAdapter:
                 ocr_options.bitmap_area_threshold = float(
                     self.plan.bitmap_area_threshold
                 )
+            # v2.13 Phase 1: scanned profiles ask for force_full_page_ocr=True
+            # so Docling skips its layout model for OCR-region selection and
+            # OCRs the whole page (recovers multi-column layouts that the
+            # layout model mis-segments).
+            if (
+                getattr(self.plan, "force_full_page_ocr", False)
+                and hasattr(ocr_options, "force_full_page_ocr")
+            ):
+                ocr_options.force_full_page_ocr = True
+                logger.info(
+                    "[DOCLING-ADAPTER] OCR force_full_page_ocr=True "
+                    "(scanned profile=%s)", self.plan.profile_type,
+                )
             options.ocr_options = ocr_options
 
         if self.plan.needs_code_enrichment:

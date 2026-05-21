@@ -136,6 +136,57 @@ def embed_text_dashscope(text: str, model: str, api_key: str,
     raise RuntimeError(f"Dashscope embed failed after {retries} retries: {last_err}")
 
 
+# ── omlx local embedding (v2.13 Phase 1) ───────────────────────────────────
+
+_OMLX_DEFAULT_URL = "http://10.0.10.246:8000/v1/embeddings"
+
+
+def embed_text_omlx(text: str, model: str, api_key: str,
+                    url: str = _OMLX_DEFAULT_URL,
+                    timeout: int = 60, retries: int = 4) -> list[float]:
+    """Embed text via omlx-server's OpenAI-compatible embeddings endpoint.
+
+    Used by v2.13 Phase 1 to replace Dashscope text-embedding-v4 with
+    a local Qwen3-Embedding-8B-mxfp8 model. Outputs 4096-dim vectors
+    (vs 1024-dim for text-embedding-v4) — a separate collection is
+    required. Image chunks fall back to text-of-description (no
+    multimodal embedding here either).
+
+    Latency: ~180ms p99 from the user's LAN to Mac Mini.
+    """
+    import time
+    if not api_key:
+        raise RuntimeError("MLX_API_KEY required for --provider omlx")
+    text = (text or "")[:8000] or " "
+    body = json.dumps({"model": model, "input": text}).encode()
+    last_err: Exception | None = None
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, data=body, method="POST")
+            req.add_header("Authorization", f"Bearer {api_key}")
+            req.add_header("Content-Type", "application/json")
+            resp = urllib.request.urlopen(req, timeout=timeout)
+            data = json.loads(resp.read())
+            return data["data"][0]["embedding"]
+        except urllib.error.HTTPError as e:
+            last_err = e
+            if e.code in (429, 500, 502, 503, 504):
+                time.sleep(2 ** attempt)
+                continue
+            try:
+                detail = e.read().decode("utf-8", errors="replace")[:200]
+            except Exception:
+                detail = ""
+            raise RuntimeError(f"omlx HTTP {e.code}: {detail}") from e
+        except (urllib.error.URLError, ConnectionError, OSError, TimeoutError) as e:
+            last_err = e
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            raise
+    raise RuntimeError(f"omlx embed failed after {retries} retries: {last_err}")
+
+
 # ── Qdrant operations ──────────────────────────────────────────────────────
 
 def qdrant_request(method: str, path: str, body: dict | None, qdrant_url: str) -> dict:
@@ -401,16 +452,20 @@ def main():
     parser.add_argument("--qdrant-url", type=str, default="http://localhost:6333")
     parser.add_argument("--ollama-url", type=str, default="http://localhost:11434")
     parser.add_argument("--provider", type=str, default="dashscope",
-                        choices=["ollama", "dashscope"],
-                        help="Embedding provider. 'dashscope' = Dashscope cloud text-embedding "
-                             "(default since v2.11.0 after Phase 1 shootout: 10× lift on retrieval "
-                             "vs llava; 1024-dim, text-only — image chunks embed via VLM description). "
-                             "'ollama' = legacy local Ollama (llava 4096-dim multimodal; v2.10 baseline, "
-                             "retained for rollback).")
+                        choices=["ollama", "dashscope", "omlx"],
+                        help="Embedding provider. 'dashscope' (v2.11.0 default) = Dashscope cloud "
+                             "text-embedding-v4 (1024-dim, text-only). 'omlx' (v2.13 candidate) = "
+                             "local Qwen3-Embedding-8B-mxfp8 via omlx-server (4096-dim, text-only, "
+                             "~7× faster than dashscope from LAN). 'ollama' = legacy llava 4096-dim "
+                             "multimodal; v2.10 baseline, retained for 30-day rollback.")
     parser.add_argument("--model", type=str, default=None,
-                        help="Embedding model. Default 'text-embedding-v4' for dashscope; 'llava' for ollama.")
+                        help="Embedding model. Defaults: 'text-embedding-v4' (dashscope), "
+                             "'Qwen3-Embedding-8B-mxfp8' (omlx), 'llava' (ollama).")
     parser.add_argument("--api-key", type=str, default=None,
-                        help="API key for dashscope provider. Defaults to DASHSCOPE_API_KEY env var.")
+                        help="API key. dashscope reads DASHSCOPE_API_KEY by default; "
+                             "omlx reads MLX_API_KEY by default; ollama needs no key.")
+    parser.add_argument("--omlx-url", type=str, default=_OMLX_DEFAULT_URL,
+                        help=f"omlx embeddings endpoint (default: {_OMLX_DEFAULT_URL})")
     parser.add_argument("--batch-size", type=int, default=10)
     parser.add_argument("--recreate", action="store_true")
     parser.add_argument("--no-contextual", action="store_true",
@@ -418,11 +473,20 @@ def main():
     args = parser.parse_args()
     # Provider-specific defaults.
     if args.model is None:
-        args.model = "text-embedding-v4" if args.provider == "dashscope" else "llava"
+        args.model = {
+            "dashscope": "text-embedding-v4",
+            "omlx":      "Qwen3-Embedding-8B-mxfp8",
+            "ollama":    "llava",
+        }[args.provider]
     if args.provider == "dashscope" and not args.api_key:
         args.api_key = os.environ.get("DASHSCOPE_API_KEY", "")
         if not args.api_key:
             print("ERROR: --provider dashscope requires --api-key or DASHSCOPE_API_KEY env var", file=sys.stderr)
+            return 2
+    if args.provider == "omlx" and not args.api_key:
+        args.api_key = os.environ.get("MLX_API_KEY", "")
+        if not args.api_key:
+            print("ERROR: --provider omlx requires --api-key or MLX_API_KEY env var", file=sys.stderr)
             return 2
 
     jsonl_path = args.jsonl_path
@@ -456,12 +520,17 @@ def main():
     def _embed_text(text: str) -> list[float]:
         if args.provider == "dashscope":
             return embed_text_dashscope(text, args.model, args.api_key)
+        if args.provider == "omlx":
+            return embed_text_omlx(text, args.model, args.api_key, url=args.omlx_url)
         return embed_text(text, args.model, args.ollama_url)
 
     def _embed_image(asset_path: Path | None, fallback_text: str) -> list[float]:
         if args.provider == "dashscope":
             # Dashscope text-embedding is text-only; use the VLM description.
             return embed_text_dashscope(fallback_text or "image", args.model, args.api_key)
+        if args.provider == "omlx":
+            # Qwen3-Embedding is text-only; use the VLM description.
+            return embed_text_omlx(fallback_text or "image", args.model, args.api_key, url=args.omlx_url)
         if asset_path and asset_path.exists():
             return embed_image(asset_path, args.model, args.ollama_url, fallback_text)
         return embed_text(fallback_text or "image", args.model, args.ollama_url)

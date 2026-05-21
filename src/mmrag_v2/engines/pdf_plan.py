@@ -110,6 +110,12 @@ class PdfConversionPlan:
     # full-bleed photo pages (digital literature, magazines) raise it further to
     # ~0.92 so only nearly-pure-bitmap pages OCR.
     bitmap_area_threshold: float = 0.75
+    # v2.13 Phase 1: force full-page OCR for scanned documents to avoid
+    # layout-model column-boundary misjudgments that produce interleaved
+    # text. Specifically targeted at the v2.11 soak Format dip on
+    # Earthship multi-column scanned pages. Default off — only scanned/
+    # scanned_degraded profiles set it on.
+    force_full_page_ocr: bool = False
     extra_metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -203,6 +209,7 @@ def build_pdf_conversion_plan(
     reading_order_strategy: str = "",
     suppress_layout_label_text: bool = False,
     bitmap_area_threshold: float = 0.75,
+    force_full_page_ocr: bool | None = None,
     extra_metadata: Dict[str, Any] | None = None,
 ) -> PdfConversionPlan:
     """Build a resolved PDF conversion plan from diagnostics and config.
@@ -275,6 +282,18 @@ def build_pdf_conversion_plan(
         ):
             resolved_bitmap_threshold = 0.92
 
+    # v2.13 Phase 1: scanned profiles default to force_full_page_ocr=True.
+    # Multi-column scanned pages can be misjudged by Docling's layout model,
+    # producing interleaved column text in OCR output (e.g. Earthship's
+    # "NOT ENOUGH SUN" → mangled). Full-page OCR runs the OCR engine over
+    # the entire page rather than per-region, recovering coherent layout
+    # at the cost of ~3× per-page wall time. Born-digital docs that hit
+    # this path (rare) still benefit. Explicit caller override wins.
+    if force_full_page_ocr is None:
+        resolved_force_full_page_ocr = bool(is_scanned)
+    else:
+        resolved_force_full_page_ocr = bool(force_full_page_ocr)
+
     return PdfConversionPlan(
         generate_table_images=bool(force_table_vlm),
         do_picture_classification=not is_scanned,
@@ -305,5 +324,6 @@ def build_pdf_conversion_plan(
         reading_order_strategy=resolved_reading_order,
         suppress_layout_label_text=resolved_suppress_label,
         bitmap_area_threshold=resolved_bitmap_threshold,
+        force_full_page_ocr=resolved_force_full_page_ocr,
         extra_metadata=dict(extra_metadata or {}),
     )
