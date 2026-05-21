@@ -1,0 +1,1067 @@
+{
+  "collection": "mmrag_v2_8__qwen3_dashscope",
+  "top_k_retrieve": 25,
+  "top_n": 5,
+  "cloud_model": "gte-rerank",
+  "local_model": "gte-reranker-modernbert-base-mlx",
+  "summary": {
+    "queries_scored": 20,
+    "top1_agreement_rate": 0.15,
+    "top5_jaccard_mean": 0.23869047619047618,
+    "top5_overlap_histogram": {
+      "0": 2,
+      "1": 9,
+      "2": 5,
+      "3": 2,
+      "4": 1,
+      "5": 1
+    },
+    "cloud_latency_mean_seconds": 0.9495740645521437,
+    "cloud_latency_max_seconds": 1.979732291016262,
+    "local_latency_mean_seconds": 0.43064411674859004,
+    "local_latency_max_seconds": 0.6106589160044678,
+    "local_to_cloud_latency_ratio": 0.4535129305071097
+  },
+  "per_query": [
+    {
+      "query_id": "Q01_mcp",
+      "query_text": "what is the Model Context Protocol and how does an MCP client work",
+      "candidate_count": 25,
+      "cloud_top_indices": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "cloud_top_scores": [
+        0.8162604370260591,
+        0.8162604370260591,
+        0.6786785907051394,
+        0.6455189658654995,
+        0.20564347738272398
+      ],
+      "cloud_elapsed_seconds": 1.164746708003804,
+      "local_top_indices": [
+        2,
+        0,
+        1,
+        4,
+        11
+      ],
+      "local_top_scores": [
+        0.9718244075775146,
+        0.9527644515037537,
+        0.9527644515037537,
+        0.9494698643684387,
+        0.9494698643684387
+      ],
+      "local_elapsed_seconds": 0.5027712089940906,
+      "top1_agree": false,
+      "top5_overlap_count": 4,
+      "top5_jaccard": 0.6666666666666666,
+      "cloud_top5_chunk_ids": [
+        "47bcf7e2f91b_085_text_c36bbb04",
+        "47bcf7e2f91b_087_text_66bc0411",
+        "47bcf7e2f91b_086_text_983b0980",
+        "47bcf7e2f91b_034_text_ee100f9e",
+        "47bcf7e2f91b_079_text_cd0e9e49"
+      ],
+      "local_top5_chunk_ids": [
+        "47bcf7e2f91b_084_text_8f9a2044",
+        "47bcf7e2f91b_085_text_c36bbb04",
+        "47bcf7e2f91b_087_text_66bc0411",
+        "47bcf7e2f91b_086_text_983b0980",
+        "47bcf7e2f91b_034_text_ee100f9e"
+      ]
+    },
+    {
+      "query_id": "Q02_rag_eval",
+      "query_text": "how to evaluate a retrieval augmented generation system",
+      "candidate_count": 25,
+      "cloud_top_indices": [
+        1,
+        3,
+        0,
+        4,
+        2
+      ],
+      "cloud_top_scores": [
+        0.5297832215600138,
+        0.5297832215600138,
+        0.3295159585213349,
+        0.2661401160853486,
+        0.1867107841438184
+      ],
+      "cloud_elapsed_seconds": 0.8436760830227286,
+      "local_top_indices": [
+        5,
+        20,
+        13,
+        22,
+        9
+      ],
+      "local_top_scores": [
+        0.9256843328475952,
+        0.9144231081008911,
+        0.9124554991722107,
+        0.9108812212944031,
+        0.9096540212631226
+      ],
+      "local_elapsed_seconds": 0.4515119169955142,
+      "top1_agree": false,
+      "top5_overlap_count": 0,
+      "top5_jaccard": 0.0,
+      "cloud_top5_chunk_ids": [
+        "c480fb4e3164_207_text_251d73dd_o2",
+        "12c8aaab4fa1_046_text_ce274616",
+        "c480fb4e3164_207_text_251d73dd",
+        "c480fb4e3164_208_text_46d254b9_o2",
+        "5b915c809145_147_text_017a59df"
+      ],
+      "local_top5_chunk_ids": [
+        "12c8aaab4fa1_238_text_c84b9b3a_o2",
+        "5b915c809145_109_text_18c58f26",
+        "12c8aaab4fa1_108_text_ac3f33c7",
+        "12c8aaab4fa1_046_text_485b3547",
+        "12c8aaab4fa1_251_text_467370c6_s1"
+      ]
+    },
+    {
+      "query_id": "Q03_agent_tools",
+      "query_text": "how do LLM agents call tools and reason over results",
+      "candidate_count": 25,
+      "cloud_top_indices": [
+        1,
+        2,
+        4,
+        3,
+        0
+      ],
+      "cloud_top_scores": [
+        0.7288498849659584,
+        0.4644180816428297,
+        0.446032419395883,
+        0.27992220018970543,
+        0.2758670465065959
+      ],
+      "cloud_elapsed_seconds": 0.8305385829880834,
+      "local_top_indices": [
+        16,
+        21,
+        1,
+        6,
+        9
+      ],
+      "local_top_scores": [
+        0.9654679894447327,
+        0.9622778296470642,
+        0.9581329822540283,
+        0.9581329822540283,
+        0.9581329822540283
+      ],
+      "local_elapsed_seconds": 0.46522200002800673,
+      "top1_agree": false,
+      "top5_overlap_count": 1,
+      "top5_jaccard": 0.1111111111111111,
+      "cloud_top5_chunk_ids": [
+        "6afeb55a9449_057_text_f3f0aba1",
+        "6afeb55a9449_079_text_ac4ae72b",
+        "6afeb55a9449_063_text_1b6a746a",
+        "6afeb55a9449_064_text_3106ae0b",
+        "6afeb55a9449_066_text_74ca300a"
+      ],
+      "local_top5_chunk_ids": [
+        "6afeb55a9449_057_text_f3f0aba1",
+        "6afeb55a9449_060_text_3d30afdf",
+        "6afeb55a9449_126_text_4e0da83e",
+        "8e184dc5d9c4_117_text_d3943248",
+        "6afeb55a9449_059_text_4d7a0fe3"
+      ]
+    },
+    {
+      "query_id": "Q04_rag_arch",
+      "query_text": "architecture of a production RAG pipeline",
+      "candidate_count": 25,
+      "cloud_top_indices": [
+        0,
+        3,
+        4,
+        2,
+        1
+      ],
+      "cloud_top_scores": [
+        0.584928490021426,
+        0.34035340996925006,
+        0.2183509346863225,
+        0.19739833505918178,
+        0.1872619562624775
+      ],
+      "cloud_elapsed_seconds": 1.464823874994181,
+      "local_top_indices": [
+        14,
+        0,
+        1,
+        5,
+        19
+      ],
+      "local_top_scores": [
+        0.9439234733581543,
+        0.937382161617279,
+        0.9327969551086426,
+        0.9310120940208435,
+        0.9242072105407715
+      ],
+      "local_elapsed_seconds": 0.4484178749844432,
+      "top1_agree": false,
+      "top5_overlap_count": 2,
+      "top5_jaccard": 0.25,
+      "cloud_top5_chunk_ids": [
+        "12c8aaab4fa1_041_text_d99053aa",
+        "12c8aaab4fa1_042_text_0afcbb18",
+        "5b915c809145_162_text_511a00fc",
+        "12c8aaab4fa1_122_image_33263e6a",
+        "12c8aaab4fa1_167_text_b7655343"
+      ],
+      "local_top5_chunk_ids": [
+        "12c8aaab4fa1_042_text_0afcbb18",
+        "5b915c809145_162_text_511a00fc",
+        "12c8aaab4fa1_043_text_4a75a571_o2",
+        "12c8aaab4fa1_139_text_405c8d11",
+        "5b915c809145_110_text_cce983e2"
+      ]
+    },
+    {
+      "query_id": "Q05_iterator",
+      "query_text": "how to write a Python iterator with __iter__ and __next__",
+      "candidate_count": 25,
+      "cloud_top_indices": [
+        3,
+        1,
+        4,
+        2,
+        0
+      ],
+      "cloud_top_scores": [
+        0.36366542450693534,
+        0.30093452809241167,
+        0.2830693257666341,
+        0.18741219710071064,
+        0.1870916422252033
+      ],
+      "cloud_elapsed_seconds": 0.8309205000114162,
+      "local_top_indices": [
+        15,
+        16,
+        14,
+        3,
+        6
+      ],
+      "local_top_scores": [
+        0.9283819198608398,
+        0.9271820187568665,
+        0.9251047968864441,
+        0.9241577386856079,
+        0.9241577386856079
+      ],
+      "local_elapsed_seconds": 0.40286425000522286,
+      "top1_agree": false,
+      "top5_overlap_count": 1,
+      "top5_jaccard": 0.1111111111111111,
+      "cloud_top5_chunk_ids": [
+        "1e7e436164a3_437_text_da336222",
+        "1e7e436164a3_433_text_b729155a",
+        "1e7e436164a3_437_text_548882cf",
+        "24ecec9a39ce_823_image_3d81602f",
+        "1e7e436164a3_435_text_0953023e"
+      ],
+      "local_top5_chunk_ids": [
+        "1e7e436164a3_432_text_dd542ef0",
+        "1e7e436164a3_433_text_b729155a",
+        "289fd158f828_173_text_0fcf68ec",
+        "24ecec9a39ce_165_text_a06fbbeb",
+        "289fd158f828_173_text_209c87f4"
+      ]
+    },
+    {
+      "query_id": "Q06_decorator",
+      "query_text": "Python decorator recipe with functools.wraps",
+      "candidate_count": 25,
+      "cloud_top_indices": [
+        0,
+        4,
+        1,
+        2,
+        3
+      ],
+      "cloud_top_scores": [
+        0.30669624691142094,
+        0.3055899526508302,
+        0.17360032518889573,
+        0.16639995597718035,
+        0.13399373921110652
+      ],
+      "cloud_elapsed_seconds": 0.6583235420112032,
+      "local_top_indices": [
+        10,
+        4,
+        0,
+        8,
+        7
+      ],
+      "local_top_scores": [
+        0.9566092491149902,
+        0.9548725485801697,
+        0.9443126916885376,
+        0.9406255483627319,
+        0.9376369714736938
+      ],
+      "local_elapsed_seconds": 0.4175913750077598,
+      "top1_agree": false,
+      "top5_overlap_count": 2,
+      "top5_jaccard": 0.25,
+      "cloud_top5_chunk_ids": [
+        "1e7e436164a3_225_text_ce4f9054",
+        "24ecec9a39ce_914_image_77cc6f70",
+        "24ecec9a39ce_909_image_5934827d",
+        "24ecec9a39ce_1175_image_a0acf8b2",
+        "24ecec9a39ce_908_image_72e5b241"
+      ],
+      "local_top5_chunk_ids": [
+        "1e7e436164a3_225_text_ce4f9054",
+        "289fd158f828_106_text_a862ea99",
+        "24ecec9a39ce_909_image_5934827d",
+        "1e7e436164a3_225_text_d50f77fb",
+        "24ecec9a39ce_207_text_4289cf1f"
+      ]
+    },
+    {
+      "query_id": "Q07_module_org",
+      "query_text": "structuring Python modules and packages for a large project",
+      "candidate_count": 25,
+      "cloud_top_indices": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "cloud_top_scores": [
+        0.2971553049082543,
+        0.19659181108923,
+        0.18785270514896435,
+        0.14663257465779503,
+        0.14085473496765005
+      ],
+      "cloud_elapsed_seconds": 0.6886098749819212,
+      "local_top_indices": [
+        11,
+        0,
+        5,
+        6,
+        13
+      ],
+      "local_top_scores": [
+        0.9639163613319397,
+        0.9437913298606873,
+        0.9374890327453613,
+        0.9208235740661621,
+        0.9170268774032593
+      ],
+      "local_elapsed_seconds": 0.34615825000219047,
+      "top1_agree": false,
+      "top5_overlap_count": 1,
+      "top5_jaccard": 0.1111111111111111,
+      "cloud_top5_chunk_ids": [
+        "24ecec9a39ce_373_text_96ad61c5",
+        "24ecec9a39ce_369_text_15801c0a",
+        "24ecec9a39ce_1196_image_f69fb091",
+        "24ecec9a39ce_376_text_2195890f",
+        "24ecec9a39ce_072_text_1fa3e957"
+      ],
+      "local_top5_chunk_ids": [
+        "24ecec9a39ce_362_text_7558578d",
+        "24ecec9a39ce_347_text_8680787c",
+        "24ecec9a39ce_369_text_b76544f9",
+        "24ecec9a39ce_070_text_8f2f9dde",
+        "24ecec9a39ce_072_text_1fa3e957"
+      ]
+    },
+    {
+      "query_id": "Q08_pytorch_cnn",
+      "query_text": "PyTorch convolutional neural network for image classification",
+      "candidate_count": 25,
+      "cloud_top_indices": [
+        0,
+        2,
+        1,
+        3,
+        4
+      ],
+      "cloud_top_scores": [
+        0.3444482417958489,
+        0.14641204846429112,
+        0.1409143095590433,
+        0.14031886949853892,
+        0.1229534237168675
+      ],
+      "cloud_elapsed_seconds": 0.8139946250012144,
+      "local_top_indices": [
+        0,
+        10,
+        8,
+        21,
+        24
+      ],
+      "local_top_scores": [
+        0.9499014019966125,
+        0.9394997954368591,
+        0.9346911311149597,
+        0.9326823949813843,
+        0.9323556423187256
+      ],
+      "local_elapsed_seconds": 0.44575558399083093,
+      "top1_agree": true,
+      "top5_overlap_count": 1,
+      "top5_jaccard": 0.1111111111111111,
+      "cloud_top5_chunk_ids": [
+        "57dd24faf967_081_text_83156d16",
+        "57dd24faf967_086_text_4b7afb25",
+        "57dd24faf967_094_text_0e6712a1",
+        "57dd24faf967_085_text_d1587920",
+        "57dd24faf967_086_text_ebfcb20a"
+      ],
+      "local_top5_chunk_ids": [
+        "57dd24faf967_081_text_83156d16",
+        "57dd24faf967_332_text_672f3d41",
+        "57dd24faf967_087_text_8182d2b9",
+        "57dd24faf967_082_text_a5c9dc8c",
+        "57dd24faf967_103_text_3fe325cc"
+      ]
+    },
+    {
+      "query_id": "Q09_arcgis",
+      "query_text": "automate ArcGIS Pro workflow with a Python script",
+      "candidate_count": 25,
+      "cloud_top_indices": [
+        4,
+        2,
+        3,
+        1,
+        0
+      ],
+      "cloud_top_scores": [
+        0.7530574498283397,
+        0.32056383241845615,
+        0.32056383241845615,
+        0.19160416824040777,
+        0.17795105242923878
+      ],
+      "cloud_elapsed_seconds": 1.979732291016262,
+      "local_top_indices": [
+        9,
+        11,
+        4,
+        5,
+        6
+      ],
+      "local_top_scores": [
+        0.9500428438186646,
+        0.948968768119812,
+        0.9349907636642456,
+        0.9279538989067078,
+        0.9159548282623291
+      ],
+      "local_elapsed_seconds": 0.43674233299680054,
+      "top1_agree": false,
+      "top5_overlap_count": 1,
+      "top5_jaccard": 0.1111111111111111,
+      "cloud_top5_chunk_ids": [
+        "5917d010344e_031_image_b2ed2430",
+        "5917d010344e_315_text_6888c614",
+        "5917d010344e_316_text_c965c71e",
+        "5917d010344e_026_image_9669c4a1",
+        "5917d010344e_013_table_c92beed6"
+      ],
+      "local_top5_chunk_ids": [
+        "5917d010344e_013_text_8b84cc2a",
+        "5917d010344e_318_text_6bca7d1e",
+        "5917d010344e_319_text_740e37ab",
+        "5917d010344e_016_text_43b1f5ba",
+        "5917d010344e_013_table_c92beed6"
+      ]
+    },
+    {
+      "query_id": "Q10_patterns",
+      "query_text": "design patterns and idioms in Python",
+      "candidate_count": 25,
+      "cloud_top_indices": [
+        1,
+        0,
+        2,
+        4,
+        3
+      ],
+      "cloud_top_scores": [
+        0.18885273214536064,
+        0.16709264026712498,
+        0.12776499404681715,
+        0.08266247541340094,
+        0.005881487803521509
+      ],
+      "cloud_elapsed_seconds": 1.1679620420036372,
+      "local_top_indices": [
+        7,
+        10,
+        18,
+        8,
+        11
+      ],
+      "local_top_scores": [
+        0.9514424800872803,
+        0.9259378910064697,
+        0.9245690107345581,
+        0.9142985343933105,
+        0.913744330406189
+      ],
+      "local_elapsed_seconds": 0.6106589160044678,
+      "top1_agree": false,
+      "top5_overlap_count": 0,
+      "top5_jaccard": 0.0,
+      "cloud_top5_chunk_ids": [
+        "1e7e436164a3_297_text_85eefdd6",
+        "1e7e436164a3_243_text_ecba04ab",
+        "1e7e436164a3_241_text_2170b67c",
+        "1e7e436164a3_372_text_1b6c83d0",
+        "289fd158f828_286_text_0ddd1e37_o2"
+      ],
+      "local_top5_chunk_ids": [
+        "1e7e436164a3_208_text_3f41ac99",
+        "289fd158f828_014_text_84851e67",
+        "1e7e436164a3_207_text_6dfacda6",
+        "24ecec9a39ce_169_text_08b98696",
+        "24ecec9a39ce_278_text_1046dbc3"
+      ]
+    },
+    {
+      "query_id": "Q11_chatgpt_nl",
+      "query_text": "hoe schrijf ik betere ChatGPT prompts in het Nederlands",
+      "candidate_count": 25,
+      "cloud_top_indices": [
+        4,
+        0,
+        1,
+        3,
+        2
+      ],
+      "cloud_top_scores": [
+        0.3915032890927011,
+        0.1925580206403794,
+        0.18407929421106,
+        0.18313295719418246,
+        0.12329463890815201
+      ],
+      "cloud_elapsed_seconds": 0.8646168750128709,
+      "local_top_indices": [
+        5,
+        4,
+        13,
+        12,
+        6
+      ],
+      "local_top_scores": [
+        0.9419392347335815,
+        0.923747181892395,
+        0.9201592206954956,
+        0.9180477857589722,
+        0.9175068140029907
+      ],
+      "local_elapsed_seconds": 0.3939569579961244,
+      "top1_agree": false,
+      "top5_overlap_count": 1,
+      "top5_jaccard": 0.1111111111111111,
+      "cloud_top5_chunk_ids": [
+        "988b4f3d88a2_4005_text_99c5908a",
+        "988b4f3d88a2_5001_text_74b07b6e",
+        "988b4f3d88a2_4005_text_7a119fae",
+        "988b4f3d88a2_5000_text_6b122feb",
+        "988b4f3d88a2_5000_text_92a1ca8e"
+      ],
+      "local_top5_chunk_ids": [
+        "a414e7cb0259_24020_text_bafb398d",
+        "a414e7cb0259_30074_text_cdc9a327",
+        "988b4f3d88a2_4005_text_0e06dbf0",
+        "a414e7cb0259_25024_text_2b8d4f4d",
+        "988b4f3d88a2_5000_text_92a1ca8e"
+      ]
+    },
+    {
+      "query_id": "Q12_ki_epub_nl",
+      "query_text": "digitale producten verkopen met AI en ChatGPT",
+      "candidate_count": 25,
+      "cloud_top_indices": [
+        1,
+        3,
+        4,
+        2,
+        0
+      ],
+      "cloud_top_scores": [
+        0.2787967630086125,
+        0.22137134048495938,
+        0.19914391562338632,
+        0.16284755179943528,
+        0.12932671597260412
+      ],
+      "cloud_elapsed_seconds": 0.9377949999761768,
+      "local_top_indices": [
+        22,
+        1,
+        4,
+        3,
+        18
+      ],
+      "local_top_scores": [
+        0.949184775352478,
+        0.9379225969314575,
+        0.9109600782394409,
+        0.9086562991142273,
+        0.8980679512023926
+      ],
+      "local_elapsed_seconds": 0.21131820901064202,
+      "top1_agree": false,
+      "top5_overlap_count": 3,
+      "top5_jaccard": 0.42857142857142855,
+      "cloud_top5_chunk_ids": [
+        "a414e7cb0259_9004_text_60d22d67",
+        "a414e7cb0259_9004_text_f705ddfc",
+        "a414e7cb0259_9004_text_7ee37ab2",
+        "a414e7cb0259_10004_text_a5abf11c",
+        "a414e7cb0259_11006_text_2e8d9a68"
+      ],
+      "local_top5_chunk_ids": [
+        "a414e7cb0259_9004_text_60d22d67",
+        "a414e7cb0259_3004_text_7c62db51",
+        "a414e7cb0259_10004_text_a5abf11c",
+        "a414e7cb0259_11006_text_2e8d9a68",
+        "a414e7cb0259_9001_text_c734c1c3"
+      ]
+    },
+    {
+      "query_id": "Q13_pcworld",
+      "query_text": "Windows 11 PC build advice and hardware recommendations",
+      "candidate_count": 25,
+      "cloud_top_indices": [
+        3,
+        1,
+        0,
+        2,
+        4
+      ],
+      "cloud_top_scores": [
+        0.1624917182973932,
+        0.11699243714658192,
+        0.07925095578083473,
+        0.005949579483329656,
+        0.005836519116524904
+      ],
+      "cloud_elapsed_seconds": 0.6527992089977488,
+      "local_top_indices": [
+        9,
+        14,
+        22,
+        4,
+        3
+      ],
+      "local_top_scores": [
+        0.8616350889205933,
+        0.8522295951843262,
+        0.8522295951843262,
+        0.8455102443695068,
+        0.8328130841255188
+      ],
+      "local_elapsed_seconds": 0.436022125009913,
+      "top1_agree": false,
+      "top5_overlap_count": 2,
+      "top5_jaccard": 0.25,
+      "cloud_top5_chunk_ids": [
+        "ae1c6740af40_044_text_3c60a04c",
+        "ae1c6740af40_011_text_1c02ff4f",
+        "ae1c6740af40_052_text_0dfc2488",
+        "ae1c6740af40_044_text_4193772e",
+        "ae1c6740af40_069_image_ef2a59ce"
+      ],
+      "local_top5_chunk_ids": [
+        "ae1c6740af40_011_text_1c02ff4f",
+        "ae1c6740af40_052_text_6646d506",
+        "ae1c6740af40_044_text_4193772e",
+        "ae1c6740af40_072_text_4914e2db",
+        "ae1c6740af40_071_text_67ef89ce"
+      ]
+    },
+    {
+      "query_id": "Q14_combat",
+      "query_text": "F-35 Lightning II stealth fighter operations",
+      "candidate_count": 25,
+      "cloud_top_indices": [
+        1,
+        3,
+        2,
+        0,
+        4
+      ],
+      "cloud_top_scores": [
+        0.1838579104840752,
+        0.16740416999099555,
+        0.12008798042710148,
+        0.04784916890359688,
+        0.04772923406085878
+      ],
+      "cloud_elapsed_seconds": 0.8559194580011535,
+      "local_top_indices": [
+        3,
+        1,
+        20,
+        21,
+        16
+      ],
+      "local_top_scores": [
+        0.8543051481246948,
+        0.8541393876075745,
+        0.8500311970710754,
+        0.8426674604415894,
+        0.842394232749939
+      ],
+      "local_elapsed_seconds": 0.41849737500888295,
+      "top1_agree": false,
+      "top5_overlap_count": 2,
+      "top5_jaccard": 0.25,
+      "cloud_top5_chunk_ids": [
+        "a4c2916a64c2_025_text_15b86fe3",
+        "a4c2916a64c2_005_text_a9a2eef9",
+        "a4c2916a64c2_013_text_e6437abd",
+        "a4c2916a64c2_045_image_4f26c3fa",
+        "a4c2916a64c2_013_text_f06341e9"
+      ],
+      "local_top5_chunk_ids": [
+        "a4c2916a64c2_023_image_dc887913",
+        "a4c2916a64c2_013_image_9d48eafa",
+        "a4c2916a64c2_045_image_4f26c3fa",
+        "a4c2916a64c2_012_text_a66d164b",
+        "a4c2916a64c2_013_text_f06341e9"
+      ]
+    },
+    {
+      "query_id": "Q15_firearms",
+      "query_text": "firearm cleaning and safety procedure step by step",
+      "candidate_count": 25,
+      "cloud_top_indices": [
+        0,
+        2,
+        3,
+        1,
+        4
+      ],
+      "cloud_top_scores": [
+        0.17862929573814873,
+        0.17785991600547998,
+        0.17674549943038714,
+        0.1758026006453235,
+        0.1530051673793897
+      ],
+      "cloud_elapsed_seconds": 0.6283604589989409,
+      "local_top_indices": [
+        0,
+        1,
+        6,
+        3,
+        19
+      ],
+      "local_top_scores": [
+        0.8876808285713196,
+        0.8649314045906067,
+        0.8636339902877808,
+        0.853073000907898,
+        0.8511279225349426
+      ],
+      "local_elapsed_seconds": 0.21757891698507592,
+      "top1_agree": true,
+      "top5_overlap_count": 3,
+      "top5_jaccard": 0.42857142857142855,
+      "cloud_top5_chunk_ids": [
+        "29f7c8bb7680_088_image_965730fe",
+        "29f7c8bb7680_184_image_a4e76b88",
+        "29f7c8bb7680_090_image_b72b8b20",
+        "29f7c8bb7680_247_image_b6e592cb",
+        "29f7c8bb7680_113_image_6326d0d7"
+      ],
+      "local_top5_chunk_ids": [
+        "29f7c8bb7680_184_image_a4e76b88",
+        "29f7c8bb7680_090_image_b72b8b20",
+        "29f7c8bb7680_247_image_b6e592cb",
+        "29f7c8bb7680_245_image_6a21e1c6",
+        "29f7c8bb7680_111_image_393ed7c6"
+      ]
+    },
+    {
+      "query_id": "Q16_earthship",
+      "query_text": "Earthship passive solar design and rainwater harvesting",
+      "candidate_count": 25,
+      "cloud_top_indices": [
+        4,
+        1,
+        3,
+        0,
+        2
+      ],
+      "cloud_top_scores": [
+        0.19963293615183514,
+        0.1879727917820422,
+        0.1802574342373194,
+        0.18008563674191705,
+        0.07966464667119975
+      ],
+      "cloud_elapsed_seconds": 0.8918163329944946,
+      "local_top_indices": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "local_top_scores": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "local_elapsed_seconds": 0.4208131249761209,
+      "top1_agree": false,
+      "top5_overlap_count": 5,
+      "top5_jaccard": 1.0,
+      "cloud_top5_chunk_ids": [
+        "aa11d5ea2275_048_text_745357ed",
+        "aa11d5ea2275_043_text_21033d08",
+        "aa11d5ea2275_043_text_268dd696",
+        "aa11d5ea2275_043_text_6aeb5cd0",
+        "aa11d5ea2275_054_text_d7421b37"
+      ],
+      "local_top5_chunk_ids": [
+        "aa11d5ea2275_048_text_745357ed",
+        "aa11d5ea2275_043_text_21033d08",
+        "aa11d5ea2275_043_text_268dd696",
+        "aa11d5ea2275_043_text_6aeb5cd0",
+        "aa11d5ea2275_054_text_d7421b37"
+      ]
+    },
+    {
+      "query_id": "Q17_greenhouse",
+      "query_text": "greenhouse climate control and ventilation strategy",
+      "candidate_count": 25,
+      "cloud_top_indices": [
+        2,
+        3,
+        1,
+        0,
+        4
+      ],
+      "cloud_top_scores": [
+        0.26318860881057343,
+        0.1838579104840752,
+        0.18013616841320645,
+        0.15201545501795366,
+        0.14338244952861431
+      ],
+      "cloud_elapsed_seconds": 0.8593168750230689,
+      "local_top_indices": [
+        17,
+        20,
+        2,
+        9,
+        18
+      ],
+      "local_top_scores": [
+        0.9207964539527893,
+        0.9207964539527893,
+        0.9121043682098389,
+        0.9026779532432556,
+        0.9026779532432556
+      ],
+      "local_elapsed_seconds": 0.5239293749909848,
+      "top1_agree": false,
+      "top5_overlap_count": 1,
+      "top5_jaccard": 0.1111111111111111,
+      "cloud_top5_chunk_ids": [
+        "8b79e9dca3ae_149_text_53f74feb_o2",
+        "8b79e9dca3ae_148_text_3915e59e_o2",
+        "8b79e9dca3ae_150_table_87e83a1b",
+        "8b79e9dca3ae_150_text_c47011ed",
+        "8b79e9dca3ae_347_text_545e98fe_o3"
+      ],
+      "local_top5_chunk_ids": [
+        "8b79e9dca3ae_278_text_38c231ec",
+        "8b79e9dca3ae_150_text_c47011ed",
+        "8b79e9dca3ae_152_text_a50c1d29",
+        "8b79e9dca3ae_153_text_0816d47b",
+        "8b79e9dca3ae_279_text_6ecdf631"
+      ]
+    },
+    {
+      "query_id": "Q18_aios",
+      "query_text": "what is an LLM agent operating system",
+      "candidate_count": 25,
+      "cloud_top_indices": [
+        2,
+        3,
+        4,
+        1,
+        0
+      ],
+      "cloud_top_scores": [
+        0.3203447628292705,
+        0.2812717096797961,
+        0.191066886719732,
+        0.16849256203778762,
+        0.16503021413134078
+      ],
+      "cloud_elapsed_seconds": 0.816049999993993,
+      "local_top_indices": [
+        2,
+        3,
+        6,
+        18,
+        19
+      ],
+      "local_top_scores": [
+        0.9509772658348083,
+        0.9477183818817139,
+        0.9477183818817139,
+        0.8989900350570679,
+        0.896178126335144
+      ],
+      "local_elapsed_seconds": 0.4227135000110138,
+      "top1_agree": true,
+      "top5_overlap_count": 2,
+      "top5_jaccard": 0.25,
+      "cloud_top5_chunk_ids": [
+        "6afeb55a9449_010_text_ba3b95f4",
+        "07a1232cccf4_010_text_31f4eb44_o2",
+        "07a1232cccf4_001_text_f758e64d",
+        "07a1232cccf4_004_text_8667eac0",
+        "07a1232cccf4_012_text_0bea082a"
+      ],
+      "local_top5_chunk_ids": [
+        "6afeb55a9449_010_text_ba3b95f4",
+        "6afeb55a9449_009_text_2d61126c",
+        "6afeb55a9449_011_text_7f01b551",
+        "07a1232cccf4_002_text_79efe627",
+        "07a1232cccf4_001_text_f758e64d"
+      ]
+    },
+    {
+      "query_id": "Q19_solar_pv",
+      "query_text": "modelling a photovoltaic solar PV system performance",
+      "candidate_count": 25,
+      "cloud_top_indices": [
+        0,
+        4,
+        1,
+        2,
+        3
+      ],
+      "cloud_top_scores": [
+        0.4288576939493044,
+        0.19341104198829173,
+        0.18432073287321782,
+        0.18363646542371356,
+        0.1545218898787751
+      ],
+      "cloud_elapsed_seconds": 0.8243214999965858,
+      "local_top_indices": [
+        5,
+        0,
+        12,
+        17,
+        21
+      ],
+      "local_top_scores": [
+        0.9225641489028931,
+        0.9122757911682129,
+        0.8919695019721985,
+        0.888279378414154,
+        0.888279378414154
+      ],
+      "local_elapsed_seconds": 0.5126314169901889,
+      "top1_agree": false,
+      "top5_overlap_count": 1,
+      "top5_jaccard": 0.1111111111111111,
+      "cloud_top5_chunk_ids": [
+        "b670f5359e9c_003_text_239fc151",
+        "b670f5359e9c_002_text_4d1433d3",
+        "b670f5359e9c_003_text_f6726ea6",
+        "b670f5359e9c_007_text_5178f773",
+        "b670f5359e9c_006_text_9c019436"
+      ],
+      "local_top5_chunk_ids": [
+        "b670f5359e9c_006_text_7d9ffb90",
+        "b670f5359e9c_001_text_579501cf",
+        "b670f5359e9c_006_text_bc690797",
+        "b670f5359e9c_007_text_5178f773",
+        "b670f5359e9c_005_text_8c647038"
+      ]
+    },
+    {
+      "query_id": "Q20_harry",
+      "query_text": "Harry Potter Quidditch match against Slytherin",
+      "candidate_count": 25,
+      "cloud_top_indices": [
+        4,
+        0,
+        2,
+        1,
+        3
+      ],
+      "cloud_top_scores": [
+        0.592901664848572,
+        0.1972017576410444,
+        0.1972017576410444,
+        0.18519531270839126,
+        0.18519531270839126
+      ],
+      "cloud_elapsed_seconds": 1.2171574580133893,
+      "local_top_indices": [
+        10,
+        12,
+        4,
+        7,
+        5
+      ],
+      "local_top_scores": [
+        0.9370098114013672,
+        0.9370098114013672,
+        0.9320957660675049,
+        0.9320957660675049,
+        0.9274628162384033
+      ],
+      "local_elapsed_seconds": 0.5277276249835268,
+      "top1_agree": false,
+      "top5_overlap_count": 1,
+      "top5_jaccard": 0.1111111111111111,
+      "cloud_top5_chunk_ids": [
+        "f0a0beca0506_197_text_df9d3ea8",
+        "f0a0beca0506_200_text_85d63527",
+        "f0a0beca0506_198_text_562b3f93",
+        "f0a0beca0506_199_text_2c862e36",
+        "f0a0beca0506_193_text_c0495190"
+      ],
+      "local_top5_chunk_ids": [
+        "f0a0beca0506_192_text_d7885bf2",
+        "f0a0beca0506_233_text_ca81fa83",
+        "f0a0beca0506_232_text_13b9eab5",
+        "f0a0beca0506_197_text_40d12a84",
+        "f0a0beca0506_193_text_c0495190"
+      ]
+    }
+  ]
+}

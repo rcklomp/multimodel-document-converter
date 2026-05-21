@@ -55,6 +55,11 @@ from measure_reranker_latency import (  # noqa: E402
     DEFAULT_RERANK_MODEL_OMLX,
 )
 
+# Optional override for the local model — by default uses what's in
+# measure_reranker_latency.DEFAULT_RERANK_MODEL_OMLX; pass --local-model
+# to compare a different one.
+LOCAL_MODEL_OVERRIDE: str | None = None
+
 
 def jaccard(a: set, b: set) -> float:
     if not a and not b:
@@ -73,8 +78,12 @@ def main() -> int:
     parser.add_argument("--top-n", type=int, default=5)
     parser.add_argument("--max-chunk-chars", type=int, default=1500)
     parser.add_argument("--embed-model", default="text-embedding-v4")
+    parser.add_argument("--local-model", default=None,
+                        help="Override the local reranker model name "
+                             f"(default: {DEFAULT_RERANK_MODEL_OMLX}).")
     parser.add_argument("--output-json", default=None)
     args = parser.parse_args()
+    local_model = args.local_model or DEFAULT_RERANK_MODEL_OMLX
 
     dashscope_key = os.environ.get("DASHSCOPE_API_KEY", "")
     mlx_key = os.environ.get("MLX_API_KEY", "")
@@ -90,7 +99,7 @@ def main() -> int:
     print(f"top_k_retrieve:    {args.top_k_retrieve}")
     print(f"top_n returned:    {args.top_n}")
     print(f"Cloud reranker:    {DEFAULT_RERANK_MODEL_DASHSCOPE} @ Dashscope intl")
-    print(f"Local reranker:    {DEFAULT_RERANK_MODEL_OMLX} @ {DEFAULT_RERANK_URL_OMLX}")
+    print(f"Local reranker:    {local_model} @ {DEFAULT_RERANK_URL_OMLX}")
     print()
 
     per_query: list[dict] = []
@@ -122,7 +131,7 @@ def main() -> int:
         try:
             local_results, local_elapsed = rerank_call(
                 qtext, docs, mlx_key,
-                DEFAULT_RERANK_URL_OMLX, DEFAULT_RERANK_MODEL_OMLX,
+                DEFAULT_RERANK_URL_OMLX, local_model,
                 top_n=args.top_n,
             )
             local_top = [r.get("index") for r in local_results[:args.top_n]]
@@ -196,7 +205,7 @@ def main() -> int:
             "top_k_retrieve": args.top_k_retrieve,
             "top_n": args.top_n,
             "cloud_model": DEFAULT_RERANK_MODEL_DASHSCOPE,
-            "local_model": DEFAULT_RERANK_MODEL_OMLX,
+            "local_model": local_model,
             "summary": {
                 "queries_scored": n,
                 "top1_agreement_rate": top1_agreement,

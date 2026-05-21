@@ -1,6 +1,6 @@
 # Plan: v2.12 — Close the absolute-quality gap: reranker → hybrid retrieval → HyDE
 
-**Status:** **Draft v0.3** (2026-05-21). Authored after the v2.11.0
+**Status:** **Draft v0.4** (2026-05-21). Authored after the v2.11.0
 swap landed and was tagged (`c2a461c`, annotated `v2.11.0` on both
 remotes 2026-05-20/21). v2.11 closed the *embedder* bottleneck with a
 10× lift across every embedder-attributable axis; v2.12 closes the
@@ -30,6 +30,47 @@ slower) and quality-signal grounds (score bunching pattern
 consistent with a yes/no-token-classification head; top-1
 agreement with cloud is 5% but both could be wrong). Cloud
 `gte-rerank` confirmed as the Phase 1 reranker.
+
+**v0.4 changes (2026-05-21):** Second local reranker tested —
+`afanjul/gte-reranker-modernbert-base-mlx` (~150M-param cross-
+encoder, 285 MB MLX-quantized, ModernBERT backbone). Right
+architecture family for the task: continuous-score regression
+head, not the yes/no-classification head of Qwen3-Reranker.
+Empirical results from the same 20-query × top-25 benchmark
+(`tests/fixtures/reranker_latency_modernbert_2026-05-21.json`,
+`tests/fixtures/reranker_quality_modernbert_2026-05-21.json`):
+
+- **Latency: 3× FASTER than cloud.** K=25 p99 = 0.55 s vs cloud
+  1.70 s. Per-pair compute ~15 ms on the user's Mac Mini (vs
+  ~750 ms for the 8B-param Qwen3 model). End-to-end p99 at K=25
+  is ~1.85 s including embed, vs ~3.1 s for the cloud-rerank path.
+  Sub-1.5 s budget is achievable at K=10 (total ~1.61 s) with
+  future embed-cache optimization.
+
+- **Score distribution: clean.** Wide range 0.0–0.951 (proper
+  cross-encoder behavior) vs Qwen3's bunched 0.62–0.84. Decisive
+  ordering. One anomaly: query Q16 (Earthship) returned all
+  candidates with score 0.0 — either a quantization edge case or
+  a legitimate "nothing relevant" verdict; needs investigation
+  during Phase 1 soak.
+
+- **Quality vs cloud is unresolved.** Top-1 agreement 15%
+  (3/20), mean Jaccard 0.239 — better than Qwen3 (5%, 0.127)
+  but still substantial disagreement with cloud `gte-rerank`.
+  Two viable interpretations: (a) different generations of the
+  GTE family with different training data → both are valid but
+  prefer different chunks per query; (b) one is actually better.
+  Agreement-rate analysis alone cannot distinguish these.
+
+**Decision deferred into Phase 1.** Cloud `gte-rerank` remains
+the *fallback* Phase 1 reranker (latency known, quality known to
+be a 10× lift over v2.11.0). Local ModernBERT becomes the
+*leading candidate* pending the Phase 1 soak verdict — same 518-
+query × LLM-judge protocol the v2.11 embedder shootout used.
+Whichever reranker scores better on the soak ships as the v2.12
+production reranker. Both candidates pin a new fingerprint for
+regression-test reproducibility. The benchmark + comparison
+scripts are reusable for any future reranker bake-off.
 
 **Predecessor:** [`docs/PLAN_V2.11.md`](PLAN_V2.11.md) — Draft v1.0,
 Phase 1 swap executed 2026-05-20 on `c2a461c`, tag `v2.11.0` on
@@ -248,55 +289,82 @@ chunker, no embedder, no schema changes.
 
 ### Phase 1 — Reranker  (the biggest single lever)
 
-**What.** Add Dashscope `gte-rerank-v2` as a second-stage reranker
-between Qdrant top-K retrieval and the final returned chunks. The
-production retrieval flow becomes:
+**What.** Add a cross-encoder reranker as a second stage between
+Qdrant top-K retrieval and the final returned chunks. The production
+retrieval flow becomes:
 
 ```
-query → embed (text-embedding-v4) → Qdrant top-50 (cosine)
-      → gte-rerank-v2 (query × chunk pairs) → reordered top-5/10
+query → embed (text-embedding-v4) → Qdrant top-25 (cosine)
+      → cross-encoder reranker (query × chunk pairs) → reordered top-5
 ```
 
-The reranker is a cross-encoder: it scores `(query, chunk)` pairs
-*together*, capturing semantic interaction that a single-vector
-embedder can't. For the v2.11 right-doc-wrong-chunk pattern, this
-is the canonical fix.
+The reranker scores `(query, chunk)` pairs *together*, capturing
+semantic interaction that a single-vector embedder can't. For the
+v2.11 right-doc-wrong-chunk pattern, this is the canonical fix.
+
+**Reranker choice — leading candidate is local ModernBERT, cloud is
+the fallback.** Two GTE-family rerankers benchmarked in pre-Phase-1
+work (see §1 status banner v0.3 + v0.4 changes). The Phase 1 soak
+picks the winner:
+
+- **Leading candidate (local):**
+  `afanjul/gte-reranker-modernbert-base-mlx` served by `omlx-server`
+  at `http://10.0.10.246:8000/v1/rerank`. ~150M-param cross-encoder
+  on Apple Silicon. K=25 p99 = 0.55 s, 3× faster than cloud. Wide
+  score distribution (0.0–0.951). Top-1 agreement with cloud is
+  only 15% but agreement-rate analysis doesn't tell us which is
+  RIGHT — the soak will.
+- **Fallback (cloud):** Dashscope `gte-rerank` at
+  `https://dashscope-intl.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank`.
+  K=25 p99 = 1.70 s. Quality known to be a 10× lift on top of v2.11
+  embedder swap (proxy estimate from the agreement rate against
+  what should be a strong reranker). Cost per query ~$0.001.
 
 **Architecture decisions.**
 
-- **New module** `src/mmrag_v2/retrieval/` with three files at the
-  start: `__init__.py`, `reranker.py` (Dashscope client), `pipeline.py`
-  (composable retrieve → rerank → return).
+- **New module** `src/mmrag_v2/retrieval/` with four files: `__init__.py`,
+  `reranker.py` (provider abstraction: `LocalOmlxReranker` +
+  `DashscopeReranker` both implement a `rerank(query, chunks) →
+  list[(score, chunk)]` interface), `pipeline.py` (composable retrieve
+  → rerank → return), and `config.py` (factory: `get_reranker(name)`
+  reads `RERANKER_BACKEND` env var or CLI flag).
 - **No changes** to `scripts/ingest_to_qdrant.py` (retrieval-side
   only).
 - **`scripts/search_qdrant.py` is the integration point.** Its
   existing `--no-rerank` flag flips meaning: today it's a no-op
   (rerank degrades to vector-rank truncation); after Phase 1,
   default behavior is rerank-on, and `--no-rerank` opts out.
-- **Reranker API.** `POST` to
-  `https://dashscope-intl.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank`
-  with `model: "gte-rerank"` (intl endpoint name — the cn endpoint
-  uses `gte-rerank-v2` for the same model; v0.1 of this plan had
-  the cn name and was corrected after the 2026-05-21 probe).
-  Same `DASHSCOPE_API_KEY` env var as the embedder. Cost: ~$0.001
-  per call × 240-call benchmark = ~$0.24 verified; per query in
-  production ~$0.001. Soak run (518 queries × 1 rerank each):
-  ~$0.50. Production: bounded by query traffic.
-- **Latency budget (empirically determined 2026-05-21,
-  `tests/fixtures/reranker_latency_2026-05-21.json`).** Per-call
-  rerank latency p99 from the user's network: 1.04 s at K=10,
-  1.70 s at K=25, 2.36 s at K=50, 3.29 s at K=100 (with outliers
-  up to 4.3 s). Marginal cost per +K pair is small (~150 ms p50
-  from K=10 → K=25); the round-trip dominates over the scoring.
-  **Recommended `top_k_retrieve` = 25** for the v2.12.0 default:
-  Phase-2-eligible (the candidate-set rationale below says K must
-  be > top_n_return = 5 by enough margin that the reranker can do
-  useful work); plays well with the 3.0 s p99 budget; tail-latency
-  outliers controlled. **K=50 is acceptable** if Phase 1 alone
-  doesn't clear the Recall@5 chunk ≥ 85% floor — the extra ~700 ms
-  p99 may be worth the wider candidate set. **K=100 is not
-  recommended** — the tail-latency outliers (4.3 s observed in 60
-  samples) are too large.
+- **Reranker APIs (both candidates use the same Cohere-style payload
+  shape).**
+  - Local: `POST http://10.0.10.246:8000/v1/rerank` with
+    `model: "gte-reranker-modernbert-base-mlx"` and
+    `Authorization: Bearer $MLX_API_KEY`. Cost: zero per call (LAN-
+    hosted). Latency: K=25 p99 0.55 s. Throughput is bounded by the
+    Mac Mini and is single-tenant — production scale-up would need
+    either a queue or a second instance.
+  - Cloud: `POST https://dashscope-intl.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank`
+    with `model: "gte-rerank"` (intl endpoint; cn endpoint name is
+    `gte-rerank-v2` for the same model). Same `DASHSCOPE_API_KEY`
+    env var. Cost: ~$0.001 per query. Latency: K=25 p99 1.70 s.
+- **Latency budget (empirically determined 2026-05-21).**
+  Per-call rerank p99 by backend:
+
+  | Backend | K=10 | K=25 | K=50 |
+  |---|---:|---:|---:|
+  | Local ModernBERT | 0.32 s | 0.55 s | 1.04 s |
+  | Cloud `gte-rerank` | 1.04 s | 1.70 s | 2.36 s |
+
+  Pinned data: `tests/fixtures/reranker_latency_modernbert_2026-05-21.json`
+  (local), `tests/fixtures/reranker_latency_2026-05-21.json` (cloud).
+  **Recommended `top_k_retrieve` = 25** for the v2.12.0 default: gives
+  the reranker enough candidates to reorder meaningfully; plays well
+  with the 3.0 s total-p99 budget on either backend. **K=50** is the
+  fallback if Phase 1 alone doesn't clear Recall@5 chunk ≥ 85% — local
+  ModernBERT still p99 ≈ 2.3 s total at K=50, cloud is ~3.8 s.
+  **K=100** excluded (cloud has 4.3 s tail-latency outliers; not
+  measured on local but per-pair compute would extrapolate to ~2 s
+  rerank-only on the Mini, OK budget-wise but diminishing-returns
+  vs K=50).
 
 **Approach.**
 
@@ -710,6 +778,7 @@ Before the v2.12.0 tag is staged:
 | 2026-05-21 | Draft v0.1 authored after the v2.11.0 swap landed + was tagged. Order of phases driven by the v2.11 soak shape: Recall@5 doc 91.7% vs Recall@5 chunk 66.8% is a right-doc-wrong-chunk pattern → reranker is the highest-leverage first phase. Phase 2 (hybrid) and Phase 3 (HyDE) are conditional on Phase 1's floor outcomes. Phase 4 (per-doc-class chunking) is a stretch safety valve, not the planned path. Phase 0 closes the v2.11.x Format recovery + 30-day rollback drop before any retrieval work starts so the v2.12 measurements start from a clean Format baseline. |
 | 2026-05-21 | Promoted to Draft v0.2 after empirical reranker-latency benchmark (`scripts/measure_reranker_latency.py`; 240 samples across 20 queries × 4 K values × 3 repeats). Three substantive changes: (1) Correct model name from `gte-rerank-v2` to `gte-rerank` for the intl endpoint (v2 only on the cn endpoint; same model). (2) §2 Goal 7 latency budget revised — the original 1.5 s p99 target was incompatible with the empirical embed p99 of 1.35 s on its own; new split-stage budget plus a 3.0 s total p99 target at K=25 / 3.5 s at K=50 reflects what's achievable from the user's current network. The embed p99 (1.35 s) is the dominant cost, not the reranker — a counterintuitive but actionable finding that frames embedding-cache as the right next-cycle latency lever. (3) §3 Phase 1 default `top_k_retrieve` set to 25 (was unspecified); K=50 is the fallback if Phase 1 alone doesn't clear Recall@5 chunk ≥ 85%; K=100 is excluded due to 4.3 s tail-latency outliers in the benchmark. Open Question 1 marked resolved. |
 | 2026-05-21 | Promoted to Draft v0.3 after a local-vs-cloud reranker bake-off against the user's self-hosted `mlx-community_Qwen3-Reranker-8B-mxfp8` at `http://10.0.10.246:8000`. Benchmark script extended with `--rerank-backend` flag; new `scripts/compare_reranker_quality.py` runs the same query+candidates through both rerankers side-by-side. Local reranker rejected for v2.12 Phase 1 on two independent grounds: (a) **Latency 17.5× worse than cloud** — K=10 p99 = 12.2 s, K=25 p99 = 30.7 s (per-pair compute ~750 ms on Apple Silicon for an 8B-param causal-LM cross-encoder). (b) **Score-distribution pattern indicates a yes/no-token-classification head** rather than a regression head — local scores bunch in 0.75-0.85 vs cloud's 0.006-0.75 range, meaning the local reranker's within-band ordering is closer to noise than signal. Top-1 agreement between the two rerankers was 5% (1/20), mean top-5 Jaccard 0.127 — functionally independent decisions, but the benchmarks alone can't tell which is RIGHT (both could be wrong). Deferred to v2.13+ pending either 10× local-latency improvement or a privacy/data-residency driver. Cloud `gte-rerank` confirmed as the Phase 1 reranker; new fixtures committed for future delta reproducibility. Open Question 1 sub-clause (local reranker) marked resolved. |
+| 2026-05-21 | Promoted to Draft v0.4 after the user found `afanjul/gte-reranker-modernbert-base-mlx` — the *right* shape of local reranker (150M-param cross-encoder with regression head, vs the rejected 8B causal-LM with yes/no head from v0.3). Discussion of why reranker model size is decoupled from reranker quality: standard production rerankers (BGE/GTE families) sit in the 200-600M-param range; the 8B Qwen3 was the architectural outlier. ModernBERT model pulled onto omlx-server and benchmarked: (a) **Latency 3× FASTER than cloud** — K=25 p99 = 0.55 s vs cloud 1.70 s. Per-pair compute ~15 ms on the Mini (50× faster than Qwen3-8B). (b) **Score distribution wide** (0.0–0.951) — proper cross-encoder behavior, decisive ordering. (c) **Quality vs cloud unresolved** — top-1 agreement 15% (3/20), mean Jaccard 0.239. Better than Qwen3 on every axis but agreement-rate alone can't tell us which reranker picks BETTER chunks (both could be valid-but-different gte-family generations). **Decision deferred into Phase 1 itself** — the Phase 1 soak (518 queries × LLM-judge) will pick the winner; whichever scores better ships. Cloud remains the fallback if local ModernBERT loses the soak or the Q16 all-zero anomaly turns out to be a model defect. New scripts/fixtures: `scripts/compare_reranker_quality.py` gains `--local-model` flag; `tests/fixtures/reranker_latency_modernbert_2026-05-21.json` (60 samples × 3 K values) and `tests/fixtures/reranker_quality_modernbert_2026-05-21.json` (20-query head-to-head). |
 
 ---
 
