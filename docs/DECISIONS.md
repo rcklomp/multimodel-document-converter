@@ -1134,3 +1134,75 @@ Each chunk correctly captures a row group from a structured inventory list. The 
 **Acceptance criterion for v2.13.0 closure**: Format ex-CarOK ≥95%. CarOK separately stays at its current ~70% Format score with the documented rationale above.
 
 **Decision recorded by:** autonomous run, 2026-05-22.
+
+## v2.13 Phase 1 Embedder Swap Executed — omlx Wins 6/6 Axes (2026-05-22)
+
+**Decision: SWAP** to local `Qwen3-Embedding-8B-mxfp8` via omlx-server as the
+v2.13.0 production embedder. Cloud `text-embedding-v4` retained as the 30-day
+rollback baseline through **2026-06-19**.
+
+**Apples-to-apples shootout (same fixture, same queries, same judge,
+same retrieval stack — only the embedder differs):**
+
+| Metric | omlx (local) | dashscope (cloud) | Δ |
+|---|---:|---:|---:|
+| Recall@1 chunk | 57.5% (298/518) | 55.0% (285/518) | **+2.5 pp omlx** |
+| Recall@5 chunk | 78.0% (404/518) | 72.6% (376/518) | **+5.4 pp omlx** |
+| Recall@5 doc   | 95.2% (493/518) | 93.1% (482/518) | **+2.1 pp omlx** |
+| Relevance      | 74.6% (773/1036) | 74.1% (768/1036) | +0.5 pp |
+| Format         | 92.9% (962/1036) | 89.2% (924/1036) | **+3.7 pp omlx** |
+| Faithfulness   | 66.9% (693/1036) | 65.9% (683/1036) | +1.0 pp |
+
+omlx wins 6/6 axes; 3 with meaningful margins (R@1 +2.5, R@5 chunk +5.4,
+Format +3.7); 3 within noise.
+
+**Per-doc:** R@1 is per-doc near-tie (13-omlx-win / 7-tie / 12-dashscope-win)
+but aggregate wins because omlx's wins are larger margins than its losses.
+R@5 chunk is a cleaner 17-9-6 split; Format 15-12-5. Both favour omlx.
+
+**Why not directly comparable to v2.12.0's R@1 = 67.8%:** the v2.13 P1 fixture
+was sampled fresh from the post-v2.13-P2 ingestion (after Earthship + Firearms
+re-extraction). Different gold chunk_ids → different difficulty. The right
+anchor is dashscope-on-the-new-fixture (55.0%), not the v2.12 number. The
+~10pp absolute drop affects both providers equally and is fixture-noise.
+
+**Justification (all axes positive):**
+
+1. Quality — omlx wins 6/6
+2. Cost — embed cost drops to $0 (vs ~$0.0001/query)
+3. Privacy — corpus data never leaves the LAN
+4. Latency — sub-100ms LAN embed vs ~250–500ms WAN
+5. Independence — no Dashscope rate-limit / outage exposure on embedding side
+
+**Risks accepted, tracked for v2.14:**
+
+- German + minor-language content takes a hit (ATZ_Elektronik -12.5 R@1).
+  Possibly add per-doc language-aware embedder routing if regression deepens.
+- Code-dense + engineering content (Python_Cookbook, IRJET, Hybrid_electric,
+  Greenhouse) regress 6-12pp R@1. Acceptable given offsetting wins.
+
+**Rollback plan:** the dashscope collection
+(`mmrag_v2_8__qwen3_dashscope`, 31,371 pts) is retained unchanged through
+**2026-06-19**. If a corpus-specific regression surfaces in production use,
+the production embedder/collection knob in
+`src/mmrag_v2/retrieval/config.py` flips back to dashscope without re-ingestion.
+After 2026-06-19 the dashscope collection becomes deletion candidate if no
+rollback was triggered.
+
+**Methodology:** both runs share identical sample seed (42), generated query
+texts (one shared `--stage generate` pass), judge model + prompts (qwen-max),
+retrieval stack (hybrid + RRF + ModernBERT rerank), BM25 index, sparse
+collection, and reranker. The work file was generated once then forked. The
+6/6-axis omlx win is therefore attributable to the embedder swap and not to
+any retrieval or judge artifact.
+
+**Evidence:**
+- `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md` — canonical
+  comparison report (this decision's evidence)
+- `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx.md` — full omlx per-doc + weakest queries
+- `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_dashscope_baseline.md` — full dashscope per-doc
+- `output/soak/v2.13_p1_omlx/work.jsonl` — omlx fixture (518 queries)
+- `output/soak/v2.13_p1_dashscope_baseline/work.jsonl` — dashscope fixture (same 518 queries)
+- Soak cost ~$5.25 (within $25/cycle cap)
+
+**Decision recorded by:** autonomous run, 2026-05-22.
