@@ -54,10 +54,11 @@ def test_engine_and_schema_version_pinned() -> None:
     changed."""
     from mmrag_v2.version import __engine_version__, __schema_version__
 
-    # Current production tag (v2.12.0 retrieval stack shipped
-    # 2026-05-21: hybrid+rerank +32pp Recall@1 over v2.11.0).
-    # Bump this assertion when the next tag ships.
-    assert __engine_version__ == "2.12.0"
+    # Current production tag (v2.13.0 closes Phase 1 local embedder swap
+    # — Qwen3-Embedding-8B-mxfp8 via omlx replaces Dashscope
+    # text-embedding-v4; 6/6-axis apples-to-apples win, shipped
+    # 2026-05-22). Bump this assertion when the next tag ships.
+    assert __engine_version__ == "2.13.0"
     assert __schema_version__ == "2.7.0"
 
     # Cross-check pyproject.toml stays in sync with version.py so a

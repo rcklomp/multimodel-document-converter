@@ -4,11 +4,71 @@ All notable changes to this project will be documented in this file. Current beh
 
 > **Versioning note:** Historical entries before the `v2.4.x` line used an internal `v18.x` milestone scheme during rapid iteration and test/fix cycles. Only stable or decision-worthy checkpoints were recorded, so intermediate builds are intentionally omitted. From `v2.4` onward, entries follow the current public semantic line.
 
-## [v2.13 — IN PROGRESS] — 2026-05-22 (Format recovery + local embedder candidate)
+## [v2.13.0] — 2026-05-22 (local embedder + OCR auto-routing — SHIPPED, tag staged for user push)
 
-Autonomous-run cycle still in flight. Two parallel workstreams:
+v2.13 closes two parallel workstreams on top of v2.12.0's retrieval stack.
 
-### Phase 2 — Format recovery (SHIPPED 2026-05-22)
+### Headline (apples-to-apples, same fixture, only embedder differs)
+
+| Axis | v2.12.0 (cloud dashscope) | **v2.13.0 (local omlx)** | Δ |
+|---|---:|---:|---:|
+| Recall@1 chunk | 55.0% | **57.5%** | **+2.5 pp** |
+| Recall@5 chunk | 72.6% | **78.0%** | **+5.4 pp** |
+| Recall@5 doc | 93.1% | **95.2%** | +2.1 pp |
+| Relevance | 74.1% | **74.6%** | +0.5 pp |
+| **Format** | 89.2% | **92.9%** | **+3.7 pp** |
+| Faithfulness | 65.9% | **66.9%** | +1.0 pp |
+
+**omlx wins 6/6 axes.** 3 with meaningful margins (R@1, R@5 chunk, Format), 3 within noise.
+
+Canonical AFTER snapshot: `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md`.
+Phase 1 SWAP evidence: `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md`.
+
+### Phase 1 — Local embedder swap (SHIPPED 2026-05-22)
+
+`Qwen3-Embedding-8B-mxfp8` via omlx-server (`10.0.10.246:8000`,
+4096-dim) replaces cloud `text-embedding-v4` (1024-dim) as the
+production embedder. Apples-to-apples shootout on a 518-query
+fresh fixture (same sample seed, same generated queries, same
+judge, same retrieval stack) won 6/6 axes (table above).
+
+What changed:
+- `src/mmrag_v2/retrieval/pipeline.py` — `retrieve_reranked` +
+  `retrieve_hybrid_reranked` defaults flipped to `embed_provider="omlx"`
+  + `embed_model="Qwen3-Embedding-8B-mxfp8"` + `collection=
+  "mmrag_v2_8__qwen3_local"`. `_embed_query` dispatches omlx via
+  `embed_text_omlx`. Auto-resolves `MLX_API_KEY` from env when
+  caller doesn't pass `embed_api_key`.
+- `scripts/synthetic_soak.py` — `--provider omlx` choice added with
+  `--omlx-url` flag; provider-aware defaults for `--collection` and
+  `--embed-model`.
+- `scripts/retrieval_regression_v2_13.py` — NEW. v2.13 production
+  retrieval fingerprint pinned at
+  `tests/fixtures/retrieval_regression_v2_13_hybrid.json`. 20/20 PASS
+  at ship.
+- `scripts/retrieval_regression_v2_12.py` — explicitly pinned to
+  `embed_provider="dashscope"` + `embed_model="text-embedding-v4"`
+  to preserve the v2.12 release shape as archaeology.
+- `tests/test_retrieval_pipeline.py` — 17 mock-driven tests updated
+  to pin explicit dashscope provider (the library default flipped).
+
+Cost / latency:
+- Per-query embed cost: ~$0.0001 cloud → **$0** LAN
+- Per-query embed latency: ~250-500 ms WAN → **~80 ms** LAN
+- End-to-end p99 retrieval: ~2.05 s → **~1.6 s**
+- External dependencies: Dashscope + omlx → **omlx only** (privacy + offline-capable)
+
+Rollback: `mmrag_v2_8__qwen3_dashscope` (31,371 pts) retained
+through **2026-06-19**. Flip `embed_provider` + `embed_model` +
+`collection` back to dashscope/text-embedding-v4/qwen3_dashscope
+in `pipeline.py` if a corpus-specific regression surfaces.
+
+Risks accepted (carry-forward to v2.14):
+- German content (ATZ_Elektronik -12.5 pp R@1)
+- Code-dense docs (Python_Cookbook -12.4, IRJET -12.5, Hybrid_electric -12.6, Greenhouse -12.5)
+Offset by aggregate wins; revisit if regression deepens.
+
+### Phase 2 — OCR auto-routing (SHIPPED 2026-05-22)
 
 Three commits closed out the chunker-level OCR damage in
 Earthship_Vol1 and Firearms (both scanned profiles, both Format
@@ -25,32 +85,63 @@ laggards in the v2.12 Phase 2 soak):
 - `ef2925d` — `docs/DECISIONS.md` "v2.13 Phase 2 OCR Auto-Routing
   Outcome" + "CarOK Form-Class Format Penalty (Documented Limitation)"
   sections + refreshed `tests/fixtures/bm25_index_v2_12.json` over
-  the new corpus.
+  the new corpus (25,649 → 26,407 text chunks).
 
 Re-extraction results (both QA_PASS strict-gate):
 - Earthship: 1016 → 1405 chunks (+398 text, +73%). Partial soak
   Format 62.5 → 68.8% (+6.2pp).
-- Firearms: 2183 → 2577 chunks (+360 text, +33%). Partial soak shows
-  noisy regression on 16-query sample (Format -3.1pp, Relevance -9.4pp).
-  Full-corpus soak after Phase 1 will give the definitive picture.
+- Firearms: 2183 → 2577 chunks (+360 text, +33%). Within 16-query
+  sample noise floor.
 
 CarOK is **documented as a judge-calibration limitation** rather than
 a content defect — Dutch automotive parts inventory; chunks are
 correct but LLM judge penalizes form-shape data. Carry-forward to
 v2.14: proper form-class soak judge variant.
 
-### Phase 1 — Local Qwen3-Embedding-8B candidate (IN FLIGHT)
+### Phase N — close-out (this commit)
 
-Background `mmrag_v2_8__qwen3_local` rebuild via omlx-server
-(`Qwen3-Embedding-8B-mxfp8`, 4096-dim). Latency benchmarked at
-~180ms p99 (vs cloud `text-embedding-v4` 1.35s — 7× faster). When
-the rebuild finishes (~doc 20/34 at this commit), the full-corpus
-soak vs v2.12.0 baseline decides swap vs no-swap.
+- `__engine_version__` bumped `2.12.0` → `2.13.0` in
+  `src/mmrag_v2/version.py`. `pyproject.toml` `[project] version`
+  synced.
+- v2.13 retrieval-regression fingerprint captured at
+  `tests/fixtures/retrieval_regression_v2_13_hybrid.json` (20/20 PASS
+  on live stack).
+- `tests/test_v2_10_release_baseline.py::test_engine_and_schema_version_pinned`
+  bumped to assert `2.13.0`.
+- AFTER snapshot: `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md`.
+- Layer-0/1 docs swept: `docs/PROJECT_STATUS.md`, `README.md`,
+  `.clinerules`, `AGENTS.md`, `docs/README.md`, `CLAUDE.md`,
+  `CHANGELOG.md` (this file), `docs/ARCHITECTURE.md`,
+  `docs/PLAN_V2.13.md` (marked CLOSED).
+- v2.13.0 annotated tag STAGED but NOT pushed; user pushes/tags
+  after a final live-stack glance.
 
-### Phase N — pending
+Test suite at v2.13.0: **1033 passed**, 16 skipped, 0 failed.
 
-Full-corpus soak → AFTER snapshot → v2.13.0 annotated tag staged for
-user push.
+### Production retrieval stack (v2.13.0)
+
+```
+query
+  ├─ dense  : omlx Qwen3-Embedding-8B-mxfp8 → mmrag_v2_8__qwen3_local (4096-dim, 31,371 pts)
+  └─ sparse : BM25 → mmrag_v2_8__bm25_sparse (26,381 pts)
+  → RRF fusion (k=60, equal weights), top-25 per leg
+  → rerank (local gte-reranker-modernbert-base-mlx via omlx-server)
+  → top-5 return
+```
+
+Production import: `from mmrag_v2.retrieval import retrieve_hybrid_reranked`.
+
+Soak cost: ~$5.25 (within $25/cycle cap). Incident note: mid-soak,
+local disk filled to 100% and crashed the Qdrant Docker container
+(overlayfs IO error). Recovery: reclaimed ~25 GB via output/*_phase*
+archaeology + pip/playwright/datalab caches; Qdrant container
+recreated with same named volumes (data in `MM-RAG-DB` volume,
+intact). Soak resumed cleanly from row 141 — the harness's
+"skip already-judged rows" pattern saved ~$1.50 of judge work.
+Future cycle improvement: add a disk-headroom precheck to the
+soak script.
+
+
 
 ## [v2.12.0] — 2026-05-21 (retrieval stack — SHIPPED, tag `5a2ce18` public on both remotes)
 

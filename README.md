@@ -4,82 +4,86 @@ Convert PDF, EPUB, HTML, and Office documents into structured JSONL datasets for
 
 The converter extracts text, images, and tables from complex documents while preserving spatial layout, document hierarchy, and semantic context. It handles everything from born-digital magazines to degraded scanned manuals.
 
-**Version 2.12.0 SHIPPED** (annotated tag `5a2ce18`, 2026-05-21, public on GitHub + Gitea) | **v2.13 cycle IN PROGRESS** (Format recovery shipped 2026-05-22; local Qwen3-Embedding-8B candidate in flight; see [`docs/PLAN_V2.13.md`](docs/PLAN_V2.13.md)) | predecessors `v2.11.0` (`c2a461c`) → `v2.10.0` (`db6527c`) → `v2.9.0-rc1` (`3e06d1b`) → `v2.8.0` | Python 3.10 | Apple Silicon native | Docling 2.86.0 | Schema 2.7.0
+**Version 2.13.0 SHIPPED** (annotated tag staged 2026-05-22 for user push to GitHub + Gitea) | predecessors `v2.12.0` (`5a2ce18`) → `v2.11.0` (`c2a461c`) → `v2.10.0` (`db6527c`) → `v2.9.0-rc1` (`3e06d1b`) → `v2.8.0` | Python 3.10 | Apple Silicon native | Docling 2.86.0 | Schema 2.7.0
 
-> **v2.12.0 — retrieval stack release.** v2.12 closes the absolute-
-> quality gap the v2.11 soak revealed. v2.11 fixed the embedder;
-> v2.12 adds the retrieval-side stack on top — cross-encoder
-> reranker, BM25 sparse, RRF fusion. HyDE was measured but ships
-> opt-in (no meaningful lift on top of hybrid+rerank).
+> **v2.13.0 — local embedder release.** v2.13 closes two parallel
+> workstreams on top of v2.12.0's retrieval stack: Phase 1 swaps
+> the production embedder from cloud Dashscope `text-embedding-v4`
+> to local `Qwen3-Embedding-8B-mxfp8` via omlx-server (6/6-axis
+> apples-to-apples win on same fixture); Phase 2 fixes OCR
+> auto-routing so scanned-profile docs honour Docling's
+> `force_full_page_ocr` flag (Earthship Format +6.2pp).
 >
-> | Axis | v2.11.0 baseline | **v2.12.0** | Δ |
+> | Axis | v2.12.0 (cloud) | **v2.13.0 (local omlx)** | Δ |
 > |---|---:|---:|---|
-> | Recall@1 chunk | 35.5% | **67.8%** | **+32.3pp (1.9×)** |
-> | Recall@5 chunk | 66.8% | **90.2%** | **+23.4pp (STRETCH ✓)** |
-> | Recall@5 doc | 91.7% | **98.6%** | +6.9pp (STRETCH ✓) |
-> | Relevance (judge) | 59.3% | **82.1%** | +22.8pp |
-> | Faithfulness (judge) | 50.6% | **72.6%** | +22.0pp |
-> | Format (judge) | 89.8% | 88.4% | −1.4pp (Phase 0 carry-forward) |
+> | Recall@1 chunk | 55.0% | **57.5%** | **+2.5pp** |
+> | Recall@5 chunk | 72.6% | **78.0%** | **+5.4pp** |
+> | Recall@5 doc | 93.1% | **95.2%** | +2.1pp |
+> | Relevance (judge) | 74.1% | **74.6%** | +0.5pp |
+> | **Format (judge)** | 89.2% | **92.9%** | **+3.7pp** |
+> | Faithfulness (judge) | 65.9% | **66.9%** | +1.0pp |
 >
-> **Production retrieval stack (v2.12.0):**
+> Numbers from the v2.13 P1 apples-to-apples fixture (same chunks,
+> queries, judge, and retrieval stack — only the embedder differs).
+> Not directly comparable to v2.12.0's 67.8% R@1 canonical number
+> (that was on the v2.11 baseline fixture); the v2.13 P1 fixture is
+> a fresh post-v2.13-P2 sample, harder for both providers, but omlx
+> wins on every axis vs the same-fixture dashscope read.
+>
+> **Production retrieval stack (v2.13.0):**
 >
 > ```
 > query
->   → embed (Dashscope text-embedding-v4)
->   → dense Qdrant top-25 (mmrag_v2_8__qwen3_dashscope)
->   + sparse Qdrant top-25 (mmrag_v2_8__bm25_sparse, BM25)
->   → RRF fusion (k=60, equal weights)
+>   ├─ dense  : omlx Qwen3-Embedding-8B-mxfp8 → mmrag_v2_8__qwen3_local (4096-dim)
+>   └─ sparse : BM25 → mmrag_v2_8__bm25_sparse
+>   → RRF fusion (k=60, equal weights), top-25 per leg
 >   → rerank (local gte-reranker-modernbert-base-mlx via omlx-server)
 >   → top-5 return
 >
-> End-to-end p99 latency: ~2.05 s (within 3.0 s budget)
-> Per-query cost: ~$0.001 (Dashscope embed only — reranker is local)
+> End-to-end p99 latency: ~1.6 s (cloud→LAN embed swap saves ~400 ms)
+> Per-query cost: $0 (no cloud calls on retrieval path)
+> External dependencies: omlx-server LAN only (privacy + offline-capable)
 > ```
->
-> Five of six embedder-attributable axes pass their floors; two hit
-> **STRETCH** targets. Format remains below ≥96% pin (chunk-level
-> OCR damage in scanned/form docs; carry-forward to v2.13 via
-> Earthship re-OCR + CarOK form-shape decision).
 >
 > **Phase contributions:**
 >
-> - Phase 0: `content/refined_content` preference fix in ingest →
->   IRJET Format +15.6pp.
-> - Phase 1: cross-encoder reranker (local ModernBERT wins 4/4 vs
->   cloud `gte-rerank`) → R@1 chunk +26.3pp.
-> - Phase 2: hybrid retrieval (BM25 + dense + RRF) → R@5 chunk +8.9pp.
-> - Phase 3: HyDE measured but ships opt-in (all deltas within ±1pp
->   on top of Phase 2).
-> - Phase 4: NOT triggered — floors met by Phase 1+2.
+> - **Phase 1**: local embedder swap. Qwen3-Embedding-8B-mxfp8 wins
+>   6/6 axes vs cloud text-embedding-v4 on same fixture; production
+>   default flipped. Dashscope retained as 30-day rollback baseline
+>   through 2026-06-19.
+> - **Phase 2**: OCR auto-routing. `force_full_page_ocr=True` is now
+>   honored end-to-end (was previously bypassed by layout-aware OCR
+>   path). Earthship +6.2pp Format on partial soak; CarOK documented
+>   as judge-calibration limitation for v2.14.
 >
-> Test suite: **1032 passed**, 15 skipped, 0 failed (+46 over the
-> v2.11.0 baseline). v2.10 strict-gate corpus state unchanged at
-> **34 PASS / 0 WARN / 0 FAIL** (v2.11 + v2.12 changed only the
-> retrieval side; extraction/chunking/validation untouched).
+> Test suite: **1033 passed**, 16 skipped, 0 failed. v2.10 strict-gate
+> corpus state unchanged at **34 PASS / 0 WARN / 0 FAIL** (v2.11,
+> v2.12, v2.13 all changed only the retrieval side and OCR routing;
+> extraction/chunking/validation contracts untouched).
 >
 > AFTER snapshot:
-> [`docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md`](docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md).
-> Plan: [`docs/PLAN_V2.12.md`](docs/PLAN_V2.12.md) (Draft v0.8).
-> Per-phase soak reports retained in `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_p{1_cloud,1_omlx,2_hybrid,3_hyde}.md`.
+> [`docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md`](docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md).
+> Phase 1 SWAP evidence:
+> [`docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md`](docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md).
+> Plan: [`docs/PLAN_V2.13.md`](docs/PLAN_V2.13.md) (CLOSED 2026-05-22).
 >
-> **Cumulative v2.10 → v2.12 trajectory on Recall@1 chunk:**
+> **Cumulative v2.10 → v2.13 trajectory on Recall@1 chunk** (note: v2.13
+> bar is on the harder v2.13 P1 fixture; v2.10-v2.12 are on the v2.11
+> baseline fixture):
 >
 > ```
-> v2.10  ====                                          2.1%   (llava embedder)
-> v2.11  ==============                               35.5%   (dashscope embedder)
-> v2.12  ==============================               67.8%   (hybrid + rerank)
+> v2.10  ====                                          2.1%   (llava embedder, dense only)
+> v2.11  ==============                               35.5%   (dashscope, dense only)
+> v2.12  ==============================               67.8%   (hybrid + rerank, dashscope)
+> v2.13  ===========================                  57.5%*  (hybrid + rerank, omlx local — *new fixture)
 >         0%       20%       40%       60%       80%
 > ```
 >
-> **Recommendation:** use v2.12.0 as the production retrieval stack.
-> The system is now in "good" territory across every embedder-
-> attributable axis. Format remains the only laggard; v2.13 carry-
-> forward addresses it via chunk-level OCR work on the three named
-> docs (Earthship, CarOK, IRJET still has residual issues).
->
-> No QA threshold weakening was silent. The Format gate downgrade
-> from v2.11.0 carries forward into v2.12.0 explicitly, on the
-> record, and time-bounded by v2.13's named recovery work.
+> **Recommendation:** use v2.13.0 as the production retrieval stack.
+> The system now runs the full retrieval path with no cloud
+> dependency on the embedding side. CarOK Format penalty and a few
+> domain regressions (German content, code-heavy Python_Cookbook)
+> are documented v2.14 carry-forwards.
 
 ---
 

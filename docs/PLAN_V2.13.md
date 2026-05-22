@@ -1,4 +1,25 @@
-# Plan: v2.13 — Format Recovery + Local Embedder Candidate
+# Plan: v2.13 — Format Recovery + Local Embedder Swap
+
+**Status:** **CLOSED 2026-05-22.** v2.13.0 SHIPPED — annotated tag
+`v2.13.0` STAGED locally for user push to both `github` and
+`origin` (Gitea at 10.0.10.241). Phase 1 (local omlx embedder swap)
+and Phase 2 (OCR auto-routing) both shipped.
+
+**Outcome (apples-to-apples, same fixture, only embedder differs):**
+omlx local `Qwen3-Embedding-8B-mxfp8` wins 6/6 axes vs cloud
+`text-embedding-v4` (R@1 +2.5pp, R@5 chunk +5.4pp, R@5 doc +2.1pp,
+Relevance +0.5pp, Format +3.7pp, Faithfulness +1.0pp). 3 of 6 with
+meaningful margins; 3 within noise.
+
+**Canonical AFTER snapshot:**
+[`docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md`](QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md).
+**Phase 1 SWAP evidence:**
+[`docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md`](QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md).
+**Decision record:** `docs/DECISIONS.md` "v2.13 Phase 1 Embedder Swap Executed — omlx Wins 6/6 Axes" (2026-05-22).
+
+---
+
+**(Original draft below; preserved as cycle archaeology.)**
 
 **Status:** **Draft v0.1** (2026-05-22). Authored mid-cycle as the
 plan-of-record after Phases 0 + 2 of the actual v2.13 work landed.

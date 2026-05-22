@@ -15,25 +15,25 @@ The embed and Qdrant primitives are imported from
 duplication; the retrieval module owns ONLY the composition + rerank
 provider abstraction.
 
-Production usage (dense-only, v2.12 Phase 1 default):
+Production usage (dense-only, v2.13.0 default — omlx local embedder):
 
     from mmrag_v2.retrieval import retrieve_reranked
 
     chunks = retrieve_reranked(
         query="how do LLM agents call tools",
-        collection="mmrag_v2_8__qwen3_dashscope",
+        collection="mmrag_v2_8__qwen3_local",
         top_k_retrieve=25,
         top_n_return=5,
         reranker_backend="omlx",
     )
 
-Hybrid usage (v2.12 Phase 2):
+Hybrid usage (v2.12 Phase 2 retrieval shape, v2.13.0 embedder):
 
     from mmrag_v2.retrieval import retrieve_hybrid_reranked
 
     chunks = retrieve_hybrid_reranked(
         query="how do LLM agents call tools",
-        dense_collection="mmrag_v2_8__qwen3_dashscope",
+        dense_collection="mmrag_v2_8__qwen3_local",
         sparse_collection="mmrag_v2_8__bm25_sparse",
         bm25_index_path="tests/fixtures/bm25_index_v2_12.json",
         top_k_retrieve=25,   # per leg, before RRF
@@ -87,11 +87,11 @@ def _embed_query(
 def retrieve_reranked(
     query: str,
     *,
-    collection: str = "mmrag_v2_8__qwen3_dashscope",
+    collection: str = "mmrag_v2_8__qwen3_local",
     top_k_retrieve: int = 25,
     top_n_return: int = 5,
-    embed_provider: str = "dashscope",
-    embed_model: str = "text-embedding-v4",
+    embed_provider: str = "omlx",
+    embed_model: str = "Qwen3-Embedding-8B-mxfp8",
     embed_api_key: str | None = None,
     qdrant_url: str = "http://localhost:6333",
     reranker: Reranker | None = None,
@@ -109,19 +109,24 @@ def retrieve_reranked(
     Arguments:
 
       query                Natural-language query string.
-      collection           Qdrant collection name. Defaults to v2.11.0
-                           production collection.
+      collection           Qdrant collection name. Defaults to v2.13.0
+                           production collection (mmrag_v2_8__qwen3_local,
+                           4096-dim, populated by local Qwen3-Embedding-8B).
       top_k_retrieve       Number of candidates the reranker sees.
                            v2.12 default = 25 per the empirical
                            latency benchmark; may rise to 50 if the
                            Phase 1 soak doesn't clear Recall@5 ≥ 85%.
       top_n_return         Final list size returned to caller. Default 5.
-      embed_provider       "dashscope" (v2.11.0+) or "ollama" (legacy
-                           rollback through 2026-06-19).
-      embed_model          Embed model name. Defaults match the
-                           production v2.11.0 collection.
-      embed_api_key        Override for Dashscope key. Default reads
-                           DASHSCOPE_API_KEY env var.
+      embed_provider       "omlx" (v2.13.0 default — local
+                           Qwen3-Embedding-8B-mxfp8 via omlx-server),
+                           "dashscope" (v2.11.0-v2.12.0 prod, retained
+                           as 30-day rollback through 2026-06-19), or
+                           "ollama" (legacy v2.10 path).
+      embed_model          Embed model name. Defaults to v2.13.0 prod
+                           (Qwen3-Embedding-8B-mxfp8); must match how
+                           the target collection was built.
+      embed_api_key        Auto-resolved per provider: DASHSCOPE_API_KEY
+                           for dashscope, MLX_API_KEY for omlx.
       qdrant_url           Qdrant base URL.
       reranker             Pre-constructed Reranker instance. Useful
                            for tests and for keeping a reranker hot
@@ -302,7 +307,7 @@ def _fetch_dense_points_by_chunk_id(
 def retrieve_hybrid_reranked(
     query: str,
     *,
-    dense_collection: str = "mmrag_v2_8__qwen3_dashscope",
+    dense_collection: str = "mmrag_v2_8__qwen3_local",
     sparse_collection: str = "mmrag_v2_8__bm25_sparse",
     bm25_index_path: str = "tests/fixtures/bm25_index_v2_12.json",
     top_k_retrieve: int = 25,
@@ -310,8 +315,8 @@ def retrieve_hybrid_reranked(
     top_n_return: int = 5,
     rrf_k: int = 60,
     rrf_weights: tuple[float, float] = (1.0, 1.0),  # (dense, sparse)
-    embed_provider: str = "dashscope",
-    embed_model: str = "text-embedding-v4",
+    embed_provider: str = "omlx",
+    embed_model: str = "Qwen3-Embedding-8B-mxfp8",
     embed_api_key: str | None = None,
     qdrant_url: str = "http://localhost:6333",
     reranker=None,
@@ -323,7 +328,7 @@ def retrieve_hybrid_reranked(
     """Dense + BM25 sparse + RRF + reranker.
 
     Pipeline:
-      1. embed query (text-embedding-v4) → dense vector
+      1. embed query (Qwen3-Embedding-8B-mxfp8 via omlx-server) → dense vector
       2. dense top-K search on `dense_collection`
       3. BM25 query encoding from `bm25_index_path`
       4. sparse top-K search on `sparse_collection`

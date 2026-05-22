@@ -1,4 +1,4 @@
-# 🚨 EXECUTION LAW: MM-Converter V2 (v2.13 in-progress; v2.12.0 SHIPPED 2026-05-21)
+# 🚨 EXECUTION LAW: MM-Converter V2 (v2.13.0 SHIPPED 2026-05-22; v2.14 not yet scoped)
 
 You are the Senior Architect. Apple Silicon (M-series) environment.
 Zero room for error. Hallucinations or ignoring documentation hierarchy
@@ -13,8 +13,9 @@ equals failure.
 3. `docs/DECISIONS.md` (architectural decisions — APPEND-ONLY, never silently revert)
 4. `docs/ARCHITECTURE.md` (current pipeline shape; engine version block at top)
 5. `docs/PROJECT_STATUS.md` (current cycle state — read this first to orient)
-6. The active plan: `docs/PLAN_V2.13.md` (in-progress) → `docs/PLAN_V2.12.md` (closed v2.12.0)
-   → `docs/PLAN_V2.11.md` (closed v2.11.0) → `docs/PLAN_V2.10.md` (closed v2.10.0)
+6. Plan history (latest first): `docs/PLAN_V2.13.md` (CLOSED v2.13.0)
+   → `docs/PLAN_V2.12.md` (CLOSED v2.12.0) → `docs/PLAN_V2.11.md` (CLOSED v2.11.0)
+   → `docs/PLAN_V2.10.md` (CLOSED v2.10.0). v2.14 plan not yet drafted.
 7. `docs/QUALITY_GATES.md` (pass/fail thresholds)
 8. `docs/TESTING.md` (test commands)
 9. `.clinerules` (this file — emergency operational rules)
@@ -24,8 +25,8 @@ equals failure.
 Ignore any references to 2.0.0 / 2.3.0 / 2.4.1 in older examples — those
 predate the schema freeze.
 
-**Engine version:** `2.12.0` (next tag pending: `v2.13.0`).
-Source of truth: `src/mmrag_v2/version.py` `__engine_version__`.
+**Engine version:** `2.13.0` (annotated tag `v2.13.0` staged 2026-05-22
+for user push). Source of truth: `src/mmrag_v2/version.py` `__engine_version__`.
 
 **Tag history on GitHub + Gitea:**
 
@@ -36,7 +37,7 @@ v2.10.0-rc1  (2026-05-16, 82c3639)
 v2.10.0      (2026-05-16, db6527c)  — chunker baseline + soak evidence
 v2.11.0      (2026-05-20, c2a461c)  — embedder swap (Dashscope text-embedding-v4)
 v2.12.0      (2026-05-21, 5a2ce18)  — retrieval stack (hybrid + ModernBERT rerank)
-v2.13.0      (PENDING — autonomous run in progress 2026-05-22)
+v2.13.0      (PENDING — staged 2026-05-22) — local embedder swap (omlx Qwen3-Embedding-8B) + OCR auto-routing
 ```
 
 **Strict isolation:**
@@ -70,48 +71,51 @@ to ship a clean close.
 - **BBoxes**: integer `[0,1000]` normalized coordinates only.
 - **Acceptance**: `GATE_PASS` + `UNIVERSAL_PASS` across the smoke matrix
   (`bash scripts/smoke_multiprofile.sh`).
-- **Format gate** (soak judge axis): downgraded to ≥85% for v2.11.0; recovery
-  target ≥95% in v2.13.x via Earthship re-OCR + CarOK form-class decision.
-  See `docs/DECISIONS.md` "v2.11.0 Embedder Swap Executed — Format Gate Downgrade".
+- **Format gate** (soak judge axis): v2.13.0 hit 92.9% aggregate
+  (omlx vs 89.2% dashscope on same fixture; +3.7pp from embedder swap).
+  CarOK Format penalty is judge-calibration limitation (form-class
+  content shape) — carry-forward to v2.14 for a `format_form` axis.
+  See `docs/DECISIONS.md` "v2.13 Phase 2 CarOK Form-Class Format Penalty".
 
-## 🔄 PRODUCTION RETRIEVAL STACK (v2.12.0+)
+## 🔄 PRODUCTION RETRIEVAL STACK (v2.13.0+)
 
 ```
 query
-  → embed (Dashscope text-embedding-v4, 1024-dim cloud)        ← v2.11.0 swap
-  → dense Qdrant top-25 (mmrag_v2_8__qwen3_dashscope)          ← v2.11.0
-  + sparse Qdrant top-25 (mmrag_v2_8__bm25_sparse, BM25)       ← v2.12.0 add
-  → RRF fusion (k=60, equal weights)                           ← v2.12.0 add
-  → rerank (local gte-reranker-modernbert-base-mlx)            ← v2.12.0 swap
+  ├─ dense  : omlx Qwen3-Embedding-8B-mxfp8 (4096-dim LAN)     ← v2.13.0 swap
+  │           → mmrag_v2_8__qwen3_local (31,371 pts)
+  └─ sparse : BM25 → mmrag_v2_8__bm25_sparse (26,381 pts)       ← v2.12.0
+  → RRF fusion (k=60, equal weights), top-25 per leg            ← v2.12.0
+  → rerank (local gte-reranker-modernbert-base-mlx)             ← v2.12.0
     via omlx-server at http://10.0.10.246:8000
   → top-5 return
 ```
 
-End-to-end p99: ~2.05 s. Per-query cost: ~$0.001 (Dashscope embed).
+End-to-end p99: ~1.6 s. Per-query cost: $0 (no cloud calls on retrieval path).
+External dependencies: omlx-server LAN only (privacy + offline-capable).
 Production import: `from mmrag_v2.retrieval import retrieve_hybrid_reranked`.
 
 Environment variables required for production retrieval:
-- `DASHSCOPE_API_KEY` (embed + judge + cloud reranker fallback)
-- `MLX_API_KEY` (omlx local reranker; defaults to `omlx-...`)
+- `MLX_API_KEY` (omlx embedder + omlx reranker — both on the same server)
+- `DASHSCOPE_API_KEY` (only for soak judge + query generation, OR for
+  the 30-day rollback path through 2026-06-19)
 
-## 🚧 IN-FLIGHT: v2.13
+## 📦 v2.13 SHIP-STATE SUMMARY
 
-Active draft plan: `docs/PLAN_V2.13.md`.
+v2.13.0 SHIPPED 2026-05-22. Two parallel workstreams closed:
 
-Two parallel workstreams:
+1. **Phase 1: Local embedder swap.** `Qwen3-Embedding-8B-mxfp8` via
+   omlx replaces cloud `text-embedding-v4`. Apples-to-apples soak
+   (same fixture, only embedder differs) won 6/6 axes — R@1 +2.5pp,
+   R@5 chunk +5.4pp, R@5 doc +2.1pp, Relevance +0.5pp, Format
+   +3.7pp, Faithfulness +1.0pp. Dashscope collection retained as
+   30-day rollback through 2026-06-19.
 
-1. **Format recovery (Phase 2)** — completed 2026-05-22:
-   - Earthship multi-column OCR fix (auto-route to legacy + force_full_page_ocr
-     for scanned profiles). +398 text chunks, +6.2pp Format on partial soak.
-   - Firearms re-extracted with same fix. Strict-gate clean.
-   - CarOK documented as judge-calibration limitation; carry to v2.14.
+2. **Phase 2: OCR auto-routing.** `force_full_page_ocr=True` now
+   reaches Docling end-to-end (was bypassed by `layout-aware` OCR
+   mode). Earthship +6.2pp Format. CarOK = judge-calibration limit.
 
-2. **Local embedder candidate (Phase 1)** — in flight:
-   - Qwen3-Embedding-8B-mxfp8 via omlx-server. Latency benchmarked 7×
-     faster than cloud (~180ms vs ~1.35s p99 from LAN).
-   - Parallel collection `mmrag_v2_8__qwen3_local` rebuild ~80% complete.
-   - Full-corpus quality soak vs v2.12 baseline pending; soak decides
-     swap/no-swap.
+Evidence: `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md` (AFTER)
++ `..._v2.13_p1_omlx_vs_dashscope.md` (SWAP decision).
 
 ## 🛠️ TESTING & VALIDATION
 
@@ -119,7 +123,10 @@ Two parallel workstreams:
 # Full test suite (no live services required)
 conda run -n mmrag-v2 pytest tests/ --ignore=tests/manual -q
 
-# Live-stack retrieval regression (v2.12 production)
+# Live-stack retrieval regression (v2.13 production)
+conda run -n mmrag-v2 python scripts/retrieval_regression_v2_13.py
+
+# v2.12 regression (pinned to dashscope; archaeology contract)
 conda run -n mmrag-v2 python scripts/retrieval_regression_v2_12.py
 
 # Strict gate on a single doc
@@ -130,7 +137,8 @@ conda run -n mmrag-v2 python scripts/qa_full_conversion.py \
 bash scripts/smoke_multiprofile.sh
 ```
 
-Test count at v2.12.0: **1033 passed, 16 skipped, 0 failed**.
+Test count at v2.13.0: **1033 passed, 16 skipped, 0 failed**.
+v2.13 retrieval fingerprint: **20/20 PASS** against live stack.
 
 ## 🔍 AGENT BEHAVIOR
 

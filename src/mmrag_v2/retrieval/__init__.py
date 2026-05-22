@@ -16,12 +16,13 @@ Public API:
 
     chunks = retrieve_reranked(
         query="what is MCP",
-        collection="mmrag_v2_8__qwen3_dashscope",
+        collection="mmrag_v2_8__qwen3_local",  # v2.13.0 production default
         top_k_retrieve=25,
         top_n_return=5,
     )
 
-See `docs/PLAN_V2.12.md` Phase 1 for the design rationale.
+See `docs/PLAN_V2.12.md` Phase 1 for the design rationale and
+`docs/PLAN_V2.13.md` Phase 1 for the v2.13.0 embedder swap.
 """
 from mmrag_v2.retrieval.pipeline import (  # noqa: F401
     retrieve_reranked,

@@ -216,12 +216,17 @@ def test_retrieve_reranked_composes_embed_qdrant_rerank(monkeypatch):
         ]
 
         # Reverse the order via the fixed-score reranker (which scores
-        # c00 highest, c04 lowest).
+        # c00 highest, c04 lowest). Pinned to dashscope provider +
+        # text-embedding-v4 model to match the mocked embedder (the
+        # v2.13.0 library defaults are omlx + Qwen3-Embedding-8B-mxfp8;
+        # tests that mock dashscope must opt in explicitly).
         result = retrieve_reranked(
             query="any query",
             collection="test-coll",
             top_k_retrieve=5,
             top_n_return=3,
+            embed_provider="dashscope",
+            embed_model="text-embedding-v4",
             reranker=_FixedScoreReranker(),
         )
 
@@ -274,6 +279,8 @@ def test_retrieve_reranked_falls_back_on_rerank_error(monkeypatch):
             collection="t",
             top_k_retrieve=3,
             top_n_return=2,
+            embed_provider="dashscope",
+            embed_model="text-embedding-v4",
             reranker=_BrokenReranker(),
             fall_back_on_rerank_error=True,
         )
@@ -301,6 +308,8 @@ def test_retrieve_reranked_propagates_error_when_fallback_disabled(monkeypatch):
             retrieve_reranked(
                 query="q", collection="t",
                 top_k_retrieve=1, top_n_return=1,
+                embed_provider="dashscope",
+                embed_model="text-embedding-v4",
                 reranker=_BrokenReranker(),
                 fall_back_on_rerank_error=False,
             )
@@ -315,6 +324,8 @@ def test_retrieve_reranked_empty_qdrant_returns_empty(monkeypatch):
         result = retrieve_reranked(
             query="q", collection="t",
             top_k_retrieve=25, top_n_return=5,
+            embed_provider="dashscope",
+            embed_model="text-embedding-v4",
             reranker=_NullReranker(),
         )
     assert result == []
@@ -331,6 +342,8 @@ def test_retrieve_reranked_truncates_to_top_n(monkeypatch):
         result = retrieve_reranked(
             query="q", collection="t",
             top_k_retrieve=20, top_n_return=5,
+            embed_provider="dashscope",
+            embed_model="text-embedding-v4",
             reranker=_NullReranker(),
         )
     assert len(result) == 5
@@ -354,6 +367,8 @@ def test_retrieve_reranked_uses_factory_when_no_reranker_passed(monkeypatch):
         result = retrieve_reranked(
             query="q", collection="t",
             top_k_retrieve=3, top_n_return=2,
+            embed_provider="dashscope",
+            embed_model="text-embedding-v4",
             reranker=None,
             reranker_backend=None,  # factory should read RERANKER_BACKEND env
         )

@@ -77,6 +77,12 @@ def _run_query(query_text: str) -> list[dict]:
         bm25_index_path=BM25_INDEX,
         top_k_retrieve=TOP_K_RETRIEVE,
         top_n_return=TOP_N_RETURN,
+        # Pin to v2.12.0 contract: cloud Dashscope text-embedding-v4
+        # against the 1024-dim dashscope collection. (v2.13.0 flipped
+        # the library defaults to omlx + 4096-dim collection; this
+        # script preserves the v2.12 release shape as archaeology.)
+        embed_provider="dashscope",
+        embed_model="text-embedding-v4",
         reranker_backend="omlx",
         use_hyde=False,
     )
