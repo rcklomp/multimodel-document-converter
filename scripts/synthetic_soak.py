@@ -42,6 +42,7 @@ import json
 import os
 import random
 import re
+import shutil
 import sys
 import time
 import urllib.request
@@ -60,6 +61,17 @@ from ingest_to_qdrant import embed_text_dashscope, embed_text_omlx  # noqa: E402
 
 OUTPUT_DIR = REPO_ROOT / "output" / "soak" / "v2.10"
 DEFAULT_WORK_PATH = OUTPUT_DIR / "work.jsonl"
+
+# Disk-headroom precheck (v2.14 Phase 5 — incident-improvement from
+# the v2.13 P1 disk-full crash that killed Qdrant mid-judge). A soak's
+# retrieve+judge passes only add a few MB to the work file, but Qdrant
+# (running on the same disk) writes WAL + segments during retrieval
+# and crashes hard if the disk fills. 10 GB free is the floor below
+# which we refuse to start a stage. Override via the
+# `SOAK_DISK_HEADROOM_FLOOR_GB` env var (e.g. `=2.0` for a tight CI run).
+DISK_HEADROOM_FLOOR_GB = float(
+    os.environ.get("SOAK_DISK_HEADROOM_FLOOR_GB", "10.0")
+)
 DEFAULT_REPORT_PATH = REPO_ROOT / "docs" / (
     f"QUALITY_SNAPSHOT_{datetime.now().strftime('%Y-%m-%d')}_v2.10_soak.md"
 )
@@ -176,6 +188,35 @@ def stage_sample(seed: int, n_chunks: int, work_path: Path) -> None:
         for row in sampled:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
     print(f"  sample: wrote {len(sampled)} rows to {work_path}")
+
+
+def _check_disk_headroom(work_path: Path, floor_gb: float = DISK_HEADROOM_FLOOR_GB) -> None:
+    """v2.14 Phase 5: refuse to start a write-heavy stage when free
+    disk is below `floor_gb`. Prevents the v2.13 P1 incident where
+    the disk filled mid-judge and crashed Qdrant's container overlayfs.
+
+    Checks the partition holding `work_path` (which is the same partition
+    Qdrant writes its segments to in the standard dev setup).
+    """
+    try:
+        target = work_path.parent if work_path.parent.exists() else REPO_ROOT
+        usage = shutil.disk_usage(target)
+    except OSError as e:
+        print(f"  WARNING: disk-headroom precheck couldn't stat {target}: {e}",
+              file=sys.stderr)
+        return
+    free_gb = usage.free / (1024 ** 3)
+    if free_gb < floor_gb:
+        print(
+            f"\nERROR: Insufficient disk headroom — {free_gb:.1f} GB free, "
+            f"floor is {floor_gb:.1f} GB. Aborting before this stage can\n"
+            f"crash Qdrant (incident reference: v2.13 P1 soak, 2026-05-22).\n"
+            f"Free space and retry, or override via DISK_HEADROOM_FLOOR_GB=<smaller>.\n",
+            file=sys.stderr,
+        )
+        raise SystemExit(3)
+    if free_gb < floor_gb * 2:
+        print(f"  NOTE: disk headroom tight ({free_gb:.1f} GB free; floor {floor_gb:.1f} GB)")
 
 
 def _read_work(work_path: Path) -> list[dict]:
@@ -361,6 +402,7 @@ def stage_retrieve(work_path: Path, qdrant_url: str, ollama_url: str,
     `rerank_index` on each chunk so the Phase 1 soak can compare
     reranker output across backends.
     """
+    _check_disk_headroom(work_path)
     rows = _read_work(work_path)
     if not rows:
         print("  retrieve: no work file", file=sys.stderr)
@@ -566,6 +608,7 @@ Return ONLY: {{"relevance": <0-2>, "format": <0-2>, "faithfulness": <0-2>, "rati
 
 
 def stage_judge(work_path: Path, api_key: str) -> None:
+    _check_disk_headroom(work_path)
     rows = _read_work(work_path)
     if not rows:
         print("  judge: no work file", file=sys.stderr)
