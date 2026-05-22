@@ -24,17 +24,22 @@ This folder uses a three-layer documentation structure so a new coding session c
    - v2.10 strict-gate baseline (corpus 34/34 PASS; unchanged in
      v2.11 + v2.12 — both cycles changed only the retrieval side)
 
-3. `docs/PLAN_V2.12.md`
-   - active v2.12 plan (Draft v0.8); Phase 0-3 SHIPPED locally,
-     Phase 4 NOT triggered, Phase N staged for user push/tag.
+3. `docs/PLAN_V2.13.md`
+   - active v2.13 plan (Draft v0.1); Phase 2 (Format recovery)
+     shipped 2026-05-22; Phase 1 (local Qwen3-Embedding-8B swap)
+     in flight.
 
-3b. `docs/PLAN_V2.11.md`
+3b. `docs/PLAN_V2.12.md`
+   - v2.12 execution history — CLOSED 2026-05-21; tag `v2.12.0` on
+     commit `5a2ce18` public on GitHub + Gitea.
+
+3c. `docs/PLAN_V2.11.md`
    - v2.11 execution history — CLOSED 2026-05-20; tag `v2.11.0` on
-     commit `c2a461c` public on GitHub.
+     commit `c2a461c`.
 
-3c. `docs/PLAN_V2.10.md`
+3d. `docs/PLAN_V2.10.md`
    - v2.10 execution history — CLOSED 2026-05-16; tag `v2.10.0` on
-     commit `db6527c` public on GitHub.
+     commit `db6527c`.
 
 4. `AGENTS.md`
    - hard project invariants

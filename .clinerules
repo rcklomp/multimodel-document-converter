@@ -1,39 +1,146 @@
-# 🚨 EXECUTION LAW: V2.4 MM RAG CORPUS CONVERTER
+# 🚨 EXECUTION LAW: MM-Converter V2 (v2.13 in-progress; v2.12.0 SHIPPED 2026-05-21)
 
-YOU are the Senior Architect. [cite_start]This is an Apple Silicon (M-series) environment. [cite: 1]
-There is ZERO ROOM for error. [cite_start]Hallucinations or ignoring documentation hierarchy equals failure. [cite: 2]
+You are the Senior Architect. Apple Silicon (M-series) environment.
+Zero room for error. Hallucinations or ignoring documentation hierarchy
+equals failure.
 
 ## 🏗️ TRUTH & DOCUMENTATION HIERARCHY (ANTI-HALLUCINATION)
-1. **CANONICAL SOURCE**: If instructions conflict, follow this order: 
-   `SRS_Multimodal_Ingestion_V2.4.md` > `.clinerules` > `ARCHITECTURE.md` > `README.md`.
-2. **SCHEMA TRUTH**: The current schema version is **2.4.1-stable**. Ignore any references to 2.0.0 or 2.3.0 in examples.
-3. **STRICT ISOLATION**: 
-   - NEVER read or reference files in `docs/archive/`. 
-   - NEVER reference absolute paths like `/Users/ronald/...`. Use relative paths only.
-4. **VERIFICATION**: Before implementing a fix, check `docs/DECISIONS.md` to ensure you aren't reverting a conscious architectural choice.
 
-## 💻 HARDWARE & ENVIRONMENT COMMANDMENTS
-1. [cite_start]**ARCHITECTURE**: Prefer native ARM64. [cite: 3]
-2. [cite_start]**GPU/MPS**: Use MPS when available; verify with `torch.backends.mps.is_available()`. [cite: 4]
-3. **CONDA**: Use the local environment in `./env`. [cite_start]NEVER create `.venv`. [cite: 5]
-4. [cite_start]**ACTIVATION**: Ensure `conda activate ./env` is effective before execution. [cite: 5]
-5. [cite_start]**INSTALLATION**: Use `environment.yml` and `pip install -e .`. [cite: 6]
-6. [cite_start]**PYTHON**: Version 3.10 ONLY. [cite: 6]
+**Canonical-source order** (later overrides earlier):
 
-## 🎯 PROJECT REQUIREMENTS
-1. [cite_start]**SRS COMPLIANCE**: Meet all requirements in `SRS_Multimodal_Ingestion_V2.4.md`. 
-2. [cite_start]**PINNING**: Use the exact Docling pin from `pyproject.toml` (`project.dependencies`) via `pip install -e .`; do not deviate. [cite: 8]
-3. [cite_start]**CLI**: `mmrag-v2` is the entry point (linked to `mmrag_v2.cli:main`). [cite: 9]
-4. [cite_start]**SCHEMA**: Outputs MUST validate against the `ingestion.jsonl` Pydantic model. [cite: 9]
-5. **NO PLACEHOLDERS**: Write full implementations. [cite_start]No 'TODO' or '...'. [cite: 10]
+1. `AGENTS.md` (Level-0 invariants, governance)
+2. `CLAUDE.md` (Claude Code-specific guidance + Read First)
+3. `docs/DECISIONS.md` (architectural decisions — APPEND-ONLY, never silently revert)
+4. `docs/ARCHITECTURE.md` (current pipeline shape; engine version block at top)
+5. `docs/PROJECT_STATUS.md` (current cycle state — read this first to orient)
+6. The active plan: `docs/PLAN_V2.13.md` (in-progress) → `docs/PLAN_V2.12.md` (closed v2.12.0)
+   → `docs/PLAN_V2.11.md` (closed v2.11.0) → `docs/PLAN_V2.10.md` (closed v2.10.0)
+7. `docs/QUALITY_GATES.md` (pass/fail thresholds)
+8. `docs/TESTING.md` (test commands)
+9. `.clinerules` (this file — emergency operational rules)
+10. `README.md` (public-facing summary)
 
-## 🔍 PRE-FLIGHT & PROCESSING RULES
-- [cite_start]**LOGGING**: Log `Using Docling v{docling.__version__}` at start and verify it matches the exact pin in `pyproject.toml`. [cite: 11]
-- [cite_start]**INTEGRITY**: Verify SHA256 of any input file before processing (integrity check only; `doc_id` remains MD5-based). [cite: 11]
-- [cite_start]**ASSETS**: Enforce 10px padding on all crops (REQ-MM-01). [cite: 12]
-- **DATA**: Test documents are in `data/raw/`. [cite_start]Do NOT modify them. [cite: 13]
+**Schema version:** `2.7.0` (chunk-shape contract; unchanged since v2.7).
+Ignore any references to 2.0.0 / 2.3.0 / 2.4.1 in older examples — those
+predate the schema freeze.
 
-## 🛠️ TROUBLESHOOTING
-- [cite_start]Prioritize `environment.yml` and Apple-specific channels for conflicts. [cite: 14]
-- [cite_start]If `import torch` takes > 2 seconds, investigate environment corruption. [cite: 14]
-- If a file referenced in ARCHITECTURE.md is missing, STOP and ask for clarification.
+**Engine version:** `2.12.0` (next tag pending: `v2.13.0`).
+Source of truth: `src/mmrag_v2/version.py` `__engine_version__`.
+
+**Tag history on GitHub + Gitea:**
+
+```
+v2.8.0       (2026-05-04, 645ab2b)
+v2.9.0-rc1   (2026-05-12, 3e06d1b)
+v2.10.0-rc1  (2026-05-16, 82c3639)
+v2.10.0      (2026-05-16, db6527c)  — chunker baseline + soak evidence
+v2.11.0      (2026-05-20, c2a461c)  — embedder swap (Dashscope text-embedding-v4)
+v2.12.0      (2026-05-21, 5a2ce18)  — retrieval stack (hybrid + ModernBERT rerank)
+v2.13.0      (PENDING — autonomous run in progress 2026-05-22)
+```
+
+**Strict isolation:**
+
+- NEVER reference absolute paths like `/Users/ronald/...`; use repo-relative paths.
+- `docs/archive/` was emptied in the v2.11.0 cleanup. Old archived plans are
+  recoverable via `git log --all -- docs/archive/...` but not on the active tree.
+- Older `SRS_Multimodal_Ingestion_V2.X.md` files no longer exist on the active
+  tree. The Read First chain above is the canonical source.
+
+**Verification:** Before implementing a change, check `docs/DECISIONS.md` to
+ensure you aren't reverting a conscious architectural choice. Per the
+`feedback_contract_violation_mode` memory rule, never silently weaken a gate
+to ship a clean close.
+
+## 💻 HARDWARE & ENVIRONMENT
+
+- **Architecture**: native ARM64 (Apple Silicon).
+- **GPU/MPS**: use MPS when available; verify via `torch.backends.mps.is_available()`.
+- **Python**: 3.10 ONLY (pinned in `pyproject.toml`: `>=3.10,<3.11`).
+- **Conda env**: `mmrag-v2` (see `environment.yml`).
+- **Installation**: `pip install -e .` after `conda activate mmrag-v2`.
+- **Docling**: exact pin `2.86.0` (`pyproject.toml`).
+
+## 🎯 PROJECT INVARIANTS (v2.13)
+
+- **CLI entry**: `mmrag-v2` → `mmrag_v2.cli:main`.
+- **Schema**: outputs must validate against the `IngestionChunk` Pydantic model
+  in `src/mmrag_v2/schema/ingestion_schema.py`.
+- **Batch size**: PDF batch size ≤ 10 pages.
+- **BBoxes**: integer `[0,1000]` normalized coordinates only.
+- **Acceptance**: `GATE_PASS` + `UNIVERSAL_PASS` across the smoke matrix
+  (`bash scripts/smoke_multiprofile.sh`).
+- **Format gate** (soak judge axis): downgraded to ≥85% for v2.11.0; recovery
+  target ≥95% in v2.13.x via Earthship re-OCR + CarOK form-class decision.
+  See `docs/DECISIONS.md` "v2.11.0 Embedder Swap Executed — Format Gate Downgrade".
+
+## 🔄 PRODUCTION RETRIEVAL STACK (v2.12.0+)
+
+```
+query
+  → embed (Dashscope text-embedding-v4, 1024-dim cloud)        ← v2.11.0 swap
+  → dense Qdrant top-25 (mmrag_v2_8__qwen3_dashscope)          ← v2.11.0
+  + sparse Qdrant top-25 (mmrag_v2_8__bm25_sparse, BM25)       ← v2.12.0 add
+  → RRF fusion (k=60, equal weights)                           ← v2.12.0 add
+  → rerank (local gte-reranker-modernbert-base-mlx)            ← v2.12.0 swap
+    via omlx-server at http://10.0.10.246:8000
+  → top-5 return
+```
+
+End-to-end p99: ~2.05 s. Per-query cost: ~$0.001 (Dashscope embed).
+Production import: `from mmrag_v2.retrieval import retrieve_hybrid_reranked`.
+
+Environment variables required for production retrieval:
+- `DASHSCOPE_API_KEY` (embed + judge + cloud reranker fallback)
+- `MLX_API_KEY` (omlx local reranker; defaults to `omlx-...`)
+
+## 🚧 IN-FLIGHT: v2.13
+
+Active draft plan: `docs/PLAN_V2.13.md`.
+
+Two parallel workstreams:
+
+1. **Format recovery (Phase 2)** — completed 2026-05-22:
+   - Earthship multi-column OCR fix (auto-route to legacy + force_full_page_ocr
+     for scanned profiles). +398 text chunks, +6.2pp Format on partial soak.
+   - Firearms re-extracted with same fix. Strict-gate clean.
+   - CarOK documented as judge-calibration limitation; carry to v2.14.
+
+2. **Local embedder candidate (Phase 1)** — in flight:
+   - Qwen3-Embedding-8B-mxfp8 via omlx-server. Latency benchmarked 7×
+     faster than cloud (~180ms vs ~1.35s p99 from LAN).
+   - Parallel collection `mmrag_v2_8__qwen3_local` rebuild ~80% complete.
+   - Full-corpus quality soak vs v2.12 baseline pending; soak decides
+     swap/no-swap.
+
+## 🛠️ TESTING & VALIDATION
+
+```bash
+# Full test suite (no live services required)
+conda run -n mmrag-v2 pytest tests/ --ignore=tests/manual -q
+
+# Live-stack retrieval regression (v2.12 production)
+conda run -n mmrag-v2 python scripts/retrieval_regression_v2_12.py
+
+# Strict gate on a single doc
+conda run -n mmrag-v2 python scripts/qa_full_conversion.py \
+    output/<doc>/ingestion.jsonl --source-pdf data/<class>/<doc>.pdf
+
+# Multi-profile smoke
+bash scripts/smoke_multiprofile.sh
+```
+
+Test count at v2.12.0: **1033 passed, 16 skipped, 0 failed**.
+
+## 🔍 AGENT BEHAVIOR
+
+- **No placeholders / TODOs** in shipped code.
+- **Surgical changes** — touch only what the task requires.
+- **Verify before converting** — strict-gate + smoke before any batch ingest.
+- **Auto-memory** at `~/.claude/projects/.../memory/` — read MEMORY.md index
+  at session start; persist user preferences + project state into it.
+- **Always commit before push** but **never push tags** without explicit user
+  signoff (`feedback_contract_violation_mode` rule + user preference).
+- For an autonomous-run cycle close (e.g. v2.13.0): stage the tag command in
+  the close-out commit message but leave the actual `git tag -a … && git push`
+  to the user.

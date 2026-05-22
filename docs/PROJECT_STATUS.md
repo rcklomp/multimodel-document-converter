@@ -1,22 +1,41 @@
 # Project Status
 
-Last updated: 2026-05-21
+Last updated: 2026-05-22
 
 Purpose: fast orientation for a new coding session. Read this before deeper project docs.
 
 ## Current Objective
 
-**`v2.12.0` retrieval stack STAGED LOCALLY (2026-05-21)** — full
-production retrieval pipeline shipped: hybrid (BM25 sparse + dense
-+ RRF) plus local ModernBERT cross-encoder reranker. Cumulative
-quality lift over v2.11.0 across every embedder-attributable axis;
-two axes hit STRETCH targets. Commits `0d731b1` (Phase 0) → `988fcaf`
-(Phase 1 infra) → `65a5ba7` (Phase 1 close-out) → `d7a0bfd` (Phase
-2+3 infra) → `51ab67c` (Phase 2 close-out) → `181a5a1` (Phase 3
-close-out) live on local `main`. **Not yet pushed beyond `181a5a1`;
-no v2.12.0 tag is created yet** — the user pushes and tags after
-live-stack re-verification (`pytest tests/ --ignore=tests/manual -q`
-+ `python scripts/retrieval_regression_v2_12.py`).
+**v2.13 cycle IN PROGRESS (started 2026-05-22)** — `v2.12.0` SHIPPED
+2026-05-21 (annotated tag `5a2ce18`, public on both GitHub and Gitea
+at 10.0.10.241). v2.12.0 brought the retrieval-quality stack
+(hybrid + ModernBERT rerank) — cumulative +32pp Recall@1 over
+v2.11.0; two axes hit STRETCH. The only remaining laggard from v2.12
+was Format (88.4% vs ≥96% pin), concentrated in three scanned/form
+docs.
+
+**v2.13 work in flight (autonomous):**
+
+- **Phase 2 (Format recovery) SHIPPED 2026-05-22** — commits
+  `b0dc7c6` (v2.13 P1 infra: omlx provider + force_full_page_ocr
+  scaffold) + `cf3a909` (batch_processor auto-routes scanned to
+  legacy OCR when force_full_page_ocr is set) + `ef2925d` (Earthship
+  + Firearms re-extraction outcome + CarOK form-class decision +
+  BM25 index rebuild).
+  - Earthship: 1016 → 1405 chunks (+398 text); partial soak Format
+    62.5 → 68.8% (+6.2pp). Strict-gate QA_PASS clean (was QA_PASS_WITH_ADVISORIES).
+  - Firearms: 2183 → 2577 chunks (+360 text). Partial soak shows
+    -3.1pp Format / -9.4pp Relevance within 16-query sample noise.
+  - CarOK: documented as judge-calibration limitation, carry to v2.14.
+
+- **Phase 1 (local Qwen3-Embedding-8B swap) IN FLIGHT** — background
+  parallel-collection rebuild `mmrag_v2_8__qwen3_local` running on
+  the omlx-server. Latency benchmarked at ~180ms p99 (vs cloud
+  ~1.35s — 7× faster). If full-corpus soak holds quality vs v2.12.0
+  baseline, swap ships; if it regresses, stay on cloud. Currently on
+  doc ~20/34 of the 34-doc canonical rebuild.
+
+Plan: [`docs/PLAN_V2.13.md`](PLAN_V2.13.md) (Draft v0.1).
 
 ## v2.12.0 quality numbers (vs v2.11.0 baseline)
 
@@ -49,15 +68,16 @@ End-to-end p99 latency: ~2.05 s (within 3.0 s budget).
 Per-query cost: ~$0.001 (Dashscope embed only).
 ```
 
-Tag tree on GitHub (after user pushes the staged commits + tags):
+Tag tree on GitHub + Gitea:
 
 ```
-v2.8.0         (2026-05-04, 645ab2b)
-v2.9.0-rc1     (2026-05-12, 3e06d1b)  — v2.9 ship state, 8 deferrals
-v2.10.0-rc1    (2026-05-16, 82c3639)  — all 8 closed corpus-wide
-v2.10.0        (2026-05-16, db6527c)  — chunker baseline + soak evidence
-v2.11.0        (2026-05-20, c2a461c)  — embedder swap (Dashscope text-embedding-v4)
-v2.12.0        (PENDING, latest main) — hybrid retrieval + ModernBERT reranker
+v2.8.0       (2026-05-04, 645ab2b)
+v2.9.0-rc1   (2026-05-12, 3e06d1b)  — v2.9 ship state, 8 deferrals
+v2.10.0-rc1  (2026-05-16, 82c3639)  — all 8 closed corpus-wide
+v2.10.0      (2026-05-16, db6527c)  — chunker baseline + soak evidence
+v2.11.0      (2026-05-20, c2a461c)  — embedder swap (Dashscope text-embedding-v4)
+v2.12.0      (2026-05-21, 5a2ce18)  — retrieval stack (hybrid + ModernBERT rerank)
+v2.13.0      (PENDING, latest main) — Format recovery + local embedder candidate
 ```
 
 **Active canonical baseline:**

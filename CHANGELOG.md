@@ -4,7 +4,55 @@ All notable changes to this project will be documented in this file. Current beh
 
 > **Versioning note:** Historical entries before the `v2.4.x` line used an internal `v18.x` milestone scheme during rapid iteration and test/fix cycles. Only stable or decision-worthy checkpoints were recorded, so intermediate builds are intentionally omitted. From `v2.4` onward, entries follow the current public semantic line.
 
-## [v2.12.0] — 2026-05-21 (retrieval stack staged locally; tag pending user push)
+## [v2.13 — IN PROGRESS] — 2026-05-22 (Format recovery + local embedder candidate)
+
+Autonomous-run cycle still in flight. Two parallel workstreams:
+
+### Phase 2 — Format recovery (SHIPPED 2026-05-22)
+
+Three commits closed out the chunker-level OCR damage in
+Earthship_Vol1 and Firearms (both scanned profiles, both Format
+laggards in the v2.12 Phase 2 soak):
+
+- `b0dc7c6` — v2.13 P1 infra: `--provider omlx` for ingest +
+  `force_full_page_ocr` field on PdfConversionPlan + DoclingPdfAdapter
+  wiring.
+- `cf3a909` — v2.13 P2: `BatchProcessor.set_conversion_plan` auto-
+  overrides `ocr_mode "layout-aware" → "legacy"` when
+  `plan.force_full_page_ocr == True`. Without this, the layout-aware
+  OCR path bypassed Docling's OCR entirely and the
+  `force_full_page_ocr` flag was a no-op.
+- `ef2925d` — `docs/DECISIONS.md` "v2.13 Phase 2 OCR Auto-Routing
+  Outcome" + "CarOK Form-Class Format Penalty (Documented Limitation)"
+  sections + refreshed `tests/fixtures/bm25_index_v2_12.json` over
+  the new corpus.
+
+Re-extraction results (both QA_PASS strict-gate):
+- Earthship: 1016 → 1405 chunks (+398 text, +73%). Partial soak
+  Format 62.5 → 68.8% (+6.2pp).
+- Firearms: 2183 → 2577 chunks (+360 text, +33%). Partial soak shows
+  noisy regression on 16-query sample (Format -3.1pp, Relevance -9.4pp).
+  Full-corpus soak after Phase 1 will give the definitive picture.
+
+CarOK is **documented as a judge-calibration limitation** rather than
+a content defect — Dutch automotive parts inventory; chunks are
+correct but LLM judge penalizes form-shape data. Carry-forward to
+v2.14: proper form-class soak judge variant.
+
+### Phase 1 — Local Qwen3-Embedding-8B candidate (IN FLIGHT)
+
+Background `mmrag_v2_8__qwen3_local` rebuild via omlx-server
+(`Qwen3-Embedding-8B-mxfp8`, 4096-dim). Latency benchmarked at
+~180ms p99 (vs cloud `text-embedding-v4` 1.35s — 7× faster). When
+the rebuild finishes (~doc 20/34 at this commit), the full-corpus
+soak vs v2.12.0 baseline decides swap vs no-swap.
+
+### Phase N — pending
+
+Full-corpus soak → AFTER snapshot → v2.13.0 annotated tag staged for
+user push.
+
+## [v2.12.0] — 2026-05-21 (retrieval stack — SHIPPED, tag `5a2ce18` public on both remotes)
 
 v2.12 closes the absolute-quality gap the v2.11 soak revealed. The
 v2.11.0 embedder swap fixed the embedder; v2.12 adds the retrieval-

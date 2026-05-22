@@ -4,7 +4,7 @@ Convert PDF, EPUB, HTML, and Office documents into structured JSONL datasets for
 
 The converter extracts text, images, and tables from complex documents while preserving spatial layout, document hierarchy, and semantic context. It handles everything from born-digital magazines to degraded scanned manuals.
 
-**Version 2.12.0** (retrieval stack staged 2026-05-21; user pushes/tags after live-stack re-verification) | predecessor `v2.11.0` (`c2a461c`, 2026-05-20 — embedder swap) → `v2.10.0` (`db6527c`, 2026-05-16) → `v2.9.0-rc1` (`3e06d1b`, 2026-05-12) → `v2.8.0` | Python 3.10 | Apple Silicon native | Docling 2.86.0 | Schema 2.7.0
+**Version 2.12.0 SHIPPED** (annotated tag `5a2ce18`, 2026-05-21, public on GitHub + Gitea) | **v2.13 cycle IN PROGRESS** (Format recovery shipped 2026-05-22; local Qwen3-Embedding-8B candidate in flight; see [`docs/PLAN_V2.13.md`](docs/PLAN_V2.13.md)) | predecessors `v2.11.0` (`c2a461c`) → `v2.10.0` (`db6527c`) → `v2.9.0-rc1` (`3e06d1b`) → `v2.8.0` | Python 3.10 | Apple Silicon native | Docling 2.86.0 | Schema 2.7.0
 
 > **v2.12.0 — retrieval stack release.** v2.12 closes the absolute-
 > quality gap the v2.11 soak revealed. v2.11 fixed the embedder;
