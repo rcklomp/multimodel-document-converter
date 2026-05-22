@@ -34,16 +34,17 @@ DEFAULT_MAX_TOKENS = 250  # ~50-100 words of hypothetical answer
 DEFAULT_TIMEOUT = 45
 DEFAULT_RETRIES = 3
 
-# v2.14 Phase 4a: local-LLM HyDE provider. The calibration on
-# 2026-05-22 (docs/CALIBRATION_2026-05-22_v2.14_p0_local_judge.md)
-# showed Qwen2.5-14B-Instruct is RESTRICTED for relevance + faithfulness
-# judging (81.7% / 76.1% exact) but the ±1 agreement is ~100% — the
-# local LLM has the same ordinal sense as qwen-max. For HyDE that's
-# fine: HyDE doesn't need a calibrated judge, just a semantically
-# coherent hypothetical answer for retrieval. The local path is free
-# + offline-capable.
+# v2.14 Phase 4a: local-LLM HyDE provider. The original 2026-05-22
+# calibration (docs/CALIBRATION_2026-05-22_v2.14_p0_local_judge.md)
+# was run against Qwen2.5-14B-Instruct on the GX10. On 2026-05-23 the
+# endpoint was swapped to Qwen3.6-27B-FP8 with native MTP=3 spec
+# decoding (~32 tok/s on Spark, well-fitted to the 128 GB unified
+# memory). The 14B calibration verdict is therefore stale; a fresh
+# Phase 0 run against the 27B endpoint is the prerequisite for any
+# Phase 4b/c/d/e judge-side use. HyDE generation itself is leniency-
+# robust — the bias direction doesn't affect retrieval-target answers.
 VLLM_DEFAULT_URL = "http://10.0.10.239:8000/v1/chat/completions"
-VLLM_DEFAULT_MODEL = "Qwen/Qwen2.5-14B-Instruct"
+VLLM_DEFAULT_MODEL = "Qwen/Qwen3.6-27B-FP8"
 
 
 SYSTEM_PROMPT = (
@@ -84,9 +85,10 @@ def generate_hypothetical_answer(
     `provider` selects the backend:
       - "dashscope" (default): cloud `qwen-max`. Requires DASHSCOPE_API_KEY.
       - "vllm": local OpenAI-compatible vLLM (defaults to the GX10 at
-        http://10.0.10.239:8000 with Qwen/Qwen2.5-14B-Instruct). No
-        auth required by default; pass `api_key` if your endpoint
-        gates on a bearer token. v2.14 Phase 4a addition.
+        http://10.0.10.239:8000 with Qwen/Qwen3.6-27B-FP8 + native
+        MTP=3 as of 2026-05-23). No auth required by default; pass
+        `api_key` if your endpoint gates on a bearer token.
+        v2.14 Phase 4a addition.
 
     `model` and `url` override the provider's defaults. If omitted,
     each provider uses its own `DEFAULT_*` / `VLLM_DEFAULT_*` constants.
