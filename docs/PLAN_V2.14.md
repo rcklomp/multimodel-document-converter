@@ -1,8 +1,28 @@
 # Plan: v2.14 — Carry-Forwards Closeout + Local LLM Integration
 
-**Status:** **Draft v0.1** (2026-05-22). Authored after v2.13.0
-SHIPPED (commit `a77758b`, annotated tag staged for user push) as
-the planning artifact for the next cycle.
+**Status:** **Draft v0.2** (2026-05-22). Phase 0 + Phase 4a + Phase 5
+landed locally on the same day as the plan draft; remaining phases
+(1, 2, 3, 4b, 4c, N) still to do.
+
+## Phase outcomes so far
+
+| Phase | Status | Outcome |
+|---|---|---|
+| Phase 0 (judge calibration) | **SHIPPED 2026-05-22** | Per-axis verdict: relevance 81.7% (RESTRICTED), **format 90.2% (TRUSTWORTHY)**, faithfulness 76.1% (RESTRICTED). ±1 agreement ~100% on all axes — local LLM has same ordinal scale, slightly more lenient. Report: `docs/CALIBRATION_2026-05-22_v2.14_p0_local_judge.md` |
+| Phase 4a (local HyDE) | **SHIPPED 2026-05-22** | `src/mmrag_v2/retrieval/hyde.py` gained `provider="vllm"` knob. Defaults to GX10 at `http://10.0.10.239:8000` with `Qwen/Qwen2.5-14B-Instruct`. 5 unit tests added. End-to-end smoke OK (392-char hypothesis generated locally in ~2s, $0). Default provider remains `dashscope` — no behavior change for existing callers. |
+| Phase 5 (disk precheck) | **SHIPPED 2026-05-22** | `_check_disk_headroom()` in `synthetic_soak.py` aborts retrieve/judge stages below 10 GB free. Override via `SOAK_DISK_HEADROOM_FLOOR_GB` env. 5 unit tests added. |
+| Phase 1 (format_form judge axis) | pending | |
+| Phase 2 (per-doc regression) | pending | |
+| Phase 3 (rollback drop) | pending (2026-06-19) | |
+| Phase 4b (local judge in soak) | gated on Phase 1 + reduced scope | Per Phase 0 verdict: Format axis can be cloud-replaced fully; Relevance + Faithfulness should stay on qwen-max for cycle-close go/no-go. |
+| Phase 4c (local query gen) | pending | Likely safe — generation isn't judging; the Phase 0 leniency bias doesn't apply. |
+| Phase N (close-out) | pending | Engine bump to 2.14.0 when enough phases land to justify a tag. |
+
+---
+
+**Original Draft v0.1** (2026-05-22, preserved below as cycle archaeology).
+Authored after v2.13.0 SHIPPED (commit `a77758b`, annotated tag staged
+for user push) as the planning artifact for the next cycle.
 
 **Predecessor:** [`docs/PLAN_V2.13.md`](PLAN_V2.13.md) — CLOSED
 2026-05-22 with `v2.13.0` annotated tag staged on commit `a77758b`,

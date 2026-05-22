@@ -34,6 +34,17 @@ DEFAULT_MAX_TOKENS = 250  # ~50-100 words of hypothetical answer
 DEFAULT_TIMEOUT = 45
 DEFAULT_RETRIES = 3
 
+# v2.14 Phase 4a: local-LLM HyDE provider. The calibration on
+# 2026-05-22 (docs/CALIBRATION_2026-05-22_v2.14_p0_local_judge.md)
+# showed Qwen2.5-14B-Instruct is RESTRICTED for relevance + faithfulness
+# judging (81.7% / 76.1% exact) but the ±1 agreement is ~100% — the
+# local LLM has the same ordinal sense as qwen-max. For HyDE that's
+# fine: HyDE doesn't need a calibrated judge, just a semantically
+# coherent hypothetical answer for retrieval. The local path is free
+# + offline-capable.
+VLLM_DEFAULT_URL = "http://10.0.10.239:8000/v1/chat/completions"
+VLLM_DEFAULT_MODEL = "Qwen/Qwen2.5-14B-Instruct"
+
 
 SYSTEM_PROMPT = (
     "You write hypothetical answers to user questions. Your answer will "
@@ -56,8 +67,9 @@ def generate_hypothetical_answer(
     query: str,
     api_key: str | None = None,
     *,
-    model: str = DEFAULT_MODEL,
-    url: str = DEFAULT_URL,
+    provider: str = "dashscope",
+    model: str | None = None,
+    url: str | None = None,
     temperature: float = DEFAULT_TEMPERATURE,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     timeout: int = DEFAULT_TIMEOUT,
@@ -68,14 +80,32 @@ def generate_hypothetical_answer(
     Returns the generated string. On unrecoverable failure (network,
     parse, no choices in response), raises HydeError — callers should
     catch and fall back to the literal query for retrieval.
+
+    `provider` selects the backend:
+      - "dashscope" (default): cloud `qwen-max`. Requires DASHSCOPE_API_KEY.
+      - "vllm": local OpenAI-compatible vLLM (defaults to the GX10 at
+        http://10.0.10.239:8000 with Qwen/Qwen2.5-14B-Instruct). No
+        auth required by default; pass `api_key` if your endpoint
+        gates on a bearer token. v2.14 Phase 4a addition.
+
+    `model` and `url` override the provider's defaults. If omitted,
+    each provider uses its own `DEFAULT_*` / `VLLM_DEFAULT_*` constants.
     """
-    if not api_key:
+    if url is None:
+        url = VLLM_DEFAULT_URL if provider == "vllm" else DEFAULT_URL
+    if model is None:
+        model = VLLM_DEFAULT_MODEL if provider == "vllm" else DEFAULT_MODEL
+
+    if provider == "dashscope" and not api_key:
         api_key = os.environ.get("DASHSCOPE_API_KEY", "")
         if not api_key:
             raise HydeError(
-                "generate_hypothetical_answer requires api_key arg or "
-                "DASHSCOPE_API_KEY env var"
+                "generate_hypothetical_answer with provider='dashscope' "
+                "requires api_key arg or DASHSCOPE_API_KEY env var"
             )
+    elif provider == "vllm" and api_key is None:
+        # vLLM defaults to no auth; allow empty bearer to be sent.
+        api_key = os.environ.get("VLLM_API_KEY", "")
 
     body = json.dumps({
         "model": model,
@@ -91,7 +121,8 @@ def generate_hypothetical_answer(
     for attempt in range(retries):
         try:
             req = urllib.request.Request(url, data=body, method="POST")
-            req.add_header("Authorization", f"Bearer {api_key}")
+            if api_key:
+                req.add_header("Authorization", f"Bearer {api_key}")
             req.add_header("Content-Type", "application/json")
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 payload = json.loads(resp.read())
