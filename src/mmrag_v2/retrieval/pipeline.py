@@ -57,9 +57,11 @@ _SCRIPTS = _REPO_ROOT / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-from ingest_to_qdrant import embed_text_dashscope  # noqa: E402
+from ingest_to_qdrant import embed_text_dashscope, embed_text_omlx  # noqa: E402
 from search_qdrant import embed as embed_ollama  # noqa: E402
 from search_qdrant import search as qdrant_search  # noqa: E402
+
+_OMLX_DEFAULT_URL = "http://10.0.10.246:8000/v1/embeddings"
 
 
 def _embed_query(
@@ -69,6 +71,7 @@ def _embed_query(
     *,
     api_key: str = "",
     ollama_url: str = "http://localhost:11434",
+    omlx_url: str = _OMLX_DEFAULT_URL,
 ) -> list[float]:
     """Embed a query through the chosen provider. Mirrors the dispatch
     logic in `scripts.retrieval_regression`."""
@@ -76,6 +79,8 @@ def _embed_query(
         return embed_text_dashscope(text, model, api_key)
     if provider == "ollama":
         return embed_ollama(text, model=model, ollama_url=ollama_url)
+    if provider == "omlx":
+        return embed_text_omlx(text, model, api_key, url=omlx_url)
     raise ValueError(f"Unsupported embed provider: {provider!r}")
 
 
@@ -136,6 +141,13 @@ def retrieve_reranked(
             raise ValueError(
                 "Dashscope embed provider requires DASHSCOPE_API_KEY env "
                 "var or explicit embed_api_key arg"
+            )
+    if embed_provider == "omlx" and embed_api_key is None:
+        embed_api_key = os.environ.get("MLX_API_KEY", "")
+        if not embed_api_key:
+            raise ValueError(
+                "omlx embed provider requires MLX_API_KEY env var or "
+                "explicit embed_api_key arg"
             )
 
     # Optional Step 0: HyDE — generate a hypothetical answer and embed
@@ -336,6 +348,12 @@ def retrieve_hybrid_reranked(
         if not embed_api_key:
             raise ValueError(
                 "Dashscope embed provider requires DASHSCOPE_API_KEY env var"
+            )
+    if embed_provider == "omlx" and embed_api_key is None:
+        embed_api_key = _os.environ.get("MLX_API_KEY", "")
+        if not embed_api_key:
+            raise ValueError(
+                "omlx embed provider requires MLX_API_KEY env var"
             )
 
     # Load BM25 index (consider caching across calls in production —

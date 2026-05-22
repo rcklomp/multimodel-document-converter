@@ -56,7 +56,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from search_qdrant import embed as _embed_ollama, search  # noqa: E402
-from ingest_to_qdrant import embed_text_dashscope  # noqa: E402
+from ingest_to_qdrant import embed_text_dashscope, embed_text_omlx  # noqa: E402
 
 OUTPUT_DIR = REPO_ROOT / "output" / "soak" / "v2.10"
 DEFAULT_WORK_PATH = OUTPUT_DIR / "work.jsonl"
@@ -66,8 +66,11 @@ DEFAULT_REPORT_PATH = REPO_ROOT / "docs" / (
 DOCS_ROOT = REPO_ROOT / "output"
 COLLECTION_DEFAULT_DASHSCOPE = "mmrag_v2_8__qwen3_dashscope"
 COLLECTION_DEFAULT_OLLAMA = "mmrag_v2_8"
+COLLECTION_DEFAULT_OMLX = "mmrag_v2_8__qwen3_local"
 EMBED_MODEL_OLLAMA = "llava"
 EMBED_MODEL_DASHSCOPE = "text-embedding-v4"
+EMBED_MODEL_OMLX = "Qwen3-Embedding-8B-mxfp8"
+OMLX_DEFAULT_URL = "http://10.0.10.246:8000/v1/embeddings"
 TOP_K = 5
 
 # Dashscope OpenAI-compatible endpoint (matches scripts/convert_all.sh /
@@ -328,9 +331,12 @@ def stage_generate(work_path: Path, api_key: str) -> None:
 
 
 def _embed_query(text: str, provider: str, model: str,
-                 ollama_url: str, api_key: str) -> list[float]:
+                 ollama_url: str, api_key: str,
+                 omlx_url: str = OMLX_DEFAULT_URL) -> list[float]:
     if provider == "dashscope":
         return embed_text_dashscope(text, model, api_key)
+    if provider == "omlx":
+        return embed_text_omlx(text, model, api_key, url=omlx_url)
     return _embed_ollama(text, model=model, ollama_url=ollama_url)
 
 
@@ -786,12 +792,18 @@ def main() -> int:
     parser.add_argument("--collection", default=None,
                         help="Qdrant collection to retrieve from. Provider-aware defaults: "
                              f"'{COLLECTION_DEFAULT_DASHSCOPE}' (dashscope), "
-                             f"'{COLLECTION_DEFAULT_OLLAMA}' (ollama).")
-    parser.add_argument("--provider", default="dashscope", choices=["ollama", "dashscope"],
+                             f"'{COLLECTION_DEFAULT_OLLAMA}' (ollama), "
+                             f"'{COLLECTION_DEFAULT_OMLX}' (omlx).")
+    parser.add_argument("--provider", default="dashscope", choices=["ollama", "dashscope", "omlx"],
                         help="Embedding provider for query-side (default: dashscope as of v2.11.0). "
-                             "Must match how the target collection was built.")
+                             "Must match how the target collection was built. "
+                             "'omlx' (v2.13 P1 candidate) = local Qwen3-Embedding-8B-mxfp8 via "
+                             "omlx-server (4096-dim, text-only).")
     parser.add_argument("--embed-model", default=None,
-                        help="Query-side embedding model. Default 'text-embedding-v4' for dashscope; 'llava' for ollama.")
+                        help="Query-side embedding model. Default 'text-embedding-v4' for dashscope; "
+                             "'llava' for ollama; 'Qwen3-Embedding-8B-mxfp8' for omlx.")
+    parser.add_argument("--omlx-url", default=os.environ.get("OMLX_URL", OMLX_DEFAULT_URL),
+                        help=f"omlx embeddings endpoint (default: {OMLX_DEFAULT_URL})")
     parser.add_argument("--rerank-backend", default=None,
                         choices=["dashscope", "omlx", "null", None],
                         help="When set, the retrieve stage runs the Qdrant top-K candidates through "
@@ -829,12 +841,25 @@ def main() -> int:
               "and for retrieve when --provider dashscope.", file=sys.stderr)
         return 2
 
+    # omlx provider needs MLX_API_KEY (for the local omlx-server, not Dashscope).
+    omlx_api_key = os.environ.get("MLX_API_KEY", "").strip()
+    if args.stage in ("retrieve", "all") and args.provider == "omlx" and not omlx_api_key:
+        print("ERROR: MLX_API_KEY env var is not set; required for --provider omlx.",
+              file=sys.stderr)
+        return 2
+
     if args.collection is None:
-        args.collection = (COLLECTION_DEFAULT_DASHSCOPE if args.provider == "dashscope"
-                          else COLLECTION_DEFAULT_OLLAMA)
+        args.collection = (
+            COLLECTION_DEFAULT_DASHSCOPE if args.provider == "dashscope"
+            else COLLECTION_DEFAULT_OMLX if args.provider == "omlx"
+            else COLLECTION_DEFAULT_OLLAMA
+        )
     if args.embed_model is None:
-        args.embed_model = (EMBED_MODEL_DASHSCOPE if args.provider == "dashscope"
-                            else EMBED_MODEL_OLLAMA)
+        args.embed_model = (
+            EMBED_MODEL_DASHSCOPE if args.provider == "dashscope"
+            else EMBED_MODEL_OMLX if args.provider == "omlx"
+            else EMBED_MODEL_OLLAMA
+        )
 
     if args.stage in ("sample", "all"):
         print("[stage] sample")
@@ -853,9 +878,14 @@ def main() -> int:
             args.top_k_retrieve if args.top_k_retrieve is not None
             else (25 if effective_rerank_backend else TOP_K)
         )
+        embed_api_key = (
+            api_key if args.provider == "dashscope"
+            else omlx_api_key if args.provider == "omlx"
+            else ""
+        )
         stage_retrieve(
             work_path, args.qdrant_url, args.ollama_url,
-            args.collection, args.provider, args.embed_model, api_key,
+            args.collection, args.provider, args.embed_model, embed_api_key,
             rerank_backend=effective_rerank_backend,
             top_k_retrieve=top_k_retrieve_resolved,
             top_n_return=TOP_K,
