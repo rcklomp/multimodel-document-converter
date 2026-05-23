@@ -78,7 +78,12 @@ plan + outcomes tracked in [`docs/PLAN_V2.14.md`](PLAN_V2.14.md)
 - Phase 4c (gen-provider vllm) — **SHIPPED 2026-05-23** (commit
   `1c201dd`). `synthetic_soak.py --gen-provider vllm` + smoke at
   2.0s/query on the live 27B. Default stays `dashscope`.
-- Phase 4d (tie-breaker) — code-only; ready to wire.
+- Phase 4d (tie-breaker) — **SHIPPED 2026-05-23**.
+  `scripts/local_then_cloud_soak.py` (two-tier judging: local-vLLM
+  on all in-scope queries, cloud qwen-max re-judges contested only;
+  provenance tagged via `judgment.judge_source`). 14 unit tests
+  in `tests/test_local_then_cloud_soak.py`. Live smoke green
+  (4 local judgments in 13s).
 - Phase 4e (1500-query Format-only demo) — **DROPPED 2026-05-23**:
   predicate failed (Format not TRUSTWORTHY on 27B).
 - Phase 4-Resilience (qwen3-max cloud fallback for HyDE) — **SHIPPED
@@ -363,7 +368,7 @@ of drift, the plan file wins.
 | 4a | Local HyDE provider | SHIPPED 2026-05-22; default model updated 2026-05-23 (14B → 27B-MTP). **Harness re-validated 2026-05-23** after `chat_template_kwargs.enable_thinking=False` fix (commit `0c5e818`). |
 | 4b | Local judge in soak (was Format-only) | **DOWNGRADED 2026-05-23** — Format axis no longer trustworthy on 27B. Remaining viable: prompt A/B + tie-breaker. |
 | 4c | Local query gen | PENDING — safe; ready to wire `--gen-provider vllm`. |
-| 4d | Tie-breaker harness | PENDING — code-only; ready to wire. |
+| 4d | Tie-breaker harness | **SHIPPED 2026-05-23** — `scripts/local_then_cloud_soak.py` + 14 unit tests. Local-vLLM judges all in-scope; cloud `qwen-max` re-judges contested (any axis < floor). Provenance tagged. |
 | 4e | 1500-query Format-only demo soak | **DROPPED 2026-05-23** — predicate failed. |
 | 5 | Soak disk-headroom precheck | SHIPPED 2026-05-22. |
 | 6 | Code-block chunking hygiene | **PARTIAL** — commit `d737147` ships block-extension + `partial_code` schema field + 3 new tests on the `_chunk_text_with_overlap` path. Discovery 2026-05-23: production technical_manual chunks come from Docling's `hybrid_chunker`, NOT through that path. Committed change covers `scanned_book` + observability; Fluent_Python defect needs a HybridChunker-layer pass. **Sign-off needed** on direction. |
