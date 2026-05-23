@@ -13,18 +13,11 @@ plan + outcomes tracked in [`docs/PLAN_V2.14.md`](PLAN_V2.14.md)
 (currently at Draft v0.5).
 
 **v2.14 phases shipped:**
-- **Phase 0 (judge calibration)** — first run SHIPPED 2026-05-22
-  against `Qwen2.5-14B-Instruct`; SUPERSEDED 2026-05-23 when the GX10
-  endpoint was swapped to `Qwen/Qwen3.6-27B-FP8` + native MTP=3.
-  **Re-cal against the 27B SHIPPED 2026-05-23** (n=518, 0 parse failures
-  after a harness fix to disable Qwen3 thinking mode — see Phase 4a
-  note). Verdict: relevance 82.0% (RESTRICTED), **format 70.7% (RESTRICTED)**,
-  faithfulness 78.8% (RESTRICTED). ALL THREE AXES in the 70-85% "HyDE-only"
-  band; ±1 agreement stays 98.6-99.8% (ordinal scale consistent). Bias
-  direction FLIPPED vs the 14B: the 27B is systematically STRICTER on
-  format (132 cases where qwen-max said `2`, the 27B downgraded to `1`).
-  Report: `docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen36_27b_mtp.md`.
-  Phase 4 PERMITTED list contracts — see PLAN_V2.14.md Phase 4 row.
+- **Phase 0 (judge calibration)** — three endpoints, all 2026-05-23:
+  - 14B (morning, retired): rel 81.7% / format 90.2% TRUSTWORTHY / faith 76.1% (SUPERSEDED)
+  - 27B-MTP (morning, retired): rel 82.0% / **format 70.7% RESTRICTED** / faith 78.8% — all RESTRICTED; bias direction flipped to strict-on-format (132 downgrades from qwen-max "2" to local "1"); motivated the afternoon swap (SUPERSEDED)
+  - 30B-A3B-Instruct-2507 (afternoon, ACTIVE): re-cal PENDING — auto-runs once user confirms the new endpoint is live
+  Report: `docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen36_27b_mtp.md` (now SUPERSEDED); historical 14B at `docs/CALIBRATION_2026-05-22_v2.14_p0_local_judge.md`.
 - **Phase 4a (local HyDE provider)** SHIPPED 2026-05-22 —
   `src/mmrag_v2/retrieval/hyde.py` gained `provider="vllm"` knob.
   Default vLLM model updated 2026-05-23 from 14B to `Qwen/Qwen3.6-27B-FP8`.
@@ -236,30 +229,26 @@ Do not print or commit API keys.
 - provider: Dashscope, model `qwen-max` (used for both query generation and judging)
 - v2.14 Phase 0/4 additions: local-LLM judge candidate at the GX10 vLLM endpoint below; ship-gate go/no-go on Relevance + Faithfulness axes stays on cloud `qwen-max` per the Phase 4 "leniency trap" guardrail in `PLAN_V2.14.md`
 
-**Local LLM endpoint (v2.14 Phase 4a, LIVE 2026-05-23):**
+**Local LLM endpoint (v2.14 Phase 4a, ACTIVE model swap pending live verification 2026-05-23 afternoon):**
 
 - provider: vLLM (OpenAI-compatible)
-- model: `Qwen/Qwen3.6-27B-FP8` with native MTP=3 speculative decoding
-- served-model aliases: `Qwen/Qwen3.6-27B-FP8` (full) or `qwen3.6-27b` (short)
+- model (code default updated 2026-05-23 afternoon): `Qwen/Qwen3-30B-A3B-Instruct-2507-FP8` (MoE — 30B total, ~3B active per pass; pure Instruct, no `<think>` mode)
+- served-model aliases (per recipe): `Qwen/Qwen3-30B-A3B-Instruct-2507-FP8` (full) or `qwen3-30b-a3b` (short)
 - endpoint: `http://10.0.10.239:8000/v1/chat/completions` (Asus Ascent GX10 = DGX Spark clone, Grace-Blackwell GB10, 128 GB unified memory)
-- container: `vllm/vllm-openai:v0.20.0-aarch64-cu130-ubuntu2404`
-- measured perf: ~32 tok/s single-stream decode (MTP-3 acceptance at positions 1/2/3 ≈ 80/55/40%, mean accepted length 2.5–3.3)
+- container: `vllm/vllm-openai:v0.20.0-aarch64-cu130-ubuntu2404` (proven aarch64 image, reused from 27B recipe)
 - max context: 256K configured (32K typically sufficient for HyDE + judge)
 - code default: `src/mmrag_v2/retrieval/hyde.py` `VLLM_DEFAULT_MODEL` (call with `provider="vllm"`)
 - env var: `VLLM_API_KEY` (optional; endpoint runs unauthenticated by default)
-- canonical recipe + path-of-pain notes: `memory/project_v2_14_gx10_27b_mtp_swap.md`
+- canonical recipe + path-of-pain notes: `memory/project_v2_14_gx10_30b_a3b_swap.md`
 - guardrails before any future swap: `memory/feedback_gx10_deployment_guardrails.md` (5-point hard checklist)
-- **Phase 0 27B-MTP calibration SHIPPED 2026-05-23** (n=518, 0 parse
-  failures). Per-axis: relevance 82.0% / format 70.7% / faithfulness 78.8% —
-  ALL THREE RESTRICTED ("HyDE-only" band). Bias direction flipped vs the
-  retired 14B (was lenient on relevance/faithfulness, now strict on
-  format). Phase 4b "Format-axis only" scope evaporated; Phase 4e
-  Format demo dropped. Phase 4a HyDE + Phase 4c gen-provider remain
-  safe. Report:
-  `docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen36_27b_mtp.md`.
-  Predecessor `Qwen/Qwen2.5-14B-Instruct` retired 2026-05-23 (verdict
-  in `docs/CALIBRATION_2026-05-22_v2.14_p0_local_judge.md` retained
-  for historical comparison).
+- **Cloud fallback (Phase 4 Resilience, designated 2026-05-23):** Dashscope `qwen3-max` when GX10 is unavailable. Wiring is a pending change to `generate_with_fallback` in `hyde.py` (currently degrades to literal query).
+- **Endpoint swap history (all 2026-05-23):**
+  - morning: `Qwen2.5-14B-Instruct` → `Qwen/Qwen3.6-27B-FP8` + native MTP=3 (retired)
+  - afternoon: `Qwen/Qwen3.6-27B-FP8` → `Qwen/Qwen3-30B-A3B-Instruct-2507-FP8` (active, awaiting `docker run` execution)
+- **Phase 0 calibration history:**
+  - 14B (2026-05-22): rel 81.7% / format 90.2% TRUSTWORTHY / faith 76.1% — SUPERSEDED
+  - 27B-MTP (2026-05-23 morning): rel 82.0% / **format 70.7%** / faith 78.8% — all RESTRICTED, Format-axis collapsed vs 14B, motivated this afternoon's swap — SUPERSEDED
+  - 30B-A3B-Instruct-2507 (2026-05-23 afternoon): PENDING — re-cal auto-runs once user confirms the new endpoint is live
 
 **Production VLM (image enrichment — unchanged from v2.11):**
 
@@ -338,11 +327,11 @@ of drift, the plan file wins.
 
 | Phase | Topic | Status (2026-05-23) |
 |---|---|---|
-| 0 | Local-judge calibration | First run on 14B SUPERSEDED. **27B-MTP re-cal SHIPPED 2026-05-23** — all three axes RESTRICTED (rel 82.0% / format 70.7% / faith 78.8%). Bias direction flipped vs 14B. |
+| 0 | Local-judge calibration | 14B SUPERSEDED. 27B-MTP SUPERSEDED 2026-05-23 afternoon (all axes RESTRICTED, format collapsed to 70.7%). **30B-A3B-Instruct-2507 re-cal PENDING** — auto-runs once user confirms the new endpoint is live. |
 | 1 | Form/Table layout extraction recovery | PENDING — **evidence in hand**: CarOK has 0 table chunks (TSR didn't detect). VLM-fallback escalation needs user sign-off. |
 | 2 | Targeted HyDE bridging for code + minority languages | PENDING — depends on Phase 6 + Phase 1 landing. |
 | 3 | 30-day dashscope-rollback drop | PENDING — time-gated decision point 2026-06-19. |
-| 4a | Local HyDE provider | SHIPPED 2026-05-22; default model updated 2026-05-23 (14B → 27B-MTP). **Harness re-validated 2026-05-23** after `chat_template_kwargs.enable_thinking=False` fix (commit `0c5e818`). |
+| 4a | Local HyDE provider | SHIPPED 2026-05-22; default model 14B → 27B-MTP (morning 2026-05-23) → 30B-A3B-Instruct-2507 (afternoon 2026-05-23). Harness `chat_template_kwargs.enable_thinking=False` fix (commit `0c5e818`) kept across swaps as defensive no-op. Dashscope `qwen3-max` named as cloud fallback (wiring pending). |
 | 4b | Local judge in soak (was Format-only) | **DOWNGRADED 2026-05-23** — Format axis no longer trustworthy on 27B. Remaining viable: prompt A/B + tie-breaker. |
 | 4c | Local query gen | PENDING — safe; ready to wire `--gen-provider vllm`. |
 | 4d | Tie-breaker harness | PENDING — code-only; ready to wire. |

@@ -133,7 +133,7 @@ def test_generate_hypothetical_answer_vllm_provider_uses_local_url(monkeypatch):
     assert "/v1/chat/completions" in captured["url"]
     assert captured["has_auth"] is False
     body = json.loads(captured["body"].decode("utf-8"))
-    assert body["model"] == "Qwen/Qwen3.6-27B-FP8"
+    assert body["model"] == "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
 
 
 def test_generate_hypothetical_answer_vllm_provider_honors_overrides(monkeypatch):
