@@ -4,11 +4,11 @@
 Reads a v2.13 P1-style soak work.jsonl (where qwen-max has already
 judged each query on relevance / format / faithfulness), reconstructs
 the exact JUDGE_SYSTEM + JUDGE_USER_TEMPLATE used by synthetic_soak.py,
-sends the same prompts to a local OpenAI-compatible LLM (current
-default: Qwen3-30B-A3B-Instruct-2507-FP8 served via vLLM on the GX10
-at http://10.0.10.239:8000/v1; endpoint history: Qwen2.5-14B-Instruct
-→ Qwen3.6-27B-FP8+MTP → Qwen3-30B-A3B-Instruct-2507-FP8), and computes
-per-axis agreement vs the qwen-max ground truth.
+sends the same prompts to a local OpenAI-compatible LLM (default:
+Qwen3.6-27B-FP8 with native MTP=3 served via vLLM on the GX10 at
+http://10.0.10.239:8000/v1 as of 2026-05-23; previously
+Qwen2.5-14B-Instruct), and computes per-axis agreement vs the
+qwen-max ground truth.
 
 Outputs a markdown calibration report.
 
@@ -27,7 +27,7 @@ Usage:
   python scripts/calibrate_local_judge_vs_qwen_max.py \\
     --work-path output/soak/v2.13_p1_omlx/work.jsonl \\
     --local-url http://10.0.10.239:8000/v1 \\
-    --local-model Qwen/Qwen3-30B-A3B-Instruct-2507-FP8 \\
+    --local-model Qwen/Qwen3.6-27B-FP8 \\
     --report-path docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen36_27b_mtp.md
 """
 from __future__ import annotations
@@ -63,7 +63,7 @@ _extract_json = _sk._extract_json
 _read_work = _sk._read_work
 
 DEFAULT_LOCAL_URL = "http://10.0.10.239:8000/v1"
-DEFAULT_LOCAL_MODEL = "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
+DEFAULT_LOCAL_MODEL = "Qwen/Qwen3.6-27B-FP8"
 
 
 def _post_chat(url: str, model: str, messages: list[dict], *,

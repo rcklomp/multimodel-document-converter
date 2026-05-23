@@ -1,17 +1,5 @@
 # v2.14 Phase 0 Calibration — Local Judge vs qwen-max
 
-> **⚠ SUPERSEDED 2026-05-23 afternoon.** This verdict applies to the
-> now-retired `Qwen/Qwen3.6-27B-FP8` endpoint. The Format-axis collapse
-> documented below (70.7%, down from the 14B's 90.2%) motivated the
-> user to swap to `Qwen/Qwen3-30B-A3B-Instruct-2507-FP8` the same
-> afternoon. Replacement report pending the new endpoint going live +
-> re-cal completing: `docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen3_30b_a3b.md`
-> (planned). See [[project-v2-14-gx10-30b-a3b-swap]] for the new
-> endpoint recipe. Body below preserved as historical comparison —
-> the bias-direction-flip insight (lenient on 14B → strict on 27B)
-> will inform how to read the 30B-A3B verdict when it lands.
-
-
 > Date: 2026-05-23
 > Ground truth: `output/soak/v2.13_p1_omlx/work.jsonl` (qwen-max judgments from v2.13 P1 soak)
 > Local judge: `Qwen/Qwen3.6-27B-FP8` @ `http://10.0.10.239:8000/v1`
