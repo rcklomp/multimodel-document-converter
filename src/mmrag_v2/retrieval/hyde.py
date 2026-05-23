@@ -57,6 +57,37 @@ SYSTEM_PROMPT = (
 )
 
 
+# v2.14 Phase 2: intent-aware HyDE system prompts. The targeted-HyDE
+# bridging path (`retrieve_hybrid_reranked(auto_intent_hyde=True)`)
+# picks the variant based on the deterministic query-intent
+# classifier in `mmrag_v2.retrieval.intent`. The default (no intent
+# detected) falls back to `SYSTEM_PROMPT` above.
+SYSTEM_PROMPT_CODE = (
+    "You write hypothetical answers to programming questions. The "
+    "answer will be embedded and used to retrieve relevant code "
+    "documentation; the answer itself does NOT need to be runnable. "
+    "Include a short code snippet (5-15 lines) in the same language "
+    "the question implies (Python by default), preceded by a 1-2 "
+    "sentence explanation. Use realistic identifiers, real keywords, "
+    "and idiomatic syntax. No 'I don't know'."
+)
+
+SYSTEM_PROMPT_MINORITY_LANG = (
+    "You write hypothetical answers to user questions. The user's "
+    "question is in a non-English language; you MUST write the entire "
+    "answer in the SAME language as the question (German, French, "
+    "Dutch, Spanish, Italian, etc. — match the question's language "
+    "exactly). The answer will be embedded for retrieval; it does NOT "
+    "need to be factually correct. 50-100 words, single paragraph, "
+    "no preamble. No 'I don't know'."
+)
+
+_INTENT_PROMPTS = {
+    "code": SYSTEM_PROMPT_CODE,
+    "minority_language": SYSTEM_PROMPT_MINORITY_LANG,
+}
+
+
 USER_PROMPT_TEMPLATE = "Question: {query}\n\nAnswer:"
 
 
@@ -75,6 +106,7 @@ def generate_hypothetical_answer(
     max_tokens: int = DEFAULT_MAX_TOKENS,
     timeout: int = DEFAULT_TIMEOUT,
     retries: int = DEFAULT_RETRIES,
+    intent: str | None = None,
 ) -> str:
     """Generate a single hypothetical answer to the query.
 
@@ -92,7 +124,16 @@ def generate_hypothetical_answer(
 
     `model` and `url` override the provider's defaults. If omitted,
     each provider uses its own `DEFAULT_*` / `VLLM_DEFAULT_*` constants.
+
+    `intent` (v2.14 Phase 2) selects a content-aware HyDE system
+    prompt: `"code"` produces a code-snippet-style hypothetical,
+    `"minority_language"` instructs the model to match the question's
+    language explicitly. None (default) uses the generic
+    `SYSTEM_PROMPT`. The intent comes from
+    `mmrag_v2.retrieval.intent.classify_intent(query)`.
     """
+    system_prompt = _INTENT_PROMPTS.get(intent, SYSTEM_PROMPT) if intent else SYSTEM_PROMPT
+
     if url is None:
         url = VLLM_DEFAULT_URL if provider == "vllm" else DEFAULT_URL
     if model is None:
@@ -112,7 +153,7 @@ def generate_hypothetical_answer(
     request_payload: dict = {
         "model": model,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": USER_PROMPT_TEMPLATE.format(query=query)},
         ],
         "temperature": temperature,

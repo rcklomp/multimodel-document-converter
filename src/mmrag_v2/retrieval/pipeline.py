@@ -324,6 +324,8 @@ def retrieve_hybrid_reranked(
     fall_back_on_rerank_error: bool = True,
     use_hyde: bool = False,
     hyde_api_key: str | None = None,
+    auto_intent_hyde: bool = False,
+    hyde_provider: str = "dashscope",
 ) -> list[dict]:
     """Dense + BM25 sparse + RRF + reranker.
 
@@ -343,6 +345,26 @@ def retrieve_hybrid_reranked(
     `rrf_weights` lets callers tilt fusion toward dense or sparse;
     defaults equal weight (1, 1). Higher dense weight = embedder-led;
     higher sparse weight = BM25-led.
+
+    HyDE knobs (v2.14):
+      - `use_hyde=True`              — always-on HyDE (the original v2.12
+                                       Phase 3 knob); applies to the dense
+                                       leg only.
+      - `auto_intent_hyde=True`      — v2.14 Phase 2: classifies the query
+                                       via `mmrag_v2.retrieval.intent.classify_intent`
+                                       and auto-enables HyDE WITH an
+                                       intent-specific system prompt only
+                                       when intent ∈ {`code`,
+                                       `minority_language`}. English /
+                                       general queries skip HyDE
+                                       entirely → no latency hit. Targets
+                                       the omlx per-doc deficits on German
+                                       + code-dense docs (~-12pp R@1) at
+                                       query time, no permanent embedder
+                                       routing infra needed.
+      - `hyde_provider`              — "dashscope" (default, $ per call)
+                                       or "vllm" (local 27B, $0). Used by
+                                       both manual and auto-intent paths.
     """
     import os as _os
     from pathlib import Path as _Path
@@ -371,10 +393,25 @@ def retrieve_hybrid_reranked(
     # Optional Step 0: HyDE for the DENSE leg only — the BM25 leg
     # always uses the literal query (BM25 is a keyword matcher; HyDE
     # would change the keyword distribution and isn't helpful there).
+    #
+    # v2.14 Phase 2: `auto_intent_hyde=True` overrides `use_hyde` for
+    # queries whose intent matches the code/minority-language target
+    # set. Default queries (intent=None) skip HyDE entirely → no
+    # latency hit for the ~90% of queries that don't need it.
     dense_query = query
-    if use_hyde:
+    intent: str | None = None
+    if auto_intent_hyde:
+        from mmrag_v2.retrieval.intent import classify_intent
+        intent = classify_intent(query)
+    effective_use_hyde = use_hyde or (intent is not None)
+    if effective_use_hyde:
         from mmrag_v2.retrieval.hyde import generate_with_fallback
-        dense_query = generate_with_fallback(query, hyde_api_key or embed_api_key)
+        dense_query = generate_with_fallback(
+            query,
+            hyde_api_key or embed_api_key,
+            provider=hyde_provider,
+            intent=intent,
+        )
 
     # Step 1: embed (the HyDE answer or the literal query).
     vector = _embed_query(
