@@ -16,29 +16,66 @@ scattering across the codebase.
 # chunk_id for cross-version mapping must rebuild from v2.9 outputs.
 __schema_version__ = "2.7.0"
 
-# Engine/runtime version. v2.13.0 closes out two parallel workstreams
-# on top of the v2.12.0 retrieval stack:
-#   Phase 1   local embedder swap — Qwen3-Embedding-8B-mxfp8 via
-#             omlx-server replaces cloud text-embedding-v4 as the
-#             production embedder (6/6-axis apples-to-apples win)
-#   Phase 2   OCR auto-routing — `plan.force_full_page_ocr=True` for
-#             scanned profiles, batch_processor auto-overrides
-#             layout-aware -> legacy when set so Docling's flag is
-#             honored (Earthship + Firearms Format recovery)
-# v2.13 P1 apples-to-apples (same fixture, only embedder differs):
-#   Recall@1 chunk    55.0% → 57.5%   (+2.5pp omlx)
-#   Recall@5 chunk    72.6% → 78.0%   (+5.4pp omlx)
-#   Recall@5 doc      93.1% → 95.2%   (+2.1pp omlx)
-#   Relevance         74.1% → 74.6%   (noise)
-#   Format            89.2% → 92.9%   (+3.7pp omlx)
-#   Faithfulness      65.9% → 66.9%   (noise)
-# (See `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md`.
-# Absolute numbers differ from v2.12.0's 6/6-axis canonical because the
-# v2.13 P1 fixture was sampled fresh post-v2.13-P2.)
-# Production embedder: omlx Qwen3-Embedding-8B-mxfp8 against
-# `mmrag_v2_8__qwen3_local` (4096-dim, 31,371 pts). Dashscope
-# `mmrag_v2_8__qwen3_dashscope` retained as 30-day rollback baseline
-# through 2026-06-19. v2.13.0 annotated tag is STAGED but not pushed
-# by the autonomous run; the user pushes after live-stack re-verification.
-# Predecessor: v2.12.0 (2026-05-21, 5a2ce18).
-__engine_version__ = "2.13.0"
+# Engine/runtime version. v2.14.0 ships the local-LLM accelerator
+# stack on top of the v2.13.0 retrieval stack. NO RETRIEVAL-STACK
+# CHANGES — production retrieval is byte-for-byte identical to
+# v2.13.0 (omlx Qwen3-Embedding-8B-mxfp8 + BM25 + RRF + ModernBERT
+# rerank against `mmrag_v2_8__qwen3_local`).
+#
+# Phases shipped (alphabetical / numerical, not chronological):
+#   Phase 0 (calibration)   27B-MTP local judge: all axes RESTRICTED
+#                           (rel 82.0% / format 70.7% / faith 78.8%;
+#                           bias flipped vs the retired 14B);
+#                           PERMITTED uses contracted to query-gen +
+#                           HyDE + tie-breaker harness; ship-gate
+#                           judging stays on cloud qwen-max.
+#   Phase 4a (HyDE)         `provider="vllm"` knob + Qwen3 thinking-
+#                           mode payload fix (chat_template_kwargs
+#                           enable_thinking=False); live re-smoke OK.
+#   Phase 4c (gen-provider) `synthetic_soak.py --gen-provider vllm`
+#                           wires the local 27B for query generation
+#                           at $0/query; 2.0s/query live smoke.
+#   Phase 4d (tie-breaker)  `scripts/local_then_cloud_soak.py` two-
+#                           tier judging: local-vLLM on all in-scope,
+#                           cloud qwen-max re-judges contested only;
+#                           provenance tagged via judgment.judge_source
+#                           ∈ {local, cloud, local_fallback}.
+#   Phase 4-Resilience      `hyde.generate_with_fallback` chains
+#                           vllm → dashscope qwen3-max → literal query
+#                           when primary is vllm.
+#   Phase 5 (disk precheck) `_check_disk_headroom` in synthetic_soak
+#                           aborts retrieve/judge below 10 GB free.
+#
+# Phases PARTIAL (code-side landed; data acceptance bar NOT met):
+#   Phase 1 (form/table)    `--force-table-vlm` truly forces (was
+#                           silently overridden by technical_manual
+#                           profile); local NuMarkdown-8B VLM produces
+#                           clean 5-col tables on 5/12 CarOK pages.
+#                           BUT 30-query CarOK mini-soak measured
+#                           Format -26.9pp regression because flat-
+#                           prose chunks coexist with VLM tables and
+#                           win retrieval 29/30 times. Production
+#                           data ROLLED BACK to v2.13 baseline. v2.15
+#                           needs same-page prose-VLM dedup.
+#   Phase 6 (code chunking) Block-extension policy + `partial_code`
+#                           schema field shipped on the
+#                           `_chunk_text_with_overlap` (scanned_book)
+#                           path. Fluent_Python's truncated-code
+#                           defect is Docling-extraction-layer (prose
+#                           + code intermixed at page boundaries);
+#                           HybridChunker post-merge pass tested in
+#                           isolation but doesn't fire in production
+#                           (reverted this session). v2.15 needs
+#                           upstream Docling-config or text-norm fix.
+#
+# Phase 3 (rollback drop)   PENDING — time-gated to 2026-06-19
+#                           decision point; v2.14.1 candidate.
+#
+# Production retrieval byte-for-byte identical to v2.13.0:
+#   omlx Qwen3-Embedding-8B-mxfp8 → mmrag_v2_8__qwen3_local (4096-dim,
+#   31,371 pts) + BM25 sparse + RRF + local ModernBERT rerank.
+# v2.13 retrieval fingerprint must still PASS (re-verified at close).
+# v2.14.0 annotated tag is STAGED locally; user pushes after live-
+# stack re-verification.
+# Predecessor: v2.13.0 (2026-05-22, b77341a region; staged tag).
+__engine_version__ = "2.14.0"

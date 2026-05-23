@@ -1,0 +1,1036 @@
+{
+  "schema": 1,
+  "engine_version": "2.13.0",
+  "pipeline": "hybrid+rerank",
+  "dense_collection": "mmrag_v2_8__qwen3_local",
+  "sparse_collection": "mmrag_v2_8__bm25_sparse",
+  "bm25_index": "tests/fixtures/bm25_index_v2_12.json",
+  "embed_provider": "omlx",
+  "embed_model": "Qwen3-Embedding-8B-mxfp8",
+  "reranker_model": "gte-reranker-modernbert-base-mlx",
+  "top_k_retrieve": 25,
+  "top_n_return": 5,
+  "strict_k": 3,
+  "queries": [
+    {
+      "id": "Q01_mcp",
+      "text": "what is the Model Context Protocol and how does an MCP client work",
+      "top_k": [
+        {
+          "chunk_id": "47bcf7e2f91b_034_text_ee100f9e",
+          "doc_id": "47bcf7e2f91b",
+          "source_file": "Sekar S. The MCP Standard. A Developer's Guide..Building Universal AI Tools 2026.pdf",
+          "modality": "text",
+          "page_number": 34,
+          "score": 0.0,
+          "rerank_score": 0.971824
+        },
+        {
+          "chunk_id": "47bcf7e2f91b_087_text_66bc0411",
+          "doc_id": "47bcf7e2f91b",
+          "source_file": "Sekar S. The MCP Standard. A Developer's Guide..Building Universal AI Tools 2026.pdf",
+          "modality": "text",
+          "page_number": 87,
+          "score": 0.731836,
+          "rerank_score": 0.949905
+        },
+        {
+          "chunk_id": "47bcf7e2f91b_086_text_983b0980",
+          "doc_id": "47bcf7e2f91b",
+          "source_file": "Sekar S. The MCP Standard. A Developer's Guide..Building Universal AI Tools 2026.pdf",
+          "modality": "text",
+          "page_number": 86,
+          "score": 0.714041,
+          "rerank_score": 0.949905
+        },
+        {
+          "chunk_id": "47bcf7e2f91b_085_text_c36bbb04",
+          "doc_id": "47bcf7e2f91b",
+          "source_file": "Sekar S. The MCP Standard. A Developer's Guide..Building Universal AI Tools 2026.pdf",
+          "modality": "text",
+          "page_number": 85,
+          "score": 0.741125,
+          "rerank_score": 0.94628
+        },
+        {
+          "chunk_id": "47bcf7e2f91b_084_text_8f9a2044",
+          "doc_id": "47bcf7e2f91b",
+          "source_file": "Sekar S. The MCP Standard. A Developer's Guide..Building Universal AI Tools 2026.pdf",
+          "modality": "text",
+          "page_number": 84,
+          "score": 0.0,
+          "rerank_score": 0.94628
+        }
+      ]
+    },
+    {
+      "id": "Q02_rag_eval",
+      "text": "how to evaluate a retrieval augmented generation system",
+      "top_k": [
+        {
+          "chunk_id": "12c8aaab4fa1_124_text_0eacd9b6",
+          "doc_id": "12c8aaab4fa1",
+          "source_file": "A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf",
+          "modality": "text",
+          "page_number": 124,
+          "score": 0.0,
+          "rerank_score": 0.969745
+        },
+        {
+          "chunk_id": "c480fb4e3164_188_text_8fc7e0de",
+          "doc_id": "c480fb4e3164",
+          "source_file": "Bourne K. Unlocking Data with Generative AI and RAG 2024.pdf",
+          "modality": "text",
+          "page_number": 188,
+          "score": 0.731876,
+          "rerank_score": 0.962485
+        },
+        {
+          "chunk_id": "12c8aaab4fa1_107_text_1e15d574",
+          "doc_id": "12c8aaab4fa1",
+          "source_file": "A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf",
+          "modality": "text",
+          "page_number": 107,
+          "score": 0.715211,
+          "rerank_score": 0.959226
+        },
+        {
+          "chunk_id": "5b915c809145_140_text_1f27c8a9",
+          "doc_id": "5b915c809145",
+          "source_file": "Devlin M. Building LLM Agents with RAG, Knowledge Graphs and Reflection...2025.pdf",
+          "modality": "text",
+          "page_number": 140,
+          "score": 0.0,
+          "rerank_score": 0.957031
+        },
+        {
+          "chunk_id": "47bcf7e2f91b_021_text_436d6e29_o2",
+          "doc_id": "47bcf7e2f91b",
+          "source_file": "Sekar S. The MCP Standard. A Developer's Guide..Building Universal AI Tools 2026.pdf",
+          "modality": "text",
+          "page_number": 21,
+          "score": 0.0,
+          "rerank_score": 0.928723
+        }
+      ]
+    },
+    {
+      "id": "Q03_agent_tools",
+      "text": "how do LLM agents call tools and reason over results",
+      "top_k": [
+        {
+          "chunk_id": "8e184dc5d9c4_102_text_287bba16",
+          "doc_id": "8e184dc5d9c4",
+          "source_file": "Nagasubramanian D. Agentic AI for Engineers.Architecting Goal-Driven System 2026.pdf",
+          "modality": "text",
+          "page_number": 102,
+          "score": 0.0,
+          "rerank_score": 0.982989
+        },
+        {
+          "chunk_id": "8e184dc5d9c4_219_text_a89a2664_o2",
+          "doc_id": "8e184dc5d9c4",
+          "source_file": "Nagasubramanian D. Agentic AI for Engineers.Architecting Goal-Driven System 2026.pdf",
+          "modality": "text",
+          "page_number": 219,
+          "score": 0.781894,
+          "rerank_score": 0.971983
+        },
+        {
+          "chunk_id": "6afeb55a9449_101_text_95a28ad5",
+          "doc_id": "6afeb55a9449",
+          "source_file": "Jungjun H. Build an AI Agent (From Scratch)...MEAP 2026.pdf",
+          "modality": "text",
+          "page_number": 101,
+          "score": 0.0,
+          "rerank_score": 0.966026
+        },
+        {
+          "chunk_id": "8e184dc5d9c4_132_text_b566eb1d",
+          "doc_id": "8e184dc5d9c4",
+          "source_file": "Nagasubramanian D. Agentic AI for Engineers.Architecting Goal-Driven System 2026.pdf",
+          "modality": "text",
+          "page_number": 132,
+          "score": 0.0,
+          "rerank_score": 0.963789
+        },
+        {
+          "chunk_id": "6afeb55a9449_055_text_19474467",
+          "doc_id": "6afeb55a9449",
+          "source_file": "Jungjun H. Build an AI Agent (From Scratch)...MEAP 2026.pdf",
+          "modality": "text",
+          "page_number": 55,
+          "score": 0.782703,
+          "rerank_score": 0.96359
+        }
+      ]
+    },
+    {
+      "id": "Q04_rag_arch",
+      "text": "architecture of a production RAG pipeline",
+      "top_k": [
+        {
+          "chunk_id": "131b7b54c411_076_text_f8efee07",
+          "doc_id": "131b7b54c411",
+          "source_file": "Adedeji A. GenAI on Google Cloud. Enterprise Generative AI Systems...Agents 2026.pdf",
+          "modality": "text",
+          "page_number": 76,
+          "score": 0.0,
+          "rerank_score": 0.94095
+        },
+        {
+          "chunk_id": "12c8aaab4fa1_016_text_37e8e16c_o2",
+          "doc_id": "12c8aaab4fa1",
+          "source_file": "A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf",
+          "modality": "text",
+          "page_number": 16,
+          "score": 0.0,
+          "rerank_score": 0.938439
+        },
+        {
+          "chunk_id": "12c8aaab4fa1_139_text_405c8d11",
+          "doc_id": "12c8aaab4fa1",
+          "source_file": "A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf",
+          "modality": "text",
+          "page_number": 139,
+          "score": 0.736913,
+          "rerank_score": 0.924207
+        },
+        {
+          "chunk_id": "131b7b54c411_066_text_f7e1ffd2",
+          "doc_id": "131b7b54c411",
+          "source_file": "Adedeji A. GenAI on Google Cloud. Enterprise Generative AI Systems...Agents 2026.pdf",
+          "modality": "text",
+          "page_number": 66,
+          "score": 0.0,
+          "rerank_score": 0.920884
+        },
+        {
+          "chunk_id": "12c8aaab4fa1_137_text_39c07847_o2",
+          "doc_id": "12c8aaab4fa1",
+          "source_file": "A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf",
+          "modality": "text",
+          "page_number": 137,
+          "score": 0.0,
+          "rerank_score": 0.918665
+        }
+      ]
+    },
+    {
+      "id": "Q05_iterator",
+      "text": "how to write a Python iterator with __iter__ and __next__",
+      "top_k": [
+        {
+          "chunk_id": "289fd158f828_173_text_209c87f4",
+          "doc_id": "289fd158f828",
+          "source_file": "Ayeva K. Mastering Python Design Patterns...essential Python patterns...3ed 2024.pdf",
+          "modality": "text",
+          "page_number": 173,
+          "score": 0.0,
+          "rerank_score": 0.928382
+        },
+        {
+          "chunk_id": "289fd158f828_173_text_0fcf68ec",
+          "doc_id": "289fd158f828",
+          "source_file": "Ayeva K. Mastering Python Design Patterns...essential Python patterns...3ed 2024.pdf",
+          "modality": "text",
+          "page_number": 173,
+          "score": 0.0,
+          "rerank_score": 0.927182
+        },
+        {
+          "chunk_id": "24ecec9a39ce_244_text_1bb3b26b",
+          "doc_id": "24ecec9a39ce",
+          "source_file": "Python Distilled David M. Beazley 2022.pdf",
+          "modality": "text",
+          "page_number": 244,
+          "score": 0.0,
+          "rerank_score": 0.927165
+        },
+        {
+          "chunk_id": "24ecec9a39ce_165_text_a06fbbeb",
+          "doc_id": "24ecec9a39ce",
+          "source_file": "Python Distilled David M. Beazley 2022.pdf",
+          "modality": "text",
+          "page_number": 165,
+          "score": 0.0,
+          "rerank_score": 0.925105
+        },
+        {
+          "chunk_id": "1e7e436164a3_433_text_b729155a",
+          "doc_id": "1e7e436164a3",
+          "source_file": "Fluent Python Luciano Ramalho 2015.pdf",
+          "modality": "text",
+          "page_number": 433,
+          "score": 0.659391,
+          "rerank_score": 0.924354
+        }
+      ]
+    },
+    {
+      "id": "Q06_decorator",
+      "text": "Python decorator recipe with functools.wraps",
+      "top_k": [
+        {
+          "chunk_id": "24ecec9a39ce_207_text_4289cf1f",
+          "doc_id": "24ecec9a39ce",
+          "source_file": "Python Distilled David M. Beazley 2022.pdf",
+          "modality": "text",
+          "page_number": 207,
+          "score": 0.596996,
+          "rerank_score": 0.956609
+        },
+        {
+          "chunk_id": "24ecec9a39ce_205_text_fa10a06c",
+          "doc_id": "24ecec9a39ce",
+          "source_file": "Python Distilled David M. Beazley 2022.pdf",
+          "modality": "text",
+          "page_number": 205,
+          "score": 0.609519,
+          "rerank_score": 0.950683
+        },
+        {
+          "chunk_id": "24ecec9a39ce_909_image_5934827d",
+          "doc_id": "24ecec9a39ce",
+          "source_file": "Python Distilled David M. Beazley 2022.pdf",
+          "modality": "image",
+          "page_number": 909,
+          "score": 0.664505,
+          "rerank_score": 0.944313
+        },
+        {
+          "chunk_id": "1e7e436164a3_225_text_ce4f9054",
+          "doc_id": "1e7e436164a3",
+          "source_file": "Fluent Python Luciano Ramalho 2015.pdf",
+          "modality": "text",
+          "page_number": 225,
+          "score": 0.646184,
+          "rerank_score": 0.940259
+        },
+        {
+          "chunk_id": "289fd158f828_106_text_a862ea99",
+          "doc_id": "289fd158f828",
+          "source_file": "Ayeva K. Mastering Python Design Patterns...essential Python patterns...3ed 2024.pdf",
+          "modality": "text",
+          "page_number": 106,
+          "score": 0.580074,
+          "rerank_score": 0.93938
+        }
+      ]
+    },
+    {
+      "id": "Q07_module_org",
+      "text": "structuring Python modules and packages for a large project",
+      "top_k": [
+        {
+          "chunk_id": "24ecec9a39ce_070_text_8f2f9dde",
+          "doc_id": "24ecec9a39ce",
+          "source_file": "Python Distilled David M. Beazley 2022.pdf",
+          "modality": "text",
+          "page_number": 70,
+          "score": 0.595511,
+          "rerank_score": 0.958622
+        },
+        {
+          "chunk_id": "24ecec9a39ce_072_text_1fa3e957",
+          "doc_id": "24ecec9a39ce",
+          "source_file": "Python Distilled David M. Beazley 2022.pdf",
+          "modality": "text",
+          "page_number": 72,
+          "score": 0.687691,
+          "rerank_score": 0.943791
+        },
+        {
+          "chunk_id": "24ecec9a39ce_373_text_96ad61c5",
+          "doc_id": "24ecec9a39ce",
+          "source_file": "Python Distilled David M. Beazley 2022.pdf",
+          "modality": "text",
+          "page_number": 373,
+          "score": 0.0,
+          "rerank_score": 0.941355
+        },
+        {
+          "chunk_id": "24ecec9a39ce_021_text_9baf70ee",
+          "doc_id": "24ecec9a39ce",
+          "source_file": "Python Distilled David M. Beazley 2022.pdf",
+          "modality": "text",
+          "page_number": 21,
+          "score": 0.0,
+          "rerank_score": 0.921871
+        },
+        {
+          "chunk_id": "24ecec9a39ce_347_text_8680787c",
+          "doc_id": "24ecec9a39ce",
+          "source_file": "Python Distilled David M. Beazley 2022.pdf",
+          "modality": "text",
+          "page_number": 347,
+          "score": 0.589054,
+          "rerank_score": 0.920824
+        }
+      ]
+    },
+    {
+      "id": "Q08_pytorch_cnn",
+      "text": "PyTorch convolutional neural network for image classification",
+      "top_k": [
+        {
+          "chunk_id": "57dd24faf967_081_text_83156d16",
+          "doc_id": "57dd24faf967",
+          "source_file": "Chaubal S. AI Projects in PyTorch. Hands-On Projects in Vision, Text,...2025.pdf",
+          "modality": "text",
+          "page_number": 81,
+          "score": 0.730277,
+          "rerank_score": 0.950217
+        },
+        {
+          "chunk_id": "57dd24faf967_082_text_a5c9dc8c",
+          "doc_id": "57dd24faf967",
+          "source_file": "Chaubal S. AI Projects in PyTorch. Hands-On Projects in Vision, Text,...2025.pdf",
+          "modality": "text",
+          "page_number": 82,
+          "score": 0.68837,
+          "rerank_score": 0.936327
+        },
+        {
+          "chunk_id": "57dd24faf967_087_text_8182d2b9",
+          "doc_id": "57dd24faf967",
+          "source_file": "Chaubal S. AI Projects in PyTorch. Hands-On Projects in Vision, Text,...2025.pdf",
+          "modality": "text",
+          "page_number": 87,
+          "score": 0.773424,
+          "rerank_score": 0.933968
+        },
+        {
+          "chunk_id": "57dd24faf967_086_text_4b7afb25",
+          "doc_id": "57dd24faf967",
+          "source_file": "Chaubal S. AI Projects in PyTorch. Hands-On Projects in Vision, Text,...2025.pdf",
+          "modality": "text",
+          "page_number": 86,
+          "score": 0.72196,
+          "rerank_score": 0.931017
+        },
+        {
+          "chunk_id": "57dd24faf967_100_text_c13fec35",
+          "doc_id": "57dd24faf967",
+          "source_file": "Chaubal S. AI Projects in PyTorch. Hands-On Projects in Vision, Text,...2025.pdf",
+          "modality": "text",
+          "page_number": 100,
+          "score": 0.709022,
+          "rerank_score": 0.928999
+        }
+      ]
+    },
+    {
+      "id": "Q09_arcgis",
+      "text": "automate ArcGIS Pro workflow with a Python script",
+      "top_k": [
+        {
+          "chunk_id": "5917d010344e_013_text_8b84cc2a",
+          "doc_id": "5917d010344e",
+          "source_file": "Programming ArcGIS with Python Cookbook.pdf",
+          "modality": "text",
+          "page_number": 13,
+          "score": 0.763383,
+          "rerank_score": 0.950043
+        },
+        {
+          "chunk_id": "5917d010344e_017_text_88e1ec3f",
+          "doc_id": "5917d010344e",
+          "source_file": "Programming ArcGIS with Python Cookbook.pdf",
+          "modality": "text",
+          "page_number": 17,
+          "score": 0.0,
+          "rerank_score": 0.948917
+        },
+        {
+          "chunk_id": "5917d010344e_016_text_43b1f5ba",
+          "doc_id": "5917d010344e",
+          "source_file": "Programming ArcGIS with Python Cookbook.pdf",
+          "modality": "text",
+          "page_number": 16,
+          "score": 0.679723,
+          "rerank_score": 0.940404
+        },
+        {
+          "chunk_id": "5917d010344e_013_table_c92beed6",
+          "doc_id": "5917d010344e",
+          "source_file": "Programming ArcGIS with Python Cookbook.pdf",
+          "modality": "table",
+          "page_number": 13,
+          "score": 0.725037,
+          "rerank_score": 0.934991
+        },
+        {
+          "chunk_id": "5917d010344e_318_text_6bca7d1e",
+          "doc_id": "5917d010344e",
+          "source_file": "Programming ArcGIS with Python Cookbook.pdf",
+          "modality": "text",
+          "page_number": 318,
+          "score": 0.706408,
+          "rerank_score": 0.929155
+        }
+      ]
+    },
+    {
+      "id": "Q10_patterns",
+      "text": "design patterns and idioms in Python",
+      "top_k": [
+        {
+          "chunk_id": "1e7e436164a3_207_text_6dfacda6",
+          "doc_id": "1e7e436164a3",
+          "source_file": "Fluent Python Luciano Ramalho 2015.pdf",
+          "modality": "text",
+          "page_number": 207,
+          "score": 0.67153,
+          "rerank_score": 0.949481
+        },
+        {
+          "chunk_id": "1e7e436164a3_208_text_3f41ac99",
+          "doc_id": "1e7e436164a3",
+          "source_file": "Fluent Python Luciano Ramalho 2015.pdf",
+          "modality": "text",
+          "page_number": 208,
+          "score": 0.0,
+          "rerank_score": 0.925938
+        },
+        {
+          "chunk_id": "1e7e436164a3_002_text_7722a51f",
+          "doc_id": "1e7e436164a3",
+          "source_file": "Fluent Python Luciano Ramalho 2015.pdf",
+          "modality": "text",
+          "page_number": 2,
+          "score": 0.0,
+          "rerank_score": 0.917263
+        },
+        {
+          "chunk_id": "289fd158f828_014_text_84851e67",
+          "doc_id": "289fd158f828",
+          "source_file": "Ayeva K. Mastering Python Design Patterns...essential Python patterns...3ed 2024.pdf",
+          "modality": "text",
+          "page_number": 14,
+          "score": 0.661142,
+          "rerank_score": 0.916817
+        },
+        {
+          "chunk_id": "1e7e436164a3_208_text_f6f3b540",
+          "doc_id": "1e7e436164a3",
+          "source_file": "Fluent Python Luciano Ramalho 2015.pdf",
+          "modality": "text",
+          "page_number": 208,
+          "score": 0.64891,
+          "rerank_score": 0.914775
+        }
+      ]
+    },
+    {
+      "id": "Q11_chatgpt_nl",
+      "text": "hoe schrijf ik betere ChatGPT prompts in het Nederlands",
+      "top_k": [
+        {
+          "chunk_id": "988b4f3d88a2_3000_text_d93ed83f",
+          "doc_id": "988b4f3d88a2",
+          "source_file": "Falkner, Leonie - ChatGPT Praktijk-handboek.epub",
+          "modality": "text",
+          "page_number": 3000,
+          "score": 0.0,
+          "rerank_score": 0.948756
+        },
+        {
+          "chunk_id": "a414e7cb0259_24037_text_48210cf1",
+          "doc_id": "a414e7cb0259",
+          "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
+          "modality": "text",
+          "page_number": 24037,
+          "score": 0.0,
+          "rerank_score": 0.948288
+        },
+        {
+          "chunk_id": "988b4f3d88a2_5001_text_a3058412",
+          "doc_id": "988b4f3d88a2",
+          "source_file": "Falkner, Leonie - ChatGPT Praktijk-handboek.epub",
+          "modality": "text",
+          "page_number": 5001,
+          "score": 0.0,
+          "rerank_score": 0.942593
+        },
+        {
+          "chunk_id": "a414e7cb0259_13059_text_f19472af",
+          "doc_id": "a414e7cb0259",
+          "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
+          "modality": "text",
+          "page_number": 13059,
+          "score": 0.0,
+          "rerank_score": 0.931957
+        },
+        {
+          "chunk_id": "a414e7cb0259_19001_text_47650923",
+          "doc_id": "a414e7cb0259",
+          "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
+          "modality": "text",
+          "page_number": 19001,
+          "score": 0.0,
+          "rerank_score": 0.927359
+        }
+      ]
+    },
+    {
+      "id": "Q12_ki_epub_nl",
+      "text": "digitale producten verkopen met AI en ChatGPT",
+      "top_k": [
+        {
+          "chunk_id": "a414e7cb0259_3004_text_7c62db51",
+          "doc_id": "a414e7cb0259",
+          "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
+          "modality": "text",
+          "page_number": 3004,
+          "score": 0.786252,
+          "rerank_score": 0.949185
+        },
+        {
+          "chunk_id": "a414e7cb0259_13000_text_c73c652d",
+          "doc_id": "a414e7cb0259",
+          "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
+          "modality": "text",
+          "page_number": 13000,
+          "score": 0.0,
+          "rerank_score": 0.943174
+        },
+        {
+          "chunk_id": "a414e7cb0259_3002_text_4e9a73f7",
+          "doc_id": "a414e7cb0259",
+          "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
+          "modality": "text",
+          "page_number": 3002,
+          "score": 0.0,
+          "rerank_score": 0.943174
+        },
+        {
+          "chunk_id": "a414e7cb0259_29000_text_30937bfb",
+          "doc_id": "a414e7cb0259",
+          "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
+          "modality": "text",
+          "page_number": 29000,
+          "score": 0.0,
+          "rerank_score": 0.941899
+        },
+        {
+          "chunk_id": "a414e7cb0259_3005_text_636e43ca",
+          "doc_id": "a414e7cb0259",
+          "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
+          "modality": "text",
+          "page_number": 3005,
+          "score": 0.0,
+          "rerank_score": 0.941899
+        }
+      ]
+    },
+    {
+      "id": "Q13_pcworld",
+      "text": "Windows 11 PC build advice and hardware recommendations",
+      "top_k": [
+        {
+          "chunk_id": "ae1c6740af40_052_text_6646d506",
+          "doc_id": "ae1c6740af40",
+          "source_file": "PCWorld_July_2025_USA.pdf",
+          "modality": "text",
+          "page_number": 52,
+          "score": 0.0,
+          "rerank_score": 0.861635
+        },
+        {
+          "chunk_id": "ae1c6740af40_072_text_4914e2db",
+          "doc_id": "ae1c6740af40",
+          "source_file": "PCWorld_July_2025_USA.pdf",
+          "modality": "text",
+          "page_number": 72,
+          "score": 0.542471,
+          "rerank_score": 0.852502
+        },
+        {
+          "chunk_id": "ae1c6740af40_071_text_67ef89ce",
+          "doc_id": "ae1c6740af40",
+          "source_file": "PCWorld_July_2025_USA.pdf",
+          "modality": "text",
+          "page_number": 71,
+          "score": 0.533453,
+          "rerank_score": 0.852502
+        },
+        {
+          "chunk_id": "ae1c6740af40_064_text_9e78fcbe",
+          "doc_id": "ae1c6740af40",
+          "source_file": "PCWorld_July_2025_USA.pdf",
+          "modality": "text",
+          "page_number": 64,
+          "score": 0.552963,
+          "rerank_score": 0.850398
+        },
+        {
+          "chunk_id": "ae1c6740af40_044_text_4193772e",
+          "doc_id": "ae1c6740af40",
+          "source_file": "PCWorld_July_2025_USA.pdf",
+          "modality": "text",
+          "page_number": 44,
+          "score": 0.534957,
+          "rerank_score": 0.846808
+        }
+      ]
+    },
+    {
+      "id": "Q14_combat",
+      "text": "F-35 Lightning II stealth fighter operations",
+      "top_k": [
+        {
+          "chunk_id": "a4c2916a64c2_035_text_221d8a28",
+          "doc_id": "a4c2916a64c2",
+          "source_file": "Combat Aircraft - August 2025 UK.pdf",
+          "modality": "text",
+          "page_number": 35,
+          "score": 0.642702,
+          "rerank_score": 0.0
+        },
+        {
+          "chunk_id": "a4c2916a64c2_012_image_0bacb145",
+          "doc_id": "a4c2916a64c2",
+          "source_file": "Combat Aircraft - August 2025 UK.pdf",
+          "modality": "image",
+          "page_number": 12,
+          "score": 0.667538,
+          "rerank_score": 0.0
+        },
+        {
+          "chunk_id": "a4c2916a64c2_061_text_331d49f7",
+          "doc_id": "a4c2916a64c2",
+          "source_file": "Combat Aircraft - August 2025 UK.pdf",
+          "modality": "text",
+          "page_number": 61,
+          "score": 0.0,
+          "rerank_score": 0.0
+        },
+        {
+          "chunk_id": "a4c2916a64c2_023_image_dc887913",
+          "doc_id": "a4c2916a64c2",
+          "source_file": "Combat Aircraft - August 2025 UK.pdf",
+          "modality": "image",
+          "page_number": 23,
+          "score": 0.66043,
+          "rerank_score": 0.0
+        },
+        {
+          "chunk_id": "a4c2916a64c2_018_text_4e26f02d",
+          "doc_id": "a4c2916a64c2",
+          "source_file": "Combat Aircraft - August 2025 UK.pdf",
+          "modality": "text",
+          "page_number": 18,
+          "score": 0.0,
+          "rerank_score": 0.0
+        }
+      ]
+    },
+    {
+      "id": "Q15_firearms",
+      "text": "firearm cleaning and safety procedure step by step",
+      "top_k": [
+        {
+          "chunk_id": "29f7c8bb7680_061_image_391e224e",
+          "doc_id": "29f7c8bb7680",
+          "source_file": "Firearms.pdf",
+          "modality": "image",
+          "page_number": 61,
+          "score": 0.709521,
+          "rerank_score": 0.85741
+        },
+        {
+          "chunk_id": "29f7c8bb7680_201_image_d2c353ea",
+          "doc_id": "29f7c8bb7680",
+          "source_file": "Firearms.pdf",
+          "modality": "image",
+          "page_number": 201,
+          "score": 0.71451,
+          "rerank_score": 0.852037
+        },
+        {
+          "chunk_id": "29f7c8bb7680_242_image_1f25179a",
+          "doc_id": "29f7c8bb7680",
+          "source_file": "Firearms.pdf",
+          "modality": "image",
+          "page_number": 242,
+          "score": 0.709467,
+          "rerank_score": 0.851614
+        },
+        {
+          "chunk_id": "29f7c8bb7680_290_image_cc75df33",
+          "doc_id": "29f7c8bb7680",
+          "source_file": "Firearms.pdf",
+          "modality": "image",
+          "page_number": 290,
+          "score": 0.703678,
+          "rerank_score": 0.850599
+        },
+        {
+          "chunk_id": "29f7c8bb7680_184_image_fd900f60",
+          "doc_id": "29f7c8bb7680",
+          "source_file": "Firearms.pdf",
+          "modality": "image",
+          "page_number": 184,
+          "score": 0.72601,
+          "rerank_score": 0.849213
+        }
+      ]
+    },
+    {
+      "id": "Q16_earthship",
+      "text": "Earthship passive solar design and rainwater harvesting",
+      "top_k": [
+        {
+          "chunk_id": "aa11d5ea2275_039_text_0e2b3453",
+          "doc_id": "aa11d5ea2275",
+          "source_file": "Earthship_Vol1_How to build your own.pdf",
+          "modality": "text",
+          "page_number": 39,
+          "score": 0.0,
+          "rerank_score": 0.86408
+        },
+        {
+          "chunk_id": "aa11d5ea2275_016_text_001bb73d",
+          "doc_id": "aa11d5ea2275",
+          "source_file": "Earthship_Vol1_How to build your own.pdf",
+          "modality": "text",
+          "page_number": 16,
+          "score": 0.692945,
+          "rerank_score": 0.862839
+        },
+        {
+          "chunk_id": "aa11d5ea2275_031_text_916d0a62",
+          "doc_id": "aa11d5ea2275",
+          "source_file": "Earthship_Vol1_How to build your own.pdf",
+          "modality": "text",
+          "page_number": 31,
+          "score": 0.0,
+          "rerank_score": 0.857703
+        },
+        {
+          "chunk_id": "aa11d5ea2275_052_text_6a02aad3",
+          "doc_id": "aa11d5ea2275",
+          "source_file": "Earthship_Vol1_How to build your own.pdf",
+          "modality": "text",
+          "page_number": 52,
+          "score": 0.0,
+          "rerank_score": 0.854675
+        },
+        {
+          "chunk_id": "aa11d5ea2275_082_text_f6a109f1",
+          "doc_id": "aa11d5ea2275",
+          "source_file": "Earthship_Vol1_How to build your own.pdf",
+          "modality": "text",
+          "page_number": 82,
+          "score": 0.0,
+          "rerank_score": 0.854286
+        }
+      ]
+    },
+    {
+      "id": "Q17_greenhouse",
+      "text": "greenhouse climate control and ventilation strategy",
+      "top_k": [
+        {
+          "chunk_id": "8b79e9dca3ae_142_text_281617fc",
+          "doc_id": "8b79e9dca3ae",
+          "source_file": "Greenhouse Design and Control by Pedro Ponce.pdf",
+          "modality": "text",
+          "page_number": 142,
+          "score": 0.0,
+          "rerank_score": 0.951284
+        },
+        {
+          "chunk_id": "8b79e9dca3ae_150_text_c47011ed",
+          "doc_id": "8b79e9dca3ae",
+          "source_file": "Greenhouse Design and Control by Pedro Ponce.pdf",
+          "modality": "text",
+          "page_number": 150,
+          "score": 0.0,
+          "rerank_score": 0.912104
+        },
+        {
+          "chunk_id": "8b79e9dca3ae_034_text_c137d269",
+          "doc_id": "8b79e9dca3ae",
+          "source_file": "Greenhouse Design and Control by Pedro Ponce.pdf",
+          "modality": "text",
+          "page_number": 34,
+          "score": 0.0,
+          "rerank_score": 0.908206
+        },
+        {
+          "chunk_id": "8b79e9dca3ae_134_text_2a660d97",
+          "doc_id": "8b79e9dca3ae",
+          "source_file": "Greenhouse Design and Control by Pedro Ponce.pdf",
+          "modality": "text",
+          "page_number": 134,
+          "score": 0.0,
+          "rerank_score": 0.895335
+        },
+        {
+          "chunk_id": "8b79e9dca3ae_067_text_b4aed09f_o2",
+          "doc_id": "8b79e9dca3ae",
+          "source_file": "Greenhouse Design and Control by Pedro Ponce.pdf",
+          "modality": "text",
+          "page_number": 67,
+          "score": 0.0,
+          "rerank_score": 0.892112
+        }
+      ]
+    },
+    {
+      "id": "Q18_aios",
+      "text": "what is an LLM agent operating system",
+      "top_k": [
+        {
+          "chunk_id": "6afeb55a9449_012_text_846ea539",
+          "doc_id": "6afeb55a9449",
+          "source_file": "Jungjun H. Build an AI Agent (From Scratch)...MEAP 2026.pdf",
+          "modality": "text",
+          "page_number": 12,
+          "score": 0.0,
+          "rerank_score": 0.958022
+        },
+        {
+          "chunk_id": "6afeb55a9449_010_text_ba3b95f4",
+          "doc_id": "6afeb55a9449",
+          "source_file": "Jungjun H. Build an AI Agent (From Scratch)...MEAP 2026.pdf",
+          "modality": "text",
+          "page_number": 10,
+          "score": 0.715141,
+          "rerank_score": 0.949509
+        },
+        {
+          "chunk_id": "6afeb55a9449_009_text_2d61126c",
+          "doc_id": "6afeb55a9449",
+          "source_file": "Jungjun H. Build an AI Agent (From Scratch)...MEAP 2026.pdf",
+          "modality": "text",
+          "page_number": 9,
+          "score": 0.710385,
+          "rerank_score": 0.949509
+        },
+        {
+          "chunk_id": "07a1232cccf4_001_text_f758e64d",
+          "doc_id": "07a1232cccf4",
+          "source_file": "AIOS LLM Agent Operating System.pdf",
+          "modality": "text",
+          "page_number": 1,
+          "score": 0.0,
+          "rerank_score": 0.94673
+        },
+        {
+          "chunk_id": "47bcf7e2f91b_240_text_7c9067b0",
+          "doc_id": "47bcf7e2f91b",
+          "source_file": "Sekar S. The MCP Standard. A Developer's Guide..Building Universal AI Tools 2026.pdf",
+          "modality": "text",
+          "page_number": 240,
+          "score": 0.0,
+          "rerank_score": 0.915872
+        }
+      ]
+    },
+    {
+      "id": "Q19_solar_pv",
+      "text": "modelling a photovoltaic solar PV system performance",
+      "top_k": [
+        {
+          "chunk_id": "b670f5359e9c_001_text_579501cf",
+          "doc_id": "b670f5359e9c",
+          "source_file": "IRJET_Modeling_of_Solar_PV_system_under.pdf",
+          "modality": "text",
+          "page_number": 1,
+          "score": 0.605898,
+          "rerank_score": 0.915341
+        },
+        {
+          "chunk_id": "b670f5359e9c_007_text_5178f773",
+          "doc_id": "b670f5359e9c",
+          "source_file": "IRJET_Modeling_of_Solar_PV_system_under.pdf",
+          "modality": "text",
+          "page_number": 7,
+          "score": 0.627752,
+          "rerank_score": 0.902977
+        },
+        {
+          "chunk_id": "b670f5359e9c_002_text_f16b6cd2",
+          "doc_id": "b670f5359e9c",
+          "source_file": "IRJET_Modeling_of_Solar_PV_system_under.pdf",
+          "modality": "text",
+          "page_number": 2,
+          "score": 0.605792,
+          "rerank_score": 0.892225
+        },
+        {
+          "chunk_id": "b670f5359e9c_006_text_bc690797",
+          "doc_id": "b670f5359e9c",
+          "source_file": "IRJET_Modeling_of_Solar_PV_system_under.pdf",
+          "modality": "text",
+          "page_number": 6,
+          "score": 0.583023,
+          "rerank_score": 0.888706
+        },
+        {
+          "chunk_id": "b670f5359e9c_007_text_de931af1",
+          "doc_id": "b670f5359e9c",
+          "source_file": "IRJET_Modeling_of_Solar_PV_system_under.pdf",
+          "modality": "text",
+          "page_number": 7,
+          "score": 0.627399,
+          "rerank_score": 0.887078
+        }
+      ]
+    },
+    {
+      "id": "Q20_harry",
+      "text": "Harry Potter Quidditch match against Slytherin",
+      "top_k": [
+        {
+          "chunk_id": "f0a0beca0506_232_text_13b9eab5",
+          "doc_id": "f0a0beca0506",
+          "source_file": "HarryPotter_and_the_Sorcerers_Stone.pdf",
+          "modality": "text",
+          "page_number": 232,
+          "score": 0.71185,
+          "rerank_score": 0.939994
+        },
+        {
+          "chunk_id": "f0a0beca0506_233_text_ca81fa83",
+          "doc_id": "f0a0beca0506",
+          "source_file": "HarryPotter_and_the_Sorcerers_Stone.pdf",
+          "modality": "text",
+          "page_number": 233,
+          "score": 0.0,
+          "rerank_score": 0.939994
+        },
+        {
+          "chunk_id": "f0a0beca0506_198_text_562b3f93",
+          "doc_id": "f0a0beca0506",
+          "source_file": "HarryPotter_and_the_Sorcerers_Stone.pdf",
+          "modality": "text",
+          "page_number": 198,
+          "score": 0.753895,
+          "rerank_score": 0.927597
+        },
+        {
+          "chunk_id": "f0a0beca0506_197_text_df9d3ea8",
+          "doc_id": "f0a0beca0506",
+          "source_file": "HarryPotter_and_the_Sorcerers_Stone.pdf",
+          "modality": "text",
+          "page_number": 197,
+          "score": 0.748124,
+          "rerank_score": 0.927597
+        },
+        {
+          "chunk_id": "f0a0beca0506_197_text_40d12a84",
+          "doc_id": "f0a0beca0506",
+          "source_file": "HarryPotter_and_the_Sorcerers_Stone.pdf",
+          "modality": "text",
+          "page_number": 197,
+          "score": 0.730369,
+          "rerank_score": 0.924637
+        }
+      ]
+    }
+  ]
+}

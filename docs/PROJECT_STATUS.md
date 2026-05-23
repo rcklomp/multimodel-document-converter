@@ -6,11 +6,15 @@ Purpose: fast orientation for a new coding session. Read this before deeper proj
 
 ## Current Objective
 
-**v2.14 IN PROGRESS (started 2026-05-22, active 2026-05-23).** v2.13.0
-SHIPPED 2026-05-22 with annotated tag `v2.13.0` staged for user push.
-v2.14 opened the same day on top of the v2.13.0 retrieval stack;
-plan + outcomes tracked in [`docs/PLAN_V2.14.md`](PLAN_V2.14.md)
-(currently at Draft v0.5).
+**v2.14.0 SHIPPED 2026-05-23** (engine bump 2.13.0→2.14.0; v2.14.0
+annotated tag STAGED locally, pending user push to GitHub + Gitea
+after live-stack re-verification). v2.14 layered local-LLM
+accelerator infrastructure on top of the v2.13.0 retrieval stack —
+**NO retrieval-stack changes** vs v2.13.0 (omlx
+Qwen3-Embedding-8B-mxfp8 + BM25 + RRF + ModernBERT rerank unchanged).
+
+**Active canonical baseline:** [`docs/QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md`](QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md).
+**Cycle history:** [`docs/PLAN_V2.14.md`](PLAN_V2.14.md) (Draft v0.5).
 
 **v2.14 phases shipped:**
 - **Phase 0 (judge calibration)** — first run SHIPPED 2026-05-22

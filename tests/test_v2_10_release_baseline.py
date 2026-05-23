@@ -54,11 +54,14 @@ def test_engine_and_schema_version_pinned() -> None:
     changed."""
     from mmrag_v2.version import __engine_version__, __schema_version__
 
-    # Current production tag (v2.13.0 closes Phase 1 local embedder swap
-    # — Qwen3-Embedding-8B-mxfp8 via omlx replaces Dashscope
-    # text-embedding-v4; 6/6-axis apples-to-apples win, shipped
-    # 2026-05-22). Bump this assertion when the next tag ships.
-    assert __engine_version__ == "2.13.0"
+    # Current production tag (v2.14.0 ships the local-LLM accelerator
+    # stack — Phase 4a HyDE re-validated + Phase 4c gen-provider +
+    # Phase 4d tie-breaker + Phase 4-Resilience qwen3-max cloud
+    # fallback + Phase 0 27B-MTP re-calibration + Phase 5 disk
+    # precheck. NO retrieval-stack changes vs v2.13.0. Phase 1 + Phase
+    # 6 are PARTIAL — code-side fixes shipped, data-acceptance bars
+    # deferred to v2.15. Bump this assertion when the next tag ships.
+    assert __engine_version__ == "2.14.0"
     assert __schema_version__ == "2.7.0"
 
     # Cross-check pyproject.toml stays in sync with version.py so a
