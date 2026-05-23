@@ -282,30 +282,32 @@ Do not print or commit API keys.
 - provider: Dashscope, model `qwen-max` (used for both query generation and judging)
 - v2.14 Phase 0/4 additions: local-LLM judge candidate at the GX10 vLLM endpoint below; ship-gate go/no-go on Relevance + Faithfulness axes stays on cloud `qwen-max` per the Phase 4 "leniency trap" guardrail in `PLAN_V2.14.md`
 
-**Local LLM endpoint (v2.14 Phase 4a, LIVE 2026-05-23):**
+**Local LLM endpoint (v2.14 Phase 4a, LIVE 2026-05-23 PM):**
 
 - provider: vLLM (OpenAI-compatible)
-- model: `Qwen/Qwen3.6-27B-FP8` with native MTP=3 speculative decoding
-- served-model aliases: `Qwen/Qwen3.6-27B-FP8` (full) or `qwen3.6-27b` (short)
+- model: `RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic` (Neural Magic
+  compressed-tensors FP8-dynamic; Blackwell tensor-core native)
+- served-model aliases: `RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic` (full) or `qwen2.5-14b-fp8` (short)
 - endpoint: `http://10.0.10.239:8000/v1/chat/completions` (Asus Ascent GX10 = DGX Spark clone, Grace-Blackwell GB10, 128 GB unified memory)
-- container: `vllm/vllm-openai:v0.20.0-aarch64-cu130-ubuntu2404`
-- measured perf: ~32 tok/s single-stream decode (MTP-3 acceptance at positions 1/2/3 ≈ 80/55/40%, mean accepted length 2.5–3.3)
-- max context: 256K configured (32K typically sufficient for HyDE + judge)
+- container: `vllm/vllm-openai:v0.20.0-aarch64-cu130-ubuntu2404` (entrypoint = `[vllm serve]`; model as positional first arg, NO `serve` after image tag)
+- max context: 32K configured (sufficient for HyDE + judge; lower than 27B's 256K because 14B doesn't benefit and saves KV-cache headroom)
 - code default: `src/mmrag_v2/retrieval/hyde.py` `VLLM_DEFAULT_MODEL` (call with `provider="vllm"`)
 - env var: `VLLM_API_KEY` (optional; endpoint runs unauthenticated by default)
-- canonical recipe + path-of-pain notes: `memory/project_v2_14_gx10_27b_mtp_swap.md`
+- canonical recipe: `memory/project_v2_14_gx10_14b_fp8_swap.md`
 - guardrails before any future swap: `memory/feedback_gx10_deployment_guardrails.md` (5-point hard checklist)
-- **Phase 0 27B-MTP calibration SHIPPED 2026-05-23** (n=518, 0 parse
-  failures). Per-axis: relevance 82.0% / format 70.7% / faithfulness 78.8% —
-  ALL THREE RESTRICTED ("HyDE-only" band). Bias direction flipped vs the
-  retired 14B (was lenient on relevance/faithfulness, now strict on
-  format). Phase 4b "Format-axis only" scope evaporated; Phase 4e
-  Format demo dropped. Phase 4a HyDE + Phase 4c gen-provider remain
-  safe. Report:
-  `docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen36_27b_mtp.md`.
-  Predecessor `Qwen/Qwen2.5-14B-Instruct` retired 2026-05-23 (verdict
-  in `docs/CALIBRATION_2026-05-22_v2.14_p0_local_judge.md` retained
-  for historical comparison).
+- **Phase 0 FP8-14B calibration SHIPPED 2026-05-23 PM** (n=518, 0 parse
+  failures). Per-axis verdict on the same 518-query fixture as the
+  retired 14B-BF16 and 27B-MTP predecessors:
+  - relevance: **82.2%** (RESTRICTED; +0.2pp vs 27B-MTP, +0.5pp vs 14B-BF16)
+  - format: **90.7% ✓ TRUSTWORTHY** (+20.0pp vs 27B-MTP, +0.5pp vs 14B-BF16)
+  - faithfulness: **76.6%** (RESTRICTED; -2.2pp vs 27B-MTP, +0.5pp vs 14B-BF16)
+  FP8 quantization preserves the 14B's BF16 calibration profile and
+  reclaims the format-axis TRUSTWORTHY verdict that the 27B-MTP had
+  lost. Report:
+  `docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_14b_fp8.md`.
+- **Predecessor endpoint history (all retired 2026-05-23):**
+  - 27B-MTP (AM): rel 82.0 / format 70.7 / faith 78.8 — all RESTRICTED. Format collapse motivated this PM swap.
+  - 14B-BF16 (2026-05-22): rel 81.7 / format 90.2 TRUSTWORTHY / faith 76.1 — close calibration profile to the new FP8-14B but Blackwell-suboptimal precision.
 
 **Production VLM (image enrichment — unchanged from v2.11):**
 
@@ -384,7 +386,7 @@ of drift, the plan file wins.
 
 | Phase | Topic | Status (2026-05-23) |
 |---|---|---|
-| 0 | Local-judge calibration | First run on 14B SUPERSEDED. **27B-MTP re-cal SHIPPED 2026-05-23** — all three axes RESTRICTED (rel 82.0% / format 70.7% / faith 78.8%). Bias direction flipped vs 14B. |
+| 0 | Local-judge calibration | 14B-BF16 (AM, retired). 27B-MTP (AM, retired — format collapsed to 70.7%). **FP8-14B SHIPPED 2026-05-23 PM** — rel 82.2% / **format 90.7% ✓ TRUSTWORTHY** / faith 76.6%. Blackwell-native FP8 quant preserves the 14B calibration profile + reclaims TRUSTWORTHY format. |
 | 1 | Form/Table layout extraction recovery | **PARTIAL 2026-05-23; rolled back** — code-side semantic-bug fix kept (`--force-table-vlm` truly forces); mini-soak measured Format -26.9pp regression because VLM tables coexist with flat-prose duplicates that win retrieval. Production restored to v2.13 baseline. v2.15 dedup work needed. |
 | 2 | Targeted HyDE bridging for code + minority languages | PENDING — depends on Phase 6 + Phase 1 landing. |
 | 3 | 30-day dashscope-rollback drop | PENDING — time-gated decision point 2026-06-19. |

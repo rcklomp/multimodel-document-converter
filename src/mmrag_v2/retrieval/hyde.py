@@ -34,17 +34,31 @@ DEFAULT_MAX_TOKENS = 250  # ~50-100 words of hypothetical answer
 DEFAULT_TIMEOUT = 45
 DEFAULT_RETRIES = 3
 
-# v2.14 Phase 4a: local-LLM HyDE provider. The original 2026-05-22
-# calibration (docs/CALIBRATION_2026-05-22_v2.14_p0_local_judge.md)
-# was run against Qwen2.5-14B-Instruct on the GX10. On 2026-05-23 the
-# endpoint was swapped to Qwen3.6-27B-FP8 with native MTP=3 spec
-# decoding (~32 tok/s on Spark, well-fitted to the 128 GB unified
-# memory). The 14B calibration verdict is therefore stale; a fresh
-# Phase 0 run against the 27B endpoint is the prerequisite for any
-# Phase 4b/c/d/e judge-side use. HyDE generation itself is leniency-
-# robust — the bias direction doesn't affect retrieval-target answers.
+# v2.14 Phase 4a: local-LLM HyDE provider. Endpoint history:
+#   2026-05-22:     Qwen2.5-14B-Instruct BF16 (retired —
+#                   Blackwell-suboptimal precision; tensor cores
+#                   optimized for FP8/FP4)
+#   2026-05-23 AM:  Qwen3.6-27B-FP8 + native MTP=3 (retired —
+#                   Phase 0 verdict format axis collapsed to 70.7%
+#                   RESTRICTED despite the +16.8pp speed advantage
+#                   from speculative decoding)
+#   2026-05-23 PM:  RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic (ACTIVE)
+#                   Phase 0 verdict: rel 82.2% / format 90.7%
+#                   TRUSTWORTHY / faith 76.6% on the same 518-query
+#                   fixture as the predecessors. FP8-dynamic via
+#                   Neural Magic compressed-tensors; native Blackwell
+#                   tensor-core format. Pure Qwen2.5-Instruct, NO
+#                   <think> mode (chat_template_kwargs.enable_thinking
+#                   flag is a no-op on this template; kept defensively
+#                   so any future Qwen3 swap doesn't break the harness).
+#                   Same-fixture comparison report:
+#                   docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_14b_fp8.md
+# Each model swap invalidates the prior Phase 0 calibration verdict
+# per memory/feedback_gx10_deployment_guardrails.md (constraint #5).
+# HyDE generation itself is leniency-robust — judge bias direction
+# doesn't affect retrieval-target hypothetical answers.
 VLLM_DEFAULT_URL = "http://10.0.10.239:8000/v1/chat/completions"
-VLLM_DEFAULT_MODEL = "Qwen/Qwen3.6-27B-FP8"
+VLLM_DEFAULT_MODEL = "RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic"
 
 
 SYSTEM_PROMPT = (

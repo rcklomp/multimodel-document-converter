@@ -27,7 +27,7 @@ Usage:
   python scripts/calibrate_local_judge_vs_qwen_max.py \\
     --work-path output/soak/v2.13_p1_omlx/work.jsonl \\
     --local-url http://10.0.10.239:8000/v1 \\
-    --local-model Qwen/Qwen3.6-27B-FP8 \\
+    --local-model RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic \\
     --report-path docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen36_27b_mtp.md
 """
 from __future__ import annotations
@@ -63,14 +63,23 @@ _extract_json = _sk._extract_json
 _read_work = _sk._read_work
 
 DEFAULT_LOCAL_URL = "http://10.0.10.239:8000/v1"
-DEFAULT_LOCAL_MODEL = "Qwen/Qwen3.6-27B-FP8"
+DEFAULT_LOCAL_MODEL = "RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic"
 
 
 def _post_chat(url: str, model: str, messages: list[dict], *,
                temperature: float = 0.0, max_tokens: int = 250,
-               timeout: int = 60, retries: int = 2) -> str | None:
+               timeout: int = 60, retries: int = 2,
+               bearer_token: str | None = None,
+               extra_headers: dict | None = None) -> str | None:
     """Call an OpenAI-compatible /v1/chat/completions endpoint and
-    return the assistant message content (or None on failure)."""
+    return the assistant message content (or None on failure).
+
+    `bearer_token` (v2.14 Phase 0 OpenRouter eval): when set, an
+    `Authorization: Bearer <token>` header is added. Default unset =
+    local-no-auth behavior preserved (GX10 vLLM endpoint).
+    `extra_headers` lets the caller add provider-specific headers
+    (e.g. OpenRouter wants `HTTP-Referer` + `X-Title` for analytics).
+    """
     payload = {
         "model": model,
         "messages": messages,
@@ -84,13 +93,18 @@ def _post_chat(url: str, model: str, messages: list[dict], *,
         "chat_template_kwargs": {"enable_thinking": False},
     }
     body = json.dumps(payload).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if bearer_token:
+        headers["Authorization"] = f"Bearer {bearer_token}"
+    if extra_headers:
+        headers.update(extra_headers)
     last_err = None
     for attempt in range(retries + 1):
         try:
             req = urllib.request.Request(
                 f"{url.rstrip('/')}/chat/completions",
                 data=body,
-                headers={"Content-Type": "application/json"},
+                headers=headers,
                 method="POST",
             )
             with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -114,8 +128,15 @@ def _post_chat(url: str, model: str, messages: list[dict], *,
 
 
 def _judge_local(url: str, model: str, query: str, gold: str,
-                 retrieved: str, source_file: str, page) -> dict | None:
-    """Apply the exact JUDGE prompt to the local LLM and parse JSON."""
+                 retrieved: str, source_file: str, page,
+                 *,
+                 bearer_token: str | None = None,
+                 extra_headers: dict | None = None) -> dict | None:
+    """Apply the exact JUDGE prompt to the local LLM and parse JSON.
+
+    `bearer_token` + `extra_headers` are forwarded to `_post_chat` —
+    used when calibrating against OpenRouter (or any auth-gated
+    OpenAI-compatible endpoint)."""
     user_prompt = JUDGE_USER_TEMPLATE.format(
         query=query,
         gold=gold[:1500],
@@ -130,6 +151,8 @@ def _judge_local(url: str, model: str, query: str, gold: str,
             {"role": "user", "content": user_prompt},
         ],
         temperature=0.0, max_tokens=250,
+        bearer_token=bearer_token,
+        extra_headers=extra_headers,
     )
     if not raw:
         return None
@@ -185,7 +208,43 @@ def main() -> int:
                    help="If >0, only judge the first N already-qwen-max-judged queries (for quick smoke).")
     p.add_argument("--results-cache", default=None,
                    help="JSON cache of per-query local judgments; resumes from cache if present.")
+    # v2.14 Phase 0 OpenRouter eval (judge-model shortlist).
+    p.add_argument("--judge-bearer-env", default=None,
+                   help="Env var name holding the bearer token for an "
+                        "auth-gated endpoint (e.g. OPENROUTER_API_KEY for "
+                        "https://openrouter.ai/api/v1). Unset = no auth "
+                        "header sent; preserves local-vLLM behavior.")
+    p.add_argument("--openrouter-referer",
+                   default="https://github.com/rcklomp/multimodel-document-converter",
+                   help="OpenRouter HTTP-Referer header for analytics routing.")
+    p.add_argument("--openrouter-title",
+                   default="MM-RAG V2 judge calibration",
+                   help="OpenRouter X-Title header for analytics labeling.")
     args = p.parse_args()
+
+    # Resolve the bearer token + provider-specific headers ONCE so the
+    # per-query loop doesn't re-read the env on every call.
+    bearer_token: str | None = None
+    extra_headers: dict | None = None
+    if args.judge_bearer_env:
+        bearer_token = os.environ.get(args.judge_bearer_env, "").strip() or None
+        if not bearer_token:
+            print(
+                f"ERROR: --judge-bearer-env={args.judge_bearer_env} requested "
+                f"but the env var is unset or empty.",
+                file=sys.stderr,
+            )
+            return 2
+        # OpenRouter wants these for analytics; harmless on other endpoints.
+        extra_headers = {
+            "HTTP-Referer": args.openrouter_referer,
+            "X-Title": args.openrouter_title,
+        }
+        print(
+            f"Auth: bearer token from ${args.judge_bearer_env} "
+            f"(len={len(bearer_token)}, prefix={bearer_token[:10]}...); "
+            f"adding HTTP-Referer + X-Title headers."
+        )
 
     work_path = Path(args.work_path)
     if not work_path.exists():
@@ -237,6 +296,8 @@ def main() -> int:
             retrieved=top1.get("content") or "",
             source_file=top1.get("source_file") or "",
             page=top1.get("page_number"),
+            bearer_token=bearer_token,
+            extra_headers=extra_headers,
         )
         if local is None:
             cache[qid] = {"status": "parse_or_call_failed"}
