@@ -188,7 +188,7 @@ See section 1 above. omlx wins 6/6 axes on the same fixture.
 | Form-class `format_form` judge axis | v2.13 P2 CarOK decision | CarOK Format penalty is judge-calibration, not content; v2.14 amends soak protocol |
 | Language-aware embedder routing | v2.13 P1 per-doc breakdown | German content (ATZ_Elektronik -12.5 R@1) underperforms with omlx |
 | Code-doc embedder choice | v2.13 P1 per-doc breakdown | Python_Cookbook, IRJET, Hybrid_electric regress 6-12pp R@1 |
-| Local LLM integration | **LIVE in v2.14** | GX10 vLLM endpoint at `http://10.0.10.239:8000` went live with `Qwen/Qwen2.5-14B-Instruct` on 2026-05-22 (Phase 4a HyDE provider shipped), then swapped to `Qwen/Qwen3.6-27B-FP8` with native MTP=3 on 2026-05-23. Speculative "Qwen3.6-35B-A3B-FP8" never deployed. Phase 0 re-calibration against the 27B endpoint is the open Phase 4b/c/d/e gate. See [`PLAN_V2.14.md`](PLAN_V2.14.md) §"Phase outcomes" + `memory/project_v2_14_gx10_27b_mtp_swap.md` |
+| Local LLM integration | **LIVE in v2.14** | GX10 vLLM endpoint at `http://10.0.10.239:8000` went live with `Qwen/Qwen2.5-14B-Instruct` on 2026-05-22 (Phase 4a HyDE provider shipped), then swapped to `Qwen/Qwen3.6-27B-FP8` with native MTP=3 on 2026-05-23. Speculative larger local-judge model never deployed (Phase 0 verdict came in RESTRICTED, not NOT USABLE). Phase 0 re-calibration against the 27B endpoint shipped 2026-05-23 — all three axes RESTRICTED; see [`PLAN_V2.14.md`](PLAN_V2.14.md) §"Phase outcomes" + `memory/project_v2_14_gx10_27b_mtp_swap.md` |
 | 30-day dashscope rollback window | This snapshot | Decision point 2026-06-19: drop `mmrag_v2_8__qwen3_dashscope` if no rollback fired |
 
 ## 8. References

@@ -178,7 +178,7 @@ verdict per axis.
 |---|---|---|
 | ≥85% | TRUSTWORTHY | Use local judge for exploration soaks (RRF weight sweeps, top_k sweeps, prompt iteration) |
 | 70-85% | RESTRICTED | HyDE-only — weaker semantics still help retrieval, but not enough for go/no-go judging |
-| <70% | NOT USABLE | Either pick a stronger local model (Qwen3.6-35B-A3B-FP8 once vLLM supports it) or stay on cloud |
+| <70% | NOT USABLE | Either pick a stronger local model or stay on cloud |
 
 **Output:** SHIP if all three axes ≥85%; otherwise document
 the restricted-use envelope and either (a) accept reduced scope
