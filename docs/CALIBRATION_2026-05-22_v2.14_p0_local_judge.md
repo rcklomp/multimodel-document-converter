@@ -5,12 +5,22 @@
 > on 2026-05-23. The per-axis verdicts in this report apply ONLY to
 > the 14B model and are no longer operative for Phase 4 gating.
 >
-> **Operative replacement (pending):**
-> `docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen36_27b_mtp.md`
-> — run `scripts/calibrate_local_judge_vs_qwen_max.py` (defaults now
-> point at the 27B endpoint) to produce it. Same fixture, same
-> JUDGE prompt — only the judge model differs. Until the new report
-> exists, Phase 4b/c/d/e remain blocked per `feedback_gx10_deployment_guardrails`.
+> **Operative replacement (ACTIVE):**
+> [`docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen36_27b_mtp.md`](CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen36_27b_mtp.md)
+> — same 518-query fixture, same JUDGE prompt, only the judge model
+> differs. **All three axes RESTRICTED on the 27B**: rel 82.0% /
+> format **70.7%** / faith 78.8%. Bias direction flipped (was lenient
+> on rel/faith for the 14B, now strict on format for the 27B). The
+> 14B's TRUSTWORTHY format verdict (90.2% below) does NOT carry over.
+> See PLAN_V2.14.md "Phase outcomes" Phase 0 row for the updated
+> Phase 4 PERMITTED list.
+>
+> First-attempt note (historical): the 2026-05-23 re-cal initially got
+> 510/518 parse failures because the 27B is served with
+> `--reasoning-parser qwen3` and defaulted to thinking mode (output
+> routed into `message.reasoning`; `message.content` came back null).
+> Commit `0c5e818` added `chat_template_kwargs={"enable_thinking": false}`
+> to the harness payload — second run completed with 0/518 failures.
 >
 > Body preserved below as historical evidence + harness validation.
 

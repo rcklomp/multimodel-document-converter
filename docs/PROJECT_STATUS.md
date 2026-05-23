@@ -14,24 +14,59 @@ plan + outcomes tracked in [`docs/PLAN_V2.14.md`](PLAN_V2.14.md)
 
 **v2.14 phases shipped:**
 - **Phase 0 (judge calibration)** — first run SHIPPED 2026-05-22
-  against `Qwen2.5-14B-Instruct`; **superseded 2026-05-23** when the
-  GX10 endpoint was swapped to `Qwen/Qwen3.6-27B-FP8` + native MTP=3.
-  Re-cal against the 27B is the immediate open gate (~80 min, $0;
-  see `scripts/calibrate_local_judge_vs_qwen_max.py`).
+  against `Qwen2.5-14B-Instruct`; SUPERSEDED 2026-05-23 when the GX10
+  endpoint was swapped to `Qwen/Qwen3.6-27B-FP8` + native MTP=3.
+  **Re-cal against the 27B SHIPPED 2026-05-23** (n=518, 0 parse failures
+  after a harness fix to disable Qwen3 thinking mode — see Phase 4a
+  note). Verdict: relevance 82.0% (RESTRICTED), **format 70.7% (RESTRICTED)**,
+  faithfulness 78.8% (RESTRICTED). ALL THREE AXES in the 70-85% "HyDE-only"
+  band; ±1 agreement stays 98.6-99.8% (ordinal scale consistent). Bias
+  direction FLIPPED vs the 14B: the 27B is systematically STRICTER on
+  format (132 cases where qwen-max said `2`, the 27B downgraded to `1`).
+  Report: `docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen36_27b_mtp.md`.
+  Phase 4 PERMITTED list contracts — see PLAN_V2.14.md Phase 4 row.
 - **Phase 4a (local HyDE provider)** SHIPPED 2026-05-22 —
   `src/mmrag_v2/retrieval/hyde.py` gained `provider="vllm"` knob.
   Default vLLM model updated 2026-05-23 from 14B to `Qwen/Qwen3.6-27B-FP8`.
+  Commit `0c5e818` (2026-05-23) added `chat_template_kwargs={enable_thinking: False}`
+  to the vLLM payload after the Phase 0 debug revealed the 27B was
+  silently dropping content via `--reasoning-parser qwen3` routing
+  to `message.reasoning`. Two new bridge tests in `tests/test_hyde.py`.
+  Live re-smoke: 670-char hypothesis in 8.8s (the earlier "392-char in 2s"
+  smoke was the pre-thinking-discovery 14B run).
 - **Phase 5 (soak disk-headroom precheck)** SHIPPED 2026-05-22.
+- **Phase 6 (code-block chunking hygiene)** — **PARTIAL 2026-05-23.**
+  Commit `d737147` ships block-extension policy + `partial_code` schema
+  field + 3 new tests on the `_chunk_text_with_overlap` path (9/9 in
+  `tests/test_code_chunking.py`; full suite 1036/1036). Fluent_Python
+  re-extraction confirms the change is safe (chunk count -2.3%) but
+  reveals all 547 code chunks in technical_manual docs come from
+  Docling's `hybrid_chunker` / `hybrid_chunker_pagesplit`, NOT through
+  the modified processor chunker. The committed change benefits the
+  `scanned_book` path and adds universal observability; the actual
+  Fluent_Python "truncated code" defect lives in HybridChunker and
+  needs a separate design pass. **Sign-off needed** on direction —
+  see PLAN_V2.14.md Phase 6 row.
 
-**v2.14 phases pending** (per `PLAN_V2.14.md` Draft v0.5): Phase 1
-(form/table extraction recovery — was format_form judge axis in
-earlier drafts, redefined Draft v0.3 to fix extraction not judge),
-Phase 2 (targeted HyDE bridging for code + minority languages —
-was per-doc embedder routing in earlier drafts, redefined Draft v0.3),
-Phase 3 (rollback drop, time-gated 2026-06-19), Phase 4b/c/d/e
-(local judge in soak + tie-breaker + query gen — gated on the 27B
-re-cal), Phase 6 (code-block chunking hygiene — new in Draft v0.3),
-Phase N (close-out + 2.14.0 tag).
+**v2.14 phases pending / blocked**:
+- Phase 1 (form/table extraction) — **evidence in hand 2026-05-23**:
+  CarOK has 0 table chunks (Docling TSR didn't detect the inventory
+  grid). Escalation to VLM fallback (3a carry-forward) needs user
+  sign-off per the handoff "stop and ask" item #3.
+- Phase 2 (targeted HyDE bridging) — depends on Phase 6 + Phase 1
+  landing so per-doc deficits can be re-measured cleanly.
+- Phase 3 (rollback drop) — time-gated 2026-06-19; needs explicit
+  "no regression, drop it" sign-off + 90-day cold-storage snapshot
+  per Draft v0.5.
+- Phase 4b (local judge in soak) — **scope evaporated 2026-05-23**:
+  the Draft v0.3 "Format-axis only" carve-out was predicated on the
+  14B's 90.2% format TRUSTWORTHY verdict. 27B dropped format to 70.7%
+  (RESTRICTED). Remaining viable: prompt A/B + tie-breaker harness.
+- Phase 4c (gen-provider vllm) — safe; ready to wire.
+- Phase 4d (tie-breaker) — code-only; ready to wire.
+- Phase 4e (1500-query Format-only demo) — **DROPPED 2026-05-23**:
+  predicate failed (Format not TRUSTWORTHY on 27B).
+- Phase N (close-out + 2.14.0 tag).
 
 ---
 
@@ -214,7 +249,17 @@ Do not print or commit API keys.
 - env var: `VLLM_API_KEY` (optional; endpoint runs unauthenticated by default)
 - canonical recipe + path-of-pain notes: `memory/project_v2_14_gx10_27b_mtp_swap.md`
 - guardrails before any future swap: `memory/feedback_gx10_deployment_guardrails.md` (5-point hard checklist)
-- **Phase 0 calibration against this endpoint is the immediate Phase 4b/c/d/e gate** — the 2026-05-22 verdict was against the now-retired 14B and is SUPERSEDED. Predecessor `Qwen/Qwen2.5-14B-Instruct` retired 2026-05-23.
+- **Phase 0 27B-MTP calibration SHIPPED 2026-05-23** (n=518, 0 parse
+  failures). Per-axis: relevance 82.0% / format 70.7% / faithfulness 78.8% —
+  ALL THREE RESTRICTED ("HyDE-only" band). Bias direction flipped vs the
+  retired 14B (was lenient on relevance/faithfulness, now strict on
+  format). Phase 4b "Format-axis only" scope evaporated; Phase 4e
+  Format demo dropped. Phase 4a HyDE + Phase 4c gen-provider remain
+  safe. Report:
+  `docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen36_27b_mtp.md`.
+  Predecessor `Qwen/Qwen2.5-14B-Instruct` retired 2026-05-23 (verdict
+  in `docs/CALIBRATION_2026-05-22_v2.14_p0_local_judge.md` retained
+  for historical comparison).
 
 **Production VLM (image enrichment — unchanged from v2.11):**
 
@@ -293,14 +338,17 @@ of drift, the plan file wins.
 
 | Phase | Topic | Status (2026-05-23) |
 |---|---|---|
-| 0 | Local-judge calibration | First run SHIPPED 2026-05-22 (14B); **SUPERSEDED** by GX10 swap; re-cal against 27B-MTP is the open gate. |
-| 1 | Form/Table layout extraction recovery (was `format_form` judge axis in earlier drafts) | PENDING — Draft v0.3 redefinition. CarOK + other form-class docs. |
-| 2 | Targeted HyDE bridging for code + minority languages (was per-doc embedder routing in earlier drafts) | PENDING — Draft v0.3 redefinition. Reuses Phase 4a HyDE infra. |
+| 0 | Local-judge calibration | First run on 14B SUPERSEDED. **27B-MTP re-cal SHIPPED 2026-05-23** — all three axes RESTRICTED (rel 82.0% / format 70.7% / faith 78.8%). Bias direction flipped vs 14B. |
+| 1 | Form/Table layout extraction recovery | PENDING — **evidence in hand**: CarOK has 0 table chunks (TSR didn't detect). VLM-fallback escalation needs user sign-off. |
+| 2 | Targeted HyDE bridging for code + minority languages | PENDING — depends on Phase 6 + Phase 1 landing. |
 | 3 | 30-day dashscope-rollback drop | PENDING — time-gated decision point 2026-06-19. |
-| 4a | Local HyDE provider | SHIPPED 2026-05-22; default model updated 2026-05-23 (14B → 27B-MTP). |
-| 4b/c/d/e | Local judge in soak (Format-only) + tie-breaker harness + query gen + demo soak | PENDING — blocked on Phase 0 re-cal against 27B-MTP. |
+| 4a | Local HyDE provider | SHIPPED 2026-05-22; default model updated 2026-05-23 (14B → 27B-MTP). **Harness re-validated 2026-05-23** after `chat_template_kwargs.enable_thinking=False` fix (commit `0c5e818`). |
+| 4b | Local judge in soak (was Format-only) | **DOWNGRADED 2026-05-23** — Format axis no longer trustworthy on 27B. Remaining viable: prompt A/B + tie-breaker. |
+| 4c | Local query gen | PENDING — safe; ready to wire `--gen-provider vllm`. |
+| 4d | Tie-breaker harness | PENDING — code-only; ready to wire. |
+| 4e | 1500-query Format-only demo soak | **DROPPED 2026-05-23** — predicate failed. |
 | 5 | Soak disk-headroom precheck | SHIPPED 2026-05-22. |
-| 6 | Code-block chunking hygiene (NEW in Draft v0.3) | PENDING — Python_Cookbook / Fluent_Python / ArcGIS / Ayeva. |
+| 6 | Code-block chunking hygiene | **PARTIAL** — commit `d737147` ships block-extension + `partial_code` schema field + 3 new tests on the `_chunk_text_with_overlap` path. Discovery 2026-05-23: production technical_manual chunks come from Docling's `hybrid_chunker`, NOT through that path. Committed change covers `scanned_book` + observability; Fluent_Python defect needs a HybridChunker-layer pass. **Sign-off needed** on direction. |
 | N | Cycle close-out + 2.14.0 tag | PENDING — terminal. |
 
 ## Other Carry-Forwards
