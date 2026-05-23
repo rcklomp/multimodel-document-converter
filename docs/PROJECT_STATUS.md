@@ -55,17 +55,24 @@ plan + outcomes tracked in [`docs/PLAN_V2.14.md`](PLAN_V2.14.md)
   fences. Tracked as v2.15 workstream.
 
 **v2.14 phases pending / blocked**:
-- Phase 1 (form/table extraction) — **SHIPPED 2026-05-23**: local
-  NuMarkdown-8B VLM via `--force-table-vlm` produces structurally
-  clean 5-column tables (vs. OLD 3-4-col merged blobs). 5/12 CarOK
-  pages got `vlm_table_markdown_forced`; page 5 VLM returned empty;
-  6/12 kept docling. Cost: $0 (local), ~13 min for 12 pages. Two
-  cheap pre-experiments (`do_cell_matching=True`,
-  `force_full_page_ocr=True`) REGRESSED + reverted. **Semantic bug
-  fixed**: `--force-table-vlm` was silently overridden by
-  `technical_manual` profile's `vlm_table_enabled=False`. Now
-  truly forces when the flag is explicit; profile gating remains
-  for the auto-path. Cloud `qwen-vl-plus` escalation not needed.
+- Phase 1 (form/table extraction) — **PARTIAL 2026-05-23; rolled
+  back, v2.15 dedup needed.** Code-side WIN preserved (commit
+  `e60a253`): `--force-table-vlm` now truly forces (was silently
+  overridden by `technical_manual` profile's `vlm_table_enabled=False`);
+  local NuMarkdown-8B VLM produces clean 5-col markdown tables on
+  5/12 CarOK pages, $0. **Mini-soak validation failed Phase 1
+  acceptance bar**: 30-query CarOK soak measured Format 45.0% (was
+  71.9% baseline; -26.9pp regression) while Relevance +24.2pp and
+  Faithfulness +21.7pp improved. Root cause: `force_table_vlm`
+  ADDS a VLM-table chunk per page but does NOT remove the parallel
+  flat-text prose chunk; both coexist in Qdrant; retrieval picks
+  the prose 29/30 times (0 VLM tables ever won top-1). Flat prose
+  is still ugly → judge calls it "garbled" → Format regresses.
+  **Production rolled back to v2.13 baseline** (81 dense + 70 sparse
+  CarOK chunks restored; verified). v2.15 needs: when VLM produces
+  a clean table, suppress the parallel prose chunk for that page.
+  Cheap pre-experiments (`do_cell_matching`, `force_full_page_ocr`)
+  both regressed + reverted earlier.
 - Phase 2 (targeted HyDE bridging) — depends on Phase 6 + Phase 1
   landing so per-doc deficits can be re-measured cleanly.
 - Phase 3 (rollback drop) — time-gated 2026-06-19; needs explicit
@@ -362,7 +369,7 @@ of drift, the plan file wins.
 | Phase | Topic | Status (2026-05-23) |
 |---|---|---|
 | 0 | Local-judge calibration | First run on 14B SUPERSEDED. **27B-MTP re-cal SHIPPED 2026-05-23** — all three axes RESTRICTED (rel 82.0% / format 70.7% / faith 78.8%). Bias direction flipped vs 14B. |
-| 1 | Form/Table layout extraction recovery | **SHIPPED 2026-05-23** — local NuMarkdown-8B VLM via `--force-table-vlm` produces clean 5-col tables (5/12 CarOK pages); $0; cloud-VLM escalation not needed. Semantic bug fixed: `--force-table-vlm` now truly forces, overriding profile's `vlm_table_enabled=False` when explicit. |
+| 1 | Form/Table layout extraction recovery | **PARTIAL 2026-05-23; rolled back** — code-side semantic-bug fix kept (`--force-table-vlm` truly forces); mini-soak measured Format -26.9pp regression because VLM tables coexist with flat-prose duplicates that win retrieval. Production restored to v2.13 baseline. v2.15 dedup work needed. |
 | 2 | Targeted HyDE bridging for code + minority languages | PENDING — depends on Phase 6 + Phase 1 landing. |
 | 3 | 30-day dashscope-rollback drop | PENDING — time-gated decision point 2026-06-19. |
 | 4a | Local HyDE provider | SHIPPED 2026-05-22; default model updated 2026-05-23 (14B → 27B-MTP). **Harness re-validated 2026-05-23** after `chat_template_kwargs.enable_thinking=False` fix (commit `0c5e818`). |
