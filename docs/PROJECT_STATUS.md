@@ -234,10 +234,22 @@ Predecessor canonical (kept for delta reproducibility):
 
 | Collection | Vectors | Status | Role |
 |---|---:|---|---|
-| `mmrag_v2_8__qwen3_local` | 31,371 (4096-dim cosine, Qwen3-Embedding-8B) | green | **Production dense (v2.13.0)** |
-| `mmrag_v2_8__bm25_sparse` | 26,381 (BM25 sparse) | green | **Production sparse** (v2.12+) |
-| `mmrag_v2_8__qwen3_dashscope` | 31,371 (1024-dim cosine, text-embedding-v4) | green | **30-day rollback baseline** (drop after 2026-06-19 if unused) |
-| `mmrag_v2_8` | 30,454 (4096-dim cosine, llava) | green | v2.10 legacy rollback (deletion candidate) |
+| `mmrag_v2_8__qwen3_local` | 31,371 (4096-dim cosine, Qwen3-Embedding-8B) | green | **Production dense (v2.13.0+)** |
+| `mmrag_v2_8__bm25_sparse` | 26,396 (BM25 sparse) | green | **Production sparse** (v2.12+; last rebuilt 2026-05-23 in Phase 1 rollback) |
+| `mmrag_v2_8__qwen3_dashscope_smoke` | small | green | legacy smoke fixture (out of scope) |
+
+**Dropped 2026-05-23 (Phase 3, user "full send" override of 2026-06-19 time gate):**
+- `mmrag_v2_8__qwen3_dashscope` (v2.13 dashscope rollback baseline, 31,371 pts, 219 MB) — snapshot retained
+- `mmrag_v2_8` (v2.10 legacy llava rollback, 30,454 pts, 583 MB) — snapshot retained
+
+**Cold-storage snapshots (90-day retention; persist past collection deletion):**
+
+| Snapshot file | Size | Restore via |
+|---|---|---|
+| `mmrag_v2_8__qwen3_dashscope-4278644141892673-2026-05-23-17-40-32.snapshot` | 219 MB | Qdrant `POST /collections/{name}/snapshots/upload` or `recover` API |
+| `mmrag_v2_8-4278644141892673-2026-05-23-17-40-34.snapshot` | 583 MB | same |
+
+Stored at `/qdrant/snapshots/<collection>/` inside the Qdrant container, persisted on Docker volume `multimodal-doc-converter_qdrant_snapshots`. Delete after 2026-08-21 unless a rollback need surfaces.
 
 ## Active Model/Endpoint State
 
