@@ -76,6 +76,12 @@ def _post_chat(url: str, model: str, messages: list[dict], *,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
+        # Qwen3 served via vLLM with `--reasoning-parser qwen3` defaults to
+        # thinking mode, which routes the JSON answer into `message.reasoning`
+        # and leaves `message.content` null. Disable so the harness gets the
+        # JSON directly in `content`. Non-Qwen3 OpenAI-compat servers ignore
+        # unknown fields per the spec.
+        "chat_template_kwargs": {"enable_thinking": False},
     }
     body = json.dumps(payload).encode("utf-8")
     last_err = None
@@ -322,7 +328,7 @@ def main() -> int:
     lines.append(f"- {parse_fails} queries had a parse or call failure on the local side and are excluded from the agreement numbers.")
     lines.append("- Identical JUDGE prompt structure used on both sides (`JUDGE_SYSTEM` + `JUDGE_USER_TEMPLATE` from `scripts/synthetic_soak.py`).")
     lines.append("- Same retrieved chunks, same gold, same query texts — only the judge model differs.")
-    lines.append("- Cache: `output/soak/v2.13_p1_omlx/calibration_local_judgments.json` (rerun with the same `--results-cache` to resume).")
+    lines.append(f"- Cache: `{cache_path}` (rerun with the same `--results-cache` to resume).")
 
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")

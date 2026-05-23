@@ -1,8 +1,14 @@
-"""v2.12 Phase 3 — HyDE module unit tests (mock-driven).
+"""HyDE module unit tests (mock-driven).
 
 Pin the HyDE generation interface + fallback semantics without
-making live Dashscope calls. Live integration is exercised by the
-Phase 3 soak.
+making live network calls. Live integration is exercised by soak
+runs.
+
+Coverage:
+- v2.12 Phase 3: cloud Dashscope `qwen-max` provider (default).
+- v2.14 Phase 4a: local vLLM provider (`provider="vllm"`). Default
+  endpoint is the GX10 at `http://10.0.10.239:8000` serving
+  `Qwen/Qwen3.6-27B-FP8` with native MTP=3 (as of 2026-05-23).
 """
 from __future__ import annotations
 
@@ -190,6 +196,51 @@ def test_generate_hypothetical_answer_dashscope_provider_still_default(monkeypat
 
     assert out == "dashscope hypothesis"
     assert "dashscope" in captured["url"]
+
+
+def test_generate_hypothetical_answer_vllm_disables_thinking_mode(monkeypatch):
+    """vllm payload must include `chat_template_kwargs.enable_thinking=False`.
+
+    The GX10 endpoint runs Qwen3 with `--reasoning-parser qwen3`, which
+    defaults to thinking mode. Thinking routes the answer into
+    `message.reasoning` and starves `message.content` of token budget,
+    so without this flag the parser sees empty content and HydeError fires.
+    See 2026-05-23 Phase 0 re-cal debug — 510/518 parse failures from
+    this exact cause.
+    """
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+    monkeypatch.delenv("VLLM_API_KEY", raising=False)
+
+    captured = {}
+
+    def _fake_urlopen(req, timeout=None):
+        captured["body"] = req.data
+        return _fake_dashscope_response("ok")
+
+    with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
+        generate_hypothetical_answer("test query", provider="vllm")
+
+    body = json.loads(captured["body"].decode("utf-8"))
+    assert body.get("chat_template_kwargs") == {"enable_thinking": False}
+
+
+def test_generate_hypothetical_answer_dashscope_omits_thinking_kwargs(monkeypatch):
+    """Dashscope (cloud qwen-max) is NOT Qwen3 thinking-capable and must
+    not receive the chat_template_kwargs extension — keep the dashscope
+    payload identical to its pre-Phase-4a shape."""
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-test")
+
+    captured = {}
+
+    def _fake_urlopen(req, timeout=None):
+        captured["body"] = req.data
+        return _fake_dashscope_response("ok")
+
+    with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
+        generate_hypothetical_answer("test query")
+
+    body = json.loads(captured["body"].decode("utf-8"))
+    assert "chat_template_kwargs" not in body
 
 
 def test_generate_with_fallback_vllm_provider_falls_back_on_error(monkeypatch):

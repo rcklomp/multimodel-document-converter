@@ -109,7 +109,7 @@ def generate_hypothetical_answer(
         # vLLM defaults to no auth; allow empty bearer to be sent.
         api_key = os.environ.get("VLLM_API_KEY", "")
 
-    body = json.dumps({
+    request_payload: dict = {
         "model": model,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -117,7 +117,17 @@ def generate_hypothetical_answer(
         ],
         "temperature": temperature,
         "max_tokens": max_tokens,
-    }).encode("utf-8")
+    }
+    if provider == "vllm":
+        # GX10 vLLM endpoint runs Qwen3 with `--reasoning-parser qwen3`,
+        # which defaults to thinking mode. Thinking routes the answer into
+        # `message.reasoning` and starves `message.content` of token budget,
+        # so the parser at line ~150 sees empty content and the call raises
+        # HydeError. Disable thinking so the answer lands in `content`.
+        # Dashscope (cloud qwen-max) doesn't have this mode; don't send the
+        # extension there.
+        request_payload["chat_template_kwargs"] = {"enable_thinking": False}
+    body = json.dumps(request_payload).encode("utf-8")
 
     last_err: Exception | None = None
     for attempt in range(retries):

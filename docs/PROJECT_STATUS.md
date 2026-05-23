@@ -1,10 +1,39 @@
 # Project Status
 
-Last updated: 2026-05-22
+Last updated: 2026-05-23
 
 Purpose: fast orientation for a new coding session. Read this before deeper project docs.
 
 ## Current Objective
+
+**v2.14 IN PROGRESS (started 2026-05-22, active 2026-05-23).** v2.13.0
+SHIPPED 2026-05-22 with annotated tag `v2.13.0` staged for user push.
+v2.14 opened the same day on top of the v2.13.0 retrieval stack;
+plan + outcomes tracked in [`docs/PLAN_V2.14.md`](PLAN_V2.14.md)
+(currently at Draft v0.5).
+
+**v2.14 phases shipped:**
+- **Phase 0 (judge calibration)** — first run SHIPPED 2026-05-22
+  against `Qwen2.5-14B-Instruct`; **superseded 2026-05-23** when the
+  GX10 endpoint was swapped to `Qwen/Qwen3.6-27B-FP8` + native MTP=3.
+  Re-cal against the 27B is the immediate open gate (~80 min, $0;
+  see `scripts/calibrate_local_judge_vs_qwen_max.py`).
+- **Phase 4a (local HyDE provider)** SHIPPED 2026-05-22 —
+  `src/mmrag_v2/retrieval/hyde.py` gained `provider="vllm"` knob.
+  Default vLLM model updated 2026-05-23 from 14B to `Qwen/Qwen3.6-27B-FP8`.
+- **Phase 5 (soak disk-headroom precheck)** SHIPPED 2026-05-22.
+
+**v2.14 phases pending** (per `PLAN_V2.14.md` Draft v0.5): Phase 1
+(form/table extraction recovery — was format_form judge axis in
+earlier drafts, redefined Draft v0.3 to fix extraction not judge),
+Phase 2 (targeted HyDE bridging for code + minority languages —
+was per-doc embedder routing in earlier drafts, redefined Draft v0.3),
+Phase 3 (rollback drop, time-gated 2026-06-19), Phase 4b/c/d/e
+(local judge in soak + tie-breaker + query gen — gated on the 27B
+re-cal), Phase 6 (code-block chunking hygiene — new in Draft v0.3),
+Phase N (close-out + 2.14.0 tag).
+
+---
 
 **v2.13.0 SHIPPED 2026-05-22.** Annotated tag `v2.13.0` staged
 locally for user push to GitHub + Gitea. Two parallel workstreams
@@ -170,19 +199,36 @@ Do not print or commit API keys.
 **Synthetic soak judge:**
 
 - provider: Dashscope, model `qwen-max` (used for both query generation and judging)
+- v2.14 Phase 0/4 additions: local-LLM judge candidate at the GX10 vLLM endpoint below; ship-gate go/no-go on Relevance + Faithfulness axes stays on cloud `qwen-max` per the Phase 4 "leniency trap" guardrail in `PLAN_V2.14.md`
+
+**Local LLM endpoint (v2.14 Phase 4a, LIVE 2026-05-23):**
+
+- provider: vLLM (OpenAI-compatible)
+- model: `Qwen/Qwen3.6-27B-FP8` with native MTP=3 speculative decoding
+- served-model aliases: `Qwen/Qwen3.6-27B-FP8` (full) or `qwen3.6-27b` (short)
+- endpoint: `http://10.0.10.239:8000/v1/chat/completions` (Asus Ascent GX10 = DGX Spark clone, Grace-Blackwell GB10, 128 GB unified memory)
+- container: `vllm/vllm-openai:v0.20.0-aarch64-cu130-ubuntu2404`
+- measured perf: ~32 tok/s single-stream decode (MTP-3 acceptance at positions 1/2/3 ≈ 80/55/40%, mean accepted length 2.5–3.3)
+- max context: 256K configured (32K typically sufficient for HyDE + judge)
+- code default: `src/mmrag_v2/retrieval/hyde.py` `VLLM_DEFAULT_MODEL` (call with `provider="vllm"`)
+- env var: `VLLM_API_KEY` (optional; endpoint runs unauthenticated by default)
+- canonical recipe + path-of-pain notes: `memory/project_v2_14_gx10_27b_mtp_swap.md`
+- guardrails before any future swap: `memory/feedback_gx10_deployment_guardrails.md` (5-point hard checklist)
+- **Phase 0 calibration against this endpoint is the immediate Phase 4b/c/d/e gate** — the 2026-05-22 verdict was against the now-retired 14B and is SUPERSEDED. Predecessor `Qwen/Qwen2.5-14B-Instruct` retired 2026-05-23.
 
 **Production VLM (image enrichment — unchanged from v2.11):**
 
 - preferred cloud: Dashscope `qwen3-vl-plus`
 - local fallback: `NuMarkdown-8B-Thinking-mlx-8bits` on `http://10.0.10.246:8000/v1`
 
-**Future candidates (v2.14 carry-forwards):**
+**Future candidates (v2.14 carry-forwards — alignment per PLAN_V2.14.md Draft v0.5):**
 
-- form-class `format_form` judge axis (CarOK calibration limitation, see DECISIONS.md "v2.13 Phase 2 CarOK")
-- language-aware embedder routing (ATZ_Elektronik German -12.5pp R@1 with omlx; v2.13 P1 per-doc breakdown)
-- code-doc embedder choice (Python_Cookbook, IRJET, Hybrid_electric, Greenhouse regress 6-12pp R@1 with omlx)
-- **local LLM integration on Asus Ascent GX10 (DGX Spark clone)** — proposed Qwen3.6-35B-A3B-FP8 as experimentation accelerator (judge / HyDE / query generation); hold until v2.14 scoping
-- VLM swap (3a from v2.11), UIR refactor (3c, PAUSED)
+- Phase 1 — form/table layout extraction recovery for CarOK and other form-class docs (REDEFINED Draft v0.3 from earlier `format_form` judge axis proposal: fix extraction, not rubric; see DECISIONS.md "v2.13 Phase 2 CarOK")
+- Phase 2 — targeted HyDE bridging for code + minority-language queries (REDEFINED Draft v0.3 from earlier per-doc embedder routing proposal: bridge at query time via local HyDE, no parallel embedder collections)
+- Phase 6 — code-block chunking hygiene (NEW in Draft v0.3): fix mid-block truncation in Python_Cookbook / Fluent_Python / ArcGIS / Ayeva
+- VLM swap (3a from v2.11) — promoted to Phase 1 VLM-assisted table parse fallback
+- UIR refactor (3c, PAUSED for user signoff)
+- Magazine rendered-region-crop (3e from v2.11) — deferred with soak-data rationale
 
 ## Current Quality Summary
 
@@ -237,33 +283,43 @@ New v2.13 fingerprint:
 
 ## Active Engineering Direction
 
-v2.13.0 SHIPPED 2026-05-22. **Next ship state: v2.14** (scoped after
-the 30-day rollback window closes 2026-06-19). Carry-forwards below.
+**v2.14 is the active cycle** (started 2026-05-22; v2.13.0 shipped
+the same day). Authoritative scope + ordering in
+[`docs/PLAN_V2.14.md`](PLAN_V2.14.md) (Draft v0.5 as of 2026-05-23).
+The summary table below reflects current Draft v0.5 framing; in case
+of drift, the plan file wins.
 
-## v2.14 Carry-Forwards
+## v2.14 Phase Status (mirrors PLAN_V2.14.md §"Phase outcomes")
 
-1. **Form-class `format_form` judge axis.** CarOK Format penalty is
-   judge-calibration, not content (DECISIONS.md "v2.13 Phase 2
-   CarOK"). v2.14 amends the soak protocol with a form-class-aware
-   format rubric.
-2. **Language-aware embedder routing.** ATZ_Elektronik German
-   underperforms omlx by -12.5pp R@1. Consider per-doc embedder
-   selection if regression deepens with future German content.
-3. **Code-doc embedder choice.** Python_Cookbook, IRJET,
-   Hybrid_electric, Greenhouse regress 6-12pp R@1 with omlx; offset
-   by wins elsewhere but worth investigating a code-specialized
-   embedder lane.
-4. **Local LLM integration on Asus Ascent GX10.** Proposed
-   `Qwen3.6-35B-A3B-FP8` as experimentation accelerator (judge,
-   HyDE, query generation). Hold as future-use note until v2.14
-   scoping; primary use: free local soaks for hyperparameter sweeps
-   that v2.13 budget can't afford.
-5. **30-day rollback drops on 2026-06-19.** Decision point: drop
-   `mmrag_v2_8__qwen3_dashscope` (v2.12 baseline) if no v2.13
-   rollback fired, and `mmrag_v2_8` (v2.10 legacy llava).
-6. **v2.11/v2.12 carry-forwards still open:** 3a (VLM swap), 3c
-   (UIR refactor, PAUSED), 3e (magazine rendered-region-crop). HyDE
-   stays opt-in unless a future use case warrants the +1s latency.
+| Phase | Topic | Status (2026-05-23) |
+|---|---|---|
+| 0 | Local-judge calibration | First run SHIPPED 2026-05-22 (14B); **SUPERSEDED** by GX10 swap; re-cal against 27B-MTP is the open gate. |
+| 1 | Form/Table layout extraction recovery (was `format_form` judge axis in earlier drafts) | PENDING — Draft v0.3 redefinition. CarOK + other form-class docs. |
+| 2 | Targeted HyDE bridging for code + minority languages (was per-doc embedder routing in earlier drafts) | PENDING — Draft v0.3 redefinition. Reuses Phase 4a HyDE infra. |
+| 3 | 30-day dashscope-rollback drop | PENDING — time-gated decision point 2026-06-19. |
+| 4a | Local HyDE provider | SHIPPED 2026-05-22; default model updated 2026-05-23 (14B → 27B-MTP). |
+| 4b/c/d/e | Local judge in soak (Format-only) + tie-breaker harness + query gen + demo soak | PENDING — blocked on Phase 0 re-cal against 27B-MTP. |
+| 5 | Soak disk-headroom precheck | SHIPPED 2026-05-22. |
+| 6 | Code-block chunking hygiene (NEW in Draft v0.3) | PENDING — Python_Cookbook / Fluent_Python / ArcGIS / Ayeva. |
+| N | Cycle close-out + 2.14.0 tag | PENDING — terminal. |
+
+## Other Carry-Forwards
+
+- **30-day dashscope-rollback drop (Phase 3).** Decision point
+  2026-06-19: drop `mmrag_v2_8__qwen3_dashscope` (v2.13 baseline)
+  if no v2.13 rollback fired during the window, and
+  `mmrag_v2_8` (v2.10 legacy llava). Skip if regression reports
+  arrive during the window. Draft v0.5 added a 90-day cold-storage
+  snapshot policy before deletion.
+- **v2.11/v2.12 carry-forwards still open:**
+  - 3a (VLM swap) — **promoted to Phase 1 fallback** for VLM-assisted
+    table parse on form-class docs.
+  - 3c (UIR refactor) — still PAUSED for user signoff.
+  - 3e (magazine rendered-region-crop) — deferred with soak-data
+    rationale (image-axis perf is OK without it).
+- HyDE stays opt-in by default unless a future use case warrants the
+  +1 s latency (and now with Phase 4a, the +1 s is also $0/call for
+  the local path).
 
 ## Must-Respect Constraints
 
