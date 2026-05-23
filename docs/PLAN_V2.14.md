@@ -181,8 +181,11 @@ verdict per axis.
 | <70% | NOT USABLE | Fall back to cloud `qwen3-max` (Dashscope) |
 
 **Output:** SHIP if all three axes ≥85%; otherwise document
-the restricted-use envelope and either (a) accept reduced scope
-for Phase 4, or (b) gate Phase 4 on a stronger local model.
+the restricted-use envelope and accept reduced scope for Phase 4
+(cloud `qwen-max` / `qwen3-max` cover what the local can't).
+Per the 2026-05-23 cycle policy, the 27B is the GX10 ceiling for
+v2.14 — "gate Phase 4 on a stronger local model" is NOT an option
+(see `memory/feedback_no_gx10_model_swap_reflex.md`).
 
 **Cost:** $0 (local LLM only; reuses existing qwen-max judgments).
 
