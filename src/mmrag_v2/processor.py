@@ -4584,9 +4584,18 @@ class V2DocumentProcessor:
             # Guard against placeholder or text-soup table output:
             # Prefer VLM table serialization, then OCR, then docling markdown fallback.
             vlm_attempted = False
-            vlm_table_enabled = (
+            # v2.14 Phase 1 (2026-05-23): `force_table_vlm` truly forces, even when
+            # the resolved profile sets `vlm_table_enabled=False` (e.g. technical_manual
+            # disables it to prevent hallucination on schematics — but for form-class
+            # docs misclassified as technical_manual, the VLM is the ONLY path that
+            # produces structurally-clean tables). The earlier "force requested but
+            # disabled by profile" branch silently ignored the user's flag; that was
+            # a semantic bug. Profile's vlm_table_enabled still governs the AUTOMATIC
+            # path (no flag) — only an explicit `--force-table-vlm` overrides it.
+            profile_vlm_table_enabled = (
                 self._profile_params.vlm_table_enabled if self._profile_params is not None else True
             )
+            vlm_table_enabled = profile_vlm_table_enabled or self._force_table_vlm
 
             # Emergency guardrail: if profile disables table-VLM but we have no usable
             # table text and OCR is unavailable, allow one strict VLM attempt as a
@@ -4599,10 +4608,10 @@ class V2DocumentProcessor:
                 and (saved_table_image is not None)
             )
 
-            if self._force_table_vlm and not vlm_table_enabled:
+            if self._force_table_vlm and not profile_vlm_table_enabled:
                 logger.info(
-                    f"[TABLE-VLM] Page {page_no}: forced VLM table serialization requested but "
-                    "disabled by profile. Falling back to OCR/docling path."
+                    f"[TABLE-VLM] Page {page_no}: forced VLM table serialization overrides "
+                    "profile's vlm_table_enabled=False (semantic fix 2026-05-23)."
                 )
 
             if self._force_table_vlm and vlm_table_enabled:

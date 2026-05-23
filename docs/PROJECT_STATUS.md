@@ -35,24 +35,37 @@ plan + outcomes tracked in [`docs/PLAN_V2.14.md`](PLAN_V2.14.md)
   Live re-smoke: 670-char hypothesis in 8.8s (the earlier "392-char in 2s"
   smoke was the pre-thinking-discovery 14B run).
 - **Phase 5 (soak disk-headroom precheck)** SHIPPED 2026-05-22.
-- **Phase 6 (code-block chunking hygiene)** — **PARTIAL 2026-05-23.**
-  Commit `d737147` ships block-extension policy + `partial_code` schema
-  field + 3 new tests on the `_chunk_text_with_overlap` path (9/9 in
-  `tests/test_code_chunking.py`; full suite 1036/1036). Fluent_Python
-  re-extraction confirms the change is safe (chunk count -2.3%) but
-  reveals all 547 code chunks in technical_manual docs come from
-  Docling's `hybrid_chunker` / `hybrid_chunker_pagesplit`, NOT through
-  the modified processor chunker. The committed change benefits the
-  `scanned_book` path and adds universal observability; the actual
-  Fluent_Python "truncated code" defect lives in HybridChunker and
-  needs a separate design pass. **Sign-off needed** on direction —
-  see PLAN_V2.14.md Phase 6 row.
+- **Phase 6 (code-block chunking hygiene)** — **PARTIAL 2026-05-23;
+  deeper fix DEFERRED to v2.15.** Commit `d737147` ships block-extension
+  policy + `partial_code` schema field + 3 new tests on the
+  `_chunk_text_with_overlap` path (9/9 in `tests/test_code_chunking.py`;
+  full suite 1036/1036). Improves the `scanned_book` lane + adds
+  universal observability. The Fluent_Python truncated-code defect
+  lives in the Docling extraction layer (prose+code intermixing
+  at page boundaries — page 326 CODE chunk ends mid-statement at
+  `    return`, and the continuation `cls(memv)\n\`\`\`\n` is the
+  first 11 chars of a PARAGRAPH chunk that then explains the code in
+  prose). A HybridChunker post-merge pass was implemented and
+  unit-tested this session but reverted: it fires 0× in production
+  (the actual defect shape is CODE→PARAGRAPH-with-code-prefix, not
+  CODE→CODE-severance, and surgical prose-prefix extraction has
+  unacceptable false-positive risk). Right fix is upstream of
+  chunking — either Docling configuration tuning or a post-Docling
+  text-normalization step that re-inserts whitespace around code
+  fences. Tracked as v2.15 workstream.
 
 **v2.14 phases pending / blocked**:
-- Phase 1 (form/table extraction) — **evidence in hand 2026-05-23**:
-  CarOK has 0 table chunks (Docling TSR didn't detect the inventory
-  grid). Escalation to VLM fallback (3a carry-forward) needs user
-  sign-off per the handoff "stop and ask" item #3.
+- Phase 1 (form/table extraction) — **SHIPPED 2026-05-23**: local
+  NuMarkdown-8B VLM via `--force-table-vlm` produces structurally
+  clean 5-column tables (vs. OLD 3-4-col merged blobs). 5/12 CarOK
+  pages got `vlm_table_markdown_forced`; page 5 VLM returned empty;
+  6/12 kept docling. Cost: $0 (local), ~13 min for 12 pages. Two
+  cheap pre-experiments (`do_cell_matching=True`,
+  `force_full_page_ocr=True`) REGRESSED + reverted. **Semantic bug
+  fixed**: `--force-table-vlm` was silently overridden by
+  `technical_manual` profile's `vlm_table_enabled=False`. Now
+  truly forces when the flag is explicit; profile gating remains
+  for the auto-path. Cloud `qwen-vl-plus` escalation not needed.
 - Phase 2 (targeted HyDE bridging) — depends on Phase 6 + Phase 1
   landing so per-doc deficits can be re-measured cleanly.
 - Phase 3 (rollback drop) — time-gated 2026-06-19; needs explicit
@@ -62,10 +75,15 @@ plan + outcomes tracked in [`docs/PLAN_V2.14.md`](PLAN_V2.14.md)
   the Draft v0.3 "Format-axis only" carve-out was predicated on the
   14B's 90.2% format TRUSTWORTHY verdict. 27B dropped format to 70.7%
   (RESTRICTED). Remaining viable: prompt A/B + tie-breaker harness.
-- Phase 4c (gen-provider vllm) — safe; ready to wire.
+- Phase 4c (gen-provider vllm) — **SHIPPED 2026-05-23** (commit
+  `1c201dd`). `synthetic_soak.py --gen-provider vllm` + smoke at
+  2.0s/query on the live 27B. Default stays `dashscope`.
 - Phase 4d (tie-breaker) — code-only; ready to wire.
 - Phase 4e (1500-query Format-only demo) — **DROPPED 2026-05-23**:
   predicate failed (Format not TRUSTWORTHY on 27B).
+- Phase 4-Resilience (qwen3-max cloud fallback for HyDE) — **SHIPPED
+  2026-05-23** (commit `1c201dd`). `generate_with_fallback` chains
+  vllm → dashscope qwen3-max → literal query when primary is vllm.
 - Phase N (close-out + 2.14.0 tag).
 
 ---
@@ -339,7 +357,7 @@ of drift, the plan file wins.
 | Phase | Topic | Status (2026-05-23) |
 |---|---|---|
 | 0 | Local-judge calibration | First run on 14B SUPERSEDED. **27B-MTP re-cal SHIPPED 2026-05-23** — all three axes RESTRICTED (rel 82.0% / format 70.7% / faith 78.8%). Bias direction flipped vs 14B. |
-| 1 | Form/Table layout extraction recovery | PENDING — **evidence in hand**: CarOK has 0 table chunks (TSR didn't detect). VLM-fallback escalation needs user sign-off. |
+| 1 | Form/Table layout extraction recovery | **SHIPPED 2026-05-23** — local NuMarkdown-8B VLM via `--force-table-vlm` produces clean 5-col tables (5/12 CarOK pages); $0; cloud-VLM escalation not needed. Semantic bug fixed: `--force-table-vlm` now truly forces, overriding profile's `vlm_table_enabled=False` when explicit. |
 | 2 | Targeted HyDE bridging for code + minority languages | PENDING — depends on Phase 6 + Phase 1 landing. |
 | 3 | 30-day dashscope-rollback drop | PENDING — time-gated decision point 2026-06-19. |
 | 4a | Local HyDE provider | SHIPPED 2026-05-22; default model updated 2026-05-23 (14B → 27B-MTP). **Harness re-validated 2026-05-23** after `chat_template_kwargs.enable_thinking=False` fix (commit `0c5e818`). |
