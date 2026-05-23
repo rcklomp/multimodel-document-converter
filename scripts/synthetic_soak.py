@@ -91,6 +91,18 @@ DASHSCOPE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/com
 JUDGE_MODEL = "qwen-max"
 GENERATOR_MODEL = "qwen-max"
 
+# v2.14 Phase 4c: local-LLM query-generation provider. Re-uses the
+# GX10 vLLM endpoint defaults from `mmrag_v2.retrieval.hyde` so a
+# single source of truth tracks any future endpoint swap.
+# Query generation is leniency-trap-immune (it isn't judging), so the
+# vllm path is safe even on the all-axes-RESTRICTED 27B verdict.
+from mmrag_v2.retrieval.hyde import (  # noqa: E402
+    VLLM_DEFAULT_MODEL as _VLLM_GEN_DEFAULT_MODEL,
+    VLLM_DEFAULT_URL as _VLLM_GEN_DEFAULT_URL,
+)
+VLLM_GEN_DEFAULT_URL = _VLLM_GEN_DEFAULT_URL
+VLLM_GEN_DEFAULT_MODEL = _VLLM_GEN_DEFAULT_MODEL
+
 # Heuristic content filters for chunk sampling.
 MIN_CHUNK_CHARS = 150
 MAX_CODE_RATIO = 0.4
@@ -281,6 +293,59 @@ def _call_dashscope(api_key: str, model: str, messages: list[dict],
     return None
 
 
+def _call_vllm(url: str, model: str, messages: list[dict], *,
+               api_key: str | None = None,
+               temperature: float = 0.0, max_tokens: int = 600,
+               timeout: int = 60, retries: int = 3) -> str | None:
+    """OpenAI-compatible chat-completions call against a local vLLM
+    endpoint. Returns response text or None on failure.
+
+    v2.14 Phase 4c. Sends the `chat_template_kwargs.enable_thinking=False`
+    extension defensively per memory/feedback_qwen3_thinking_payload —
+    Qwen3 models served with `--reasoning-parser qwen3` default to
+    thinking mode and route output to `message.reasoning`, starving
+    `message.content`. The kwarg is a no-op on non-thinking templates
+    so it's safe across all GX10 model swaps.
+    """
+    body = json.dumps({
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }).encode("utf-8")
+    last_err = None
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, data=body, method="POST")
+            req.add_header("Content-Type", "application/json")
+            if api_key:
+                req.add_header("Authorization", f"Bearer {api_key}")
+            resp = urllib.request.urlopen(req, timeout=timeout)
+            data = json.loads(resp.read())
+            return data["choices"][0]["message"]["content"]
+        except urllib.error.HTTPError as e:
+            last_err = e
+            if e.code in (429, 500, 502, 503, 504):
+                time.sleep(2 ** attempt)
+                continue
+            try:
+                detail = e.read().decode("utf-8", errors="replace")[:200]
+            except Exception:
+                detail = ""
+            print(f"    ! vLLM HTTP {e.code}: {detail}", file=sys.stderr)
+            return None
+        except (urllib.error.URLError, ConnectionError, OSError, TimeoutError) as e:
+            last_err = e
+            time.sleep(2 ** attempt)
+            continue
+        except Exception as e:
+            print(f"    ! vLLM error: {e}", file=sys.stderr)
+            return None
+    print(f"    ! vLLM failed after {retries} retries: {last_err}", file=sys.stderr)
+    return None
+
+
 _JSON_ARRAY_RE = re.compile(r"\[\s*(?:\".*?\"\s*,?\s*)+\]", re.DOTALL)
 _JSON_OBJECT_RE = re.compile(r"\{[^{}]*\}", re.DOTALL)
 
@@ -330,11 +395,27 @@ Passage:
 Return ONLY a JSON array of 2 strings."""
 
 
-def stage_generate(work_path: Path, api_key: str) -> None:
+def stage_generate(work_path: Path, api_key: str, *,
+                   gen_provider: str = "dashscope",
+                   gen_url: str = VLLM_GEN_DEFAULT_URL,
+                   gen_model: str | None = None) -> None:
+    """Generate 2 queries per sampled chunk.
+
+    `gen_provider` selects the backend:
+      - "dashscope" (default): cloud `qwen-max`. Requires `api_key`.
+      - "vllm": local GX10 endpoint (Phase 4c, leniency-trap-immune
+        because query generation isn't judging). Reuses the default
+        endpoint + model from `mmrag_v2.retrieval.hyde`.
+    """
     rows = _read_work(work_path)
     if not rows:
         print("  generate: no work file; run --stage sample first", file=sys.stderr)
         return
+    if gen_model is None:
+        gen_model = VLLM_GEN_DEFAULT_MODEL if gen_provider == "vllm" else GENERATOR_MODEL
+    print(f"  generate: using gen_provider={gen_provider} model={gen_model}")
+    if gen_provider == "vllm":
+        print(f"  generate: local vLLM at {gen_url} ($0; ~3-9s per query pair)")
     needed = sum(1 for r in rows if not r.get("queries"))
     print(f"  generate: {needed}/{len(rows)} rows need queries")
     done = 0
@@ -342,14 +423,20 @@ def stage_generate(work_path: Path, api_key: str) -> None:
         if row.get("queries"):
             continue
         content = row["gold_content"][:2500]  # cap input size
-        result = _call_dashscope(
-            api_key, GENERATOR_MODEL,
-            messages=[
-                {"role": "system", "content": GENERATE_SYSTEM},
-                {"role": "user", "content": GENERATE_USER_TEMPLATE.format(content=content)},
-            ],
-            temperature=0.3, max_tokens=300,
-        )
+        messages = [
+            {"role": "system", "content": GENERATE_SYSTEM},
+            {"role": "user", "content": GENERATE_USER_TEMPLATE.format(content=content)},
+        ]
+        if gen_provider == "vllm":
+            result = _call_vllm(
+                gen_url, gen_model, messages=messages,
+                temperature=0.3, max_tokens=300,
+            )
+        else:
+            result = _call_dashscope(
+                api_key, gen_model, messages=messages,
+                temperature=0.3, max_tokens=300,
+            )
         queries: list[str] = []
         if result:
             parsed = _extract_json(result, "array")
@@ -668,7 +755,9 @@ def stage_judge(work_path: Path, api_key: str) -> None:
 
 
 def stage_report(work_path: Path, report_path: Path,
-                 collection: str, provider: str, embed_model: str) -> None:
+                 collection: str, provider: str, embed_model: str,
+                 *, gen_provider: str = "dashscope",
+                 gen_model: str | None = None) -> None:
     rows = _read_work(work_path)
     if not rows:
         print("  report: no work file", file=sys.stderr)
@@ -751,7 +840,14 @@ def stage_report(work_path: Path, report_path: Path,
         f"`{','.join(sorted(rerank_seen))}`" if rerank_seen
         else "(none — vector-rank only)"
     )
-    lines.append(f"> Judge: Dashscope `{JUDGE_MODEL}`. Generator: `{GENERATOR_MODEL}`. Embedder: `{embed_model}` (provider={provider}). Collection: `{collection}`. Reranker: {rerank_desc}.")
+    resolved_gen_model = gen_model or (
+        VLLM_GEN_DEFAULT_MODEL if gen_provider == "vllm" else GENERATOR_MODEL
+    )
+    gen_desc = (
+        f"Dashscope `{resolved_gen_model}`" if gen_provider == "dashscope"
+        else f"local vLLM `{resolved_gen_model}` (Phase 4c)"
+    )
+    lines.append(f"> Judge: Dashscope `{JUDGE_MODEL}`. Generator: {gen_desc}. Embedder: `{embed_model}` (provider={provider}). Collection: `{collection}`. Reranker: {rerank_desc}.")
     lines.append("> No QA threshold; this snapshot is informational.")
     lines.append("")
     lines.append("## 1. Corpus summary")
@@ -806,7 +902,7 @@ def stage_report(work_path: Path, report_path: Path,
     lines.append("## 5. Methodology")
     lines.append("")
     lines.append(f"- Sampled {n_chunks} text chunks (≥ {MIN_CHUNK_CHARS} chars, ≤ {int(MAX_CODE_RATIO*100)}% code-like lines, no advertisement keywords). Stratified across the 34-doc canonical corpus.")
-    lines.append(f"- Each chunk → 2 queries generated by `{GENERATOR_MODEL}` (temperature 0.3).")
+    lines.append(f"- Each chunk → 2 queries generated by {gen_desc} (temperature 0.3).")
     lines.append(f"- Each query → top-{TOP_K} retrieved from `{collection}` via `{provider}` provider, model `{embed_model}`.")
     lines.append(f"- Each top-1 chunk → graded by `{JUDGE_MODEL}` (temperature 0.0) on relevance / format / faithfulness, each 0-2.")
     lines.append("- Gold passage is shown to the judge for context; the judge is instructed NOT to penalize a different-chunk same-document retrieval.")
@@ -871,17 +967,39 @@ def main() -> int:
                              "that instead of the literal query. Adds ~1s + ~$0.001 per query "
                              "but improves retrieval when the question and answer have different "
                              "vocabulary.")
+    # v2.14 Phase 4c: local-LLM query generation. Query generation is
+    # NOT judging — leniency-trap rules don't apply. Safe to default to
+    # vllm once the GX10 endpoint is the user's stable choice.
+    parser.add_argument("--gen-provider", default="dashscope",
+                        choices=["dashscope", "vllm"],
+                        help="Query-generation provider (v2.14 Phase 4c). 'dashscope' (default) "
+                             "uses cloud `qwen-max` ($). 'vllm' uses the local GX10 endpoint "
+                             "($0). Generation isn't judging, so the leniency-trap rules don't "
+                             "apply; safe to use the local path even on an all-RESTRICTED Phase 0 "
+                             "verdict.")
+    parser.add_argument("--gen-url", default=VLLM_GEN_DEFAULT_URL,
+                        help=f"Override vLLM chat/completions URL (default: {VLLM_GEN_DEFAULT_URL}). "
+                             "Only used when --gen-provider=vllm.")
+    parser.add_argument("--gen-model", default=None,
+                        help="Override generation model id. Default: qwen-max for dashscope, "
+                             f"{VLLM_GEN_DEFAULT_MODEL} for vllm.")
     args = parser.parse_args()
 
     work_path = Path(args.work_path)
     report_path = Path(args.report_path)
     api_key = os.environ.get("DASHSCOPE_API_KEY", "").strip()
-    needs_key = args.stage in ("generate", "judge", "all") or (
+    # Generation needs a dashscope key ONLY when --gen-provider=dashscope
+    # (vllm path is local-LLM, $0, no api_key).
+    generate_needs_key = (
+        args.stage in ("generate", "all") and args.gen_provider == "dashscope"
+    )
+    needs_key = generate_needs_key or args.stage in ("judge", "all") or (
         args.stage in ("retrieve", "all") and args.provider == "dashscope"
     )
     if needs_key and not api_key:
-        print("ERROR: DASHSCOPE_API_KEY env var is not set; required for generate/judge "
-              "and for retrieve when --provider dashscope.", file=sys.stderr)
+        print("ERROR: DASHSCOPE_API_KEY env var is not set; required for "
+              "judge, --gen-provider=dashscope, and --provider=dashscope retrieve.",
+              file=sys.stderr)
         return 2
 
     # omlx provider needs MLX_API_KEY (for the local omlx-server, not Dashscope).
@@ -909,7 +1027,12 @@ def main() -> int:
         stage_sample(args.seed, args.n_chunks, work_path)
     if args.stage in ("generate", "all"):
         print("[stage] generate")
-        stage_generate(work_path, api_key)
+        stage_generate(
+            work_path, api_key,
+            gen_provider=args.gen_provider,
+            gen_url=args.gen_url,
+            gen_model=args.gen_model,
+        )
     if args.stage in ("retrieve", "all"):
         print("[stage] retrieve")
         # Hybrid mode implies reranking; default reranker if user
@@ -943,7 +1066,9 @@ def main() -> int:
     if args.stage in ("report", "all"):
         print("[stage] report")
         stage_report(work_path, report_path,
-                     args.collection, args.provider, args.embed_model)
+                     args.collection, args.provider, args.embed_model,
+                     gen_provider=args.gen_provider,
+                     gen_model=args.gen_model)
     return 0
 
 

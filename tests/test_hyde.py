@@ -244,8 +244,9 @@ def test_generate_hypothetical_answer_dashscope_omits_thinking_kwargs(monkeypatc
 
 
 def test_generate_with_fallback_vllm_provider_falls_back_on_error(monkeypatch):
-    """vllm-provider fallback returns the literal query on network failure,
-    same as the dashscope path."""
+    """vllm-provider fallback returns the literal query when BOTH the
+    local vllm AND the Dashscope qwen3-max cloud fallback fail (no API
+    key here means the cloud-fallback retry raises immediately)."""
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
     monkeypatch.delenv("VLLM_API_KEY", raising=False)
     import urllib.error
@@ -253,3 +254,81 @@ def test_generate_with_fallback_vllm_provider_falls_back_on_error(monkeypatch):
         with patch("mmrag_v2.retrieval.hyde.time.sleep"):
             result = generate_with_fallback("the literal query", provider="vllm")
     assert result == "the literal query"
+
+
+# ── Phase 4 Resilience: qwen3-max cloud fallback on vllm primary failure ─
+
+
+def test_generate_with_fallback_vllm_failure_falls_through_to_qwen3_max(monkeypatch):
+    """When the local vllm endpoint fails AND DASHSCOPE_API_KEY is set,
+    generate_with_fallback must retry against Dashscope qwen3-max and
+    return the cloud response (Phase 4 Resilience scope, designated
+    2026-05-23)."""
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-test")
+    monkeypatch.delenv("VLLM_API_KEY", raising=False)
+    import urllib.error
+
+    cloud_calls: list[dict] = []
+
+    def _fake_urlopen(req, timeout=None):
+        # First call (local vllm) raises; subsequent calls (cloud retry)
+        # return a successful Dashscope-shape response.
+        if "10.0.10.239" in req.full_url:
+            raise urllib.error.URLError("simulated local outage")
+        body = json.loads(req.data.decode("utf-8"))
+        cloud_calls.append({"url": req.full_url, "model": body.get("model")})
+        return _fake_dashscope_response("qwen3-max fallback hypothesis")
+
+    with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
+        with patch("mmrag_v2.retrieval.hyde.time.sleep"):
+            result = generate_with_fallback("test query", provider="vllm")
+
+    assert result == "qwen3-max fallback hypothesis"
+    assert len(cloud_calls) == 1, "cloud retry must be a single call, no retries-of-retries"
+    assert cloud_calls[0]["model"] == "qwen3-max"
+    assert "dashscope" in cloud_calls[0]["url"]
+
+
+def test_generate_with_fallback_vllm_opt_out_skips_cloud_fallback(monkeypatch):
+    """Passing cloud_fallback_model=None preserves the pre-Phase-4-Resilience
+    behavior: vllm failure → literal query immediately, no Dashscope retry."""
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-test")  # would succeed if tried
+    monkeypatch.delenv("VLLM_API_KEY", raising=False)
+    import urllib.error
+
+    def _fake_urlopen(req, timeout=None):
+        if "10.0.10.239" in req.full_url:
+            raise urllib.error.URLError("simulated local outage")
+        raise AssertionError("cloud must NOT be called when cloud_fallback_model=None")
+
+    with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
+        with patch("mmrag_v2.retrieval.hyde.time.sleep"):
+            result = generate_with_fallback(
+                "literal", provider="vllm", cloud_fallback_model=None,
+            )
+    assert result == "literal"
+
+
+def test_generate_with_fallback_dashscope_primary_does_not_retry_cloud(monkeypatch):
+    """When the primary provider is dashscope (not vllm), a failure
+    must NOT trigger the qwen3-max fallback — same-provider retry
+    doesn't help when dashscope itself is unreachable. Degrades
+    straight to literal query."""
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-test")
+    import urllib.error
+
+    call_count = {"n": 0}
+
+    def _fake_urlopen(req, timeout=None):
+        call_count["n"] += 1
+        raise urllib.error.URLError("simulated dashscope outage")
+
+    with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
+        with patch("mmrag_v2.retrieval.hyde.time.sleep"):
+            result = generate_with_fallback("literal")  # default provider=dashscope
+    assert result == "literal"
+    # Only the primary attempts (default retries=3) — no extra cloud-fallback layer
+    assert call_count["n"] == 3, (
+        "dashscope primary failure must not trigger a second dashscope call "
+        f"via the cloud-fallback path; got {call_count['n']} calls (expected 3 retries)"
+    )

@@ -168,15 +168,59 @@ def generate_hypothetical_answer(
     ) from last_err
 
 
-def generate_with_fallback(query: str, api_key: str | None = None, **kwargs) -> str:
-    """Like `generate_hypothetical_answer` but never raises — falls back
-    to the literal query if generation fails.
+CLOUD_FALLBACK_MODEL = "qwen3-max"
 
-    Production retrieval paths typically want this variant: HyDE adds
-    quality lift, but a single failed call shouldn't fail the whole
-    retrieval. The literal-query embed is a graceful degradation.
+
+def generate_with_fallback(
+    query: str,
+    api_key: str | None = None,
+    *,
+    cloud_fallback_model: str | None = CLOUD_FALLBACK_MODEL,
+    **kwargs,
+) -> str:
+    """Like `generate_hypothetical_answer` but never raises.
+
+    Two-tier degradation when the PRIMARY provider is `vllm` (the
+    GX10 local endpoint):
+
+      1. Try the local vllm endpoint.
+      2. If that fails (network, OOM, model unloaded), retry against
+         Dashscope `cloud_fallback_model` (default `qwen3-max`,
+         designated 2026-05-23 as the cloud escape hatch when local
+         is unavailable). Requires `DASHSCOPE_API_KEY`.
+      3. If the cloud fallback also fails (or no API key), return the
+         literal query — the embed-the-question baseline.
+
+    When the PRIMARY provider is `dashscope`, this collapses to the
+    pre-2026-05-23 behavior: try cloud once, on failure return the
+    literal query. There's no useful "retry cloud on a different
+    model" — if dashscope is unreachable, neither model helps.
+
+    Pass `cloud_fallback_model=None` to opt out of the cloud fallback
+    entirely (preserves pre-resilience-scope behavior; useful for
+    tests that mock only the primary endpoint).
     """
+    primary_provider = kwargs.get("provider", "dashscope")
     try:
         return generate_hypothetical_answer(query, api_key, **kwargs)
+    except HydeError:
+        pass
+
+    if primary_provider != "vllm" or not cloud_fallback_model:
+        return query
+
+    # Phase 4 Resilience: local vllm failed → try Dashscope qwen3-max.
+    cloud_kwargs = {
+        k: v for k, v in kwargs.items()
+        if k not in ("provider", "model", "url")
+    }
+    try:
+        return generate_hypothetical_answer(
+            query,
+            api_key=None,  # re-resolve DASHSCOPE_API_KEY from env
+            provider="dashscope",
+            model=cloud_fallback_model,
+            **cloud_kwargs,
+        )
     except HydeError:
         return query
