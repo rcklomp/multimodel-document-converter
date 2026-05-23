@@ -513,6 +513,15 @@ class ChunkMetadata(BaseModel):
         default=None, ge=0.0, le=1.0,
         description="1.0 = has indentation, 0.0 = flat code"
     )
+    partial_code: Optional[bool] = Field(
+        default=None,
+        description=(
+            "True when the chunker had to split a code unit (fenced ``` block "
+            "or contiguous indented run) mid-unit because end-of-unit exceeded "
+            "the size-limit safe-max (1.5×). Both halves of the split carry "
+            "this flag. Observability signal for v2.14 Phase 6 chunking hygiene."
+        ),
+    )
 
     # V2.4 INTELLIGENCE STACK METADATA (Observability Fix)
     # These fields provide proof that intelligent classification ran
@@ -818,6 +827,7 @@ def create_text_chunk(
     document_domain: Optional[str] = None,
     document_modality: Optional[str] = None,
     position: int = 0,
+    partial_code: Optional[bool] = None,
 ) -> IngestionChunk:
     """
     Factory function to create a TEXT modality chunk.
@@ -867,6 +877,7 @@ def create_text_chunk(
         confidence_threshold=confidence_threshold,
         document_domain=document_domain,
         document_modality=document_modality,
+        partial_code=partial_code,
     )
 
     # Build semantic context if provided

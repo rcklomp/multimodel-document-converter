@@ -2462,12 +2462,16 @@ class V2DocumentProcessor:
         text: str,
         max_chars: int = MAX_CHUNK_CHARS,
         overlap_ratio: float = CHUNK_OVERLAP_RATIO,
-    ) -> List[Tuple[str, ChunkType]]:
+    ) -> List[Tuple[str, ChunkType, bool]]:
         """
         Split text into chunks with overlap.
 
         For programming/technical manuals, prefer code-aware chunking (avoid splitting
         indented blocks mid-scope). For other documents, default to sentence-aware.
+
+        Returns `(text, ChunkType, partial_code)` triples. `partial_code=True`
+        means the chunker had to sever a code unit mid-body because the unit
+        exceeded the size safe-max (v2.14 Phase 6). Always `False` for prose.
         """
         if not text:
             return []
@@ -2485,9 +2489,12 @@ class V2DocumentProcessor:
             )
 
         if len(text) <= max_chars:
-            return [(text, ChunkType.PARAGRAPH)]
+            return [(text, ChunkType.PARAGRAPH, False)]
 
-        return [(c, ChunkType.PARAGRAPH) for c in self._chunk_by_sentences(text, max_chars, overlap_chars)]
+        return [
+            (c, ChunkType.PARAGRAPH, False)
+            for c in self._chunk_by_sentences(text, max_chars, overlap_chars)
+        ]
 
     def _effective_chunk_params(
         self, max_chars: int, overlap_ratio: float
@@ -2554,50 +2561,134 @@ class V2DocumentProcessor:
             blocks.append("\n".join(current).strip("\n"))
         return [b for b in blocks if b.strip()]
 
+    @staticmethod
+    def _code_unit_ranges(lines: List[str]) -> List[Tuple[int, int]]:
+        """Identify (start, end-exclusive) ranges of atomic code units.
+
+        Each unit is either:
+        - A fenced region (from a ``` opener line through its closer, inclusive)
+        - A contiguous run of non-blank lines (between blank lines or fence
+          boundaries)
+
+        Blank lines are unit separators and not themselves part of any unit.
+        v2.14 Phase 6: used by `_chunk_code_by_lines` to avoid severing a
+        code unit mid-body when end-of-unit fits within the size safe-max.
+        """
+        n = len(lines)
+        units: List[Tuple[int, int]] = []
+        i = 0
+        while i < n:
+            while i < n and lines[i].strip() == "":
+                i += 1
+            if i >= n:
+                break
+            if lines[i].lstrip().startswith("```"):
+                start = i
+                i += 1
+                while i < n and not lines[i].lstrip().startswith("```"):
+                    i += 1
+                if i < n:
+                    i += 1
+                units.append((start, i))
+            else:
+                start = i
+                while i < n and lines[i].strip() != "":
+                    i += 1
+                units.append((start, i))
+        return units
+
     def _chunk_code_by_lines(
         self, code: str, max_chars: int, overlap_lines: int = 4
-    ) -> List[str]:
-        """
-        Chunk code by line boundaries, with a small line overlap for context.
+    ) -> List[Tuple[str, bool]]:
+        """Chunk code by line boundaries, returning (text, partial_code) pairs.
+
+        v2.14 Phase 6: when a chunk would otherwise close mid-unit (fenced
+        block or contiguous indented run), extend up to `safe_max` (1.5×
+        max_chars) to reach end-of-unit. If end-of-unit still exceeds
+        safe_max, accept a line-boundary split and flag every chunk that
+        sits inside that oversized unit with `partial_code=True`. Otherwise
+        `partial_code=False`. Small line overlap preserves context across
+        non-partial boundaries.
         """
         lines = code.splitlines()
         if not lines:
             return []
 
-        chunks: List[str] = []
+        safe_max = int(max_chars * 1.5)
+        units = self._code_unit_ranges(lines)
+        unit_start_of: Dict[int, int] = {}
+        unit_end_of: Dict[int, int] = {}
+        unit_len_from: Dict[int, int] = {}
+        for start, end in units:
+            running = 0
+            for idx in range(end - 1, start - 1, -1):
+                running += len(lines[idx]) + (1 if idx + 1 < end else 0)
+                unit_start_of[idx] = start
+                unit_end_of[idx] = end
+                unit_len_from[idx] = running
+
+        chunks: List[Tuple[str, bool]] = []
         i = 0
         while i < len(lines):
+            # A chunk that STARTS mid-unit is a continuation of an oversized
+            # unit and must be flagged partial regardless of where it closes.
+            chunk_starts_mid_unit = (
+                i in unit_start_of and i != unit_start_of[i]
+            )
             current: List[str] = []
             cur_len = 0
+            closes_mid_unit = False
             while i < len(lines):
                 ln = lines[i]
                 add_len = len(ln) + (1 if current else 0)
                 if current and cur_len + add_len > max_chars:
+                    unit_end = unit_end_of.get(i)
+                    if unit_end is not None:
+                        remaining_in_unit = unit_len_from.get(i, 0)
+                        projected = cur_len + 1 + remaining_in_unit
+                        if projected <= safe_max:
+                            while i < unit_end:
+                                ln_e = lines[i]
+                                current.append(ln_e)
+                                cur_len += len(ln_e) + (1 if len(current) > 1 else 0)
+                                i += 1
+                        else:
+                            closes_mid_unit = True
                     break
                 current.append(ln)
                 cur_len += add_len
                 i += 1
             if current:
-                chunks.append("\n".join(current).strip("\n"))
+                partial = chunk_starts_mid_unit or closes_mid_unit
+                chunks.append(("\n".join(current).strip("\n"), partial))
             if i < len(lines):
+                if closes_mid_unit:
+                    # Continuation begins exactly where we stopped; no overlap
+                    # (would duplicate code lines from the previous chunk).
+                    continue
+                prev_i = i
                 i = max(i - overlap_lines, 0)
-                # Prevent infinite loop on extremely long single lines.
-                if chunks and chunks[-1] == "\n".join(lines[i : i + len(current)]).strip("\n"):
-                    i += max(1, overlap_lines)
-        return [c for c in chunks if c.strip()]
+                # Prevent infinite loop on extremely long single lines: if the
+                # overlap would re-emit the same chunk verbatim, advance past it.
+                if chunks and chunks[-1][0] == "\n".join(lines[i : i + len(current)]).strip("\n"):
+                    i = prev_i + max(1, overlap_lines)
+        return [(t, p) for t, p in chunks if t.strip()]
 
     def _chunk_mixed_text_and_code(
         self, text: str, max_chars: int, overlap_chars: int
-    ) -> List[Tuple[str, ChunkType]]:
+    ) -> List[Tuple[str, ChunkType, bool]]:
         """
         Chunk mixed prose/code by block boundaries.
 
         - Prose blocks: sentence-aware, then size-limited with overlap.
-        - Code blocks: never sentence-split; only split by line boundaries if needed.
+        - Code blocks: never sentence-split; only split by line boundaries
+          if needed. v2.14 Phase 6: the third tuple element carries the
+          `partial_code` flag from `_chunk_code_by_lines` (True iff the
+          code unit had to be split mid-body because it exceeded safe_max).
         """
         blocks = self._split_blocks_preserve_newlines(text)
         if not blocks:
-            return [(text, ChunkType.PARAGRAPH)]
+            return [(text, ChunkType.PARAGRAPH, False)]
 
         typed_blocks: List[Tuple[str, ChunkType]] = []
         for b in blocks:
@@ -2612,22 +2703,24 @@ class V2DocumentProcessor:
             else:
                 merged[-1] = (merged[-1][0] + "\n\n" + b, t)
 
-        out: List[Tuple[str, ChunkType]] = []
+        out: List[Tuple[str, ChunkType, bool]] = []
         for block_text, block_type in merged:
             if block_type == ChunkType.CODE:
                 if len(block_text) <= max_chars:
-                    out.append((block_text, ChunkType.CODE))
+                    out.append((block_text, ChunkType.CODE, False))
                 else:
-                    for c in self._chunk_code_by_lines(block_text, max_chars=max_chars):
-                        out.append((c, ChunkType.CODE))
+                    for c, partial in self._chunk_code_by_lines(
+                        block_text, max_chars=max_chars
+                    ):
+                        out.append((c, ChunkType.CODE, partial))
                 continue
 
             # Prose: chunk within the block, then merge adjacent chunks up to max_chars.
             prose_chunks = self._chunk_by_sentences(block_text, max_chars, overlap_chars)
             for c in prose_chunks:
-                out.append((c, ChunkType.PARAGRAPH))
+                out.append((c, ChunkType.PARAGRAPH, False))
 
-        return [(t, k) for (t, k) in out if t and t.strip()]
+        return [(t, k, p) for (t, k, p) in out if t and t.strip()]
 
     def _chunk_by_words(
         self,
@@ -4832,7 +4925,7 @@ class V2DocumentProcessor:
 
             text_chunks = self._chunk_text_with_overlap(final_text)
 
-            for i, (chunk_text, chunk_type) in enumerate(text_chunks):
+            for i, (chunk_text, chunk_type, chunk_partial_code) in enumerate(text_chunks):
                 if not self._is_noise_content(chunk_text) and not self._is_advertisement(chunk_text):
                     # ================================================================
                     # V3.0.0: SEMANTIC CONTEXT - prev_text_snippet, next_text_snippet
@@ -4897,6 +4990,7 @@ class V2DocumentProcessor:
                             chunk_type,
                         ),
                         position=self._next_chunk_position(),
+                        partial_code=chunk_partial_code if chunk_type == ChunkType.CODE else None,
                         # V2.4: Intelligence Stack Metadata
                         **self._intelligence_metadata,
                     )
