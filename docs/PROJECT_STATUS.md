@@ -18,8 +18,8 @@ retrieve call, with zero impact on candidate ordering).
 **v2.15 phases shipped (Option F scope):**
 - **Phase 3 [F]** SHIPPED — full telemetry suite (5 modules + 2 docs + soak hook + 29 tests; DECISIONS.md "v2.15 Documented-Limitation Telemetry Threshold" transitioned PRE-CYCLE PROPOSAL → ACTIVE RULE)
 - **Phase 6 [U]** SHIPPED — calibration freshness check: FP8-14B cal fresh through 2026-06-22, T-72h pre-tag checkpoint armed
-- **Phase 1 [U]** PARTIAL — code shipped (narrow-fixture sampler); soak execution deferred-with-evidence per v0.9 DoD silent-default (`MLX_API_KEY` not in autonomous-run env)
-- **Phase N** — engine bump + AFTER snapshot + version-pin test update + tag staged
+- **Phase 1 [U]** CLOSED as DEAD LEVER 2026-05-24 PM (post-v2.15.0 tag) — narrow A/B soak (n=224 across 5 docs) ran post-tag once `MLX_API_KEY` env was available; falsification rule fired (4/5 docs ZERO R@1 delta; +0.4pp aggregate within noise; German subgroup +0.0 on n=64). HyDE bridging closed per the v0.9 plan's explicit termination condition. Infra stays in tree as opt-in (production defaults unchanged). Report: `docs/SOAK_2026-05-24_v2.15_p1_narrow_hyde_AB.md`. DECISIONS.md entry: "v2.15 Phase 1 HyDE Bridging — CLOSED as Dead Lever".
+- **Phase N** — engine bump + AFTER snapshot + version-pin test update + **v2.15.0 tag PUSHED to origin** (commit `fff67d9`)
 
 **v2.15 phases skipped (Option F deferrals):**
 - **Phase 2 [A]** pdfplumber lane — v2.16 contingent on Phase 3 telemetry evidence

@@ -28,11 +28,11 @@ zero impact on candidate ordering or rerank scores).
 | **6 [U]** (calibration freshness) | FP8-14B Phase 0 cal verified fresh through **2026-06-22** (no re-cal needed at cycle open). T-72h pre-tag checkpoint armed via `docs/CYCLE_OPEN_CHECKLIST.md` `cycle_slip.log` for future cycles. | (verification step only; no code change) |
 | **3 [F]** (telemetry suite) | Full Option F instrumentation — 5 new modules + 2 new docs + soak-harness hook + 29 unit tests. See §2 below for component list. DECISIONS.md telemetry-threshold entry transitioned **PRE-CYCLE PROPOSAL → ACTIVE RULE** concurrent with the code landing. | `ca1fa18` |
 
-### Phases PARTIAL (code shipped; data-acceptance bar deferred)
+### Phases SHIPPED (post-tag patch range, 2026-05-24 PM)
 
-| Phase | What landed | What deferred | Commit(s) |
-|---|---|---|---|
-| **1 [U]** (HyDE bridging) | `scripts/sample_phase1_narrow_fixture.py` — 5-doc fixture sampler (100 ATZ_Elektronik_German + 4×20 code-dense docs per Round-7 Finding 1 statistical-defensibility bar). Intent classifier + targeted-HyDE infra already shipped in v2.14 P2 (`156dfa7`); this cycle prepared the narrower re-target soak. | **SOAK EXECUTION** — blocked on `MLX_API_KEY` not in the autonomous-run shell environment (auto-mode classifier correctly denied credential scraping). v0.9 DoD silent-default applies: defer-with-evidence. **Rerun procedure** documented in `src/mmrag_v2/version.py` engine-comment block. | `ca1fa18` |
+| Phase | What | Commit(s) |
+|---|---|---|
+| **1 [U]** (HyDE bridging) | **CLOSED as DEAD LEVER** post-tag. User authorized `MLX_API_KEY` sourcing from `.zshrc` 2026-05-24 PM; A/B soak ran end-to-end (n=224 queries across 5 docs; HyDE-off baseline vs HyDE-on auto-intent test). Falsification rule fired (4/5 docs ZERO R@1 delta; aggregate +0.4pp within noise; German subgroup +0.0 on n=64). DECISIONS.md entry "v2.15 Phase 1 HyDE Bridging — CLOSED as Dead Lever" records the closure; opt-in infra stays in tree (production defaults unchanged). Report: `docs/SOAK_2026-05-24_v2.15_p1_narrow_hyde_AB.md`. v2.14 retrieval fingerprint re-verified live: 20/20 PASS. | (post-tag, this commit) |
 
 ### Phases SKIPPED (Option F deferral)
 
@@ -85,7 +85,7 @@ Per-query cost: $0 on the retrieval path.
 
 ### Retrieval fingerprint
 
-- **v2.14 fingerprint** (`tests/fixtures/retrieval_regression_v2_14_hybrid.json`) is the canonical pin for v2.15. Production retrieval is byte-for-byte identical (pipeline.py untouched; Phase 3 hook is post-retrieve telemetry-only). Empirical re-verification via `scripts/retrieval_regression_v2_14.py` deferred to user-runtime — blocked on `MLX_API_KEY` not in the autonomous-run shell environment.
+- **v2.14 fingerprint** (`tests/fixtures/retrieval_regression_v2_14_hybrid.json`) is the canonical pin for v2.15. Production retrieval is byte-for-byte identical (pipeline.py untouched; Phase 3 hook is post-retrieve telemetry-only). **Live verification 2026-05-24 PM: 20/20 PASS** via `scripts/retrieval_regression_v2_14.py` (ran once `MLX_API_KEY` env was available).
 - No v2.15 fingerprint captured — would be redundant against the v2.14 fingerprint given zero retrieval-stack delta.
 
 ### Strict-gate corpus state
@@ -106,13 +106,13 @@ observability only, not extraction/chunking/validation.
 
 ## 6. Cost summary
 
-- **Total cloud spend this cycle**: **$0**. No retrieval-side
-  experiments; no qwen-max calls. Phase 1 SOAK EXECUTION
-  deferred (would have spent ~$3-4 if executed; unspent budget
-  remains under the $25 cap).
-- **Local LLM utilization**: minimal — only Phase 6 calibration-
-  freshness check which is a date-only verification (no LLM
-  calls). GX10 endpoint idle this cycle from v2.15's perspective.
+- **Total cloud spend this cycle**: **~$2.50** (post-tag Phase 1
+  A/B soak — 224 query-gen calls + 448 judge calls via cloud
+  qwen-max). Well under the $25 cap.
+- **Local LLM utilization**: GX10 FP8-14B endpoint served the
+  HyDE-on test arm's auto-intent HyDE generation (224 queries ×
+  intent-matching rate ~50% = ~110 HyDE calls × ~9s each ≈ 16 min
+  of GX10 inference time). $0 cost.
 
 ## 7. Open carry-forwards into v2.16
 
@@ -123,7 +123,7 @@ at v2.16 open and follow the checklist.
 
 | # | Item | Status |
 |---|---|---|
-| 1 | Phase 1 SOAK EXECUTION | Code shipped; soak deferred-with-evidence on `MLX_API_KEY` env availability. Rerun procedure: see `src/mmrag_v2/version.py` engine-comment block. |
+| 1 | Phase 1 HyDE bridging | **CLOSED as dead lever** 2026-05-24 PM (post-tag). Falsification rule fired (4/5 docs ZERO R@1 delta). DECISIONS.md "v2.15 Phase 1 HyDE Bridging — CLOSED as Dead Lever". Opt-in infra stays in tree; production defaults unchanged; **NOT a v2.16 carry-forward**. |
 | 2 | Phase 3 telemetry data collection | Active as of v2.15.0 — every soak run via `synthetic_soak.py` writes to the rolling log. v2.16 analyzer reads the 30-day / 60-day windows for promotion / closure / middle-band rules. |
 | 3 | Phase 2 [A] pdfplumber lane | Deferred indefinitely under Option F. Eligible for promotion in v2.16+ if `CarOK_voorraadtelling` hit-rate ≥5% (standard arm) OR severe-defect-tag override fires at ≥1%. |
 | 4 | Phase 4 [A] Docling HybridChunker tuning | Deferred indefinitely under Option F. Carry-forward 6.1 re-evaluation trigger: Docling minor ≥2.87 OR every 90 days. Cycle-open checklist item #3. |

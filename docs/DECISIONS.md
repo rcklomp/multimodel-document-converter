@@ -1519,3 +1519,96 @@ commit; status flips in the same commit as the telemetry code.
 **Decision recorded by:** autonomous run, 2026-05-24, per user
 explicit "Option F will be picked" directive — silent-default
 clause not invoked.
+
+## v2.15 Phase 1 HyDE Bridging — CLOSED as Dead Lever (2026-05-24)
+
+**Decision:** the targeted-HyDE bridging hypothesis (intent-classifier
+gating + local-vLLM HyDE generation, opt-in via
+`auto_intent_hyde=True` on `retrieve_hybrid_reranked`) is CLOSED as
+a dead lever. The opt-in infrastructure (v2.14 P2, commit `156dfa7`)
+**stays in the code tree** for research / experimentation but is NOT
+promoted to a production default and is NOT carried to v2.16+.
+
+**Why this entry exists per Round-4 Finding 3 falsification rule:**
+v2.14 Phase 2's broad-soak (518 queries × 32 docs) FALSIFIED the
+broad-corpus HyDE-lift hypothesis. v2.15 Phase 1 retried under an
+explicit dilution-vs-no-lift discriminator: narrow the fixture to
+the 5 documented R@1-deficit docs (1 German + 4 code-dense) and see
+if dilution by non-deficit docs was masking real per-doc lift.
+
+The falsification rule (PLAN_V2.15.md §Phase 1 Goal): if per-doc
+R@1 lift is null (delta ≤ 0) on ≥3 of the 5 target docs, H0 is
+reconfirmed; HyDE bridging closes as a dead lever via this
+DECISIONS.md entry rather than becoming yet another perpetually-
+deferred carry-forward.
+
+**Measured result** (2026-05-24, n=224 queries across 5 docs;
+HyDE-off vs HyDE-on-with-auto-intent A/B on identical fixture):
+
+| Document | n | R@1 off | R@1 on | Δ pp |
+|---|---:|---:|---:|---:|
+| ATZ_Elektronik_German | 64 | 65.6% | 65.6% | **+0.0** |
+| Python_Cookbook | 40 | 60.0% | 62.5% | +2.5 |
+| IRJET_Modeling_of_Solar_PV | 40 | 77.5% | 77.5% | **+0.0** |
+| Hybrid_electric_vehicles | 40 | 90.0% | 90.0% | **+0.0** |
+| Greenhouse_Design | 40 | 45.0% | 45.0% | **+0.0** |
+| **AGGREGATE** | **224** | **67.4%** | **67.9%** | **+0.4** |
+
+**4 of 5 docs show ZERO delta** (null trigger fires at ≥3/5).
+The single non-null movement is Python_Cookbook's +2.5pp = 1 query
+flip out of 40 = at or below the binomial noise floor at n=40
+(single-flip = 2.5pp). The aggregate +0.4pp is within the n=224
+noise band. **The dilution hypothesis is falsified; H0 confirmed:
+HyDE bridging is inert on these document classes.**
+
+**Statistical caveat for the German subgroup**: the v0.9 plan
+required n=100 for German, but ATZ_Elektronik_German has only 32
+eligible text chunks in the corpus (corpus data limit, not a
+sampling defect). The measured n=64 German queries (2 per chunk
+× 32 chunks) is below the n=100 spec floor. At n=64 with
++0.0pp measured, the 95% binomial CI for the true delta
+spans roughly ±12pp — meaning the German result is consistent
+with no effect OR a small ±10pp effect. The other 4 docs at n=40
+each (single-flip noise ±2.5pp) collectively reject the
+dilution hypothesis even discounting German.
+
+**What stays / what doesn't:**
+
+| Component | Status |
+|---|---|
+| `src/mmrag_v2/retrieval/intent.py` (intent classifier) | **STAYS** — small, deterministic, no runtime cost when not opted in. May be useful for future query-type analytics. |
+| `src/mmrag_v2/retrieval/hyde.py` `provider="vllm"` + intent-aware system prompts | **STAYS** — v2.14 Phase 4a infrastructure; HyDE remains available as opt-in for always-on (`use_hyde=True`) or per-query gating (`auto_intent_hyde=True`). Code-side neutral. |
+| Production retrieval defaults | **UNCHANGED** — `retrieve_hybrid_reranked` defaults remain `use_hyde=False, auto_intent_hyde=False`. HyDE does NOT fire on any production query. |
+| Carry-forward to v2.16+ | **REMOVED** — no v2.16 phase covers HyDE bridging. The lever is exhausted on this corpus + retrieval stack. |
+
+**Counter-hypothesis worth recording for posterity**: HyDE could
+still produce lift on this corpus IF the embedder were different
+(e.g. a smaller model with weaker query-document alignment), or
+if the corpus were different (e.g. queries against highly technical
+documentation where the answer vocabulary diverges far from the
+query vocabulary). Neither condition is on the v2.16+ horizon.
+If either changes (embedder swap, major corpus expansion), HyDE
+bridging is worth re-evaluating; until then, this entry is the
+permanent closure.
+
+**Evidence:**
+- `docs/SOAK_2026-05-24_v2.15_p1_narrow_hyde_AB.md` — full per-
+  doc + per-axis A/B report
+- `output/soak/v2.15_p1_narrow_hyde_off/work.jsonl` — 224
+  baseline judgments (qwen-max)
+- `output/soak/v2.15_p1_narrow_hyde_on/work.jsonl` — 224
+  test-arm judgments (qwen-max) with auto-intent HyDE via
+  vLLM FP8-14B
+- Soak cost: $0 LLM (HyDE via local FP8-14B; gen + judge via
+  cloud qwen-max). Estimated cloud spend ~$2.50 for the
+  448 qwen-max calls (judge × 2 arms) + 224 generation calls.
+
+**Audit trail:**
+- v2.14 Phase 2 broad-soak FALSIFIED — `docs/SOAK_2026-05-23_v2.14_p2_intent_hyde_FALSIFIED.md`
+- v2.15 Phase 1 narrow-soak retry — this entry, falsifying the dilution counter-hypothesis
+- v0.9 plan falsification rule motivated by Round-4 audit Finding 3
+  (PLAN_V2.15.md §9 Round-3 audit changes table + Appendix A
+  Draft v0.3 → v0.4 archaeology)
+
+**Decision recorded by:** autonomous run, 2026-05-24, post-v2.15.0
+tag (v2.15.x patch range).

@@ -514,7 +514,9 @@ def stage_retrieve(work_path: Path, qdrant_url: str, ollama_url: str,
                    hybrid: bool = False,
                    sparse_collection: str = "mmrag_v2_8__bm25_sparse",
                    bm25_index_path: str = "tests/fixtures/bm25_index_v2_12.json",
-                   use_hyde: bool = False) -> None:
+                   use_hyde: bool = False,
+                   auto_intent_hyde: bool = False,
+                   hyde_provider: str = "dashscope") -> None:
     """Retrieve top-K candidates per query and store them on the row.
 
     When `rerank_backend` is None (default), behavior is identical to
@@ -584,6 +586,8 @@ def stage_retrieve(work_path: Path, qdrant_url: str, ollama_url: str,
                         qdrant_url=qdrant_url,
                         reranker=reranker,
                         use_hyde=use_hyde,
+                        auto_intent_hyde=auto_intent_hyde,
+                        hyde_provider=hyde_provider,
                     )
                 except Exception as e:
                     print(f"    ! hybrid retrieval failed for {q['query_id']}: {e}",
@@ -1006,6 +1010,17 @@ def main() -> int:
                              "that instead of the literal query. Adds ~1s + ~$0.001 per query "
                              "but improves retrieval when the question and answer have different "
                              "vocabulary.")
+    parser.add_argument("--auto-intent-hyde", action="store_true",
+                        help="v2.14 Phase 2 / v2.15 Phase 1: enable TARGETED HyDE — query-intent "
+                             "classifier decides per-query whether HyDE fires (code + minority-"
+                             "language intents only). Overrides --hyde to per-intent gating. "
+                             "Implies --hybrid (the auto_intent_hyde knob lives on "
+                             "retrieve_hybrid_reranked).")
+    parser.add_argument("--hyde-provider", default="dashscope",
+                        choices=["dashscope", "vllm"],
+                        help="HyDE generation provider when --hyde or --auto-intent-hyde is set. "
+                             "'dashscope' (default) = cloud qwen-max; 'vllm' = local GX10 endpoint "
+                             "at $0/call but adds ~9s wall-clock per query.")
     # v2.14 Phase 4c: local-LLM query generation. Query generation is
     # NOT judging — leniency-trap rules don't apply. Safe to default to
     # vllm once the GX10 endpoint is the user's stable choice.
@@ -1098,6 +1113,8 @@ def main() -> int:
             sparse_collection=args.sparse_collection,
             bm25_index_path=args.bm25_index_path,
             use_hyde=args.hyde,
+            auto_intent_hyde=args.auto_intent_hyde,
+            hyde_provider=args.hyde_provider,
         )
     if args.stage in ("judge", "all"):
         print("[stage] judge")
