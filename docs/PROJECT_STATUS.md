@@ -6,6 +6,32 @@ Purpose: fast orientation for a new coding session. Read this before deeper proj
 
 ## Current Objective
 
+**v2.15.0 SHIPPED 2026-05-24** under **Option F** (telemetry-
+augmented hybrid). Engine 2.14.0 → 2.15.0; annotated tag staged
+locally pending push. v2.15 adds Phase 3 [F] document-class
+telemetry infrastructure + Phase 1 narrow-fixture sampler on top
+of the v2.14.x state — **NO retrieval-stack changes** (production
+retrieval is byte-for-byte identical to v2.14.0; the Phase 3
+telemetry hook sits in the soak-harness write path AFTER each
+retrieve call, with zero impact on candidate ordering).
+
+**v2.15 phases shipped (Option F scope):**
+- **Phase 3 [F]** SHIPPED — full telemetry suite (5 modules + 2 docs + soak hook + 29 tests; DECISIONS.md "v2.15 Documented-Limitation Telemetry Threshold" transitioned PRE-CYCLE PROPOSAL → ACTIVE RULE)
+- **Phase 6 [U]** SHIPPED — calibration freshness check: FP8-14B cal fresh through 2026-06-22, T-72h pre-tag checkpoint armed
+- **Phase 1 [U]** PARTIAL — code shipped (narrow-fixture sampler); soak execution deferred-with-evidence per v0.9 DoD silent-default (`MLX_API_KEY` not in autonomous-run env)
+- **Phase N** — engine bump + AFTER snapshot + version-pin test update + tag staged
+
+**v2.15 phases skipped (Option F deferrals):**
+- **Phase 2 [A]** pdfplumber lane — v2.16 contingent on Phase 3 telemetry evidence
+- **Phase 4 [A]** Docling HybridChunker tuning — carry-fwd 6.1 trigger active (Docling ≥2.87 OR 90d)
+- **Phase 5 [E]** retrieval-side investments — v2.16 contingent on F→E telemetry escalation
+
+**Active canonical baseline:** [`docs/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md`](QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md).
+**Cycle history:** [`docs/PLAN_V2.15.md`](PLAN_V2.15.md) (CLOSED 2026-05-24; Draft v0.9 + 8-round audit archaeology in Appendix A).
+**Cycle-open process:** [`docs/CYCLE_OPEN_CHECKLIST.md`](CYCLE_OPEN_CHECKLIST.md) (NEW in v2.15; load-bearing for v2.16+ telemetry analyzer run, Docling watcher, calibration freshness, cycle_slip.log).
+
+---
+
 **v2.14.0 CLOSED + PUSHED 2026-05-23** (engine 2.13.0→2.14.0;
 annotated tag `v2.14.0` on origin at commit `36482e0`, sha
 `122a62e`). v2.14 layered local-LLM accelerator infrastructure on
@@ -337,13 +363,17 @@ New v2.13 fingerprint:
 
 ## Active Engineering Direction
 
-**v2.15 is the active cycle** (opened 2026-05-23 immediately after
-v2.14.0 SHIPPED + PUSHED; Draft v0.2 dated 2026-05-24). Authoritative
-scope + ordering in [`docs/PLAN_V2.15.md`](PLAN_V2.15.md). The plan
-opens with a gating strategic-decision fork (Option A vs Option E vs
-Option F); recommended default is **Option F** (telemetry-augmented
-hybrid). Phase numbering changed in v0.2 (v0.1's Phase 1 — rollback
-drop — was executed pre-cycle).
+**v2.15 CLOSED 2026-05-24 under Option F**; tag staged for push.
+Authoritative scope + execution outcomes in
+[`docs/PLAN_V2.15.md`](PLAN_V2.15.md) (Draft v0.9 — 8-round audit
+archaeology in Appendix A). AFTER snapshot at
+[`docs/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md`](QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md).
+
+**v2.16 cycle** opens when user is ready. Read
+[`docs/CYCLE_OPEN_CHECKLIST.md`](CYCLE_OPEN_CHECKLIST.md) FIRST —
+it specifies the analyzer run + USER_ISSUES.md review + Docling
+watcher + calibration freshness check that produce v2.16's
+Carry-Forwards table inputs.
 
 ## v2.15 Phase Status (mirrors PLAN_V2.15.md §3)
 
