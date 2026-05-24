@@ -72,6 +72,18 @@ DEFAULT_WORK_PATH = OUTPUT_DIR / "work.jsonl"
 DISK_HEADROOM_FLOOR_GB = float(
     os.environ.get("SOAK_DISK_HEADROOM_FLOOR_GB", "10.0")
 )
+
+# v2.15 Phase 3 [F] — document-class telemetry sink. Soak harness
+# writes one JSON line per query into this rolling log; analyzed
+# by scripts/analyze_doc_class_telemetry.py at cycle-open per
+# docs/CYCLE_OPEN_CHECKLIST.md. Override via env var for test/CI
+# runs that shouldn't pollute the production rolling log.
+TELEMETRY_LOG_PATH = Path(
+    os.environ.get(
+        "MMRAG_TELEMETRY_LOG",
+        str(REPO_ROOT / "output/telemetry/document_class_hits.jsonl"),
+    )
+)
 DEFAULT_REPORT_PATH = REPO_ROOT / "docs" / (
     f"QUALITY_SNAPSHOT_{datetime.now().strftime('%Y-%m-%d')}_v2.10_soak.md"
 )
@@ -249,6 +261,31 @@ def _write_work(work_path: Path, rows: list[dict]) -> None:
         for row in rows:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
     tmp.replace(work_path)
+
+
+def _append_telemetry(query_text: str, top: list[dict]) -> None:
+    """v2.15 Phase 3 [F]: append one telemetry record per query into
+    the rolling document-class-hits log. No-op if the import or write
+    fails (telemetry is best-effort; never breaks the soak).
+
+    Per `docs/PLAN_V2.15.md` §Phase 3 [F] step 3 + Round-4 Finding 1's
+    `analyze_doc_class_telemetry.py` deliverable contract."""
+    try:
+        sys.path.insert(0, str(REPO_ROOT / "src"))
+        from mmrag_v2.retrieval.documented_limitations import class_names
+        from mmrag_v2.retrieval.telemetry import build_telemetry_record
+    except ImportError:
+        return
+    try:
+        record = build_telemetry_record(
+            query_text, top, class_names(), top_k=5,
+        )
+        TELEMETRY_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with TELEMETRY_LOG_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except (OSError, ValueError) as e:
+        print(f"    ! telemetry write failed (non-blocking): {e}",
+              file=sys.stderr)
 
 
 def _call_dashscope(api_key: str, model: str, messages: list[dict],
@@ -573,6 +610,7 @@ def stage_retrieve(work_path: Path, qdrant_url: str, ollama_url: str,
                     "hybrid": True,
                     "sparse_collection": sparse_collection,
                 }
+                _append_telemetry(q["query_text"], top)
                 flushed += 1
                 if flushed % 20 == 0:
                     _write_work(work_path, rows)
@@ -648,6 +686,7 @@ def stage_retrieve(work_path: Path, qdrant_url: str, ollama_url: str,
                 "rerank_backend": rerank_backend,
                 "top_k_retrieve": top_k_retrieve,
             }
+            _append_telemetry(q["query_text"], top)
             flushed += 1
             if flushed % 20 == 0:
                 _write_work(work_path, rows)

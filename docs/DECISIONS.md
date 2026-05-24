@@ -1206,3 +1206,316 @@ any retrieval or judge artifact.
 - Soak cost ~$5.25 (within $25/cycle cap)
 
 **Decision recorded by:** autonomous run, 2026-05-22.
+
+## v2.15 Documented-Limitation Telemetry Threshold (ACTIVE RULE, 2026-05-24)
+
+**Status:** ACTIVE RULE as of v2.15 Phase 3 [F] ship (this commit).
+Transitioned from PRE-CYCLE PROPOSAL when the Phase 3 implementation
+landed: `src/mmrag_v2/retrieval/documented_limitations.py`,
+`src/mmrag_v2/retrieval/telemetry.py`,
+`scripts/analyze_doc_class_telemetry.py`,
+`scripts/verify_phase2_teardown.py`,
+`docs/USER_ISSUES.md`, `docs/CYCLE_OPEN_CHECKLIST.md`, soak-harness
+telemetry write path in `scripts/synthetic_soak.py`, 29 unit tests
+in `tests/test_doc_class_telemetry.py` +
+`tests/test_verify_phase2_teardown.py` (all green at promotion).
+Originally recorded per Round-2 audit Finding 1: deferring this
+definition to v2.16 would have guaranteed that v2.16 inherits a
+dataset with no decision rule attached.
+
+**Decision:** for v2.15 Option F's document-class query telemetry,
+three complementary triggers govern per-class transitions out of
+documented-limitation state:
+
+```
+per_class_hit_rate_30d   = (queries with class in rerank top-5 over 30d) / denominator_30d
+per_class_hit_rate_60d   = (queries with class in rerank top-5 over 60d) / denominator_60d
+denominator_Nd           = queries logged in N-day rolling window where
+                           rerank_top_5_non_empty == True
+open_user_issues         = count of open GitHub/Gitea issues against the class
+severe_defect_tag        = manual flag in documented-limitation config (True for
+                           classes with documented extraction defects from prior
+                           cycles: CarOK_voorraadtelling, Fluent_Python on entry)
+consecutive_middle_cycles = number of consecutive cycles this class has spent in
+                           the 1%-5% middle band
+
+PROMOTION TRIGGER (F → A) — REVISED 2026-05-24 per Round-6 Finding 1
+  to close the suppression-death-spiral failure mode:
+
+  STANDARD ARM:
+    per_class_hit_rate_30d >= 5%
+    AND (severe_defect_tag == True OR open_user_issues >= 1)
+
+  DEFECT-OVERRIDE ARM (NEW):
+    severe_defect_tag == True
+    AND per_class_hit_rate_30d >= 1%
+
+  Promotion fires if EITHER arm is True.
+
+CLOSURE TRIGGER (F → E) — REVISED 2026-05-24 per Round-6 Finding 1
+  + Round-7 Finding 3 to prevent silent closure of suppressed-
+  defective classes AND silent closure of newly-added classes
+  before human review:
+
+  per_class_hit_rate_60d < 1%
+  AND open_user_issues == 0
+  AND severe_defect_tag == False  (R6 — prevents death-spiral exploit)
+  AND (current_cycle - added_cycle) >= 2  (R7 — 2-cycle grace period)
+
+MIDDLE BAND (F → F):
+  1% <= per_class_hit_rate_60d < 5%  (carries forward; revisit at next cycle)
+
+MIDDLE-BAND ESCALATION (F → explicit A/E adjudication):
+  consecutive_middle_cycles >= 3
+  → next cycle open MUST adjudicate explicitly (cannot defer again)
+```
+
+**Rationale for the 5% corpus-frequency threshold (promotion arm 1):**
+
+| Floor | Value | Source |
+|---|---|---|
+| Random hit-rate baseline | ~3.1% | 1/32 PDFs (uniform-random query distribution against current corpus) |
+| Promotion threshold | **5%** | Meaningfully above random + reflects "1 in 20 queries gets suboptimal extraction" UX impact |
+| Investment justified | 5-7 working days | Option A pdfplumber lane Phase 2 budget; 5% hit-rate corresponds to ≈25 queries/week at typical traffic, enough to justify the lift |
+| Middle band | 1% ≤ rate < 5% | Class stays documented-limitation; revisit at next cycle |
+
+**Rationale for the new-class grace period (added 2026-05-24 per
+Round-7 audit Finding 3):**
+
+Both prior closure-safety clauses (defect-tag protection from
+Round-6, open-issues protection from Round-4) require something
+already-known: an explicit defect tag, or a filed user issue.
+Neither catches the failure mode for **newly-added classes** where
+nothing has had time to be known yet:
+
+```
+v2.16 adds new doc class X to the corpus
+  → X has severe extraction defects (nobody's diagnosed yet)
+  → users abandon queries against X within 30 days
+  → 30-day hit-rate drops below 1%
+  → 60-day window opens (X now has 60 days of <1% rate)
+  → severe_defect_tag is still False (nobody diagnosed)
+  → open_user_issues == 0 (users gave up rather than filed)
+  → CLOSURE TRIGGER fires
+  → X is permanently documented as Option E in DECISIONS.md
+  → no human ever reviewed whether the defect was fixable
+```
+
+The diagnosis gap is widest exactly when a class is newest. The
+2-cycle grace period closes this:
+
+| Field | Value | Source |
+|---|---|---|
+| Config field | `added_cycle` (per documented-limitation class) | New schema; set on entry to the documented-limitation list (e.g. "v2.15" for entry classes; "v2.16" for any v2.16 additions; etc.) |
+| Grace duration | **2 cycles** | Roughly 2-4 weeks at v2.13-v2.14 cycle cadence; long enough for a maintainer to apply `severe_defect_tag` if warranted, short enough that genuinely-low-volume classes don't sit in telemetry-track indefinitely |
+| What the grace blocks | Auto-closure (F → E) only | Explicit closure by user decision still permitted; promotion (F → A) still permitted via either arm |
+| Implementation | `analyze_doc_class_telemetry.py` skips auto-closure where `current_cycle - added_cycle < 2`; emits "GRACE PERIOD ACTIVE" line in the report | Closes the v2.16+ failure mode without touching the closure threshold values |
+
+Together with the Round-6 defect-tag clause and the Round-4
+open-issues clause, the closure rule now has 3 defense-in-depth
+protections: (1) defect-tag prevents death-spiral closure of
+known-defective classes, (2) open-issues prevents closure when
+file evidence exists, (3) grace period prevents closure of new
+classes before human review.
+
+**Rationale for the defect-override promotion arm (added 2026-05-24
+per Round-6 audit Finding 1):**
+
+The pain-frequency-coupled standard arm from Round-5 has a known
+failure mode: as a class's extraction defects worsen, users
+abandon queries against it → hit-rate drops below 5% → the
+standard arm can never fire promotion for the class despite the
+known defects. Severity-of-defect creates its own suppression
+signal that the corpus-frequency floor cannot see through.
+
+The defect-override arm provides an alternative promotion path
+specifically for severe-defect-tagged classes:
+
+| Floor | Value | Source |
+|---|---|---|
+| Standard-arm corpus-frequency floor | 5% | Unchanged from v0.6; gates "doing fine despite being popular" classes |
+| Defect-override corpus-frequency floor | **1%** | Three-fold *below* the random-distribution baseline (~3.1%). Filters truly-dead classes (no one queries) while letting suppressed-volume defect classes trigger explicit adjudication. Matches the closure rule's 1% threshold for symmetry. |
+| Defect-override requires | `severe_defect_tag == True` | Manual flag is the gate; the corpus-frequency floor alone is not enough to trigger the override (would re-introduce the popular-but-fine bias) |
+
+The closure rule's new `severe_defect_tag == False` clause closes
+the symmetric failure mode on the closure side: a defective class
+with users abandoning could otherwise drop below 1% with zero
+issues and be silently closed — making the closure path itself a
+death-spiral exploit. The clause ensures defect-tagged classes
+can only exit telemetry via promotion to Option A or via explicit
+user adjudication (removing the defect tag because the defect is
+no longer load-bearing).
+
+**Rationale for the pain-frequency standard arm (added 2026-05-24
+per Round-5 audit Finding 1):**
+
+The corpus-frequency threshold alone has a known failure mode:
+a heavily-queried class that's doing fine could trigger Option A
+investment just for being popular, while a lower-volume class
+with catastrophic extraction defects (truncation, garbled rows,
+missing OCR) never crosses 5% and remains indefinitely deferred.
+Promotion now requires BOTH a corpus-frequency signal AND a
+pain-frequency signal:
+
+| Pain signal | Source |
+|---|---|
+| `severe_defect_tag = True` | Manual flag in the documented-limitation config; set True on entry for classes with documented extraction defects from prior cycles. Both v2.15 entry classes (CarOK_voorraadtelling, Fluent_Python) qualify because their defects are recorded in v2.13/v2.14 quality snapshots. New classes added in future cycles default `False` and gain the flag only via explicit DECISIONS.md entry. |
+| `open_user_issues >= 1` | At least one open GitHub/Gitea issue specifically against the class. File evidence beats telemetry — if users have filed real complaints, telemetry rate alone shouldn't gate the investment. |
+
+Either pain signal satisfies the second arm. A class with high
+corpus-frequency but zero pain signal stays in the middle band
+(or moves up to it from <1%) and waits for evidence to accumulate.
+
+**Rationale for the middle-band aging rule (added 2026-05-24 per
+Round-5 audit Finding 3):**
+
+Without an aging rule, a class with a stable 2-4% hit-rate could
+live in the middle band indefinitely — never promoted (no pain
+signal yet, or rate stuck below 5%), never closed (rate above 1%),
+just continuously consuming cognitive overhead. The persistence
+trigger (≥3 consecutive middle-band cycles) forces a one-time
+human adjudication: at the cycle-open after the 3rd consecutive
+middle-band cycle, the cycle plan MUST resolve the class as
+Option A or Option E with explicit reasoning. Cannot defer to
+a 4th middle-band cycle.
+
+| Window | Value | Source |
+|---|---|---|
+| Consecutive cycles in middle band | **3** | Roughly 3-6 months of cycle cadence at the v2.13-v2.14 rate; long enough for a transient spike to fade or a real trend to surface, short enough to prevent indefinite limbo |
+| Adjudication required at | next cycle open after 3rd consecutive middle-band cycle | Forces the decision at cycle-plan-authoring time when context is fresh, not at v2.X close-out when the maintainer is fatigued |
+
+**Rationale for the <1% closure threshold (added 2026-05-24 per
+Round-4 audit Finding 2):**
+
+| Floor | Value | Source |
+|---|---|---|
+| Random hit-rate baseline | ~3.1% | Same as above |
+| Closure threshold | **<1%** | Three-fold *below* random baseline; queries against this class are statistically anomalously rare even accounting for non-uniform query distributions |
+| Window | **60 days** | Twice the promotion window — closure decisions should be slower than promotion decisions; one bad month shouldn't permanently close a class that might pick up later |
+| Issue floor | **0 open user issues** | If anyone has actually filed against the class, the telemetry rate is the wrong signal — file evidence beats telemetry; class stays open until issues close |
+| Conversion | F → Option E documented-limitation closure | Concrete DECISIONS.md entry naming the closure with measured hit-rate + window; class removed from the telemetry-tracked list; no further attention until/unless user re-opens with concrete evidence |
+
+**Why both triggers are necessary:** v0.4 of the plan defined only
+the promotion trigger. Without a closure trigger, classes below 5%
+live in telemetry-purgatory forever — F is operationally biased
+toward A (the only escape from F is via promotion). The closure
+trigger makes F a true fork: classes go up (≥5% → A), down
+(<1% with 0 issues → E), or stay in the middle band (1-5% →
+defer-with-evidence).
+
+**Why this needs to be defined NOW, not when Phase 3 ships:**
+
+The Phase 3 telemetry log format and v2.16-handoff contract are
+coupled. If Phase 3 ships in v2.15 with one schema and the v2.16
+decision rule then requires a different denominator (e.g., "queries
+with click-through" rather than "rerank top-5 non-empty"), the
+v2.15 telemetry data is retroactively useless. Defining the rule
+pre-cycle binds the log schema to the rule it serves.
+
+**What's NOT decided here:**
+
+- Whether Option F is the chosen strategic path (user picks in
+  Phase N close-out of v2.15 per PLAN_V2.15.md §2). If Option A or
+  Option E is chosen instead, Phase 3 [F] is not built and this
+  proposal stays parked.
+- What v2.16 does *with* a class that hits the trigger — the plan
+  for that document class is its own v2.16 Phase scoping exercise
+  (likely the same pdfplumber/Docling-config questions Option A
+  would have faced in v2.15).
+- The threshold value beyond v2.16 — annual review per the user's
+  judgment; if corpus grows substantially or traffic patterns
+  shift, the random baseline + threshold both move.
+
+**Operationalization:**
+
+When v2.15 Phase 3 [F] code lands:
+1. This entry's status updates from PRE-CYCLE PROPOSAL to ACTIVE
+   RULE in the same commit (no separate "promotion" step).
+2. The telemetry config under `src/mmrag_v2/retrieval/` includes:
+   - `PROMOTION_THRESHOLD_PCT = 5` (corpus-frequency arm)
+   - `CLOSURE_THRESHOLD_PCT = 1` (closure-rate floor)
+   - `MIDDLE_BAND_PERSISTENCE_CYCLES = 3` (aging escalation)
+   - per-class `severe_defect_tag` field in the documented-
+     limitation config (initial entries: CarOK_voorraadtelling
+     = True, Fluent_Python = True)
+
+   All constants carry docstrings linking back to this entry.
+3. `scripts/analyze_doc_class_telemetry.py` ships in the same
+   commit and reads all four thresholds from the config (per
+   Round-4 Finding 1 + Round-5 Findings 1, 3). Output report
+   includes per-class disposition with all triggers shown:
+   ```
+   ## CarOK_voorraadtelling
+   - 30-day hit-rate: 7.2% (37 / 514 qualified queries)
+   - 60-day hit-rate: 6.8%
+   - severe_defect_tag: True
+   - open_user_issues: 0
+   - consecutive_middle_cycles: 0
+   - PROMOTION TRIGGER (≥5% AND pain-signal): FIRED (5% gate ✓, pain ✓)
+   - CLOSURE TRIGGER (<1% AND 0 issues): NOT FIRED
+   - MIDDLE-BAND ESCALATION (≥3 cycles): NOT FIRED
+   - v2.16 disposition: Option A treatment (extraction-lane investment)
+   ```
+4. `docs/CYCLE_OPEN_CHECKLIST.md` ships in Phase N with a
+   "Run analyze_doc_class_telemetry.py" line item — this is
+   the process that actually fires the triggers (per Round-4
+   Finding 1).
+5. The cycle plan template gains a "documented-limitation
+   adjudications" sub-section that imports the analyzer report;
+   any class with a fired escalation trigger is treated as a
+   required-decision item for that cycle-plan author (per
+   Round-5 Finding 3).
+6. v2.16 cycle plan opens with these rules as hard inputs, not
+   to-be-decided.
+
+**Evidence linked:**
+
+- `docs/PLAN_V2.15.md` §3 Phase 3 [F] — implementation method
+- `docs/PLAN_V2.15_AUDIT_PROMPT.md` — Round-2 audit Finding 1 that
+  motivated the pre-cycle definition + Round-4 audit Finding 2
+  that motivated the closure rule + Round-5 audit Findings 1+3
+  that motivated the pain-signal coupling + middle-band aging
+
+**Decision recorded by:** autonomous run, 2026-05-24, per Round-2
+audit Finding 1 + Round-4 audit Finding 2 + Round-5 audit
+Findings 1 + 3 + Round-6 audit Finding 1 + Round-7 audit Finding 3.
+
+## v2.15 Strategic Path — Option F Selected (2026-05-24)
+
+**Decision:** v2.15 executes under **Option F** (telemetry-augmented
+hybrid). User explicit selection on 2026-05-24, ahead of the T-24h
+silent-default activation per `PLAN_V2.15.md` §Phase N DoD silent-
+default clause. Reasoning per audit consensus across 7 audit rounds
++ Gemini round 1 + Round-7 overall stance — all independently
+arrived at F as the recommended path.
+
+**Active phases this cycle:**
+- Phase 1 [U or E] — Targeted HyDE bridging for code + minority-
+  language queries (5-doc narrow mini-soak; n=180)
+- Phase 3 [F] — Document-class query telemetry (analyzer +
+  `USER_ISSUES.md` + `CYCLE_OPEN_CHECKLIST.md` + verify-teardown
+  script)
+- Phase 6 [U] — Calibration freshness check (FP8-14B cal SHIPPED
+  2026-05-23 PM; expires 2026-06-22; today 2026-05-24 → fresh,
+  no re-cal needed)
+- Phase N — Cycle close-out + 2.15.0 tag
+
+**Skipped phases:**
+- Phase 2 [A] — pdfplumber lane (deferred to v2.16 contingent on
+  Phase 3 telemetry evidence per the Option F charter)
+- Phase 4 [A] — Docling HybridChunker config tuning (deferred
+  with re-evaluation trigger in carry-forward 6.1: "Docling minor
+  ≥2.87 OR every 90 days")
+- Phase 5 [E] — Retrieval-side investments (deferred to v2.16 if
+  Option E ever supersedes F via the middle-band-aging escalation
+  rule)
+
+**Pre-cycle proposals transitioning to ACTIVE RULE this cycle:**
+The "v2.15 Documented-Limitation Telemetry Threshold" entry above
+moves from PRE-CYCLE PROPOSAL to ACTIVE RULE when Phase 3 code
+ships (per its operationalization step 1). No separate promotion
+commit; status flips in the same commit as the telemetry code.
+
+**Decision recorded by:** autonomous run, 2026-05-24, per user
+explicit "Option F will be picked" directive — silent-default
+clause not invoked.
