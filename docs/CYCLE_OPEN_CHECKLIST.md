@@ -74,7 +74,30 @@ re-cal date + 30 days. If expiring within 72h of cycle-open,
 schedule the re-cal now (don't wait for the T-72h pre-tag
 checkpoint to fire it).
 
-### 5. cycle_slip.log review (carryover from prior cycle close-out)
+### 5. UIR refactor (3c) trigger conditions
+
+30-second review. Carry-forward 3c (UIR refactor) is PARKED WITH
+TRIGGERS per user disposition 2026-05-24. Reopens when ANY of the
+following fires:
+
+- **Trigger 1**: a 3rd document engine has been added (beyond PDF
+  via Docling + EPUB via ebooklib) — i.e., HTML, RTF, DOCX, or
+  similar engine landed in `src/mmrag_v2/engines/`. Standardization
+  ROI clears the refactor cost when N≥3.
+- **Trigger 2**: a cross-engine chunking defect requires duplicate
+  fixes in multiple engine paths during the prior cycle. UIR would
+  absorb the fix once instead of N times.
+- **Trigger 3**: per-engine test boilerplate exceeds ~500 LOC of
+  duplication across `tests/`. (Quick check:
+  `wc -l tests/test_*_adapter.py tests/test_*_engine.py | tail -1`).
+- **Trigger 4**: external integration request for a new format
+  (user-driven new engine slot that would push us to N≥3).
+
+If any trigger fires, add a `docs/PLAN_<id>_UIR.md` proposal entry
+to the cycle plan. Otherwise carry-forward 3c stays parked another
+cycle.
+
+### 6. cycle_slip.log review (carryover from prior cycle close-out)
 
 Open `docs/cycle_slip.log` and check whether any blocking-step
 slip entries exist from the prior cycle. If so:

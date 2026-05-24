@@ -307,7 +307,7 @@ Do not print or commit API keys.
 - Unconditional Phase 1 — targeted HyDE bridging for code + minority-language queries (5-doc narrow mini-soak; isolation rule blocks overlap with Phase 5 soaks)
 - Unconditional Phase 6 — calibration freshness check (Phase 0 FP8-14B cal SHIPPED 2026-05-23 PM; window expires 2026-06-22)
 - VLM swap (3a from v2.11) — promoted to v2.14 Phase 1 fallback (force_table_vlm); dedup carried to v2.15 Option A Phase 2
-- UIR refactor (3c, PAUSED for user signoff)
+- UIR refactor (3c, PARKED WITH TRIGGERS per user disposition 2026-05-24 PM; see `docs/CYCLE_OPEN_CHECKLIST.md` §5)
 - Magazine rendered-region-crop (3e from v2.11) — deferred with soak-data rationale
 
 ## Current Quality Summary
@@ -424,7 +424,7 @@ inline as a quick anchor; the canonical source is
 - **v2.11/v2.12 carry-forwards still open:**
   - 3a (VLM swap) — **promoted to v2.14 Phase 1 fallback** for VLM-assisted
     table parse on form-class docs; force_table_vlm shipped, dedup deferred to v2.15.
-  - 3c (UIR refactor) — still PAUSED for user signoff.
+  - 3c (UIR refactor) — **PARKED WITH TRIGGERS** (user disposition 2026-05-24 PM). Four reopen conditions in `docs/CYCLE_OPEN_CHECKLIST.md` §5: 3rd document engine added / cross-engine chunking defect / test boilerplate ≥500 LOC duplication / external engine integration request. 30-second check per cycle open.
   - 3e (magazine rendered-region-crop) — deferred with soak-data
     rationale (image-axis perf is OK without it).
 - HyDE stays opt-in by default unless a future use case warrants the
