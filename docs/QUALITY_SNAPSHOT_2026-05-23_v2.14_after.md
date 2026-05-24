@@ -1,10 +1,14 @@
 # v2.14.0 AFTER Snapshot — Local-LLM Accelerator Cycle
 
-> Date: 2026-05-23
+> Date: 2026-05-23 (ship state); post-ship addendum 2026-05-24 (§8).
 > Engine: `__engine_version__ = "2.14.0"`
 > Schema: `__schema_version__ = "2.7.0"` (unchanged from v2.7)
 > Predecessor: v2.13.0 (2026-05-22, annotated tag staged for user push)
-> Status: tag **STAGED**, not pushed by autonomous run
+> Tag status (at autonomous-run close): tag **STAGED**, not pushed.
+> Tag status (current): **PUSHED to origin** 2026-05-23 (commit `36482e0`, sha `122a62e`).
+> See §8 Post-ship addendum (2026-05-24) for v2.14.x patch-range
+> events that occurred between this snapshot's capture and the
+> opening of v2.15.
 
 ## 1. What this cycle shipped
 
@@ -93,8 +97,102 @@ Per-query cost: **$0** on the retrieval path.
 
 ## 7. References
 
-- Plan: [`docs/PLAN_V2.14.md`](PLAN_V2.14.md) (Draft v0.5)
+- Plan: [`docs/PLAN_V2.14.md`](PLAN_V2.14.md) (CLOSED 2026-05-23; Draft v0.5 body preserved as archaeology)
+- Successor plan: [`docs/PLAN_V2.15.md`](PLAN_V2.15.md) (Draft v0.2, 2026-05-24)
 - v2.13.0 AFTER baseline: [`docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md`](QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md)
-- Phase 0 calibration report: [`docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen36_27b_mtp.md`](CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen36_27b_mtp.md)
+- Phase 0 calibration reports:
+  - 27B-MTP (ship-state, retired): [`docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen36_27b_mtp.md`](CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen36_27b_mtp.md)
+  - FP8-14B (operative after v2.14.1 swap): [`docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_14b_fp8.md`](CALIBRATION_2026-05-23_v2.14_p0_local_judge_14b_fp8.md)
 - v2.14 fingerprint: `tests/fixtures/retrieval_regression_v2_14_hybrid.json` (20/20 PASS)
 - Project status: [`docs/PROJECT_STATUS.md`](PROJECT_STATUS.md)
+
+## 8. Post-ship addendum (2026-05-24)
+
+Three v2.14.x patch-range events occurred between this snapshot's
+capture and the v2.15 cycle opening. The body above (§1–§7) is the
+historical record at `v2.14.0` tag; this section is the delta.
+
+### 8.1 Phase 2 (intent-classifier + targeted HyDE) — SHIPPED + FALSIFIED
+
+Commit `156dfa7`. The Phase 2 intent classifier (`src/mmrag_v2/retrieval/intent.py`)
+and targeted HyDE wiring through `retrieve_hybrid_reranked(auto_intent_hyde=True)`
+shipped as opt-in infrastructure. A broad-query mini-soak FALSIFIED
+the lift hypothesis at the corpus level. The opt-in infrastructure
+is retained because v2.15 Phase 1 re-targets it at a narrower 5-doc
+mini-soak (`ATZ_Elektronik`, `Python_Cookbook`, `IRJET`,
+`Hybrid_electric_vehicles`, `Greenhouse_Design`) where the per-doc
+R@1 deficits were measured. Default behavior unchanged.
+
+### 8.2 Phase 3 (rollback-collection drop) — EXECUTED ahead of time gate
+
+Commit `2527414`. Under explicit user "full send" authorization,
+Phase 3 ran on 2026-05-23 PM (vs. the originally planned 2026-06-19
+time gate). 90-day cold-storage Qdrant snapshots taken first:
+
+| Collection dropped | Pts | Snapshot file | Snapshot size |
+|---|---:|---|---|
+| `mmrag_v2_8__qwen3_dashscope` (v2.13 rollback baseline) | 31,371 | `mmrag_v2_8__qwen3_dashscope-4278644141892673-2026-05-23-17-40-32.snapshot` | 219 MB |
+| `mmrag_v2_8` (v2.10 legacy llava rollback) | 30,454 | `mmrag_v2_8-4278644141892673-2026-05-23-17-40-34.snapshot` | 583 MB |
+
+Snapshots persisted on Docker volume
+`multimodal-doc-converter_qdrant_snapshots`. Disk reclaimed ≈30 GB.
+Both retention windows expire 2026-08-21.
+
+### 8.3 v2.14.1 — GX10 endpoint swap to FP8-14B
+
+Commit `53ffc73`. The 27B-MTP endpoint described in §3 was retired
+because its Phase 0 verdict put all three judging axes in the
+RESTRICTED band (format 70.7% NOT USABLE for any format-axis local
+judging). After offline shortlist evaluation via OpenRouter
+(Qwen3-32B, Llama-3.1-70B; neither cleared the 14B-BF16 baseline),
+the user noted BF16 is Blackwell-suboptimal and pivoted to
+`RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic` — Neural Magic
+compressed-tensors FP8 E4M3 dynamic quantization of the same 14B
+weights. Phase 0 re-cal on the FP8-14B (n=518, 0 parse failures):
+
+| Axis | Exact% | ±1% | Verdict |
+|---|---:|---:|---|
+| relevance | **82.2%** | 100.0% | RESTRICTED (HyDE-only band) |
+| format | **90.7%** | 99.8% | ✓ TRUSTWORTHY |
+| faithfulness | **76.6%** | 99.4% | RESTRICTED (HyDE-only band) |
+
+FP8 preserves the 14B-BF16 calibration profile within ±0.5pp on
+every axis AND recovers the format-axis TRUSTWORTHY verdict that
+the 27B-MTP regressed. **Operative endpoint after this swap:**
+`RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic` @
+`http://10.0.10.239:8000/v1/chat/completions`. The §3 line listing
+`Qwen/Qwen3.6-27B-FP8` as the active local LLM is historical.
+
+Canonical recipe + post-mortem at
+[`memory/project_v2_14_gx10_14b_fp8_swap.md`](../.claude/projects/-Users-ronald-Projects-MM-Converter-V2-4-1/memory/project_v2_14_gx10_14b_fp8_swap.md).
+
+### 8.4 n-gram speculative decoding — REJECTED
+
+Tested on the deployed FP8-14B endpoint as a throughput recovery
+attempt (the FP8-14B has no MTP heads; the 27B-MTP's ~32 tok/s was
+lost in the swap). Measured n-gram acceptance: 64 accepted /
+1023 drafted = **6.3%** (position-1 25.7%, positions 3+ 0%). No
+throughput improvement vs bare config; net-negative on long
+outputs. **Bare FP8-14B is the production configuration.**
+
+Throughput characterization (single-stream, bare config):
+- Steady-state judge call: ≈2.0s / ≈30 tok output = ≈15 tok/s
+- HyDE generation (≈600 tok output): ≈41s = ≈14.6 tok/s
+- No spec decoding path available: same-vocab Qwen2.5 draft model
+  doesn't exist below the 7B class (vocab=152064 from 7B; smaller
+  variants use 151936).
+
+Rejection record at
+[`memory/project_v2_14_ngram_spec_rejected.md`](../.claude/projects/-Users-ronald-Projects-MM-Converter-V2-4-1/memory/project_v2_14_ngram_spec_rejected.md).
+
+### 8.5 Updated open carry-forwards into v2.15
+
+§6 above listed four carry-forwards as of `v2.14.0` tag. Updated
+status per the addendum:
+
+| § | Item | Status as of 2026-05-24 |
+|---|---|---|
+| §6.1 | Phase 1.1 — Same-page VLM/prose dedup | Still carried; v2.15 Option A Phase 2 covers it if Option A chosen. |
+| §6.2 | Phase 6.1 — Docling prose+code disambiguation | Still carried; v2.15 Option A Phase 4 covers it (Approach 2 only — regex fallback explicitly rejected per Gemini audit). |
+| §6.3 | Phase 3 — 30-day dashscope rollback drop | ✓ EXECUTED 2026-05-23 PM (§8.2); no longer a carry-forward. |
+| §6.4 | Phase 2 — Targeted HyDE bridging | ✓ Infrastructure SHIPPED 2026-05-23 (§8.1); v2.15 Phase 1 re-targets to narrower mini-soak. |

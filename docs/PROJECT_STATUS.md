@@ -1,106 +1,49 @@
 # Project Status
 
-Last updated: 2026-05-23
+Last updated: 2026-05-24
 
 Purpose: fast orientation for a new coding session. Read this before deeper project docs.
 
 ## Current Objective
 
-**v2.14.0 SHIPPED 2026-05-23** (engine bump 2.13.0→2.14.0; v2.14.0
-annotated tag STAGED locally, pending user push to GitHub + Gitea
-after live-stack re-verification). v2.14 layered local-LLM
-accelerator infrastructure on top of the v2.13.0 retrieval stack —
-**NO retrieval-stack changes** vs v2.13.0 (omlx
-Qwen3-Embedding-8B-mxfp8 + BM25 + RRF + ModernBERT rerank unchanged).
+**v2.14.0 CLOSED + PUSHED 2026-05-23** (engine 2.13.0→2.14.0;
+annotated tag `v2.14.0` on origin at commit `36482e0`, sha
+`122a62e`). v2.14 layered local-LLM accelerator infrastructure on
+top of the v2.13.0 retrieval stack — **NO retrieval-stack changes**
+vs v2.13.0 (omlx Qwen3-Embedding-8B-mxfp8 + BM25 + RRF +
+ModernBERT rerank unchanged).
 
-**Active canonical baseline:** [`docs/QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md`](QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md).
-**Cycle history:** [`docs/PLAN_V2.14.md`](PLAN_V2.14.md) (Draft v0.5).
+**v2.14.x patch range (post-tag, 2026-05-23 PM):**
+- Phase 2 (intent classifier + targeted HyDE) — commit `156dfa7`. Infra opt-in; broad-query mini-soak FALSIFIED. v2.15 Phase 1 re-targets.
+- Phase 3 (rollback drop) — commit `2527414`. User "full send" override of 2026-06-19 time gate; ~30 GB reclaimed; snapshots persisted.
+- v2.14.1 GX10 endpoint swap — commit `53ffc73`. Retired Qwen3.6-27B-FP8 (format collapsed to 70.7%). Deployed `RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic` (Blackwell-native FP8). Phase 0 re-cal: rel 82.2% / **format 90.7% TRUSTWORTHY** / faith 76.6%.
+- n-gram spec decoding REJECTED post-swap (6.3% acceptance; bare FP8-14B is production).
 
-**v2.14 phases shipped:**
-- **Phase 0 (judge calibration)** — first run SHIPPED 2026-05-22
-  against `Qwen2.5-14B-Instruct`; SUPERSEDED 2026-05-23 when the GX10
-  endpoint was swapped to `Qwen/Qwen3.6-27B-FP8` + native MTP=3.
-  **Re-cal against the 27B SHIPPED 2026-05-23** (n=518, 0 parse failures
-  after a harness fix to disable Qwen3 thinking mode — see Phase 4a
-  note). Verdict: relevance 82.0% (RESTRICTED), **format 70.7% (RESTRICTED)**,
-  faithfulness 78.8% (RESTRICTED). ALL THREE AXES in the 70-85% "HyDE-only"
-  band; ±1 agreement stays 98.6-99.8% (ordinal scale consistent). Bias
-  direction FLIPPED vs the 14B: the 27B is systematically STRICTER on
-  format (132 cases where qwen-max said `2`, the 27B downgraded to `1`).
-  Report: `docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen36_27b_mtp.md`.
-  Phase 4 PERMITTED list contracts — see PLAN_V2.14.md Phase 4 row.
-- **Phase 4a (local HyDE provider)** SHIPPED 2026-05-22 —
-  `src/mmrag_v2/retrieval/hyde.py` gained `provider="vllm"` knob.
-  Default vLLM model updated 2026-05-23 from 14B to `Qwen/Qwen3.6-27B-FP8`.
-  Commit `0c5e818` (2026-05-23) added `chat_template_kwargs={enable_thinking: False}`
-  to the vLLM payload after the Phase 0 debug revealed the 27B was
-  silently dropping content via `--reasoning-parser qwen3` routing
-  to `message.reasoning`. Two new bridge tests in `tests/test_hyde.py`.
-  Live re-smoke: 670-char hypothesis in 8.8s (the earlier "392-char in 2s"
-  smoke was the pre-thinking-discovery 14B run).
-- **Phase 5 (soak disk-headroom precheck)** SHIPPED 2026-05-22.
-- **Phase 6 (code-block chunking hygiene)** — **PARTIAL 2026-05-23;
-  deeper fix DEFERRED to v2.15.** Commit `d737147` ships block-extension
-  policy + `partial_code` schema field + 3 new tests on the
-  `_chunk_text_with_overlap` path (9/9 in `tests/test_code_chunking.py`;
-  full suite 1036/1036). Improves the `scanned_book` lane + adds
-  universal observability. The Fluent_Python truncated-code defect
-  lives in the Docling extraction layer (prose+code intermixing
-  at page boundaries — page 326 CODE chunk ends mid-statement at
-  `    return`, and the continuation `cls(memv)\n\`\`\`\n` is the
-  first 11 chars of a PARAGRAPH chunk that then explains the code in
-  prose). A HybridChunker post-merge pass was implemented and
-  unit-tested this session but reverted: it fires 0× in production
-  (the actual defect shape is CODE→PARAGRAPH-with-code-prefix, not
-  CODE→CODE-severance, and surgical prose-prefix extraction has
-  unacceptable false-positive risk). Right fix is upstream of
-  chunking — either Docling configuration tuning or a post-Docling
-  text-normalization step that re-inserts whitespace around code
-  fences. Tracked as v2.15 workstream.
+**v2.15 cycle OPEN.** Plan: [`docs/PLAN_V2.15.md`](PLAN_V2.15.md) (Draft v0.2, 2026-05-24 — supersedes Draft v0.1 after Gemini audit + post-v2.14 GX10/spec events). Strategic Option A/E/F decision is the gating opening move; recommended default Option F (telemetry-augmented hybrid).
 
-**v2.14 phases pending / blocked**:
-- Phase 1 (form/table extraction) — **PARTIAL 2026-05-23; rolled
-  back, v2.15 dedup needed.** Code-side WIN preserved (commit
-  `e60a253`): `--force-table-vlm` now truly forces (was silently
-  overridden by `technical_manual` profile's `vlm_table_enabled=False`);
-  local NuMarkdown-8B VLM produces clean 5-col markdown tables on
-  5/12 CarOK pages, $0. **Mini-soak validation failed Phase 1
-  acceptance bar**: 30-query CarOK soak measured Format 45.0% (was
-  71.9% baseline; -26.9pp regression) while Relevance +24.2pp and
-  Faithfulness +21.7pp improved. Root cause: `force_table_vlm`
-  ADDS a VLM-table chunk per page but does NOT remove the parallel
-  flat-text prose chunk; both coexist in Qdrant; retrieval picks
-  the prose 29/30 times (0 VLM tables ever won top-1). Flat prose
-  is still ugly → judge calls it "garbled" → Format regresses.
-  **Production rolled back to v2.13 baseline** (81 dense + 70 sparse
-  CarOK chunks restored; verified). v2.15 needs: when VLM produces
-  a clean table, suppress the parallel prose chunk for that page.
-  Cheap pre-experiments (`do_cell_matching`, `force_full_page_ocr`)
-  both regressed + reverted earlier.
-- Phase 2 (targeted HyDE bridging) — depends on Phase 6 + Phase 1
-  landing so per-doc deficits can be re-measured cleanly.
-- Phase 3 (rollback drop) — time-gated 2026-06-19; needs explicit
-  "no regression, drop it" sign-off + 90-day cold-storage snapshot
-  per Draft v0.5.
-- Phase 4b (local judge in soak) — **scope evaporated 2026-05-23**:
-  the Draft v0.3 "Format-axis only" carve-out was predicated on the
-  14B's 90.2% format TRUSTWORTHY verdict. 27B dropped format to 70.7%
-  (RESTRICTED). Remaining viable: prompt A/B + tie-breaker harness.
-- Phase 4c (gen-provider vllm) — **SHIPPED 2026-05-23** (commit
-  `1c201dd`). `synthetic_soak.py --gen-provider vllm` + smoke at
-  2.0s/query on the live 27B. Default stays `dashscope`.
-- Phase 4d (tie-breaker) — **SHIPPED 2026-05-23**.
-  `scripts/local_then_cloud_soak.py` (two-tier judging: local-vLLM
-  on all in-scope queries, cloud qwen-max re-judges contested only;
-  provenance tagged via `judgment.judge_source`). 14 unit tests
-  in `tests/test_local_then_cloud_soak.py`. Live smoke green
-  (4 local judgments in 13s).
-- Phase 4e (1500-query Format-only demo) — **DROPPED 2026-05-23**:
-  predicate failed (Format not TRUSTWORTHY on 27B).
-- Phase 4-Resilience (qwen3-max cloud fallback for HyDE) — **SHIPPED
-  2026-05-23** (commit `1c201dd`). `generate_with_fallback` chains
-  vllm → dashscope qwen3-max → literal query when primary is vllm.
-- Phase N (close-out + 2.14.0 tag).
+**Active canonical baseline:** [`docs/QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md`](QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md) (ship state + §8 post-ship addendum 2026-05-24).
+**Cycle history:** [`docs/PLAN_V2.14.md`](PLAN_V2.14.md) (CLOSED 2026-05-23; close-out header + Draft v0.5 archaeology).
+
+**v2.14 final phase outcomes** (mirrors `QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md` §1 + §8 addendum):
+
+**Shipped (8 — 6 at tag, +2 in patch range):**
+- **Phase 0 (judge calibration)** — operative verdict is the FP8-14B
+  re-cal from 2026-05-23 PM (post v2.14.1 swap): rel 82.2% / **format
+  90.7% TRUSTWORTHY** / faith 76.6%. Report: `docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_14b_fp8.md`. The 27B-MTP ship-state verdict (all axes RESTRICTED, format collapsed to 70.7%) is retained at `docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen36_27b_mtp.md` as historical. Reclaiming format-axis TRUSTWORTHY re-opens the v2.14 Phase 4b carve-out for v2.15 sub-phases.
+- **Phase 4a (local HyDE provider)** — `provider="vllm"` knob (5 tests); `chat_template_kwargs.enable_thinking=False` Qwen3 fix (commit `0c5e818`, 2 bridge tests).
+- **Phase 4c (gen-provider vllm)** — `synthetic_soak.py --gen-provider vllm` (commit `1c201dd`).
+- **Phase 4d (tie-breaker harness)** — `scripts/local_then_cloud_soak.py` two-tier judging (14 unit tests).
+- **Phase 4-Resilience (qwen3-max cloud fallback)** — `generate_with_fallback` chains vllm → qwen3-max → literal (commit `1c201dd`, 3 bridge tests).
+- **Phase 5 (disk precheck)** — `_check_disk_headroom()` aborts soak stages below 10 GB free.
+- **Phase 2 (intent classifier + targeted HyDE)** — commit `156dfa7`, post-tag. Opt-in infra retained; broad-query lift FALSIFIED. v2.15 Phase 1 re-targets at narrower 5-doc mini-soak.
+- **Phase 3 (rollback collection drop)** — commit `2527414`, post-tag under user "full send" override of 2026-06-19 time gate. ~30 GB reclaimed; cold-storage snapshots persisted.
+
+**Partial (2 — carried to v2.15):**
+- **Phase 1 (form/table extraction)** — code-side semantic-bug fix preserved (commit `e60a253`): `--force-table-vlm` now truly forces (was silently overridden by `technical_manual` profile's `vlm_table_enabled=False`); local NuMarkdown-8B VLM produces clean 5-col markdown tables on 5/12 CarOK pages, $0. **Mini-soak failed Phase 1 acceptance bar**: 30-query CarOK soak measured Format 45.0% (was 71.9% baseline; -26.9pp regression) because VLM tables coexist with flat-prose duplicates that win retrieval 29/30 times. **Production rolled back** to v2.13 baseline. **v2.15 Option A Phase 2** addresses via same-page prose-VLM dedup (if A chosen); v2.15 Option F treats CarOK as documented-limitation with telemetry.
+- **Phase 6 (code-block chunking hygiene)** — block-extension + `partial_code` schema field shipped on `_chunk_text_with_overlap` (scanned_book) path (commit `d737147`; 9/9 tests). Fluent_Python truncated-code defect is upstream of chunking (Docling-extraction-layer prose+code intermixing at page boundaries); **v2.15 Option A Phase 4** addresses via Docling-config tuning (Approach 2 only — regex/heuristic fallback explicitly rejected per Gemini audit).
+
+**Dropped (1):**
+- **Phase 4e (1500-query Format-only demo)** — predicate failed on 27B-MTP; moot under FP8-14B Format TRUSTWORTHY (Format judging is now a no-cost local capability rather than a demonstration goal).
 
 ---
 
@@ -115,8 +58,10 @@ closed this cycle on top of the v2.12.0 retrieval stack:
   (R@1 +2.5pp, R@5 chunk +5.4pp, R@5 doc +2.1pp, Relevance +0.5pp,
   Format +3.7pp, Faithfulness +1.0pp). Production dense collection
   flipped to `mmrag_v2_8__qwen3_local` (4096-dim, 31,371 pts).
-  Dashscope collection retained as 30-day rollback baseline through
-  2026-06-19.
+  Dashscope collection was retained as 30-day rollback baseline
+  through 2026-06-19, then **dropped 2026-05-23 PM** under v2.14
+  Phase 3 user "full send" override (cold-storage snapshot retained
+  through 2026-08-21).
 
 - **Phase 2 (Format recovery) SHIPPED 2026-05-22** — commits
   `b0dc7c6` (v2.13 P1 infra: omlx provider + force_full_page_ocr
@@ -182,7 +127,9 @@ v2.10.0-rc1  (2026-05-16, 82c3639)  — all 8 closed corpus-wide
 v2.10.0      (2026-05-16, db6527c)  — chunker baseline + soak evidence
 v2.11.0      (2026-05-20, c2a461c)  — embedder swap (Dashscope text-embedding-v4)
 v2.12.0      (2026-05-21, 5a2ce18)  — retrieval stack (hybrid + ModernBERT rerank)
-v2.13.0      (PENDING, staged for user push) — local embedder swap (omlx Qwen3-Embedding-8B) + OCR auto-routing
+v2.13.0      (2026-05-22, 021ef05)  — local embedder swap (omlx Qwen3-Embedding-8B) + OCR auto-routing
+v2.14.0      (2026-05-23, 122a62e)  — local-LLM accelerator stack (HyDE/gen/tie-breaker on local vLLM + Qwen3 thinking-mode fix + disk precheck)
+v2.14.x      (post-tag, untagged) — Phase 2 (`156dfa7`, intent classifier) + Phase 3 (`2527414`, rollback drop) + v2.14.1 (`53ffc73`, GX10 → FP8-14B)
 ```
 
 **Active canonical baseline:**
@@ -255,19 +202,22 @@ Stored at `/qdrant/snapshots/<collection>/` inside the Qdrant container, persist
 
 Do not print or commit API keys.
 
-**Production text-retrieval embedder (v2.13.0):**
+**Production text-retrieval embedder (v2.13.0; unchanged through v2.14):**
 
 - provider: omlx-server (OpenAI-compatible local API)
 - model: `Qwen3-Embedding-8B-mxfp8` (4096-dim, MLX FP8-quantized)
 - endpoint: `http://10.0.10.246:8000/v1/embeddings`
 - env var: `MLX_API_KEY` (required for retrieval through omlx)
 - runtime: Apple Silicon (Mac Mini), ~80 ms LAN per query
-- rollback (through 2026-06-19): provider Dashscope, model
-  `text-embedding-v4` (1024-dim) against `mmrag_v2_8__qwen3_dashscope`;
-  flip the embedder defaults in `src/mmrag_v2/retrieval/pipeline.py`
-  back to `embed_provider="dashscope"` + `embed_model="text-embedding-v4"`
-  if a regression surfaces — no re-ingestion needed since both
-  collections are kept hot.
+- rollback: **dropped 2026-05-23 PM** via v2.14 Phase 3 (commit
+  `2527414`, user "full send" override of original 2026-06-19 time
+  gate). The dashscope rollback collection
+  `mmrag_v2_8__qwen3_dashscope` no longer exists in Qdrant; cold-
+  storage snapshot (219 MB) retained on
+  `multimodal-doc-converter_qdrant_snapshots` through 2026-08-21
+  for recovery if needed. If a regression surfaces past that date,
+  re-ingest from source via the dashscope provider — no hot
+  fallback collection.
 
 **Production cross-encoder reranker (NEW in v2.12):**
 
@@ -282,7 +232,7 @@ Do not print or commit API keys.
 - provider: Dashscope, model `qwen-max` (used for both query generation and judging)
 - v2.14 Phase 0/4 additions: local-LLM judge candidate at the GX10 vLLM endpoint below; ship-gate go/no-go on Relevance + Faithfulness axes stays on cloud `qwen-max` per the Phase 4 "leniency trap" guardrail in `PLAN_V2.14.md`
 
-**Local LLM endpoint (v2.14 Phase 4a, LIVE 2026-05-23 PM):**
+**Local LLM endpoint (v2.14.1 ACTIVE, LIVE 2026-05-23 PM):**
 
 - provider: vLLM (OpenAI-compatible)
 - model: `RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic` (Neural Magic
@@ -290,11 +240,16 @@ Do not print or commit API keys.
 - served-model aliases: `RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic` (full) or `qwen2.5-14b-fp8` (short)
 - endpoint: `http://10.0.10.239:8000/v1/chat/completions` (Asus Ascent GX10 = DGX Spark clone, Grace-Blackwell GB10, 128 GB unified memory)
 - container: `vllm/vllm-openai:v0.20.0-aarch64-cu130-ubuntu2404` (entrypoint = `[vllm serve]`; model as positional first arg, NO `serve` after image tag)
-- max context: 32K configured (sufficient for HyDE + judge; lower than 27B's 256K because 14B doesn't benefit and saves KV-cache headroom)
+- max context: 32K configured
 - code default: `src/mmrag_v2/retrieval/hyde.py` `VLLM_DEFAULT_MODEL` (call with `provider="vllm"`)
 - env var: `VLLM_API_KEY` (optional; endpoint runs unauthenticated by default)
 - canonical recipe: `memory/project_v2_14_gx10_14b_fp8_swap.md`
-- guardrails before any future swap: `memory/feedback_gx10_deployment_guardrails.md` (5-point hard checklist)
+- guardrails before any future swap: `memory/feedback_gx10_deployment_guardrails.md` (5-point hard checklist) + `memory/feedback_no_gx10_model_swap_reflex.md` (offline-eval-first before any live swap)
+- throughput characterization (bare config; n-gram spec REJECTED — see `memory/project_v2_14_ngram_spec_rejected.md`):
+  - steady-state judge call: ≈2.0s / ≈15 tok/s
+  - HyDE generation (≈600 tok): ≈41s / ≈14.6 tok/s
+  - no spec-decoding path available (no same-vocab Qwen2.5 draft <7B; vocab=152064 only from 7B class up)
+  - `--max-num-batched-tokens 8192` recommended in production recipe for chunked-prefill
 - **Phase 0 FP8-14B calibration SHIPPED 2026-05-23 PM** (n=518, 0 parse
   failures). Per-axis verdict on the same 518-query fixture as the
   retired 14B-BF16 and 27B-MTP predecessors:
@@ -305,6 +260,9 @@ Do not print or commit API keys.
   reclaims the format-axis TRUSTWORTHY verdict that the 27B-MTP had
   lost. Report:
   `docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_14b_fp8.md`.
+  Phase 4b format-axis local judging carve-out is back on the table
+  for v2.15 sub-phases (Phase 5a top-k tuning, Phase 5c paraphrase
+  fusion if Option E chosen).
 - **Predecessor endpoint history (all retired 2026-05-23):**
   - 27B-MTP (AM): rel 82.0 / format 70.7 / faith 78.8 — all RESTRICTED. Format collapse motivated this PM swap.
   - 14B-BF16 (2026-05-22): rel 81.7 / format 90.2 TRUSTWORTHY / faith 76.1 — close calibration profile to the new FP8-14B but Blackwell-suboptimal precision.
@@ -314,12 +272,15 @@ Do not print or commit API keys.
 - preferred cloud: Dashscope `qwen3-vl-plus`
 - local fallback: `NuMarkdown-8B-Thinking-mlx-8bits` on `http://10.0.10.246:8000/v1`
 
-**Future candidates (v2.14 carry-forwards — alignment per PLAN_V2.14.md Draft v0.5):**
+**Future candidates (v2.15 cycle scope — alignment per PLAN_V2.15.md Draft v0.2):**
 
-- Phase 1 — form/table layout extraction recovery for CarOK and other form-class docs (REDEFINED Draft v0.3 from earlier `format_form` judge axis proposal: fix extraction, not rubric; see DECISIONS.md "v2.13 Phase 2 CarOK")
-- Phase 2 — targeted HyDE bridging for code + minority-language queries (REDEFINED Draft v0.3 from earlier per-doc embedder routing proposal: bridge at query time via local HyDE, no parallel embedder collections)
-- Phase 6 — code-block chunking hygiene (NEW in Draft v0.3): fix mid-block truncation in Python_Cookbook / Fluent_Python / ArcGIS / Ayeva
-- VLM swap (3a from v2.11) — promoted to Phase 1 VLM-assisted table parse fallback
+- Option A Phase 2 — pdfplumber lane for CarOK + form-class docs (5-7 day budget per Gemini audit; explicit UIR-schema mapping sub-task; POC-first gate)
+- Option A Phase 4 — Docling HybridChunker config tuning (Approach 2 only; HARD ABORT if not viable — NO regex/heuristic fallback per Gemini audit)
+- Option E Phase 5 — retrieval-side investments (per-class top-k tuning, query rewriting, RAG-fusion with <1500ms p50 latency budget, documented-limitations policy)
+- Option F Phase 3 — document-class query telemetry (required mechanism for "wait for v2.16 user-query evidence" to mean anything)
+- Unconditional Phase 1 — targeted HyDE bridging for code + minority-language queries (5-doc narrow mini-soak; isolation rule blocks overlap with Phase 5 soaks)
+- Unconditional Phase 6 — calibration freshness check (Phase 0 FP8-14B cal SHIPPED 2026-05-23 PM; window expires 2026-06-22)
+- VLM swap (3a from v2.11) — promoted to v2.14 Phase 1 fallback (force_table_vlm); dedup carried to v2.15 Option A Phase 2
 - UIR refactor (3c, PAUSED for user signoff)
 - Magazine rendered-region-crop (3e from v2.11) — deferred with soak-data rationale
 
@@ -349,9 +310,9 @@ New v2.13 fingerprint:
 
 ## v2.13 commits (reverse chronological)
 
-- `(staging)` (2026-05-22) — Phase N close-out: version bump
+- `a77758b` (2026-05-22) — Phase N close-out: version bump
   2.12.0→2.13.0, AFTER snapshot, layer-0/1 docs sweep, v2.13.0
-  annotated tag staged for user push.
+  annotated tag PUSHED to origin at commit `021ef05`.
 - `4af0038` (2026-05-22) — Phase 1 SWAP decision committed
   (`docs/DECISIONS.md` + canonical comparison snapshot + omlx and
   dashscope per-doc soaks).
@@ -376,45 +337,68 @@ New v2.13 fingerprint:
 
 ## Active Engineering Direction
 
-**v2.14 is the active cycle** (started 2026-05-22; v2.13.0 shipped
-the same day). Authoritative scope + ordering in
-[`docs/PLAN_V2.14.md`](PLAN_V2.14.md) (Draft v0.5 as of 2026-05-23).
-The summary table below reflects current Draft v0.5 framing; in case
-of drift, the plan file wins.
+**v2.15 is the active cycle** (opened 2026-05-23 immediately after
+v2.14.0 SHIPPED + PUSHED; Draft v0.2 dated 2026-05-24). Authoritative
+scope + ordering in [`docs/PLAN_V2.15.md`](PLAN_V2.15.md). The plan
+opens with a gating strategic-decision fork (Option A vs Option E vs
+Option F); recommended default is **Option F** (telemetry-augmented
+hybrid). Phase numbering changed in v0.2 (v0.1's Phase 1 — rollback
+drop — was executed pre-cycle).
 
-## v2.14 Phase Status (mirrors PLAN_V2.14.md §"Phase outcomes")
+## v2.15 Phase Status (mirrors PLAN_V2.15.md §3)
 
-| Phase | Topic | Status (2026-05-23) |
+| Phase | Topic | Status (2026-05-24) |
 |---|---|---|
-| 0 | Local-judge calibration | 14B-BF16 (AM, retired). 27B-MTP (AM, retired — format collapsed to 70.7%). **FP8-14B SHIPPED 2026-05-23 PM** — rel 82.2% / **format 90.7% ✓ TRUSTWORTHY** / faith 76.6%. Blackwell-native FP8 quant preserves the 14B calibration profile + reclaims TRUSTWORTHY format. |
-| 1 | Form/Table layout extraction recovery | **PARTIAL 2026-05-23; rolled back** — code-side semantic-bug fix kept (`--force-table-vlm` truly forces); mini-soak measured Format -26.9pp regression because VLM tables coexist with flat-prose duplicates that win retrieval. Production restored to v2.13 baseline. v2.15 dedup work needed. |
-| 2 | Targeted HyDE bridging for code + minority languages | PENDING — depends on Phase 6 + Phase 1 landing. |
-| 3 | 30-day dashscope-rollback drop | PENDING — time-gated decision point 2026-06-19. |
-| 4a | Local HyDE provider | SHIPPED 2026-05-22; default model updated 2026-05-23 (14B → 27B-MTP). **Harness re-validated 2026-05-23** after `chat_template_kwargs.enable_thinking=False` fix (commit `0c5e818`). |
-| 4b | Local judge in soak (was Format-only) | **DOWNGRADED 2026-05-23** — Format axis no longer trustworthy on 27B. Remaining viable: prompt A/B + tie-breaker. |
-| 4c | Local query gen | PENDING — safe; ready to wire `--gen-provider vllm`. |
-| 4d | Tie-breaker harness | **SHIPPED 2026-05-23** — `scripts/local_then_cloud_soak.py` + 14 unit tests. Local-vLLM judges all in-scope; cloud `qwen-max` re-judges contested (any axis < floor). Provenance tagged. |
-| 4e | 1500-query Format-only demo soak | **DROPPED 2026-05-23** — predicate failed. |
-| 5 | Soak disk-headroom precheck | SHIPPED 2026-05-22. |
-| 6 | Code-block chunking hygiene | **PARTIAL** — commit `d737147` ships block-extension + `partial_code` schema field + 3 new tests on the `_chunk_text_with_overlap` path. Discovery 2026-05-23: production technical_manual chunks come from Docling's `hybrid_chunker`, NOT through that path. Committed change covers `scanned_book` + observability; Fluent_Python defect needs a HybridChunker-layer pass. **Sign-off needed** on direction. |
-| N | Cycle close-out + 2.14.0 tag | PENDING — terminal. |
+| Pre-cycle | dashscope-rollback drop (was v0.1 Phase 1) | ✓ COMPLETED 2026-05-23 PM (commit `2527414`, "full send" override of 2026-06-19 time gate) |
+| 1 [U/E] | Targeted HyDE bridging for code + minority languages | PENDING — re-targeted from v2.14 P2 falsification to narrower 5-doc mini-soak; isolation rule blocks overlap with Phase 5 soaks |
+| 2 [A] | pdfplumber lane for form-class documents | PENDING — gated on Option A selection + POC; budget revised to 5-7 days per Gemini audit (includes explicit UIR-schema mapping sub-task) |
+| 3 [F] | Document-class query telemetry | PENDING — Option F's required mechanism for "wait for v2.16 evidence" to mean anything (NEW in Draft v0.2 per Gemini audit) |
+| 4 [A] | Docling HybridChunker config tuning (Approach 2 only) | PENDING — gated on Option A + 1-day spike for native config viability; HARD ABORT if Approach 2 not viable (no regex fallback per Gemini audit) |
+| 5 [E] | Retrieval-side investments (per-class top-k / query rewriting / RAG fusion / documented-limitations) | PENDING — gated on Option E; 5c paraphrase fusion has strict latency budget (<1500ms p50 / <3000ms p99) |
+| 6 [U] | Calibration freshness check (30-day-OR-model-change) | PENDING — Phase 0 FP8-14B cal SHIPPED 2026-05-23 PM; freshness window expires 2026-06-22 |
+| N | Cycle close-out + 2.15.0 tag | PENDING — terminal |
+
+## v2.15 Strategic Decision Status
+
+Awaiting user selection: **Option A** (formalize extraction lanes),
+**Option E** (accept tiered quality + retrieval investments), or
+**Option F** (hybrid — recommended default). Phase set finalizes
+in Draft v0.3 once the decision lands. See PLAN_V2.15.md §2 for
+the full A/E/F sketch + Gemini's independent F recommendation.
+
+## v2.14 Phase Status (HISTORICAL — see Final outcomes above)
+
+This table reflects the final outcomes section above and is kept
+inline as a quick anchor; the canonical source is
+[`docs/QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md`](QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md)
+§1 + §8 addendum.
+
+| Phase | Topic | Final status |
+|---|---|---|
+| 0 | Local-judge calibration | FP8-14B operative (v2.14.1): rel 82.2 / **format 90.7 TRUSTWORTHY** / faith 76.6. 27B-MTP and 14B-BF16 predecessors retired. |
+| 1 | Form/Table layout extraction recovery | **PARTIAL** — code WIN preserved; data ROLLED BACK; carried to v2.15 Option A Phase 2 |
+| 2 | Targeted HyDE bridging | SHIPPED post-tag (`156dfa7`) opt-in; broad lift FALSIFIED; v2.15 Phase 1 re-targets |
+| 3 | Rollback-collection drop | SHIPPED post-tag (`2527414`) under user override; ~30 GB reclaimed |
+| 4a | Local HyDE provider | SHIPPED 2026-05-22; Qwen3 thinking-mode fix (`0c5e818`) |
+| 4b | Local judge format-axis | RE-OPENED by v2.14.1 FP8-14B Format TRUSTWORTHY verdict; available for v2.15 |
+| 4c | Local query gen | SHIPPED 2026-05-23 (`1c201dd`) |
+| 4d | Tie-breaker harness | SHIPPED 2026-05-23 (`local_then_cloud_soak.py`, 14 tests) |
+| 4e | 1500-query Format-only demo | DROPPED — moot under FP8-14B Format TRUSTWORTHY |
+| 4-Resilience | qwen3-max cloud fallback for HyDE | SHIPPED 2026-05-23 (`1c001dd`, 3 bridge tests) |
+| 5 | Soak disk-headroom precheck | SHIPPED 2026-05-22 |
+| 6 | Code-block chunking hygiene | **PARTIAL** — scanned_book + observability shipped; Docling-layer defect carried to v2.15 Option A Phase 4 |
+| N | Cycle close-out + 2.14.0 tag | ✓ PUSHED 2026-05-23 (commit `36482e0`, sha `122a62e`) |
 
 ## Other Carry-Forwards
 
-- **30-day dashscope-rollback drop (Phase 3).** Decision point
-  2026-06-19: drop `mmrag_v2_8__qwen3_dashscope` (v2.13 baseline)
-  if no v2.13 rollback fired during the window, and
-  `mmrag_v2_8` (v2.10 legacy llava). Skip if regression reports
-  arrive during the window. Draft v0.5 added a 90-day cold-storage
-  snapshot policy before deletion.
 - **v2.11/v2.12 carry-forwards still open:**
-  - 3a (VLM swap) — **promoted to Phase 1 fallback** for VLM-assisted
-    table parse on form-class docs.
+  - 3a (VLM swap) — **promoted to v2.14 Phase 1 fallback** for VLM-assisted
+    table parse on form-class docs; force_table_vlm shipped, dedup deferred to v2.15.
   - 3c (UIR refactor) — still PAUSED for user signoff.
   - 3e (magazine rendered-region-crop) — deferred with soak-data
     rationale (image-axis perf is OK without it).
 - HyDE stays opt-in by default unless a future use case warrants the
-  +1 s latency (and now with Phase 4a, the +1 s is also $0/call for
+  +1 s latency (and with Phase 4a, the +1 s is also $0/call for
   the local path).
 
 ## Must-Respect Constraints
@@ -430,10 +414,12 @@ of drift, the plan file wins.
   against `mmrag_v2_8__qwen3_local` (v2.13.0 default). Production
   reranker is local `gte-reranker-modernbert-base-mlx` via omlx-server.
   Production retrieval flow is `mmrag_v2.retrieval.retrieve_hybrid_reranked()`.
-- Dashscope text-embedding-v4 against `mmrag_v2_8__qwen3_dashscope`
-  is the 30-day rollback baseline through 2026-06-19; not the default
-  for any new code path. Ollama/llava lane is legacy; do not use as a
-  comparison baseline.
+- Dashscope text-embedding-v4 (formerly the 30-day rollback baseline)
+  collection `mmrag_v2_8__qwen3_dashscope` was **dropped 2026-05-23 PM**
+  (v2.14 Phase 3 under user override). Cold-storage snapshot retained
+  on `multimodal-doc-converter_qdrant_snapshots` through 2026-08-21
+  for recovery. Not the default for any code path. Ollama/llava lane
+  is legacy; do not use as a comparison baseline.
 - `MLX_API_KEY` env var is required for production retrieval (omlx
   embedder + omlx reranker). `DASHSCOPE_API_KEY` is required only
   for synthetic-soak judge + query generation and for the dashscope

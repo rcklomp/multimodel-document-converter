@@ -1,11 +1,59 @@
 # Plan: v2.14 — Carry-Forwards Closeout + Local LLM Integration
 
-**Status:** **Draft v0.5** (2026-05-23). User audit of Draft v0.4
-added 10 improvements across all phases: HIGH-priority quantitative
-fallback criteria (Phase 1), HIGH-priority GX10-offline resilience
-(Phase 4), MEDIUM-priority lang-detection specifics (Phase 2),
-existing-test interaction (Phase 6), VLM fallback budget; and
-LOW-priority calibration drift detection, rollback snapshot,
+**Status:** **CLOSED 2026-05-23.** Tag `v2.14.0` pushed to origin
+(commit `36482e0`, sha `122a62e`). Successor cycle:
+[`docs/PLAN_V2.15.md`](PLAN_V2.15.md) (Draft v0.2, 2026-05-24).
+
+### Close-out summary
+
+**Shipped (6):** Phase 0 (judge calibration — 27B-MTP ship-state,
+later superseded by FP8-14B per addendum), Phase 4a (HyDE provider
++ Qwen3 thinking-mode fix), Phase 4c (gen-provider vllm),
+Phase 4d (tie-breaker harness), Phase 4-Resilience (qwen3-max cloud
+fallback), Phase 5 (disk-headroom precheck).
+
+**Shipped after main close (in v2.14.x patch range):**
+- **Phase 2** (intent-classifier + targeted HyDE) — commit `156dfa7`.
+  Infrastructure shipped opt-in; mini-soak FALSIFIED the broad-
+  query lift hypothesis. v2.15 Phase 1 re-targets the same infra
+  at a narrower 5-doc mini-soak.
+- **Phase 3** (rollback-collection drop) — commit `2527414`. Executed
+  under explicit user "full send" override of the 2026-06-19 time
+  gate; ~30 GB reclaimed; 90-day cold-storage snapshots persisted
+  on `multimodal-doc-converter_qdrant_snapshots`.
+- **v2.14.1 GX10 endpoint swap** — commit `53ffc73`. Retired
+  `Qwen/Qwen3.6-27B-FP8` (Phase 0 format collapsed to 70.7%);
+  deployed `RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic`. Re-cal
+  verdict: rel 82.2% / **format 90.7% TRUSTWORTHY** / faith 76.6%
+  — reclaims format axis. Endpoint canonical recipe:
+  [`memory/project_v2_14_gx10_14b_fp8_swap.md`](../.claude/projects/-Users-ronald-Projects-MM-Converter-V2-4-1/memory/project_v2_14_gx10_14b_fp8_swap.md).
+- **n-gram spec-decoding** rejected post-swap (6.3% acceptance,
+  no throughput win). Bare FP8-14B is the production config.
+  [`memory/project_v2_14_ngram_spec_rejected.md`](../.claude/projects/-Users-ronald-Projects-MM-Converter-V2-4-1/memory/project_v2_14_ngram_spec_rejected.md).
+
+**Partial (2):** Phase 1 (form/table — code path shipped, data
+rolled back; same-page dedup deferred to v2.15), Phase 6 (code
+chunking — scanned_book + observability shipped, Fluent_Python
+Docling-layer defect deferred to v2.15).
+
+**Dropped (1):** Phase 4e (1500-query Format-only demo) — predicate
+failed on the 27B-MTP and is moot under the FP8-14B Format
+TRUSTWORTHY verdict because the original v2.13-vs-v2.14 Format-
+recovery hypothesis was never the question; Format judging is now
+a no-cost local capability rather than a demonstration goal.
+
+The original Draft v0.5 working content is preserved below verbatim
+as cycle archaeology. Edits made post-close are limited to this
+header.
+
+---
+
+**Original status (pre-close):** Draft v0.5 (2026-05-23). User audit
+of Draft v0.4 added 10 improvements across all phases: HIGH-priority
+quantitative fallback criteria (Phase 1), HIGH-priority GX10-offline
+resilience (Phase 4), MEDIUM-priority lang-detection specifics
+(Phase 2), existing-test interaction (Phase 6), VLM fallback budget;
+and LOW-priority calibration drift detection, rollback snapshot,
 Definition of Done gate, plus parallelization note. See "Draft v0.5
 revision summary" below.
 

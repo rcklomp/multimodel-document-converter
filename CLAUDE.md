@@ -11,17 +11,18 @@ This file provides guidance to Claude Code when working with this repository.
 6. `docs/TESTING.md`
 7. `docs/QUALITY_GATES.md`
 8. `docs/ARCHITECTURE.md`
-9. `docs/QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md` (**current canonical baseline**; v2.14.0 SHIPPED 2026-05-23 — local-LLM accelerator stack on top of unchanged v2.13.0 retrieval. Phase 0 27B-MTP cal: all axes RESTRICTED. Phase 4a HyDE + 4c gen-provider + 4d tie-breaker + 4-Resilience qwen3-max fallback all SHIPPED. Phase 1 (form/table) + Phase 6 (chunking) PARTIAL — code shipped, data acceptance bars deferred to v2.15. 20/20 retrieval fingerprint PASS at ship.)
-10. `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md` (v2.13.0 predecessor baseline — local omlx embedder swap + OCR auto-routing; apples-to-apples 6/6-axis omlx win vs dashscope)
-11. `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md` (v2.13 Phase 1 SWAP evidence — canonical comparison report)
-12. `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md` (v2.12.0 predecessor baseline — retrieval stack hybrid+rerank, R@1 67.8% on v2.11 fixture)
-13. `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md` (v2.11.0 baseline soak — Recall@1 35.5%; the 518-query fixture every v2.12 soak ran against)
-14. `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` (v2.10 strict-gate baseline — 34/34 PASS; unchanged in v2.11 + v2.12 + v2.13 + v2.14 because all four cycles touched retrieval-side / observability only)
-15. `docs/PLAN_V2.14.md` (v2.14 execution history — CLOSED 2026-05-23, tag `v2.14.0` staged for user push)
-16. `docs/PLAN_V2.13.md` (v2.13 execution history — CLOSED 2026-05-22, tag `v2.13.0` staged for user push)
-17. `docs/PLAN_V2.12.md` (v2.12 execution history — CLOSED 2026-05-21, tag `v2.12.0` on `5a2ce18` public on GitHub + Gitea)
-18. `docs/PLAN_V2.11.md` (v2.11 execution history — CLOSED 2026-05-20, tag `v2.11.0` on `c2a461c`)
-19. `docs/PLAN_V2.10.md` (v2.10 execution history — CLOSED 2026-05-16, tag `v2.10.0` on `db6527c`)
+9. `docs/PLAN_V2.15.md` (**active cycle plan**; Draft v0.9 2026-05-24 — **stopping-rule FIRES** (rounds 7 + 8 both 0 HIGH; consecutive-clean count = 2). Plan is EXECUTABLE pending §8 Q1 strategic Option A/E/F decision; recommended default F via silent-default clause at T-24h. Incorporates 8 audit rounds (Gemini + Rounds 2-8) closing ~40 concrete failure modes. v0.1-v0.8 archaeology preserved in Appendix A.)
+10. `docs/QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md` (**current canonical baseline**; v2.14.0 PUSHED 2026-05-23 [commit `36482e0`, sha `122a62e`] — local-LLM accelerator stack on top of unchanged v2.13.0 retrieval. Phase 0 ship-state was 27B-MTP all axes RESTRICTED; **operative Phase 0 verdict is FP8-14B (v2.14.1 patch swap): rel 82.2% / format 90.7% TRUSTWORTHY / faith 76.6%** — see §8 post-ship addendum. Phase 4a HyDE + 4c gen-provider + 4d tie-breaker + 4-Resilience qwen3-max fallback all SHIPPED. Phase 1 (form/table) + Phase 6 (chunking) PARTIAL — code shipped, data acceptance bars deferred to v2.15. Phase 2 + Phase 3 SHIPPED post-tag in v2.14.x patch range. n-gram spec decoding REJECTED. 20/20 retrieval fingerprint PASS at ship.)
+11. `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md` (v2.13.0 predecessor baseline — local omlx embedder swap + OCR auto-routing; apples-to-apples 6/6-axis omlx win vs dashscope)
+12. `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md` (v2.13 Phase 1 SWAP evidence — canonical comparison report)
+13. `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md` (v2.12.0 predecessor baseline — retrieval stack hybrid+rerank, R@1 67.8% on v2.11 fixture)
+14. `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md` (v2.11.0 baseline soak — Recall@1 35.5%; the 518-query fixture every v2.12 soak ran against)
+15. `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` (v2.10 strict-gate baseline — 34/34 PASS; unchanged in v2.11 + v2.12 + v2.13 + v2.14 because all four cycles touched retrieval-side / observability only)
+16. `docs/PLAN_V2.14.md` (v2.14 execution history — CLOSED 2026-05-23, tag `v2.14.0` PUSHED to origin [commit `36482e0`, sha `122a62e`]; close-out header + Draft v0.5 archaeology)
+17. `docs/PLAN_V2.13.md` (v2.13 execution history — CLOSED 2026-05-22, tag `v2.13.0` PUSHED to origin at commit `021ef05`)
+18. `docs/PLAN_V2.12.md` (v2.12 execution history — CLOSED 2026-05-21, tag `v2.12.0` on `5a2ce18` public on GitHub + Gitea)
+19. `docs/PLAN_V2.11.md` (v2.11 execution history — CLOSED 2026-05-20, tag `v2.11.0` on `c2a461c`)
+20. `docs/PLAN_V2.10.md` (v2.10 execution history — CLOSED 2026-05-16, tag `v2.10.0` on `db6527c`)
 
 Use the three-layer docs model:
 - Layer 0 contracts: invariants, governance, decisions, architecture, quality gates.
