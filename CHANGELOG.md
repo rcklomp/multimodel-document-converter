@@ -21,8 +21,8 @@ v2.13 closes two parallel workstreams on top of v2.12.0's retrieval stack.
 
 **omlx wins 6/6 axes.** 3 with meaningful margins (R@1, R@5 chunk, Format), 3 within noise.
 
-Canonical AFTER snapshot: `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md`.
-Phase 1 SWAP evidence: `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md`.
+Canonical AFTER snapshot: `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md`.
+Phase 1 SWAP evidence: `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md`.
 
 ### Phase 1 — Local embedder swap (SHIPPED 2026-05-22)
 
@@ -108,11 +108,11 @@ v2.14: proper form-class soak judge variant.
   on live stack).
 - `tests/test_v2_10_release_baseline.py::test_engine_and_schema_version_pinned`
   bumped to assert `2.13.0`.
-- AFTER snapshot: `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md`.
+- AFTER snapshot: `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md`.
 - Layer-0/1 docs swept: `docs/PROJECT_STATUS.md`, `README.md`,
   `.clinerules`, `AGENTS.md`, `docs/README.md`, `CLAUDE.md`,
   `CHANGELOG.md` (this file), `docs/ARCHITECTURE.md`,
-  `docs/PLAN_V2.13.md` (marked CLOSED).
+  `docs/archive/plans/PLAN_V2.13.md` (marked CLOSED).
 - v2.13.0 annotated tag STAGED but NOT pushed; user pushes/tags
   after a final live-stack glance.
 
@@ -163,7 +163,7 @@ on this corpus, so it ships opt-in only.
 | Format (judge) | 89.8% | 88.4% | −1.4pp (Phase 0 carry-forward) |
 
 Full report:
-[`docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md`](docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md).
+[`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md`](docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md).
 
 ### Phase 0 — content preference fix (`0d731b1`)
 
@@ -247,7 +247,7 @@ candidate only if Format recovery work surfaces chunker-level defects.
   `tests/fixtures/retrieval_regression_v2_12_hybrid.json`. New
   `tests/test_retrieval_regression_v2_12.py` pins it.
 - AFTER snapshot:
-  `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md`.
+  `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md`.
 - v2.12.0 annotated tag staged but NOT pushed; user pushes/tags
   after live-stack re-verification.
 
@@ -311,7 +311,7 @@ v2.10 non-goals) also shipped in this cycle.
 | Format (judge) | 98.3% | 89.8% | **−8.5pp** |
 
 Full soak report:
-[`docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md`](docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md).
+[`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md`](docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md).
 
 ### v2.11 Phase 1 — Embedder Swap (2026-05-20, `c2a461c` + `18bfbf2`)
 
@@ -413,7 +413,7 @@ and Phase 8 corpus-wide strict-gate re-verification reports **34 PASS /
 0 WARN / 0 FAIL** across the 34-doc canonical corpus (16 `QA_PASS` +
 18 `QA_PASS_WITH_ADVISORIES`). 0 advisory codes were added to
 `_ALLOWED_ADVISORY_WARN_CODES`. AFTER snapshot at
-[`docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md`](docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md).
+[`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md`](docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md).
 
 ### v2.10 Phase 8 — Strict-Gate Re-Verification + v2.10 Release Prep (2026-05-16, `validated-local`)
 
@@ -715,9 +715,9 @@ v2.10 production-tag blockers (see `docs/DECISIONS.md`
   Phase 4 close, +70 net new regression tests).
 - Qdrant `mmrag_v2_8`: rebuilt to **30,461 points**
   (status=green, 4096-dim llava, 10h15m wall time).
-- BEFORE state: `docs/QUALITY_SNAPSHOT_2026-05-11_v2.9_strict_gate_full_corpus.md`
+- BEFORE state: `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-11_v2.9_strict_gate_full_corpus.md`
   (9 PASS / 8 WARN / 17 FAIL — first full-corpus run).
-- AFTER state: `docs/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`.
+- AFTER state: `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md`.
 
 ### Phases shipped this cycle (per docs/PLAN_V2.9.md)
 
@@ -998,7 +998,7 @@ Tagged as `v2.8.0` (annotated tag, commit `9726b43`).
   emits delta column vs prior snapshot).
 - **Quality snapshots**:
   `docs/QUALITY_SNAPSHOT_2026-05-03.md` (Phase 0 BEFORE) and
-  `docs/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md` (Phase 5c AFTER
+  `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-04_v2.8_after.md` (Phase 5c AFTER
   with empirical Phase outcomes + known limitations).
 
 ### Changed

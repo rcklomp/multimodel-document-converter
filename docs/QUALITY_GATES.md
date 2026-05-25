@@ -185,7 +185,7 @@ correctly grades their pre-existing OCR/scan imperfections).
 
 | Window | Format pin | Source of truth |
 |---|---:|---|
-| **v2.11.0** (this release) | **≥ 85%** | 89.8% actual per `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md` |
+| **v2.11.0** (this release) | **≥ 85%** | 89.8% actual per `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md` |
 | **v2.11.1+** (recovery) | **≥ 95%** | Target after v2.11.x scanned/form chunk-content sanitization patch |
 | **v2.12+** (revert) | **≥ 96%** | Original pin; reinstated after two consecutive recovery soaks pass |
 

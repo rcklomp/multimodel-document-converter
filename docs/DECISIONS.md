@@ -552,7 +552,7 @@ snapshot, and release tagging before any `complete` claim.
   attributes the resulting chunks to the earliest source page, not the
   page the content actually lives on. Fix: emit one chunk per source
   page with correct `page_number` per slice. Diagnostic in
-  `docs/PHASE_B3_CROSS_PAGE_SPLIT_DIAGNOSTIC.md`.
+  `docs/archive/diagnostics/PHASE_B3_CROSS_PAGE_SPLIT_DIAGNOSTIC.md`.
 - `B4B_FULL_DOC_PICTURE_DEDUP` (#8, partial #5): Earthship p109 and
   similar image-only pages produce a chunk in 100-page partial probes
   but get dropped in full-doc conversions. Likely a deduplication
@@ -629,14 +629,14 @@ strict-gate re-run → final tag.
 
 **Cross-references:**
 - `docs/PLAN_V2.9.md` §3 Phase B sub-classes (B1 sanitizer = cosmetic; B2 = boilerplate; B3 = mixed application; B4 = mixed application).
-- `docs/PHASE_A_MISSING_PAGES_DIAGNOSTIC.md` §3 Sub-class taxonomy.
+- `docs/archive/diagnostics/PHASE_A_MISSING_PAGES_DIAGNOSTIC.md` §3 Sub-class taxonomy.
 - `docs/QUALITY_GATES.md` `MISSING_PAGES` / `MISSING_PAGES_BLANK` semantics.
 
 ---
 
 ## v2.10 chunker-quality ceiling — 99.9% Format not chased (2026-05-16)
 
-**Decision.** The v2.10.0 soak landed at **Format 98.3%** (1018/1036 axis-points across 518 sampled top-1 retrievals). Going from 98.3% → 99.9% is not pursued in v2.11 or v2.12. The release-engineering effort returns instead to retrieval quality (embedder swap, see `docs/PLAN_V2.11.md` Phase 1).
+**Decision.** The v2.10.0 soak landed at **Format 98.3%** (1018/1036 axis-points across 518 sampled top-1 retrievals). Going from 98.3% → 99.9% is not pursued in v2.11 or v2.12. The release-engineering effort returns instead to retrieval quality (embedder swap, see `docs/archive/plans/PLAN_V2.11.md` Phase 1).
 
 **Why this is the right call right now.** Format 98.3% means roughly 17 chunks out of the 518 sampled scored less than perfect (mostly 1/2 "minor formatting issues" — odd whitespace, sentence-break artifacts, light truncation — not 0/2 broken chunks). The remaining defects are a long tail across many lanes, no single class dominates, and the marginal user-visible impact is small.
 
@@ -665,15 +665,15 @@ Numerically: bumping Format 98.3 → 99.9 affects ~17 chunks; bumping Recall@1 f
 Until at least one of the three triggers fires, the v2.10 chunker quality bar of 34 PASS strict gate + 98.3% Format soak is treated as the durable production baseline.
 
 **Cross-references:**
-- `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md` §4 "Weakest 15" — the source data behind the 1.7% gap.
-- `docs/PLAN_V2.11.md` §1 Carry-Forward Register (rows 5, 8) — UIR refactor and EPUB engine rewrite as deferred items adjacent to this decision.
-- `docs/PLAN_V2.11.md` §5 Out of Scope — the one-line outbound reference back here.
+- `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-16_v2.10_soak.md` §4 "Weakest 15" — the source data behind the 1.7% gap.
+- `docs/archive/plans/PLAN_V2.11.md` §1 Carry-Forward Register (rows 5, 8) — UIR refactor and EPUB engine rewrite as deferred items adjacent to this decision.
+- `docs/archive/plans/PLAN_V2.11.md` §5 Out of Scope — the one-line outbound reference back here.
 
 ---
 
 ## v2.11 Carry-Forward Decisions (2026-05-17)
 
-The five rc1 carry-forward non-goals from `docs/PLAN_V2.10.md` §5 each get an explicit disposition in v2.11. Per user direction (2026-05-17): "find alternatives where possible, defer with named workaround where not." Pure-defer-without-rationale is forbidden.
+The five rc1 carry-forward non-goals from `docs/archive/plans/PLAN_V2.10.md` §5 each get an explicit disposition in v2.11. Per user direction (2026-05-17): "find alternatives where possible, defer with named workaround where not." Pure-defer-without-rationale is forbidden.
 
 ### 3a. NuMarkdown-8B local VLM — alternative proposed for v2.12, no v2.11 execution
 
@@ -724,7 +724,7 @@ A simpler implementation that lowers the existing `_max_chunker_per_element_char
 
 3. **Diagnostic deliverable instead.** v2.12 should ship the implementation *after* a pre-flight diagnostic walks the corpus and quantifies "how many items would the guard split, and which docs hit fallback today." That informs whether the guard's cost is justified.
 
-4. **Tracking:** carry forward to `docs/PLAN_V2.12.md` (when authored) as Phase 1 candidate. The element-by-element fallback already in v2.10 is the durable workaround until then; the KI EPUB Phase 7 marker-injection path proves it produces acceptable Format quality (96.9% in soak).
+4. **Tracking:** carry forward to `docs/archive/plans/PLAN_V2.12.md` (when authored) as Phase 1 candidate. The element-by-element fallback already in v2.10 is the durable workaround until then; the KI EPUB Phase 7 marker-injection path proves it produces acceptable Format quality (96.9% in soak).
 
 **Why this is not a regression from the Draft v0.4 plan:** the plan estimated effort wrong, not the goal. The user's "find alternatives" directive is honored by documenting the design clearly and explicitly deferring implementation rather than shipping a feature-flag that misrepresents progress.
 
@@ -761,7 +761,7 @@ No pure-defer-without-rationale. All five items have either an executed v2.11 al
 
 ## v2.11 Phase 1 Embedder Shootout Outcome (2026-05-20)
 
-**Context.** Phase 1 of v2.11 (per `docs/PLAN_V2.11.md` Draft v0.4 / v0.5) was the embedder shootout: compare the v2.10 baseline `mmrag_v2_8` collection (Ollama `llava` 4096-dim) against a challenger `mmrag_v2_8__qwen3_dashscope` (Dashscope `text-embedding-v4` 1024-dim) using identical chunks/queries from the v2.10 soak.
+**Context.** Phase 1 of v2.11 (per `docs/archive/plans/PLAN_V2.11.md` Draft v0.4 / v0.5) was the embedder shootout: compare the v2.10 baseline `mmrag_v2_8` collection (Ollama `llava` 4096-dim) against a challenger `mmrag_v2_8__qwen3_dashscope` (Dashscope `text-embedding-v4` 1024-dim) using identical chunks/queries from the v2.10 soak.
 
 **Numeric result.**
 
@@ -803,7 +803,7 @@ The baseline llava embedder rarely retrieved these docs because of hub-collapse:
 
 - `tests/fixtures/retrieval_regression_v2_11_qwen3.json` — challenger fingerprint (20 queries × top-5).
 - `output/soak/v2.11_qwen3/work.jsonl` — 518 challenger retrievals + judgments.
-- `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md` — full challenger soak report.
+- `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md` — full challenger soak report.
 - Qdrant collection `mmrag_v2_8__qwen3_dashscope` — 30,588 points, 1024-dim, status green.
 - `scripts/retrieval_regression.py` + `scripts/synthetic_soak.py` — both extended with `--provider`/`--collection`/`--embed-model` flags (durable measurement infrastructure for the next embedder candidate).
 
@@ -924,8 +924,8 @@ Both runs used `top_k_retrieve=25` (Qdrant top-25 → reranker → top-5), same 
 **Embedder-attributable axes won by ModernBERT: 4/4 (all 4 in big margins).**
 
 Reports retained:
-- `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_p1_cloud.md` (cloud-rerank, 518 judged)
-- `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_p1_omlx.md` (omlx-rerank, 518 judged)
+- `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-21_v2.12_p1_cloud.md` (cloud-rerank, 518 judged)
+- `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-21_v2.12_p1_omlx.md` (omlx-rerank, 518 judged)
 
 **Key insight from the data.** Cloud `gte-rerank` didn't move Recall@5 chunk at all (66.8% → 66.8%); it only reordered the same 5 chunks Qdrant already had in top-5. ModernBERT lifted Recall@5 chunk to 81.3% by picking *different* 5 chunks from the top-25 candidate set — finding gold chunks deeper in the candidate ranking. That's stronger reranking discrimination, consistent with ModernBERT being a 150M-param cross-encoder optimized for retrieval reordering vs cloud's smaller distilled model.
 
@@ -969,7 +969,7 @@ Reports retained:
 Recall@5 *doc* hitting 98.6% means: for 511 out of 518 queries, the gold doc IS in the top-5. The remaining 1.4% are likely judge edge cases where the soak-generated query happens to fit a different doc better than the doc the gold chunk came from.
 
 Reports retained:
-- `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_p2_hybrid.md` (518 judged)
+- `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-21_v2.12_p2_hybrid.md` (518 judged)
 
 **Phase 3 (HyDE) trigger no longer fires under the plan's strict logic** — Faithfulness 72.6% ≥ 70% floor, Recall@1 67.8% well above 55%. Will still **run Phase 3 soak for measurement** to determine whether HyDE adds anything on top of hybrid+rerank; result determines whether HyDE ships opt-in (default off / default on) or stays dormant.
 
@@ -1026,7 +1026,7 @@ Reports retained:
 For a +0.5pp Recall@1 gain that's within noise, the trade-off is unfavorable.
 
 Reports retained:
-- `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_p3_hyde.md` (518 judged)
+- `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-21_v2.12_p3_hyde.md` (518 judged)
 
 **Decision recorded by:** autonomous run, 2026-05-21.
 
@@ -1197,10 +1197,10 @@ collection, and reranker. The work file was generated once then forked. The
 any retrieval or judge artifact.
 
 **Evidence:**
-- `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md` — canonical
+- `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md` — canonical
   comparison report (this decision's evidence)
-- `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx.md` — full omlx per-doc + weakest queries
-- `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_dashscope_baseline.md` — full dashscope per-doc
+- `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx.md` — full omlx per-doc + weakest queries
+- `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_dashscope_baseline.md` — full dashscope per-doc
 - `output/soak/v2.13_p1_omlx/work.jsonl` — omlx fixture (518 queries)
 - `output/soak/v2.13_p1_dashscope_baseline/work.jsonl` — dashscope fixture (same 518 queries)
 - Soak cost ~$5.25 (within $25/cycle cap)
@@ -1470,8 +1470,8 @@ When v2.15 Phase 3 [F] code lands:
 
 **Evidence linked:**
 
-- `docs/PLAN_V2.15.md` §3 Phase 3 [F] — implementation method
-- `docs/PLAN_V2.15_AUDIT_PROMPT.md` — Round-2 audit Finding 1 that
+- `docs/archive/plans/PLAN_V2.15.md` §3 Phase 3 [F] — implementation method
+- `docs/archive/plans/PLAN_V2.15_AUDIT_PROMPT.md` — Round-2 audit Finding 1 that
   motivated the pre-cycle definition + Round-4 audit Finding 2
   that motivated the closure rule + Round-5 audit Findings 1+3
   that motivated the pain-signal coupling + middle-band aging
@@ -1592,7 +1592,7 @@ bridging is worth re-evaluating; until then, this entry is the
 permanent closure.
 
 **Evidence:**
-- `docs/SOAK_2026-05-24_v2.15_p1_narrow_hyde_AB.md` — full per-
+- `docs/archive/soaks/SOAK_2026-05-24_v2.15_p1_narrow_hyde_AB.md` — full per-
   doc + per-axis A/B report
 - `output/soak/v2.15_p1_narrow_hyde_off/work.jsonl` — 224
   baseline judgments (qwen-max)
@@ -1604,7 +1604,7 @@ permanent closure.
   448 qwen-max calls (judge × 2 arms) + 224 generation calls.
 
 **Audit trail:**
-- v2.14 Phase 2 broad-soak FALSIFIED — `docs/SOAK_2026-05-23_v2.14_p2_intent_hyde_FALSIFIED.md`
+- v2.14 Phase 2 broad-soak FALSIFIED — `docs/archive/soaks/SOAK_2026-05-23_v2.14_p2_intent_hyde_FALSIFIED.md`
 - v2.15 Phase 1 narrow-soak retry — this entry, falsifying the dilution counter-hypothesis
 - v0.9 plan falsification rule motivated by Round-4 audit Finding 3
   (PLAN_V2.15.md §9 Round-3 audit changes table + Appendix A

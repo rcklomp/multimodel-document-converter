@@ -62,10 +62,10 @@ The converter extracts text, images, and tables from complex documents while pre
 > extraction/chunking/validation contracts untouched).
 >
 > AFTER snapshot:
-> [`docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md`](docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md).
+> [`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md`](docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md).
 > Phase 1 SWAP evidence:
-> [`docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md`](docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md).
-> Plan: [`docs/PLAN_V2.13.md`](docs/PLAN_V2.13.md) (CLOSED 2026-05-22).
+> [`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md`](docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md).
+> Plan: [`docs/archive/plans/PLAN_V2.13.md`](docs/archive/plans/PLAN_V2.13.md) (CLOSED 2026-05-22).
 >
 > **Cumulative v2.10 → v2.13 trajectory on Recall@1 chunk** (note: v2.13
 > bar is on the harder v2.13 P1 fixture; v2.10-v2.12 are on the v2.11

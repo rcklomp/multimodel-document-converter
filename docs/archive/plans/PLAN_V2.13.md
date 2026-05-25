@@ -1,9 +1,10 @@
 # Plan: v2.13 — Format Recovery + Local Embedder Swap
 
-**Status:** **CLOSED 2026-05-22.** v2.13.0 SHIPPED — annotated tag
-`v2.13.0` STAGED locally for user push to both `github` and
-`origin` (Gitea at 10.0.10.241). Phase 1 (local omlx embedder swap)
-and Phase 2 (OCR auto-routing) both shipped.
+**Status:** **CLOSED + PUSHED 2026-05-22.** v2.13.0 SHIPPED —
+annotated tag `v2.13.0` on origin (Gitea at 10.0.10.241) + GitHub
+(rcklomp/multimodel-document-converter) at commit `021ef05`.
+Phase 1 (local omlx embedder swap) and Phase 2 (OCR auto-routing)
+both shipped.
 
 **Outcome (apples-to-apples, same fixture, only embedder differs):**
 omlx local `Qwen3-Embedding-8B-mxfp8` wins 6/6 axes vs cloud

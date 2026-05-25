@@ -6,20 +6,34 @@ Purpose: fast orientation for a new coding session. Read this before deeper proj
 
 ## Current Objective
 
-**v2.15.0 SHIPPED 2026-05-24** under **Option F** (telemetry-
-augmented hybrid). Engine 2.14.0 → 2.15.0; annotated tag staged
-locally pending push. v2.15 adds Phase 3 [F] document-class
-telemetry infrastructure + Phase 1 narrow-fixture sampler on top
-of the v2.14.x state — **NO retrieval-stack changes** (production
-retrieval is byte-for-byte identical to v2.14.0; the Phase 3
-telemetry hook sits in the soak-harness write path AFTER each
-retrieve call, with zero impact on candidate ordering).
+**v2.15.0 SHIPPED + PUSHED 2026-05-24** under **Option F**
+(telemetry-augmented hybrid). Engine 2.14.0 → 2.15.0; annotated
+tag `v2.15.0` on origin + GitHub at commit `fff67d9`. v2.15 adds
+Phase 3 [F] document-class telemetry infrastructure + Phase 1
+narrow-fixture sampler on top of the v2.14.x state — **NO
+retrieval-stack changes** (production retrieval is byte-for-byte
+identical to v2.14.0; the Phase 3 telemetry hook sits in the
+soak-harness write path AFTER each retrieve call, with zero
+impact on candidate ordering).
 
 **v2.15 phases shipped (Option F scope):**
 - **Phase 3 [F]** SHIPPED — full telemetry suite (5 modules + 2 docs + soak hook + 29 tests; DECISIONS.md "v2.15 Documented-Limitation Telemetry Threshold" transitioned PRE-CYCLE PROPOSAL → ACTIVE RULE)
 - **Phase 6 [U]** SHIPPED — calibration freshness check: FP8-14B cal fresh through 2026-06-22, T-72h pre-tag checkpoint armed
-- **Phase 1 [U]** CLOSED as DEAD LEVER 2026-05-24 PM (post-v2.15.0 tag) — narrow A/B soak (n=224 across 5 docs) ran post-tag once `MLX_API_KEY` env was available; falsification rule fired (4/5 docs ZERO R@1 delta; +0.4pp aggregate within noise; German subgroup +0.0 on n=64). HyDE bridging closed per the v0.9 plan's explicit termination condition. Infra stays in tree as opt-in (production defaults unchanged). Report: `docs/SOAK_2026-05-24_v2.15_p1_narrow_hyde_AB.md`. DECISIONS.md entry: "v2.15 Phase 1 HyDE Bridging — CLOSED as Dead Lever".
-- **Phase N** — engine bump + AFTER snapshot + version-pin test update + **v2.15.0 tag PUSHED to origin** (commit `fff67d9`)
+- **Phase 1 [U]** CLOSED as DEAD LEVER 2026-05-24 PM (post-v2.15.0 tag) — narrow A/B soak (n=224 across 5 docs) ran post-tag once `MLX_API_KEY` env was available; falsification rule fired (4/5 docs ZERO R@1 delta; +0.4pp aggregate within noise; German subgroup +0.0 on n=64). HyDE bridging closed per the v0.9 plan's explicit termination condition. Infra stays in tree as opt-in (production defaults unchanged). Report: `docs/archive/soaks/SOAK_2026-05-24_v2.15_p1_narrow_hyde_AB.md`. DECISIONS.md entry: "v2.15 Phase 1 HyDE Bridging — CLOSED as Dead Lever".
+- **Phase N** — engine bump + AFTER snapshot + version-pin test update + **v2.15.0 tag PUSHED to origin + GitHub** (commit `fff67d9`)
+
+**v2.16 cycle plan: Draft v0.8 in mid-audit (Round 7 pending).**
+Convergence-cycle plan at `docs/PLAN_V2.16.md` (Round 1-6
+dispositions in Appendix A). Round 6 (2026-05-25) accepted 4 HIGH
+iteration-fallout findings from v0.7 propagation gaps + 1 MED +
+2 LOW. None required disposition changes; all were
+wording/cross-reference fixes. Structural-finding rate trajectory:
+R1 0 → R2 1 → R3 5 → R4 1 + 1 disposition → R5 2 iter-induced
+→ R6 4 iter-fallout (all from prior-round fixes not propagating).
+Plan IS converging — every recent HIGH is "v0.X edit didn't
+propagate to all sites," not "design is wrong." Cycle NOT yet
+open for execution; opens when audit clears the stopping rule
+(two consecutive 0-HIGH rounds).
 
 **v2.15 phases skipped (Option F deferrals):**
 - **Phase 2 [A]** pdfplumber lane — v2.16 contingent on Phase 3 telemetry evidence
@@ -27,7 +41,7 @@ retrieve call, with zero impact on candidate ordering).
 - **Phase 5 [E]** retrieval-side investments — v2.16 contingent on F→E telemetry escalation
 
 **Active canonical baseline:** [`docs/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md`](QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md).
-**Cycle history:** [`docs/PLAN_V2.15.md`](PLAN_V2.15.md) (CLOSED 2026-05-24; Draft v0.9 + 8-round audit archaeology in Appendix A).
+**Cycle history:** [`docs/archive/plans/PLAN_V2.15.md`](archive/plans/PLAN_V2.15.md) (CLOSED 2026-05-24; Draft v0.9 + 8-round audit archaeology in Appendix A).
 **Cycle-open process:** [`docs/CYCLE_OPEN_CHECKLIST.md`](CYCLE_OPEN_CHECKLIST.md) (NEW in v2.15; load-bearing for v2.16+ telemetry analyzer run, Docling watcher, calibration freshness, cycle_slip.log).
 
 ---
@@ -45,17 +59,19 @@ ModernBERT rerank unchanged).
 - v2.14.1 GX10 endpoint swap — commit `53ffc73`. Retired Qwen3.6-27B-FP8 (format collapsed to 70.7%). Deployed `RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic` (Blackwell-native FP8). Phase 0 re-cal: rel 82.2% / **format 90.7% TRUSTWORTHY** / faith 76.6%.
 - n-gram spec decoding REJECTED post-swap (6.3% acceptance; bare FP8-14B is production).
 
-**v2.15 cycle OPEN.** Plan: [`docs/PLAN_V2.15.md`](PLAN_V2.15.md) (Draft v0.2, 2026-05-24 — supersedes Draft v0.1 after Gemini audit + post-v2.14 GX10/spec events). Strategic Option A/E/F decision is the gating opening move; recommended default Option F (telemetry-augmented hybrid).
+**v2.15 cycle CLOSED 2026-05-24 under Option F** (see headline
+section above). Plan history: [`docs/archive/plans/PLAN_V2.15.md`](archive/plans/PLAN_V2.15.md)
+(Draft v0.9 + 8-round audit archaeology in Appendix A).
 
-**Active canonical baseline:** [`docs/QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md`](QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md) (ship state + §8 post-ship addendum 2026-05-24).
-**Cycle history:** [`docs/PLAN_V2.14.md`](PLAN_V2.14.md) (CLOSED 2026-05-23; close-out header + Draft v0.5 archaeology).
+**Predecessor v2.14.0 canonical baseline:** [`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md`](archive/snapshots/QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md) (ship state + §8 post-ship addendum 2026-05-24). The active canonical baseline is the v2.15 AFTER snapshot named in the headline section.
+**Cycle history:** [`docs/archive/plans/PLAN_V2.14.md`](archive/plans/PLAN_V2.14.md) (CLOSED 2026-05-23; close-out header + Draft v0.5 archaeology).
 
 **v2.14 final phase outcomes** (mirrors `QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md` §1 + §8 addendum):
 
 **Shipped (8 — 6 at tag, +2 in patch range):**
 - **Phase 0 (judge calibration)** — operative verdict is the FP8-14B
   re-cal from 2026-05-23 PM (post v2.14.1 swap): rel 82.2% / **format
-  90.7% TRUSTWORTHY** / faith 76.6%. Report: `docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_14b_fp8.md`. The 27B-MTP ship-state verdict (all axes RESTRICTED, format collapsed to 70.7%) is retained at `docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen36_27b_mtp.md` as historical. Reclaiming format-axis TRUSTWORTHY re-opens the v2.14 Phase 4b carve-out for v2.15 sub-phases.
+  90.7% TRUSTWORTHY** / faith 76.6%. Report: `docs/archive/calibrations/CALIBRATION_2026-05-23_v2.14_p0_local_judge_14b_fp8.md`. The 27B-MTP ship-state verdict (all axes RESTRICTED, format collapsed to 70.7%) is retained at `docs/archive/calibrations/CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen36_27b_mtp.md` as historical. Reclaiming format-axis TRUSTWORTHY re-opens the v2.14 Phase 4b carve-out for v2.15 sub-phases.
 - **Phase 4a (local HyDE provider)** — `provider="vllm"` knob (5 tests); `chat_template_kwargs.enable_thinking=False` Qwen3 fix (commit `0c5e818`, 2 bridge tests).
 - **Phase 4c (gen-provider vllm)** — `synthetic_soak.py --gen-provider vllm` (commit `1c201dd`).
 - **Phase 4d (tie-breaker harness)** — `scripts/local_then_cloud_soak.py` two-tier judging (14 unit tests).
@@ -73,8 +89,8 @@ ModernBERT rerank unchanged).
 
 ---
 
-**v2.13.0 SHIPPED 2026-05-22.** Annotated tag `v2.13.0` staged
-locally for user push to GitHub + Gitea. Two parallel workstreams
+**v2.13.0 SHIPPED + PUSHED 2026-05-22.** Annotated tag `v2.13.0`
+on origin + GitHub at commit `021ef05`. Two parallel workstreams
 closed this cycle on top of the v2.12.0 retrieval stack:
 
 - **Phase 1 (local embedder swap) SHIPPED 2026-05-22** —
@@ -102,9 +118,9 @@ closed this cycle on top of the v2.12.0 retrieval stack:
 - v2.13 retrieval fingerprint: 20/20 PASS against live stack
 - Engine 2.13.0, schema 2.7.0 (unchanged), `pyproject.toml` synced
 
-Plan history: [`docs/PLAN_V2.13.md`](PLAN_V2.13.md) (CLOSED 2026-05-22).
-Canonical baseline: [`docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md`](QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md).
-P1 evidence: [`docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md`](QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md).
+Plan history: [`docs/archive/plans/PLAN_V2.13.md`](archive/plans/PLAN_V2.13.md) (CLOSED 2026-05-22).
+Canonical baseline: [`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md`](archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md).
+P1 evidence: [`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md`](archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md).
 
 ## v2.13.0 quality numbers — apples-to-apples vs v2.12.0 (same fixture, only embedder differs)
 
@@ -159,31 +175,31 @@ v2.14.x      (post-tag, untagged) — Phase 2 (`156dfa7`, intent classifier) + P
 ```
 
 **Active canonical baseline:**
-[`docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md`](QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md)
+[`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md`](archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md)
 — v2.13.0 AFTER snapshot. Full numbers + per-phase contributions.
 
 Predecessor canonical (kept for delta reproducibility):
-[`docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md`](QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md)
+[`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md`](archive/snapshots/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md)
 — v2.12.0 AFTER snapshot.
 
 **v2.13 phase reports:**
 
-- [`docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md`](QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md) — **Phase 1 SWAP evidence** (apples-to-apples 6/6-axis win)
-- [`docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx.md`](QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx.md) — Phase 1 omlx per-doc + weakest queries
-- [`docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_dashscope_baseline.md`](QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_dashscope_baseline.md) — Phase 1 dashscope per-doc + weakest queries
+- [`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md`](archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md) — **Phase 1 SWAP evidence** (apples-to-apples 6/6-axis win)
+- [`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx.md`](archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx.md) — Phase 1 omlx per-doc + weakest queries
+- [`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_dashscope_baseline.md`](archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_dashscope_baseline.md) — Phase 1 dashscope per-doc + weakest queries
 
 **v2.12 phase reports (predecessor — kept for reference):**
 
-- [`docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_p1_cloud.md`](QUALITY_SNAPSHOT_2026-05-21_v2.12_p1_cloud.md) — Phase 1 cloud-rerank shootout
-- [`docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_p1_omlx.md`](QUALITY_SNAPSHOT_2026-05-21_v2.12_p1_omlx.md) — Phase 1 local-rerank shootout (winner)
-- [`docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_p2_hybrid.md`](QUALITY_SNAPSHOT_2026-05-21_v2.12_p2_hybrid.md) — Phase 2 hybrid+rerank
-- [`docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_p3_hyde.md`](QUALITY_SNAPSHOT_2026-05-21_v2.12_p3_hyde.md) — Phase 3 HyDE measurement (deltas in noise; opt-in only)
+- [`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-21_v2.12_p1_cloud.md`](archive/snapshots/QUALITY_SNAPSHOT_2026-05-21_v2.12_p1_cloud.md) — Phase 1 cloud-rerank shootout
+- [`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-21_v2.12_p1_omlx.md`](archive/snapshots/QUALITY_SNAPSHOT_2026-05-21_v2.12_p1_omlx.md) — Phase 1 local-rerank shootout (winner)
+- [`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-21_v2.12_p2_hybrid.md`](archive/snapshots/QUALITY_SNAPSHOT_2026-05-21_v2.12_p2_hybrid.md) — Phase 2 hybrid+rerank
+- [`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-21_v2.12_p3_hyde.md`](archive/snapshots/QUALITY_SNAPSHOT_2026-05-21_v2.12_p3_hyde.md) — Phase 3 HyDE measurement (deltas in noise; opt-in only)
 
 **Predecessor baselines (kept for delta reproducibility):**
 
-- [`docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md`](QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md)
+- [`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md`](archive/snapshots/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md)
   — v2.11.0 baseline. The 518-query × 259-chunk fixture every v2.12 soak ran against.
-- [`docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md`](QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md)
+- [`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md`](archive/snapshots/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md)
   — v2.10 corpus baseline (34/34 PASS strict gate — unchanged in v2.11 and v2.12 because those cycles touched retrieval-side only, not extraction/chunking/validation).
 
 ## v2.13 phase summary
@@ -285,7 +301,7 @@ Do not print or commit API keys.
   FP8 quantization preserves the 14B's BF16 calibration profile and
   reclaims the format-axis TRUSTWORTHY verdict that the 27B-MTP had
   lost. Report:
-  `docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_14b_fp8.md`.
+  `docs/archive/calibrations/CALIBRATION_2026-05-23_v2.14_p0_local_judge_14b_fp8.md`.
   Phase 4b format-axis local judging carve-out is back on the table
   for v2.15 sub-phases (Phase 5a top-k tuning, Phase 5c paraphrase
   fusion if Option E chosen).
@@ -298,26 +314,36 @@ Do not print or commit API keys.
 - preferred cloud: Dashscope `qwen3-vl-plus`
 - local fallback: `NuMarkdown-8B-Thinking-mlx-8bits` on `http://10.0.10.246:8000/v1`
 
-**Future candidates (v2.15 cycle scope — alignment per PLAN_V2.15.md Draft v0.2):**
+**v2.16 cycle candidates (per PLAN_V2.16.md Draft v0.5, mid-audit):**
 
-- Option A Phase 2 — pdfplumber lane for CarOK + form-class docs (5-7 day budget per Gemini audit; explicit UIR-schema mapping sub-task; POC-first gate)
-- Option A Phase 4 — Docling HybridChunker config tuning (Approach 2 only; HARD ABORT if not viable — NO regex/heuristic fallback per Gemini audit)
-- Option E Phase 5 — retrieval-side investments (per-class top-k tuning, query rewriting, RAG-fusion with <1500ms p50 latency budget, documented-limitations policy)
-- Option F Phase 3 — document-class query telemetry (required mechanism for "wait for v2.16 user-query evidence" to mean anything)
-- Unconditional Phase 1 — targeted HyDE bridging for code + minority-language queries (5-doc narrow mini-soak; isolation rule blocks overlap with Phase 5 soaks)
-- Unconditional Phase 6 — calibration freshness check (Phase 0 FP8-14B cal SHIPPED 2026-05-23 PM; window expires 2026-06-22)
-- VLM swap (3a from v2.11) — promoted to v2.14 Phase 1 fallback (force_table_vlm); dedup carried to v2.15 Option A Phase 2
-- UIR refactor (3c, PARKED WITH TRIGGERS per user disposition 2026-05-24 PM; see `docs/CYCLE_OPEN_CHECKLIST.md` §5)
-- Magazine rendered-region-crop (3e from v2.11) — deferred with soak-data rationale
+v2.15 closed under Option F; v2.16 is the convergence cycle that
+disposes every open carry-forward to SHIP / KILL / OUT-OF-SCOPE
+(v3.0). Disposition matrix (PLAN_V2.16.md §2) — current state:
+
+- SHIP: Phase 0 corpus expansion, Phase 1 decision-mechanism
+  overlay, Phase 2 omlx deficit diagnostic, Phase 3 partial_code
+  adjacency, Phase 4 VLM-Table dedup, Phase 5 dynamic top-k
+- CONDITIONAL: Phase 6 C1 query rewriting (gated on Phase 2);
+  Phase 7 image re-read (OPT-IN, default KILL — gated on §8a Q3)
+- KILL: 9 items (UIR refactor 3c; VLM swap 3a; magazine rendered-
+  region-crop 3e; B2 code-rescue middleware; B1 Docling config
+  hunt [conditional on Phase 3]; 3b remote CodeFormulaV2; 3d
+  HybridChunker per-item guard; A2 HTML+summary split; v2.14 P1
+  CarOK dedup absorbed into Phase 4)
+- OUT-OF-SCOPE (v3.0): D1 ColPali visual retrieval
+- KEEP active: telemetry collection, Phase 4-Resilience qwen3-max
+  cloud fallback, Phase 6 calibration freshness check
+- CLOSED already: HyDE bridging (dead lever), Phase 3 rollback
+  collection drop
 
 ## Current Quality Summary
 
-Source of truth for v2.13.0:
-[`docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md`](QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md).
+Source of truth for v2.15.0:
+[`docs/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md`](QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md).
 Strict-gate corpus state unchanged from v2.10: **34 PASS / 0 WARN /
-0 FAIL** — extraction/chunking/validation are untouched by v2.11 +
-v2.12 + v2.13 (all three cycles changed only the retrieval side
-plus, in v2.13 P2, OCR-routing).
+0 FAIL** — extraction/chunking/validation are untouched by v2.11 →
+v2.15 (all five cycles changed only the retrieval side / OCR
+routing / local-LLM accelerators / telemetry observability).
 
 **Current local test suite: 1033 passed, 16 skipped, 0 failed**
 after the v2.13 cycle (+1 over v2.12's 1032). v2.13 added no new
@@ -363,44 +389,42 @@ New v2.13 fingerprint:
 
 ## Active Engineering Direction
 
-**v2.15 CLOSED 2026-05-24 under Option F**; tag staged for push.
-Authoritative scope + execution outcomes in
-[`docs/PLAN_V2.15.md`](PLAN_V2.15.md) (Draft v0.9 — 8-round audit
-archaeology in Appendix A). AFTER snapshot at
+**v2.15 CLOSED + PUSHED 2026-05-24 under Option F**; tag on
+origin + GitHub at commit `fff67d9`. Authoritative scope +
+execution outcomes in [`docs/archive/plans/PLAN_V2.15.md`](archive/plans/PLAN_V2.15.md)
+(Draft v0.9 — 8-round audit archaeology in Appendix A). AFTER
+snapshot at
 [`docs/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md`](QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md).
 
-**v2.16 cycle** opens when user is ready. Read
+**v2.16 convergence-cycle plan at Draft v0.5 (mid-audit).**
+[`docs/PLAN_V2.16.md`](PLAN_V2.16.md) frames v2.16 as the final
+v2.X release: every open item gets SHIP / KILL / OUT-OF-SCOPE
+(v3.0). Round 1-3 dispositions captured in Appendix A; Round 4
+required (Round 3 returned 5 HIGH structural findings). Cycle
+NOT yet open. When ready to open, read
 [`docs/CYCLE_OPEN_CHECKLIST.md`](CYCLE_OPEN_CHECKLIST.md) FIRST —
 it specifies the analyzer run + USER_ISSUES.md review + Docling
 watcher + calibration freshness check that produce v2.16's
 Carry-Forwards table inputs.
 
-## v2.15 Phase Status (mirrors PLAN_V2.15.md §3)
+## v2.15 Phase Status — FINAL (mirrors PLAN_V2.15.md §3 close-out)
 
-| Phase | Topic | Status (2026-05-24) |
+| Phase | Topic | Final status |
 |---|---|---|
-| Pre-cycle | dashscope-rollback drop (was v0.1 Phase 1) | ✓ COMPLETED 2026-05-23 PM (commit `2527414`, "full send" override of 2026-06-19 time gate) |
-| 1 [U/E] | Targeted HyDE bridging for code + minority languages | PENDING — re-targeted from v2.14 P2 falsification to narrower 5-doc mini-soak; isolation rule blocks overlap with Phase 5 soaks |
-| 2 [A] | pdfplumber lane for form-class documents | PENDING — gated on Option A selection + POC; budget revised to 5-7 days per Gemini audit (includes explicit UIR-schema mapping sub-task) |
-| 3 [F] | Document-class query telemetry | PENDING — Option F's required mechanism for "wait for v2.16 evidence" to mean anything (NEW in Draft v0.2 per Gemini audit) |
-| 4 [A] | Docling HybridChunker config tuning (Approach 2 only) | PENDING — gated on Option A + 1-day spike for native config viability; HARD ABORT if Approach 2 not viable (no regex fallback per Gemini audit) |
-| 5 [E] | Retrieval-side investments (per-class top-k / query rewriting / RAG fusion / documented-limitations) | PENDING — gated on Option E; 5c paraphrase fusion has strict latency budget (<1500ms p50 / <3000ms p99) |
-| 6 [U] | Calibration freshness check (30-day-OR-model-change) | PENDING — Phase 0 FP8-14B cal SHIPPED 2026-05-23 PM; freshness window expires 2026-06-22 |
-| N | Cycle close-out + 2.15.0 tag | PENDING — terminal |
-
-## v2.15 Strategic Decision Status
-
-Awaiting user selection: **Option A** (formalize extraction lanes),
-**Option E** (accept tiered quality + retrieval investments), or
-**Option F** (hybrid — recommended default). Phase set finalizes
-in Draft v0.3 once the decision lands. See PLAN_V2.15.md §2 for
-the full A/E/F sketch + Gemini's independent F recommendation.
+| Pre-cycle | dashscope-rollback drop | ✓ COMPLETED 2026-05-23 PM (commit `2527414`) |
+| 1 [U/E] | Targeted HyDE bridging | **CLOSED as DEAD LEVER** 2026-05-24 PM (post-tag soak n=224 across 5 docs; falsification rule fired — 4/5 docs zero R@1 delta) |
+| 2 [A] | pdfplumber lane | **SKIPPED** per Option F |
+| 3 [F] | Document-class query telemetry | ✓ SHIPPED — full suite (5 modules + 2 docs + soak hook + 29 tests) |
+| 4 [A] | Docling HybridChunker tuning | **SKIPPED** per Option F (carry-forward 6.1 trigger active for v2.16+) |
+| 5 [E] | Retrieval-side investments | **SKIPPED** per Option F |
+| 6 [U] | Calibration freshness check | ✓ SHIPPED — FP8-14B cal fresh through 2026-06-22 |
+| N | Cycle close-out + 2.15.0 tag | ✓ PUSHED 2026-05-24 (commit `fff67d9`) |
 
 ## v2.14 Phase Status (HISTORICAL — see Final outcomes above)
 
 This table reflects the final outcomes section above and is kept
 inline as a quick anchor; the canonical source is
-[`docs/QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md`](QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md)
+[`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md`](archive/snapshots/QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md)
 §1 + §8 addendum.
 
 | Phase | Topic | Final status |
@@ -419,17 +443,22 @@ inline as a quick anchor; the canonical source is
 | 6 | Code-block chunking hygiene | **PARTIAL** — scanned_book + observability shipped; Docling-layer defect carried to v2.15 Option A Phase 4 |
 | N | Cycle close-out + 2.14.0 tag | ✓ PUSHED 2026-05-23 (commit `36482e0`, sha `122a62e`) |
 
-## Other Carry-Forwards
+## Other Carry-Forwards (post-v2.15 ship state)
 
-- **v2.11/v2.12 carry-forwards still open:**
-  - 3a (VLM swap) — **promoted to v2.14 Phase 1 fallback** for VLM-assisted
-    table parse on form-class docs; force_table_vlm shipped, dedup deferred to v2.15.
-  - 3c (UIR refactor) — **PARKED WITH TRIGGERS** (user disposition 2026-05-24 PM). Four reopen conditions in `docs/CYCLE_OPEN_CHECKLIST.md` §5: 3rd document engine added / cross-engine chunking defect / test boilerplate ≥500 LOC duplication / external engine integration request. 30-second check per cycle open.
-  - 3e (magazine rendered-region-crop) — deferred with soak-data
-    rationale (image-axis perf is OK without it).
-- HyDE stays opt-in by default unless a future use case warrants the
-  +1 s latency (and with Phase 4a, the +1 s is also $0/call for
-  the local path).
+- **3a (VLM swap)** — KEPT as v2.14 Phase 1 fallback infrastructure
+  (force_table_vlm shipped). v2.16 Phase 4 ships the missing dedup
+  piece (CarOK IoU>85% suppression). Per PLAN_V2.16.md disposition
+  matrix, 3a/Item #14 will KILL at v2.16 close (current VLM works).
+- **3c (UIR refactor)** — **PARKED WITH TRIGGERS** (user disposition
+  2026-05-24 PM). Four reopen conditions in `docs/CYCLE_OPEN_CHECKLIST.md`
+  §5. Per PLAN_V2.16.md disposition matrix, 3c/Item #13 will KILL
+  at v2.16 close (triggers unrealistic for solo-dev PDF-only use).
+- **3e (magazine rendered-region-crop)** — deferred. Per PLAN_V2.16.md
+  disposition matrix, 3e/Item #15 will KILL at v2.16 close (no
+  demand signal across v2.11→v2.15).
+- **HyDE** — CLOSED as DEAD LEVER post-v2.15-tag (see headline
+  section). Infra retained in tree as opt-in; production defaults
+  unchanged.
 
 ## Must-Respect Constraints
 

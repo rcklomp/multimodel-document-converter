@@ -28,7 +28,7 @@ Usage:
     --work-path output/soak/v2.13_p1_omlx/work.jsonl \\
     --local-url http://10.0.10.239:8000/v1 \\
     --local-model RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic \\
-    --report-path docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen36_27b_mtp.md
+    --report-path docs/archive/calibrations/CALIBRATION_2026-05-23_v2.14_p0_local_judge_qwen36_27b_mtp.md
 """
 from __future__ import annotations
 

@@ -5,7 +5,7 @@ Deterministic heuristics. No LLM call, no network. Used by
 local-vLLM HyDE generation with an intent-specific HyDE system prompt.
 
 Targets the omlx embedder's per-doc deficits documented in
-`docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx.md`:
+`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx.md`:
 
   - German content (`ATZ_Elektronik`) -12.5pp R@1 vs Dashscope
   - Code-dense docs (`Python_Cookbook`, `IRJET`,

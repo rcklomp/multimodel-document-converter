@@ -1,8 +1,18 @@
-# Testing Guide (v2.11.0)
+# Testing Guide
 
-**Version:** v2.11.0 (Phase 1 swap staged locally on `c2a461c`; tag pending user push)
+**Version:** Tracks the current shipping engine version — see
+`docs/PROJECT_STATUS.md` headline + `src/mmrag_v2/version.py` for
+authoritative current version (do not duplicate here; goes stale).
 **Validation Policy:** Required for every test command
-**DashScope API key:** read from the `DASHSCOPE_API_KEY` env var by `scripts/ingest_to_qdrant.py`, `scripts/search_qdrant.py`, `scripts/retrieval_regression.py`, and `scripts/synthetic_soak.py`. As of v2.11.0 the production embedder is Dashscope `text-embedding-v4` — the key is required for any ingestion, search, or retrieval-regression run. The reranker call in `search_qdrant.py` degrades to vector-rank truncation when the key is unset; the embedding call hard-fails (returns 2). Test-suite skip-gates handle the unset case for CI (the production retrieval-regression test skips cleanly).
+**API keys:**
+- `MLX_API_KEY`: required for retrieval (production omlx-server
+  embedder + local ModernBERT reranker, per v2.13.0+). Test-suite
+  skip-gates handle the unset case for CI.
+- `DASHSCOPE_API_KEY`: required for synthetic-soak judge +
+  query generation in `scripts/synthetic_soak.py`. Not required
+  for the retrieval path since v2.13.0 (local embedder swap).
+  The retrieval-regression script tolerates the unset case via
+  skip-gates.
 
 ## Environment
 - Runner: `conda run -n mmrag-v2`

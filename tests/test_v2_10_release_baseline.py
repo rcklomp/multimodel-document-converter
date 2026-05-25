@@ -2,7 +2,7 @@
 
 These tests freeze the v2.10 corpus baseline + advisory allowance so
 any future drift is visible in the diff. Evidence is the tracked
-`docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` snapshot (not
+`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` snapshot (not
 ignored `data/` or `output/` artifacts — `AGENT-EVIDENCE-01`).
 
 The v2.10 corpus pins (PASS distribution, predecessor snapshot
@@ -39,10 +39,10 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 V2_10_AFTER_SNAPSHOT = (
-    REPO_ROOT / "docs" / "QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md"
+    REPO_ROOT / "docs" / "archive" / "snapshots" / "QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md"
 )
 V2_9_AFTER_SNAPSHOT = (
-    REPO_ROOT / "docs" / "QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md"
+    REPO_ROOT / "docs" / "archive" / "snapshots" / "QUALITY_SNAPSHOT_2026-05-11_v2.9.0-rc1_after.md"
 )
 
 
@@ -151,7 +151,7 @@ def test_advisory_allowance_unchanged_vs_v2_9_rc1() -> None:
 
 
 def test_v2_10_predecessor_snapshot_kept() -> None:
-    """Per `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` headline,
+    """Per `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` headline,
     the v2.9.0-rc1 AFTER snapshot must remain tracked so the v2.10
     delta column is reproducible."""
     assert V2_9_AFTER_SNAPSHOT.exists(), (

@@ -2,34 +2,37 @@
 
 This file provides guidance to Claude Code when working with this repository.
 
-## Read First
-1. `docs/PROJECT_STATUS.md`
-2. `AGENTS.md`
-3. `docs/README.md`
-4. `docs/AGENT_GOVERNANCE.md`
-5. `docs/DECISIONS.md`
-6. `docs/TESTING.md`
-7. `docs/QUALITY_GATES.md`
-8. `docs/ARCHITECTURE.md`
-9. `docs/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md` (**current canonical baseline**; v2.15.0 SHIPPED 2026-05-24 under Option F — Phase 3 [F] document-class telemetry suite + Phase 1 narrow-fixture sampler on top of unchanged v2.14.x state. NO retrieval-stack changes vs v2.13.0/v2.14.0 (pipeline.py untouched; Phase 3 hook is additive in soak-harness write path). DECISIONS.md "v2.15 Documented-Limitation Telemetry Threshold" transitioned PRE-CYCLE PROPOSAL → ACTIVE RULE. Phase 1 SOAK EXECUTION deferred-with-evidence per DoD silent-default — `MLX_API_KEY` not in autonomous-run env. Phase 6 cal fresh through 2026-06-22. Phase 2/4/5 skipped per Option F. Test suite: 1106 passed / 17 skipped / 0 failed.)
-10. `docs/PLAN_V2.15.md` (v2.15 execution history — CLOSED 2026-05-24 under Option F; tag `v2.15.0` STAGED locally pending push. Draft v0.9 + 8-round audit archaeology in Appendix A. Closed ~40 concrete failure modes pre-execution.)
-11. `docs/CYCLE_OPEN_CHECKLIST.md` (NEW in v2.15 — load-bearing for v2.16+: analyzer run + USER_ISSUES.md review + Docling release-notes watcher + calibration freshness + cycle_slip.log spec. **Read FIRST at v2.16 open.**)
-12. `docs/QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md` (v2.14.0 predecessor baseline; operative Phase 0 verdict is FP8-14B per §8 post-ship addendum: rel 82.2% / format 90.7% TRUSTWORTHY / faith 76.6%; n-gram spec decoding REJECTED.)
-13. `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md` (v2.13.0 predecessor baseline — local omlx embedder swap + OCR auto-routing; apples-to-apples 6/6-axis omlx win vs dashscope)
-14. `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md` (v2.13 Phase 1 SWAP evidence — canonical comparison report)
-15. `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md` (v2.12.0 predecessor baseline — retrieval stack hybrid+rerank, R@1 67.8% on v2.11 fixture)
-16. `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md` (v2.11.0 baseline soak — Recall@1 35.5%; the 518-query fixture every v2.12 soak ran against)
-17. `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` (v2.10 strict-gate baseline — 34/34 PASS; unchanged in v2.11 + v2.12 + v2.13 + v2.14 + v2.15 because all five cycles touched retrieval-side / observability only)
-18. `docs/PLAN_V2.14.md` (v2.14 execution history — CLOSED 2026-05-23, tag `v2.14.0` PUSHED to origin [commit `36482e0`, sha `122a62e`]; close-out header + Draft v0.5 archaeology)
-19. `docs/PLAN_V2.13.md` (v2.13 execution history — CLOSED 2026-05-22, tag `v2.13.0` PUSHED to origin at commit `021ef05`)
-20. `docs/PLAN_V2.12.md` (v2.12 execution history — CLOSED 2026-05-21, tag `v2.12.0` on `5a2ce18` public on GitHub + Gitea)
-21. `docs/PLAN_V2.11.md` (v2.11 execution history — CLOSED 2026-05-20, tag `v2.11.0` on `c2a461c`)
-22. `docs/PLAN_V2.10.md` (v2.10 execution history — CLOSED 2026-05-16, tag `v2.10.0` on `db6527c`)
+## Read First (live working set — top-level `docs/` only)
+
+1. `docs/PROJECT_STATUS.md` — current task state.
+2. `AGENTS.md` — agent-protocol contract.
+3. `docs/README.md` — docs index + three-layer model overview.
+4. `docs/AGENT_GOVERNANCE.md` — agent governance rules.
+5. `docs/DECISIONS.md` — locked decisions log.
+6. `docs/TESTING.md` — test conventions.
+7. `docs/QUALITY_GATES.md` — gate definitions.
+8. `docs/ARCHITECTURE.md` — pipeline architecture.
+9. `docs/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md` — **current canonical baseline**. v2.15.0 SHIPPED + PUSHED 2026-05-24 under Option F (tag on origin + GitHub at commit `fff67d9`). Phase 3 [F] document-class telemetry suite + Phase 1 narrow-fixture sampler on top of unchanged v2.14.x state. NO retrieval-stack changes vs v2.13.0/v2.14.0 (pipeline.py untouched). Phase 1 HyDE bridging executed end-to-end post-tag + CLOSED as DEAD LEVER. Phase 6 cal fresh through 2026-06-22. Test suite: 1106 passed / 17 skipped / 0 failed.
+10. `docs/CYCLE_OPEN_CHECKLIST.md` — load-bearing for v2.16+ cycle-open (analyzer run + USER_ISSUES.md review + Docling release-notes watcher + calibration freshness + cycle_slip.log spec).
+11. `docs/PLAN_V2.16.md` — **active cycle plan**. Convergence cycle; final v2.X tag. Draft v0.10 → Ready to Execute as of 2026-05-25 (8 external audit rounds + 1 self-audit; v2.15 §9 stopping rule fired at Round 8; §8a Q1 answered: ≥85% uniform pass-rate threshold). Cycle opens on next commit. Full v0.10 audit archaeology preserved at `docs/archive/plans/PLAN_V2.16_0.10.md`.
+12. `docs/USER_ISSUES.md` — active issues backlog.
+13. `docs/PLAN_V2.16_AUDIT_PROMPT.md` — audit-prompt template for v2.16 review cycles.
+14. `docs/CONVERSION_PROFILES.md` — per-profile conversion rules.
+
+## Historical reference (`docs/archive/`)
+
+- `docs/archive/plans/` — predecessor execution histories: PLAN_V2.10 through PLAN_V2.15 (closed, tagged, pushed); PLAN_V2.15_AUDIT_PROMPT.md; PLAN_V2.16_0.10.md (current cycle's 70+ finding audit archaeology preserved as reference).
+- `docs/archive/snapshots/` — predecessor quality snapshots v2.8 through v2.14 (current canonical baseline v2.15 stays top-level).
+- `docs/archive/calibrations/` — v2.14 Phase 0 calibration runs. Operative verdict per v2.14 close-out: FP8-14B (`RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic`) — rel 82.2% / format 90.7% TRUSTWORTHY / faith 76.6%.
+- `docs/archive/diagnostics/` — v2.9–v2.10 phase diagnostic reports (heading reclassification, missing pages, cross-page splits, OCR).
+- `docs/archive/soaks/` — v2.14/v2.15 soak reports (intent-HyDE FALSIFIED; v2.15 narrow-HyDE AB).
+- `docs/archive/misc/` — HANDOFF_V2.14, JUDGE_EVAL openrouter shortlist, TELEMETRY_REPORT 2026-05-24.
+- `docs/archive/quality_snapshots/` — v2.8-era raw audit outputs.
 
 Use the three-layer docs model:
 - Layer 0 contracts: invariants, governance, decisions, architecture, quality gates.
-- Layer 1 current state: project status and quality snapshots.
-- Layer 2 execution: tests, active plan, and archive; current task state lives in `docs/PROJECT_STATUS.md`.
+- Layer 1 current state: project status, current canonical quality snapshot, USER_ISSUES, CYCLE_OPEN_CHECKLIST.
+- Layer 2 execution: active plan + audit prompt; historical execution lives under `docs/archive/`.
 
 ## Engineering Principles
 

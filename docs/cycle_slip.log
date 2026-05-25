@@ -1,0 +1,3 @@
+# v2.16 cycle slip log (append-only).
+# Format per docs/CYCLE_OPEN_CHECKLIST.md §7:
+#   {iso_timestamp} | {trigger_name} | elapsed_hours={N} | old_tag_date={D} | new_projected_tag_date={D'}

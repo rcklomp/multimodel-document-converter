@@ -83,18 +83,20 @@ Companion docs:
 ---
 
 ## 💾 4. AGENT MEMORY & CONTEXT PROTOCOL
-1. Start sessions with the indexed handoff path:
-   - `docs/PROJECT_STATUS.md`
-   - `docs/README.md`
-   - `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md` (**current canonical baseline**; v2.13.0 — local embedder swap + OCR auto-routing; 6/6-axis omlx win on apples-to-apples)
-   - `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_p1_omlx_vs_dashscope.md` (v2.13 Phase 1 SWAP evidence)
-   - `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md` (v2.12.0 predecessor baseline — retrieval stack hybrid+rerank, R@1 67.8% on v2.11 fixture)
-   - `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md` (v2.11.0 baseline soak; the 518-query fixture every v2.12 phase ran against)
-   - `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` (v2.10 strict-gate baseline; unchanged in v2.11 + v2.12 + v2.13 — all three cycles touched retrieval-side / OCR-routing only)
-   - `docs/PLAN_V2.13.md` (v2.13 plan; CLOSED 2026-05-22 — Phase 1 SWAP + Phase 2 OCR auto-routing both shipped)
-   - `docs/PLAN_V2.12.md` (v2.12 plan; CLOSED 2026-05-21 — tag `v2.12.0` on `5a2ce18` public on both remotes)
-   - `docs/PLAN_V2.11.md` (v2.11 execution history — closed; tag `v2.11.0` on `c2a461c` 2026-05-20)
-   - `docs/PLAN_V2.10.md` (v2.10 execution history — closed; tag `v2.10.0` on `db6527c` 2026-05-16)
+1. Start sessions with the indexed handoff path. The single source
+   of truth for "what version is current and which baseline doc to
+   read" is `CLAUDE.md`'s Read First list; this section lists only
+   the always-load entry points:
+   - `docs/PROJECT_STATUS.md` (current state including version,
+     cycle status, and next-cycle plan pointer)
+   - `docs/README.md` (doc index + read-order)
+   - The current canonical baseline named in `CLAUDE.md`'s Read
+     First list and in `PROJECT_STATUS.md`'s headline section.
+     Prior-version baselines are kept for delta reproducibility;
+     the latest dated snapshot is canonical per the Canonicality
+     Rule in `docs/AGENT_GOVERNANCE.md`.
+   - The latest `docs/PLAN_V2.X.md` (closed cycle) + any
+     `docs/PLAN_V2.X+1.md` if a next-cycle plan exists.
 2. Use the three-layer documentation model:
    - Layer 0 contracts: this file, `CLAUDE.md`, `docs/AGENT_GOVERNANCE.md`, `docs/DECISIONS.md`, `docs/QUALITY_GATES.md`, `docs/ARCHITECTURE.md`, SRS.
    - Layer 1 current state: `docs/PROJECT_STATUS.md`, dated quality snapshots.
@@ -105,10 +107,15 @@ Companion docs:
 
 ---
 
-## 📍 5. CURRENT STATE & DIRECTIVES (May 2026)
+## 📍 5. CURRENT STATE & DIRECTIVES
 
-**Engine version:** `v2.13.0` in `src/mmrag_v2/version.py` and `pyproject.toml`. Annotated tag `v2.13.0` is STAGED locally for user push to both `github` and `origin` (Gitea, 10.0.10.241). Predecessors: `v2.12.0` (2026-05-21, `5a2ce18`), `v2.11.0` (2026-05-20, `c2a461c`), `v2.10.0` (2026-05-16, `db6527c`). Schema version `2.7.0` — chunk-shape contract unchanged since v2.7.
-**Phase:** `v2.13.0` is the v2.13 ship state — two parallel workstreams closed on top of the v2.12.0 retrieval stack. **Phase 1 (local embedder swap):** `Qwen3-Embedding-8B-mxfp8` via omlx-server replaces cloud `text-embedding-v4` as the production embedder. Apples-to-apples shootout (same fixture, only embedder differs) won **6/6 axes** — Recall@1 chunk 55.0%→57.5% (+2.5pp), Recall@5 chunk 72.6%→78.0% (+5.4pp), Recall@5 doc 93.1%→95.2% (+2.1pp), Relevance 74.1%→74.6% (+0.5pp), **Format 89.2%→92.9% (+3.7pp)**, Faithfulness 65.9%→66.9% (+1.0pp). **Phase 2 (OCR auto-routing):** `force_full_page_ocr=True` for `scanned*` profiles now reaches Docling end-to-end via batch_processor auto-override of `layout-aware`→`legacy` OCR mode. Earthship +6.2pp Format. CarOK documented as judge-calibration limitation (carry to v2.14 `format_form` axis). Production collections: `mmrag_v2_8__qwen3_local` (dense, 4096-dim, 31,371 pts, NEW in v2.13) + `mmrag_v2_8__bm25_sparse` (sparse, 26,381 pts). Rollback baseline through 2026-06-19: `mmrag_v2_8__qwen3_dashscope` (1024-dim, 31,371 pts). End-to-end p99 latency ~1.6 s (cloud→LAN embed swap saves ~400 ms). Per-query cost: $0 (no cloud calls on retrieval path). Current canonical baseline: `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md`. Predecessors (kept for delta): `docs/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md`, `docs/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md`, `docs/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md` (strict gate unchanged across v2.11/v2.12/v2.13).
+**Engine + cycle state lives in `docs/PROJECT_STATUS.md`** —
+single source of truth for current version, ship+push status,
+cycle phase, production collections, and active engineering
+direction. Read it at session start. The architecture decisions
+below are stable contracts that survive cycle-to-cycle changes;
+they are kept here because they govern future work regardless of
+which v2.X is currently shipping.
 
 **Active architecture decisions:**
 - PDF extraction pathway is determined by structural integrity pre-flight tests, not semantic profile. See `docs/DECISIONS.md` — "Structural Pathology over Semantic Profiling".
@@ -122,45 +129,13 @@ Companion docs:
 
 **QA policy:** All profiles use the standard 10% token variance tolerance. See `docs/QUALITY_GATES.md`.
 
-### Priority TODOs (Open — v2.11.x recovery + v2.12 cycle)
-Source: `docs/PLAN_V2.11.md` (Draft v1.0). v2.11.0 swap is staged
-locally (commits `18bfbf2` + `c2a461c`); user pushes/tags after live-
-stack re-verification. The next cycle's open items:
+### Open items + next-cycle plan
 
-1. ~~**Embedder shootout (v2.11 Phase 1).**~~ **Done 2026-05-20** —
-   Dashscope `text-embedding-v4` swapped in; 10× lift on Recall@1.
-2. ~~**Validated-cloud checkpoint (v2.11 Phase 2).**~~ **Done
-   2026-05-17** — CI workflow at `.github/workflows/v2_11_validate.yml`
-   (GitHub-hosted lint/quick + self-hosted full validate).
-3. ~~**Carry-forward non-goal dispositions (v2.11 Phase 3).**~~ **Done
-   2026-05-17** — five rows in `docs/DECISIONS.md` "v2.11 Carry-
-   Forward Decisions"; 3a/3b/3e documented dispositions, 3c PAUSED
-   for user signoff, 3d design recorded + implementation deferred to
-   v2.12.
-4. **v2.11.x Format recovery (NEW carry-forward).** Scanned/form
-   chunk-content sanitization for `CarOK_voorraadtelling` 68.8%,
-   `Earthship_Vol1` 71.9%, `IRJET_Modeling_of_Solar_PV` 71.9%.
-   Acceptance: next soak Format ≥95% without regressing the other
-   five axes. Effort: ~1-2 days for the three named docs.
-5. **30-day rollback window (NEW carry-forward).** Legacy `mmrag_v2_8`
-   collection + `test_retrieval_regression_v2_10.py` retained
-   through 2026-06-19. Both regression tests must stay green during
-   the window. Drop date: 2026-06-19 (or sooner with user signoff).
-6. **v2.12 plan to be drafted (NEW).** Per Phase 1 outcome analysis,
-   absolute retrieval quality is still mediocre (Recall@5 chunk 66.8%
-   is "mediocre", not "good"). v2.12 should focus on closing this
-   gap via reranker → hybrid retrieval → query rewriting → per-doc-
-   class chunking, in that bang-for-buck order. Target: Recall@5 ≥
-   85%, Recall@1 ≥ 55%, Faithfulness ≥ 70%.
-
-Existing non-goals carried forward to v2.12+: 3a NuMarkdown-8B local
-VLM (proposed replacement: Qwen3-VL-8B on Mac Mini at
-`http://10.0.10.246:1234`), 3b remote CodeFormulaV2 (upstream-blocked
-on Docling 2.87+), 3c broader UIR refactor (PAUSED for user signoff
-on `ConversionPlan` parent-class carve-out scope), 3d HybridChunker
-per-item token guard (design recorded; implementation deferred), 3e
-magazine rendered-region-crop (defer with soak-data rationale — the
-ceiling is the embedder, not chunk shape).
+Per-cycle priority TODOs live in `docs/PROJECT_STATUS.md` under
+"Other Carry-Forwards" and in the latest `docs/PLAN_V2.X.md`
+disposition sections — they shift every cycle and are not stable
+contracts. Don't duplicate that state here; it goes stale by next
+cycle-open.
 
 ### Recently Completed (Do Not Reopen)
 1. `--force-ocr` override is implemented.

@@ -32,7 +32,7 @@ zero impact on candidate ordering or rerank scores).
 
 | Phase | What | Commit(s) |
 |---|---|---|
-| **1 [U]** (HyDE bridging) | **CLOSED as DEAD LEVER** post-tag. User authorized `MLX_API_KEY` sourcing from `.zshrc` 2026-05-24 PM; A/B soak ran end-to-end (n=224 queries across 5 docs; HyDE-off baseline vs HyDE-on auto-intent test). Falsification rule fired (4/5 docs ZERO R@1 delta; aggregate +0.4pp within noise; German subgroup +0.0 on n=64). DECISIONS.md entry "v2.15 Phase 1 HyDE Bridging — CLOSED as Dead Lever" records the closure; opt-in infra stays in tree (production defaults unchanged). Report: `docs/SOAK_2026-05-24_v2.15_p1_narrow_hyde_AB.md`. v2.14 retrieval fingerprint re-verified live: 20/20 PASS. | (post-tag, this commit) |
+| **1 [U]** (HyDE bridging) | **CLOSED as DEAD LEVER** post-tag. User authorized `MLX_API_KEY` sourcing from `.zshrc` 2026-05-24 PM; A/B soak ran end-to-end (n=224 queries across 5 docs; HyDE-off baseline vs HyDE-on auto-intent test). Falsification rule fired (4/5 docs ZERO R@1 delta; aggregate +0.4pp within noise; German subgroup +0.0 on n=64). DECISIONS.md entry "v2.15 Phase 1 HyDE Bridging — CLOSED as Dead Lever" records the closure; opt-in infra stays in tree (production defaults unchanged). Report: `docs/archive/soaks/SOAK_2026-05-24_v2.15_p1_narrow_hyde_AB.md`. v2.14 retrieval fingerprint re-verified live: 20/20 PASS. | (post-tag, this commit) |
 
 ### Phases SKIPPED (Option F deferral)
 
@@ -97,7 +97,7 @@ observability only, not extraction/chunking/validation.
 ### Phase 6 calibration freshness
 
 - FP8-14B Phase 0 calibration: **SHIPPED 2026-05-23 PM**
-  (`docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_14b_fp8.md`)
+  (`docs/archive/calibrations/CALIBRATION_2026-05-23_v2.14_p0_local_judge_14b_fp8.md`)
 - 30-day window expires **2026-06-22**
 - Today (cycle open): 2026-05-24 → fresh; no re-cal needed at
   cycle open. T-72h pre-tag checkpoint armed for the close-out
@@ -132,10 +132,10 @@ at v2.16 open and follow the checklist.
 
 ## 8. References
 
-- Plan: [`docs/PLAN_V2.15.md`](PLAN_V2.15.md) (Draft v0.9; 8-round audit archaeology in Appendix A)
-- Audit prompt (re-runnable for v2.16+): [`docs/PLAN_V2.15_AUDIT_PROMPT.md`](PLAN_V2.15_AUDIT_PROMPT.md)
-- Predecessor: [`docs/QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md`](QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md) (v2.14.0 ship state + §8 post-ship addendum)
-- Phase 0 calibration: [`docs/CALIBRATION_2026-05-23_v2.14_p0_local_judge_14b_fp8.md`](CALIBRATION_2026-05-23_v2.14_p0_local_judge_14b_fp8.md) (FP8-14B operative verdict)
+- Plan: [`docs/archive/plans/PLAN_V2.15.md`](archive/plans/PLAN_V2.15.md) (Draft v0.9; 8-round audit archaeology in Appendix A)
+- Audit prompt (re-runnable for v2.16+): [`docs/archive/plans/PLAN_V2.15_AUDIT_PROMPT.md`](archive/plans/PLAN_V2.15_AUDIT_PROMPT.md)
+- Predecessor: [`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md`](archive/snapshots/QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md) (v2.14.0 ship state + §8 post-ship addendum)
+- Phase 0 calibration: [`docs/archive/calibrations/CALIBRATION_2026-05-23_v2.14_p0_local_judge_14b_fp8.md`](archive/calibrations/CALIBRATION_2026-05-23_v2.14_p0_local_judge_14b_fp8.md) (FP8-14B operative verdict)
 - Telemetry threshold rules: [`docs/DECISIONS.md`](DECISIONS.md) §"v2.15 Documented-Limitation Telemetry Threshold (ACTIVE RULE)"
 - Strategic Option F decision: [`docs/DECISIONS.md`](DECISIONS.md) §"v2.15 Strategic Path — Option F Selected"
 - Project status: [`docs/PROJECT_STATUS.md`](PROJECT_STATUS.md)
