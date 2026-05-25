@@ -3,19 +3,54 @@
 **Engine version:** Current shipping engine version is in
 `src/mmrag_v2/version.py` and `docs/PROJECT_STATUS.md` headline —
 not duplicated here to avoid going stale. Schema version 2.7.0 —
-chunk-shape contract unchanged since v2.7; v2.8 → v2.15 are all
+chunk-shape contract unchanged since v2.7; v2.8 → v2.16 are all
 behavioral / quality-bar / retrieval-side / OCR-routing /
 observability changes, not schema changes.
 **Date:** May 2026
-**Status:** PRODUCTION — all v2.X tags through the current
-shipping version are pushed to both `github` (rcklomp/multimodel-
-document-converter) and `origin` (Gitea at 10.0.10.241). See
-`docs/PROJECT_STATUS.md` for current ship state + per-cycle
-deltas. Predecessors: `v2.14.0` (2026-05-23, `122a62e`),
+**Status:** PRODUCTION — **v2.16.0 is the FINAL v2.X tag** (convergence
+release). Post-tag: only bug-fix patches (v2.16.x); new features =
+re-charter as v3.0. v2.17 fires only on PLAN_V2.16.md §7 triggers.
+All v2.X tags through v2.15 are pushed to both `github` (rcklomp/
+multimodel-document-converter) and `origin` (Gitea at 10.0.10.241);
+v2.16.0 staged for user push. See `docs/PROJECT_STATUS.md` for
+current ship state + per-cycle deltas. Predecessors: `v2.15.0`
+(2026-05-24, `fff67d9`), `v2.14.0` (2026-05-23, `122a62e`),
 `v2.13.0` (2026-05-22, `021ef05`), `v2.12.0` (2026-05-21,
 `5a2ce18`), `v2.11.0` (2026-05-20, `c2a461c`), `v2.10.0`
 (2026-05-16, `db6527c`), `v2.9.0-rc1` (2026-05-12, `3e06d1b`),
 `v2.8.0` (2026-05-04, `645ab2b`).
+**Policy Update (v2.16.0):** Convergence release. Phase 1 introduces a
+`personal_importance: HIGH/MED/LOW` overlay on the documented-
+limitation registry — HIGH forces Option A regardless of telemetry
+hit-rate; the analyzer renders both signals + which rule fired
+("IMPORTANCE OVERRIDE" trigger row in `TELEMETRY_REPORT_*.md`).
+Phase 3 adds a bounded post-rerank `partial_code` adjacency-fetch
+mechanism in `mmrag_v2.retrieval.pipeline.retrieve_hybrid_reranked`
+(merges up to one text/code neighbor in each direction; preserves
+rerank_score; carries `partial_code_resolved=True` + `adjacency_
+source` list). **Mechanism is correct + tested but inert on the
+current production corpus** (HybridChunker path doesn't set
+`partial_code=True`; coverage extension routes to v2.17 per
+PLAN_V2.16.md §7 trigger #1, reopening Item #9). Phase 4 adds
+ingestion-side VLM-table IoU dedup at threshold 0.85
+(`PdfConversionPlan.dedup_vlm_table_iou_threshold`,
+`BatchProcessor._apply_vlm_table_iou_dedup` — closes the v2.14 P1
+CarOK regression where VLM tables coexisted with flat-prose
+duplicates and retrieval picked the prose 29/30 times). Phase 0
+expands the corpus from 34 → 41 docs via 7 PDFs from `data/raw/`;
+`CANONICAL_34` → `CANONICAL_DOCS` atomic rename across 5 sites with
+anti-drift bridge test in `tests/test_canonical_docs_consistency.py`.
+Phase 2 omlx-deficit diagnostic concludes multi-factor / cross-class
+(structurally blocked by v2.14 P3 dashscope-collection drop) →
+Phase 6 (C1 query rewriting) KILLs as 2nd dead lever (HyDE was the
+1st). Phase 5 (dynamic top-k) KILLs by pre-flight (PASS-retention
+undefined on v2.15.0 baseline). Phase 7 (image re-read) KILLs by
+default (no user opt-in fixture). 8 carry-forward KILL items recorded
+in DECISIONS.md; Item #11 (ColPali / visual retrieval) declared
+OUT-OF-SCOPE for v2.X. **Production retrieval flow byte-identical
+to v2.15.0 on the current corpus** (Phase 3 mechanism inert; Phase 5
+KILL'd before code change). See DECISIONS.md "v2.16 …" entries and
+`docs/QUALITY_SNAPSHOT_2026-05-25_v2.16_after.md` (canonical).
 **Policy Update (v2.13.0):** Production text-retrieval embedder swapped from cloud Dashscope `text-embedding-v4` (1024-dim) to local `Qwen3-Embedding-8B-mxfp8` via omlx-server (`10.0.10.246:8000`, 4096-dim). Apples-to-apples shootout (same fixture, only embedder differs) won 6/6 axes: R@1 chunk 55.0%→57.5% (+2.5pp), R@5 chunk 72.6%→78.0% (+5.4pp), R@5 doc 93.1%→95.2% (+2.1pp), Relevance 74.1%→74.6%, Format 89.2%→92.9% (+3.7pp), Faithfulness 65.9%→66.9%. Production Qdrant collection flipped from `mmrag_v2_8__qwen3_dashscope` (1024-dim, 31,371 pts) to `mmrag_v2_8__qwen3_local` (4096-dim, 31,371 pts). Dashscope collection retained as 30-day rollback baseline through 2026-06-19. `src/mmrag_v2/retrieval/pipeline.py` defaults flipped: `embed_provider="omlx"` + `embed_model="Qwen3-Embedding-8B-mxfp8"` + `collection="mmrag_v2_8__qwen3_local"`. End-to-end p99 latency improves to ~1.6 s (LAN embed saves ~400 ms over WAN cloud); per-query cost drops to $0; external dependencies reduced to omlx-server only (privacy + offline-capable). Phase 2 also fixed OCR auto-routing: `force_full_page_ocr=True` for scanned profiles now reaches Docling end-to-end (was bypassed by `layout-aware` OCR mode). See `docs/DECISIONS.md` "v2.13 Phase 1 Embedder Swap Executed — omlx Wins 6/6 Axes" + "v2.13 Phase 2 OCR Auto-Routing Outcome" and `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md` (canonical) + `..._v2.13_p1_omlx_vs_dashscope.md` (SWAP evidence).
 **Policy Update (v2.12.0):** Production retrieval pipeline now uses hybrid retrieval (BM25 sparse + dense + RRF fusion) plus a local cross-encoder reranker (`gte-reranker-modernbert-base-mlx` via omlx-server). New `src/mmrag_v2/retrieval/` module is the canonical entry point — see `retrieve_hybrid_reranked()` in `pipeline.py`. New sparse-only Qdrant side-collection `mmrag_v2_8__bm25_sparse` (25,623 chunks, status green) paired with the existing dense collection. BM25 index tracked at `tests/fixtures/bm25_index_v2_12.json` (deterministic, reproducible). HyDE ships opt-in (default off); use `use_hyde=True` to enable. Cumulative lift vs v2.11.0 (on v2.11 baseline fixture): Recall@1 chunk 35.5% → 67.8%; Recall@5 chunk 66.8% → 90.2% STRETCH; Recall@5 doc 91.7% → 98.6% STRETCH; Faithfulness 50.6% → 72.6%. End-to-end p99 latency ~2.05 s. Format remains at 88.4% on the v2.11 baseline fixture (chunk-level OCR/form-shape damage; addressed structurally in v2.13). See `docs/DECISIONS.md` "v2.12 Phase 1/2/3 Outcome" sections and `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-21_v2.12_after.md`.
 **Policy Update (v2.11.0):** Production text-retrieval embedder swapped from Ollama `llava` (4096-dim multimodal) to Dashscope `text-embedding-v4` (1024-dim text-only) after the Phase 1 shootout delivered 10× lift on Recall@1, Relevance, and Faithfulness vs the v2.10 baseline. Production Qdrant collection moved from `mmrag_v2_8` to `mmrag_v2_8__qwen3_dashscope` (30,588 points, status green). Legacy `mmrag_v2_8` retained through 2026-06-19 for 30-day rollback. Image chunks now embed via their VLM description text (dashscope is text-only); the VLM enrichment lane itself is unchanged. Format gate temporarily downgraded to ≥85% for v2.11.0, ≥95% for v2.11.x recovery, reverts to ≥96% in v2.12. See `docs/DECISIONS.md` "v2.11 Phase 1 Embedder Shootout Outcome" + "v2.11.0 Embedder Swap Executed — Format Gate Downgrade" and `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md`.
@@ -34,7 +69,7 @@ deltas. Predecessors: `v2.14.0` (2026-05-23, `122a62e`),
 
 ## 1. Executive Summary
 
-This document describes the current MM-Converter architecture for robust multimodal ingestion across supported formats; current shipping version is in `docs/PROJECT_STATUS.md`. (Section headers below tagged "(v2.7.0)" reflect when individual subsystems were introduced; they are still accurate descriptions of current behavior unless explicitly noted. v2.11.0 changed the *retrieval-side* embedder; v2.12.0 added the retrieval-side stack on top — cross-encoder reranker, BM25 sparse, RRF fusion; v2.13.0 swapped the cloud embedder for a local one and fixed OCR auto-routing for scanned profiles; v2.14.0 layered a local-LLM accelerator stack (HyDE/gen/judge on local vLLM at the GX10 endpoint) with no retrieval-stack changes; v2.15.0 added Option F document-class telemetry observability with no retrieval-stack changes. Text/image extraction, chunking, validation, and enrichment lanes are unchanged from v2.10.)
+This document describes the current MM-Converter architecture for robust multimodal ingestion across supported formats; current shipping version is in `docs/PROJECT_STATUS.md`. (Section headers below tagged "(v2.7.0)" reflect when individual subsystems were introduced; they are still accurate descriptions of current behavior unless explicitly noted. v2.11.0 changed the *retrieval-side* embedder; v2.12.0 added the retrieval-side stack on top — cross-encoder reranker, BM25 sparse, RRF fusion; v2.13.0 swapped the cloud embedder for a local one and fixed OCR auto-routing for scanned profiles; v2.14.0 layered a local-LLM accelerator stack (HyDE/gen/judge on local vLLM at the GX10 endpoint) with no retrieval-stack changes; v2.15.0 added Option F document-class telemetry observability with no retrieval-stack changes; v2.16.0 is the convergence release — Phase 1 personal_importance overlay, Phase 3 partial_code adjacency-fetch mechanism (inert on current corpus), Phase 4 VLM-table IoU dedup, Phase 0 corpus expansion to 41 docs; Phases 2/5/6/7 KILL'd. Text/image extraction, chunking, validation, and enrichment lanes are unchanged from v2.10.)
 
 ### Problem Statement
 

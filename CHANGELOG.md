@@ -4,6 +4,314 @@ All notable changes to this project will be documented in this file. Current beh
 
 > **Versioning note:** Historical entries before the `v2.4.x` line used an internal `v18.x` milestone scheme during rapid iteration and test/fix cycles. Only stable or decision-worthy checkpoints were recorded, so intermediate builds are intentionally omitted. From `v2.4` onward, entries follow the current public semantic line.
 
+## [v2.16.0] — 2026-05-25 (convergence release — FEATURE-COMPLETE FOR v2.X)
+
+**FEATURE-COMPLETE FOR v2.X PROJECT.** Post-tag: only bug-fix patches
+(v2.16.x); new features = re-charter as v3.0. v2.17 fires only on
+[`PLAN_V2.16.md`](docs/PLAN_V2.16.md) §7 safety-valve triggers.
+
+Audit history: 8 external rounds + 1 self-audit (v2.15 §9 stopping
+rule fired at Round 8). Full archaeology at
+[`docs/archive/plans/PLAN_V2.16_0.10.md`](docs/archive/plans/PLAN_V2.16_0.10.md).
+
+### Headline
+
+The convergence cycle disposes every open carry-forward from
+v2.11 → v2.15 to SHIP, KILL, or OUT-OF-SCOPE-for-v3.0. No "we'll
+see" classes; no soft-state carry-forwards.
+
+### Phase outcomes
+
+| Phase | Disposition | Commit |
+|---|---|---|
+| 0 — Corpus expansion (7 PDFs) | SHIPPED + rename | `e5ee33d`, `ed62429` |
+| 1 — `personal_importance` overlay | SHIPPED | `09f0e72` |
+| 2 — omlx -12pp deficit diagnostic | Diagnosed multi-factor → Phase 6 KILL | `41c9798` |
+| 3 — `partial_code` adjacency fetch | SHIPPED, inert on current corpus | `0d878f4` |
+| 4 — VLM-table IoU dedup | SHIPPED | `4a7eb4a` |
+| 5 — Dynamic top-k | KILL by pre-flight (retention undefined) | `41c9798` |
+| 6 — Query rewriting | KILL by Phase 2 verdict (2nd dead lever) | `41c9798` |
+| 7 — Image re-read | KILL by default (no opt-in fixture) | DECISIONS |
+| N — Close-out | SHIPPED — engine bump + AFTER snapshot | `5fb1fa6` |
+
+### Phase 1 — Decision-mechanism overlay (SHIPPED)
+
+`personal_importance: HIGH/MED/LOW` field on every entry in
+`src/mmrag_v2/retrieval/documented_limitations.py`:
+
+- **HIGH** forces Option A regardless of telemetry hit-rate (overrides
+  defer / middle-band).
+- **MED** applies existing v2.15 telemetry rules unchanged.
+- **LOW** reduces `NEW_CLASS_GRACE_CYCLES` from 2 → 1 for auto-closure.
+
+CarOK + Fluent_Python entered at HIGH. New entries default to MED.
+
+Validation infrastructure ships at `scripts/run_personal_validation.py`
+with per-class JSON fixtures in
+`tests/fixtures/personal_validation_queries/`. Per-query PASS rule:
+(a) gold doc in top-5, (b) format_constraint matches top-1 modality
+or `ast.parse`, (c) `expected_anchor_regexes` matches top-1 content.
+Nonzero exit code if any class drops below `target_pass_rate` for
+cycle-open / CI gating. v2.15.0 baseline captured at
+[`docs/VALIDATION_REPORT_2026-05-25_v2.15.0_baseline.md`](docs/VALIDATION_REPORT_2026-05-25_v2.15.0_baseline.md).
+
+CYCLE_OPEN_CHECKLIST.md gains §5 — 2-minute `personal_importance`
+review at every cycle-open.
+
+### Phase 3 — partial_code adjacency fetch (SHIPPED, inert on current corpus)
+
+Bounded post-rerank stitch of `partial_code=True` chunks with up to
+one text/code neighbor in each direction. Preserves rerank_score;
+merged chunk carries `partial_code_resolved=True` + `adjacency_source`
+list. Cheap-exit when no result is partial_code-flagged.
+
+8 bridge tests in `tests/test_retrieval_pipeline.py`. v2.14 retrieval
+fingerprint: 20/20 PASS unchanged.
+
+**Inert-on-current-corpus caveat:** the production v2.15.0 indexes
+have **zero** chunks with `partial_code=True`. The v2.14 P6 flag
+fires only on the `_chunk_text_with_overlap` (scanned_book) path;
+Fluent_Python and other academic_whitepaper / technical_manual
+profiles go through Docling HybridChunker which does not set the
+flag. The mechanism is correct + tested but does not change v2.16.0
+retrieval output for the documented Fluent_Python failure mode.
+Item #9 (B1 Docling config hunt) reopens for **v2.17** per
+[`PLAN_V2.16.md`](docs/PLAN_V2.16.md) §7 trigger #1 (extend
+`partial_code` coverage to the HybridChunker path).
+
+### Phase 4 — VLM-table IoU dedup (SHIPPED)
+
+Closes the v2.14 P1 CarOK regression where VLM tables coexisted with
+flat-prose duplicates and retrieval picked the prose 29/30 times.
+
+- `src/mmrag_v2/utils/bbox.py` — `bbox_iou()` on AGENT-SPATIAL-20
+  normalized integer bboxes. 7 unit tests.
+- `PdfConversionPlan.dedup_vlm_table_iou_threshold` — default 0.85;
+  0.0 disables. Threads through `build_pdf_conversion_plan`.
+- `BatchProcessor._apply_vlm_table_iou_dedup` — pre-`_apply_final
+  _boundary_repairs` hook. Filters TEXT chunks with bbox IoU >
+  threshold against any same-page VLM-table chunk. Coexists with
+  the narrower v2.14 `_apply_table_recovery_highlander_dedup`.
+
+8 dedup bridge tests + 2 plan-knob threading tests.
+
+### Phase 2 — omlx deficit diagnostic (verdict: multi-factor)
+
+Phase 2 hypothesis testing on the 5 v2.13 P1 deficit docs
+(ATZ_Elektronik_German, Greenhouse_Design, Hybrid_electric_vehicles,
+IRJET_Modeling_of_Solar_PV, Python_Cookbook) verdicts **multi-factor
+/ cross-class deficit**. The 0.2pp spread across heterogeneous
+content (German, engineering, code) contradicts a single-cause H2
+(OOV) or H3 (cross-lingual) hypothesis. Apples-to-apples re-test is
+**structurally blocked** by the dashscope-baseline collection drop
+(v2.14 P3, 2026-05-23 PM). Cold-storage snapshot retained through
+2026-08-21 but not hot.
+
+Phase 6 (C1 Query rewriting) KILLs without implementation — compound
+trigger fails both legs. 2nd dead lever (HyDE was the 1st).
+Full report:
+[`docs/DIAGNOSTIC_2026-05-25_v2.16_p2_omlx_deficit_root_cause.md`](docs/DIAGNOSTIC_2026-05-25_v2.16_p2_omlx_deficit_root_cause.md).
+
+Per Item 4 (c), the -12pp deficit on the affected docs is documented
+as accepted embedder limit; further closure is v3.0-class (Item #11
+ColPali / visual retrieval).
+
+### Phase 5 — Dynamic top-k pre-flight KILL
+
+Pre-flight verdict at
+[`docs/PHASE5_PREFLIGHT_2026-05-25.md`](docs/PHASE5_PREFLIGHT_2026-05-25.md).
+
+| Leg | Condition | Result |
+|---|---|---|
+| (a) | ≥20% queries `would_truncate` | PASS (5/20 = 25.0%) |
+| (b) | PASS-retention ≥ 0.97 | **FAIL** (undefined; static_pass=0) |
+| (c) | No HIGH class drops >2pp | PASS (Δ=+0.0pp both classes) |
+
+Leg (b) fails because the v2.15.0 baseline static PASS rate is 0/20.
+Per PLAN_V2.16.md §3 Phase 5, ANY leg fails → KILL permanently. No
+production code; "opt-in dead code is the failure mode for a feature-
+frozen product."
+
+### Phase 0 — Corpus expansion + CANONICAL_DOCS rename
+
+Adds 7 PDFs from `data/raw/` to the production corpus (34 → 41 docs):
+Bevestigingsmiddelen, ATZ_Aerodynamik_Nutzfahrzeugen,
+ATZ_ESF_Mercedes_2009, Schwungradspeicher, Eliasz_Zephyr_RTOS,
+Grundlagen_Fahrzeug_Motorentechnik, Digitale_Fotografie_Feb_2026.
+
+`CANONICAL_34` → `CANONICAL_DOCS` atomic rename across 5 sites
+(`rebuild_mmrag_v2_8_for_rc1.py`, `synthetic_soak.py`,
+`build_bm25_index.py`, `ingest_bm25_sparse.py`,
+`tests/test_rebuild_resume.py`). Anti-drift bridge test at
+`tests/test_canonical_docs_consistency.py` asserts set-equality
+between the rebuild-mod source-of-truth and the soak-harness
+independent copy.
+
+Recalibrated classification thresholds (sanity-validated against
+canonical 34):
+- code-dense: `code_chunks / (text + code) ≥ 0.25` (was 0.30; Fluent_Python
+  at 0.276 missed 0.30 by construction).
+- form-class: `table_chunks / total ≥ 0.10 AND unique_template_patterns ≥ 3`
+  (was 0.40; CarOK at 0.136 missed 0.40 by construction).
+
+Phase 0 step 6 production-index mutations (Qdrant snapshot + dense
+append + BM25 rebuild) execute post-ingestion-completion under user
+supervision. Snapshot is the dense-index revert anchor.
+
+### Carry-Forward closures (8 KILL items)
+
+Items #9 (B1 Docling config hunt — conditional, reopens for v2.17),
+#10 (A2 HTML+summary split), #12 (B2 Code-Rescue heuristic), #13
+(UIR refactor), #14 (VLM swap), #15 (magazine crop), #21 (remote
+CodeFormulaV2), #22 (HybridChunker per-item token guard). All
+recorded in DECISIONS.md "v2.16 Carry-Forward Closures".
+
+### v3.0 OUT-OF-SCOPE
+
+Item #11 (D1 ColPali / VisRAG visual retrieval). Requires per-page
+visual embeddings + separate vector store + dual-representation
+rerank. v3.0 re-charter only.
+
+### Engineering counts
+
+- **Tests:** 1145 passed / 17 skipped / 0 failed (was 1106 at
+  v2.15.0; net +39 across Phase 0 + 1 + 3 + 4).
+- **Commits this cycle:** 7 on `main` (cycle-open prep + 5 phase
+  commits + close-out prep).
+- **Engine version:** 2.15.0 → **2.16.0**.
+- **Schema version:** 2.7.0 (unchanged since v2.7.0).
+- **Canonical corpus:** 34 → 41 docs post-Phase-0.
+- **Cloud spend this cycle:** ~$0 (Phase 5 + 6 KILL'd before any
+  cloud-judged soak; no Dashscope re-ingestion).
+
+### Production retrieval stack
+
+Unchanged from v2.13.0 baseline shape (omlx Qwen3-Embedding-8B-mxfp8 +
+BM25 + RRF + ModernBERT rerank against `mmrag_v2_8__qwen3_local`).
+v2.16 adds the Phase 3 adjacency mechanism (post-rerank stitch on
+`partial_code=True`); on the current corpus this is a no-op.
+
+### Tag
+
+Annotated tag `v2.16.0` with "FINAL v2.X release" message pending
+user push to origin + GitHub.
+
+Canonical AFTER snapshot:
+[`docs/QUALITY_SNAPSHOT_2026-05-25_v2.16_after.md`](docs/QUALITY_SNAPSHOT_2026-05-25_v2.16_after.md).
+
+
+## [v2.15.0] — 2026-05-24 (telemetry-augmented hybrid — Option F)
+
+v2.15 layers document-class query telemetry infrastructure on top of
+the v2.14.0 stack. **No retrieval-stack changes** vs v2.14.0
+(production retrieval byte-for-byte identical to v2.13.0; Phase 3
+telemetry hook sits in the soak-harness write path AFTER each
+retrieve call).
+
+### Phases shipped
+
+- **Phase 3 [F]** SHIPPED — full telemetry suite: 5 modules + 2 docs
+  + soak hook + 29 tests. DECISIONS.md "v2.15 Documented-Limitation
+  Telemetry Threshold" entry transitioned PRE-CYCLE PROPOSAL →
+  ACTIVE RULE concurrent with the code landing.
+- **Phase 6 [U]** SHIPPED — calibration freshness check: FP8-14B cal
+  fresh through 2026-06-22; T-72h pre-tag checkpoint armed via
+  `docs/cycle_slip.log`.
+- **Phase 1 [U]** CLOSED as DEAD LEVER post-tag (2026-05-24 PM) —
+  narrow A/B soak (n=224 across 5 docs) ran once `MLX_API_KEY` env
+  was available. Falsification rule fired (4/5 docs ZERO R@1 delta;
+  +0.4pp aggregate within noise; German subgroup +0.0 on n=64).
+  HyDE bridging closed per the v0.9 plan's explicit termination
+  condition. Infra retained in tree as opt-in; production defaults
+  unchanged.
+- **Phase N** — engine bump + AFTER snapshot + version-pin test
+  update + v2.15.0 tag PUSHED to origin + GitHub (commit `fff67d9`).
+
+### Skipped (Option F deferrals — folded to v2.16)
+
+- Phase 2 [A] pdfplumber lane.
+- Phase 4 [A] Docling HybridChunker tuning (carry-fwd 6.1 trigger
+  active for v2.16+).
+- Phase 5 [E] retrieval-side investments.
+
+### Engineering counts
+
+- **Tests:** 1106 passed / 17 skipped / 0 failed.
+- **Engine version:** 2.14.0 → **2.15.0**.
+- **Schema:** 2.7.0 (unchanged).
+- **Tag:** `v2.15.0` on origin + GitHub at commit `fff67d9`.
+
+Canonical AFTER snapshot:
+[`docs/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md`](docs/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md).
+Plan history at
+[`docs/archive/plans/PLAN_V2.15.md`](docs/archive/plans/PLAN_V2.15.md)
+(Draft v0.9 + 8-round audit archaeology in Appendix A).
+
+
+## [v2.14.0] — 2026-05-23 (local-LLM accelerator stack)
+
+v2.14 layers local-LLM accelerator infrastructure on top of the
+v2.13.0 retrieval stack. **No retrieval-stack changes** vs v2.13.0
+(omlx Qwen3-Embedding-8B-mxfp8 + BM25 + RRF + ModernBERT rerank
+unchanged).
+
+### Headline
+
+Local FP8-14B (`RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic`,
+Blackwell-native FP8 on Asus Ascent GX10) becomes the production
+HyDE + gen + judge endpoint. Phase 0 re-cal verdict: rel 82.2% /
+**format 90.7% TRUSTWORTHY** / faith 76.6%.
+
+### Phases shipped (8 — 6 at tag, +2 in patch range)
+
+- **Phase 0** (judge calibration) — FP8-14B operative; reclaims
+  format-axis TRUSTWORTHY that the 27B-MTP predecessor lost.
+- **Phase 4a** (local HyDE provider) — `provider="vllm"` knob;
+  Qwen3 `enable_thinking=False` thinking-mode fix (commit `0c5e818`).
+- **Phase 4c** (local query gen) — `synthetic_soak.py --gen-provider vllm`.
+- **Phase 4d** (tie-breaker harness) — `scripts/local_then_cloud_soak.py`
+  two-tier judging (14 tests).
+- **Phase 4-Resilience** — `generate_with_fallback` chains vllm →
+  qwen3-max → literal.
+- **Phase 5** (disk precheck) — `_check_disk_headroom()` aborts soak
+  stages below 10 GB free.
+- **Phase 2** (intent classifier + targeted HyDE) — post-tag (`156dfa7`).
+  Opt-in infra; broad-corpus mini-soak FALSIFIED; v2.15 Phase 1
+  re-targets at narrower 5-doc soak.
+- **Phase 3** (rollback-collection drop) — post-tag (`2527414`)
+  under user "full send" override of 2026-06-19 time gate;
+  ~30 GB reclaimed; cold-storage snapshots persisted.
+
+### Partial (2 — carried to v2.15)
+
+- **Phase 1** (form/table extraction recovery) — code-side semantic
+  bug fix preserved (`--force-table-vlm` now truly forces; commit
+  `e60a253`). Mini-soak failed acceptance: Format 45.0% (vs 71.9%
+  baseline) because VLM tables coexist with flat-prose duplicates.
+  Production rolled back. v2.16 Phase 4 ships the missing dedup
+  piece.
+- **Phase 6** (code-block chunking hygiene) — block-extension +
+  `partial_code` schema field shipped on the `_chunk_text_with_overlap`
+  (scanned_book) path (commit `d737147`). Fluent_Python defect is
+  upstream of chunking; v2.16 Phase 3 + v2.17 Item #9 address.
+
+### v2.14.1 — GX10 endpoint swap (post-tag patch, 2026-05-23 PM)
+
+Retired Qwen3.6-27B-FP8 (format collapsed to 70.7%); deployed
+RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic (commit `53ffc73`). Phase 0
+re-cal confirms format-axis TRUSTWORTHY. n-gram spec decoding
+REJECTED post-swap (6.3% acceptance).
+
+### Engineering counts
+
+- **Engine version:** 2.13.0 → **2.14.0**.
+- **Schema:** 2.7.0 (unchanged).
+- **Tag:** `v2.14.0` on origin at commit `122a62e`.
+
+Canonical AFTER snapshot:
+[`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md`](docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md).
+
+
 ## [v2.13.0] — 2026-05-22 (local embedder + OCR auto-routing — SHIPPED, tag staged for user push)
 
 v2.13 closes two parallel workstreams on top of v2.12.0's retrieval stack.
