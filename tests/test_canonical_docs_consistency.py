@@ -54,12 +54,14 @@ def test_synthetic_soak_canonical_docs_matches_rebuild_source() -> None:
     )
 
 
-def test_canonical_docs_length_is_41_after_v2_16_phase_0() -> None:
-    """Pin the v2.16 Phase 0 corpus expansion: 34 original + 7 new =
-    41 canonical docs. Future cycle Phase 0 expansions should update
-    this assertion + the test_rebuild_resume length pin together."""
+def test_canonical_docs_length_is_38_after_v2_16_phase_0() -> None:
+    """Pin the v2.16 Phase 0 corpus expansion: 34 original + 4 strict-
+    gate-PASS = 38 canonical docs. (7 PDFs ingested; 3 dropped per
+    "v2.16 Phase 0 Strict-Gate Honest Reduction" DECISIONS entry.)
+    Future cycle Phase 0 expansions should update this assertion +
+    the test_rebuild_resume length pin together."""
     rebuild = _load("_rebuild_mod", SCRIPTS / "rebuild_mmrag_v2_8_for_rc1.py")
-    assert len(rebuild.CANONICAL_DOCS) == 41
+    assert len(rebuild.CANONICAL_DOCS) == 38
 
 
 def test_no_duplicate_entries_in_canonical_docs() -> None:

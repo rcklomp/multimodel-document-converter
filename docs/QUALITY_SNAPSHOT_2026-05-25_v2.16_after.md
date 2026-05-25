@@ -15,7 +15,7 @@
 
 | Phase   | Topic                              | Disposition |
 |---|---|---|
-| 0       | Corpus expansion (7 PDFs)          | SHIPPED — `CANONICAL_DOCS` renamed + extended from 34 → 41 entries. Anti-drift bridge tests in `tests/test_canonical_docs_consistency.py`. |
+| 0       | Corpus expansion (7 PDFs)          | SHIPPED — `CANONICAL_DOCS` renamed + extended from 34 → 38 entries. Anti-drift bridge tests in `tests/test_canonical_docs_consistency.py`. |
 | 1       | Decision-mechanism overlay         | SHIPPED — `personal_importance: HIGH/MED/LOW` on documented-limitation registry; HIGH-override forces Option A; analyzer reports both signals + which rule fired. |
 | 2       | omlx -12pp deficit diagnostic     | DIAGNOSED — multi-factor / structurally blocked (dashscope baseline dropped v2.14 P3). Verdict: no single-cause hypothesis; routes Phase 6 to KILL. |
 | 3       | `partial_code` adjacency fetch     | SHIPPED — mechanism + 8 bridge tests; v2.14 fingerprint 20/20 PASS unchanged. INERT on current corpus (HybridChunker path doesn't set `partial_code=True`; coverage extension routes to v2.17 per §7 trigger #1). |
@@ -29,7 +29,7 @@
 
 ```
 query
-  ├─ dense  : omlx Qwen3-Embedding-8B-mxfp8 → mmrag_v2_8__qwen3_local (4096-dim, 41 docs post-expansion)
+  ├─ dense  : omlx Qwen3-Embedding-8B-mxfp8 → mmrag_v2_8__qwen3_local (4096-dim, 38 docs post-expansion)
   └─ sparse : BM25 → mmrag_v2_8__bm25_sparse
   → RRF fusion (k=60, equal weights), top-25 candidates per leg
   → rerank (local gte-reranker-modernbert-base-mlx via omlx-server)
@@ -141,7 +141,7 @@ For delta reproducibility:
 
 - Engine: 2.16.0
 - Schema: 2.7.0 (unchanged since v2.7.0)
-- Canonical corpus: 41 docs (34 pre-v2.16 + 7 v2.16 Phase 0 additions)
+- Canonical corpus: 38 docs (34 pre-v2.16 + 7 v2.16 Phase 0 additions)
 - Production embedder: omlx Qwen3-Embedding-8B-mxfp8 (LAN, $0)
 - Production reranker: omlx gte-reranker-modernbert-base-mlx (LAN, $0)
 - Local-LLM endpoint: vLLM FP8-14B (`http://10.0.10.239:8000/v1`)

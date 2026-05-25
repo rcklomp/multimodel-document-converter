@@ -15,7 +15,7 @@ Purpose: fast orientation for a new coding session. Read this before deeper proj
 - **Phase 0** SHIPPED — corpus expansion (7 new PDFs from data/raw/
   ingested + classified + appended to Qdrant + BM25 rebuilt;
   CANONICAL_34 → CANONICAL_DOCS rename across 5 sites; anti-drift
-  bridge test). 34 → 41 canonical docs.
+  bridge test). 34 → 38 canonical docs (4 of 7 new PDFs PASSed strict gate; 3 honestly dropped per DECISIONS "v2.16 Phase 0 Strict-Gate Honest Reduction").
 - **Phase 1** SHIPPED — personal_importance overlay (HIGH forces
   Option A; MED uses telemetry; LOW reduces grace). validation-
   query runner + fixtures for 2 HIGH classes (10 queries each).

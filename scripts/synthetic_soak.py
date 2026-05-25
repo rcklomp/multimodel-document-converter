@@ -122,8 +122,10 @@ ADVERT_KEYWORDS = ("subscribe", "buy now", "click here", "limited time", "discou
 
 # Canonical doc directories. Mirrors scripts/rebuild_mmrag_v2_8_for_rc1.py.
 # v2.16 Phase 0: renamed from CANONICAL_34 → CANONICAL_DOCS and extended
-# from 34 to 41 entries (7 new PDFs ingested from data/raw/). Name
-# describes semantic role (the canonical docs list), not cardinality.
+# from 34 to 38 entries (7 PDFs ingested from data/raw/; 4 passed strict
+# gate, 3 dropped per DECISIONS "v2.16 Phase 0 Strict-Gate Honest
+# Reduction"). Name describes semantic role (the canonical docs list),
+# not cardinality.
 CANONICAL_DOCS = [
     "HarryPotter_and_the_Sorcerers_Stone", "Form_0013_invoice", "Form_betwistingsformulier",
     "CarOK_voorraadtelling", "AIOS_LLM_Agent_Operating_System",
@@ -137,14 +139,12 @@ CANONICAL_DOCS = [
     "Fluent_Python", "Python_Distilled", "Ayeva_Python_Patterns",
     "Chaubal_PyTorch_Projects", "Earthship_Vol1", "Firearms", "Greenhouse_Design",
     "ChatGPT_Praktijk_handboek", "KI_En_ChatGPT_Praktische_Gids",
-    # v2.16 Phase 0 additions (data/raw/, ingested 2026-05-25):
-    "Bevestigingsmiddelen",
+    # v2.16 Phase 0 additions (data/raw/, ingested 2026-05-25; only the
+    # 4 that PASS strict gate are canonical):
     "ATZ_Aerodynamik_Nutzfahrzeugen",
     "ATZ_ESF_Mercedes_2009",
     "Schwungradspeicher",
     "Eliasz_Zephyr_RTOS",
-    "Grundlagen_Fahrzeug_Motorentechnik",
-    "Digitale_Fotografie_Feb_2026",
 ]
 
 

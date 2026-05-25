@@ -170,11 +170,11 @@
       "text": "architecture of a production RAG pipeline",
       "top_k": [
         {
-          "chunk_id": "131b7b54c411_076_text_f8efee07",
+          "chunk_id": "131b7b54c411_075_text_6c9d5aa5",
           "doc_id": "131b7b54c411",
           "source_file": "Adedeji A. GenAI on Google Cloud. Enterprise Generative AI Systems...Agents 2026.pdf",
           "modality": "text",
-          "page_number": 76,
+          "page_number": 75,
           "score": 0.0,
           "rerank_score": 0.94095
         },
@@ -587,15 +587,6 @@
           "rerank_score": 0.949185
         },
         {
-          "chunk_id": "a414e7cb0259_13000_text_c73c652d",
-          "doc_id": "a414e7cb0259",
-          "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
-          "modality": "text",
-          "page_number": 13000,
-          "score": 0.0,
-          "rerank_score": 0.943174
-        },
-        {
           "chunk_id": "a414e7cb0259_3002_text_4e9a73f7",
           "doc_id": "a414e7cb0259",
           "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
@@ -605,13 +596,13 @@
           "rerank_score": 0.943174
         },
         {
-          "chunk_id": "a414e7cb0259_29000_text_30937bfb",
+          "chunk_id": "a414e7cb0259_13000_text_c73c652d",
           "doc_id": "a414e7cb0259",
           "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
           "modality": "text",
-          "page_number": 29000,
+          "page_number": 13000,
           "score": 0.0,
-          "rerank_score": 0.941899
+          "rerank_score": 0.943174
         },
         {
           "chunk_id": "a414e7cb0259_3005_text_636e43ca",
@@ -619,6 +610,15 @@
           "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
           "modality": "text",
           "page_number": 3005,
+          "score": 0.0,
+          "rerank_score": 0.941899
+        },
+        {
+          "chunk_id": "a414e7cb0259_29000_text_30937bfb",
+          "doc_id": "a414e7cb0259",
+          "source_file": "Seffer, David - KI En ChatGPT, Praktische Gids Voor Online Business Met Digitale Producten.epub",
+          "modality": "text",
+          "page_number": 29000,
           "score": 0.0,
           "rerank_score": 0.941899
         }

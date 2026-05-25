@@ -70,11 +70,13 @@ def test_rebuild_script_help_lists_new_flags() -> None:
 
 def test_canonical_docs_list_present_and_complete() -> None:
     """v2.16 Phase 0: CANONICAL_34 renamed → CANONICAL_DOCS and extended
-    from 34 to 41 entries (7 new PDFs ingested from data/raw/ on
-    2026-05-25)."""
+    from 34 to 38 entries (7 PDFs ingested from data/raw/ on 2026-05-25;
+    4 PASSed strict gate and entered the canonical list; 3 FAILed and
+    were honestly dropped — see DECISIONS.md "v2.16 Phase 0 Strict-Gate
+    Honest Reduction")."""
     mod = _load_rebuild_module()
     assert hasattr(mod, "CANONICAL_DOCS")
-    assert len(mod.CANONICAL_DOCS) == 41
+    assert len(mod.CANONICAL_DOCS) == 38
     # Sanity: each canonical doc name corresponds to a directory under
     # output/ (or did at rebuild time). We can't assert the directory
     # exists here (it's gitignored), but we can assert the list is a
@@ -82,18 +84,26 @@ def test_canonical_docs_list_present_and_complete() -> None:
     assert all(isinstance(name, str) and name for name in mod.CANONICAL_DOCS)
     # First doc is the one historically ingested with --recreate.
     assert mod.CANONICAL_DOCS[0] == "HarryPotter_and_the_Sorcerers_Stone"
-    # v2.16 Phase 0 additions: all 7 must be present at the tail.
+    # v2.16 Phase 0 additions: 4 strict-gate-PASS docs must be present.
     for new_doc in (
-        "Bevestigingsmiddelen",
         "ATZ_Aerodynamik_Nutzfahrzeugen",
         "ATZ_ESF_Mercedes_2009",
         "Schwungradspeicher",
         "Eliasz_Zephyr_RTOS",
-        "Grundlagen_Fahrzeug_Motorentechnik",
-        "Digitale_Fotografie_Feb_2026",
     ):
         assert new_doc in mod.CANONICAL_DOCS, (
             f"Phase 0 addition {new_doc!r} missing from CANONICAL_DOCS"
+        )
+    # v2.16 Phase 0 honest-reduction: 3 strict-gate-FAIL docs MUST NOT
+    # be in canonical (extraction artifacts retained in output/ as
+    # v3.0 test cases — see DECISIONS.md).
+    for dropped in (
+        "Bevestigingsmiddelen",
+        "Grundlagen_Fahrzeug_Motorentechnik",
+        "Digitale_Fotografie_Feb_2026",
+    ):
+        assert dropped not in mod.CANONICAL_DOCS, (
+            f"strict-gate-FAIL doc {dropped!r} incorrectly in CANONICAL_DOCS"
         )
 
 

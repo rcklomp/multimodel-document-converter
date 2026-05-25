@@ -59,8 +59,11 @@ COLLECTION_LEGACY = "mmrag_v2_8"  # v2.10 baseline (llava 4096-dim), retained fo
 QDRANT_URL_DEFAULT = "http://localhost:6333"
 
 # v2.16 Phase 0: renamed CANONICAL_34 → CANONICAL_DOCS and extended from
-# 34 to 41 entries (7 new PDFs from data/raw/ ingested 2026-05-25). The
-# rename is atomic across all 5 consumer sites (synthetic_soak.py,
+# 34 to 38 entries (7 PDFs from data/raw/ ingested 2026-05-25; 4 passed
+# the strict gate and were added to the canonical list; 3 FAILed and
+# remain in output/ as v3.0-class test cases — see
+# `docs/DECISIONS.md` "v2.16 Phase 0 Strict-Gate Honest Reduction").
+# The rename is atomic across all 5 consumer sites (synthetic_soak.py,
 # build_bm25_index.py, ingest_bm25_sparse.py, test_rebuild_resume.py,
 # and this file) per PLAN_V2.16.md §3 Phase 0 step 6.2.
 CANONICAL_DOCS = [
@@ -98,14 +101,16 @@ CANONICAL_DOCS = [
     "Greenhouse_Design",
     "ChatGPT_Praktijk_handboek",
     "KI_En_ChatGPT_Praktische_Gids",
-    # v2.16 Phase 0 additions (data/raw/, ingested 2026-05-25):
-    "Bevestigingsmiddelen",
+    # v2.16 Phase 0 additions (data/raw/, ingested 2026-05-25 — 4 of 7
+    # PASS strict gate; the 3 that FAILed are honestly dropped from
+    # canonical scope for v2.16, ingestion artifacts retained at
+    # output/Bevestigingsmiddelen, output/Grundlagen_Fahrzeug_Motorentechnik,
+    # output/Digitale_Fotografie_Feb_2026 as v3.0 test cases.
+    # See DECISIONS.md "v2.16 Phase 0 Strict-Gate Honest Reduction".):
     "ATZ_Aerodynamik_Nutzfahrzeugen",
     "ATZ_ESF_Mercedes_2009",
     "Schwungradspeicher",
     "Eliasz_Zephyr_RTOS",
-    "Grundlagen_Fahrzeug_Motorentechnik",
-    "Digitale_Fotografie_Feb_2026",
 ]
 
 

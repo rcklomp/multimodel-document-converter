@@ -132,12 +132,26 @@ Per PLAN_V2.16.md §3 Phase 5, ANY leg fails → KILL permanently. No
 production code; "opt-in dead code is the failure mode for a feature-
 frozen product."
 
-### Phase 0 — Corpus expansion + CANONICAL_DOCS rename
+### Phase 0 — Corpus expansion + CANONICAL_DOCS rename + honest reduction
 
-Adds 7 PDFs from `data/raw/` to the production corpus (34 → 41 docs):
-Bevestigingsmiddelen, ATZ_Aerodynamik_Nutzfahrzeugen,
-ATZ_ESF_Mercedes_2009, Schwungradspeicher, Eliasz_Zephyr_RTOS,
-Grundlagen_Fahrzeug_Motorentechnik, Digitale_Fotografie_Feb_2026.
+Ingested 7 PDFs from `data/raw/`. Strict-gate
+(`scripts/qa_full_conversion.py --source-pdf`) verdict:
+- **PASS**: ATZ_Aerodynamik_Nutzfahrzeugen, ATZ_ESF_Mercedes_2009,
+  Schwungradspeicher, Eliasz_Zephyr_RTOS.
+- **FAIL**: Bevestigingsmiddelen (HEADING 0/4; form-class no-heading
+  intrinsic), Grundlagen_Fahrzeug_Motorentechnik (LABEL gate;
+  orphan labels in long German textbook), Digitale_Fotografie_Feb_2026
+  (17/144 pages produced no chunks; p140/p141 outlier 52 chunks vs
+  median 5; scanned-magazine extraction inconsistency).
+
+Honest reduction: 4 PASS docs added to `CANONICAL_DOCS` (34 → 38);
+3 FAIL docs dropped from canonical scope. Their extraction
+artifacts remain at `output/<basename>/` as v3.0 architectural
+test cases — see DECISIONS.md "v2.16 Phase 0 Strict-Gate Honest
+Reduction." These extraction failures map to V3 plan workstreams
+(LLM-sanitization for form-class no-heading; UIR label-as-structure
+vs orphan-label; visual-retrieval / VLM-native parsing for
+scanned magazines).
 
 `CANONICAL_34` → `CANONICAL_DOCS` atomic rename across 5 sites
 (`rebuild_mmrag_v2_8_for_rc1.py`, `synthetic_soak.py`,
@@ -180,7 +194,7 @@ rerank. v3.0 re-charter only.
   commits + close-out prep).
 - **Engine version:** 2.15.0 → **2.16.0**.
 - **Schema version:** 2.7.0 (unchanged since v2.7.0).
-- **Canonical corpus:** 34 → 41 docs post-Phase-0.
+- **Canonical corpus:** 34 → 38 docs (4 of 7 new PDFs PASSed strict gate; 3 honestly dropped) post-Phase-0.
 - **Cloud spend this cycle:** ~$0 (Phase 5 + 6 KILL'd before any
   cloud-judged soak; no Dashscope re-ingestion).
 
