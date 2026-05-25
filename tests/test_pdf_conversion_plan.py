@@ -1108,3 +1108,22 @@ def test_all_typed_policy_fields_round_trip_full_chain(monkeypatch, tmp_path):
     assert adapter_plan.max_chunker_input_chars == 321_000
     assert adapter_plan.max_chunker_per_element_chars == 42_000
     assert adapter_plan.allow_page_level_visuals is True
+
+
+# ── v2.16 Phase 4 — dedup_vlm_table_iou_threshold knob plumb tests ──────────
+
+
+def test_plan_has_default_dedup_vlm_table_iou_threshold():
+    """The v2.16 Phase 4 knob defaults to 0.85 (the spec'd value)."""
+    plan = build_pdf_conversion_plan()
+    assert plan.dedup_vlm_table_iou_threshold == 0.85
+
+
+def test_plan_threads_dedup_vlm_table_iou_threshold():
+    """build_pdf_conversion_plan exposes the knob; it threads to the
+    frozen PdfConversionPlan dataclass field. Validates that callers
+    can tune the threshold (e.g. set 0.0 to disable, 0.95 to tighten)."""
+    p_off = build_pdf_conversion_plan(dedup_vlm_table_iou_threshold=0.0)
+    p_strict = build_pdf_conversion_plan(dedup_vlm_table_iou_threshold=0.95)
+    assert p_off.dedup_vlm_table_iou_threshold == 0.0
+    assert p_strict.dedup_vlm_table_iou_threshold == 0.95

@@ -116,6 +116,12 @@ class PdfConversionPlan:
     # Earthship multi-column scanned pages. Default off — only scanned/
     # scanned_degraded profiles set it on.
     force_full_page_ocr: bool = False
+    # v2.16 Phase 4: VLM-table dedup — suppress flat-prose text chunks
+    # that spatially overlap a VLM-extracted table chunk on the same
+    # page above this IoU threshold. Closes the v2.14 P1 CarOK regression
+    # where VLM tables coexisted with flat-prose duplicates and retrieval
+    # picked the prose chunk. Set to 0.0 to disable.
+    dedup_vlm_table_iou_threshold: float = 0.85
     extra_metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -210,6 +216,7 @@ def build_pdf_conversion_plan(
     suppress_layout_label_text: bool = False,
     bitmap_area_threshold: float = 0.75,
     force_full_page_ocr: bool | None = None,
+    dedup_vlm_table_iou_threshold: float = 0.85,
     extra_metadata: Dict[str, Any] | None = None,
 ) -> PdfConversionPlan:
     """Build a resolved PDF conversion plan from diagnostics and config.
@@ -325,5 +332,6 @@ def build_pdf_conversion_plan(
         suppress_layout_label_text=resolved_suppress_label,
         bitmap_area_threshold=resolved_bitmap_threshold,
         force_full_page_ocr=resolved_force_full_page_ocr,
+        dedup_vlm_table_iou_threshold=float(dedup_vlm_table_iou_threshold),
         extra_metadata=dict(extra_metadata or {}),
     )

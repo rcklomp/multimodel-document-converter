@@ -3221,6 +3221,13 @@ class BatchProcessor:
         all_chunks = self._filter_repetition_garbage(all_chunks)
         all_chunks = self._apply_table_recovery_highlander_dedup(all_chunks)
 
+        # v2.16 Phase 4: VLM-table IoU dedup — suppress flat-prose text chunks
+        # that spatially overlap a VLM-extracted table on the same page above
+        # `dedup_vlm_table_iou_threshold`. Closes the v2.14 P1 CarOK regression
+        # where VLM tables coexisted with flat-prose duplicates and retrieval
+        # picked the prose chunk 29/30 times.
+        all_chunks = self._apply_vlm_table_iou_dedup(all_chunks)
+
         all_chunks = self._apply_final_boundary_repairs(all_chunks)
 
         # Detect section headings from VLM-transcribed text for scanned documents.
@@ -9436,6 +9443,124 @@ class BatchProcessor:
             print(
                 f"🗡️ [HIGHLANDER] Dropped {dropped_total} recovery duplicates "
                 f"(spatial={dropped_spatial}, text={dropped_text})",
+                flush=True,
+            )
+
+        return kept
+
+    def _apply_vlm_table_iou_dedup(
+        self,
+        chunks: List[IngestionChunk],
+    ) -> List[IngestionChunk]:
+        """v2.16 Phase 4 — drop text chunks that spatially overlap a VLM-
+        extracted table on the same page above
+        `plan.dedup_vlm_table_iou_threshold`.
+
+        Targets the v2.14 P1 CarOK regression: when force_table_vlm produces
+        clean markdown tables, Docling's text-extraction pass simultaneously
+        emits the SAME content as flat prose. Retrieval picks the prose chunk
+        29/30 times. IoU>0.85 suppression is the spec'd close (PLAN_V2.16.md
+        §3 Phase 4). At 0.0 threshold the pass is disabled (the
+        `_apply_table_recovery_highlander_dedup` pass above handles the
+        narrower recovery_* case).
+        """
+        plan = self._conversion_plan
+        threshold = float(getattr(plan, "dedup_vlm_table_iou_threshold", 0.85))
+        if threshold <= 0.0:
+            return chunks
+
+        # Accept both forced and emergency VLM methods — the regression mode
+        # appears whenever a VLM markdown table is emitted, regardless of why.
+        vlm_methods = {
+            "vlm_table_markdown_forced",
+            "vlm_table_markdown",
+            "vlm_table_markdown_emergency",
+            "vlm_table",
+        }
+
+        from .utils.bbox import bbox_iou
+
+        vlm_tables_by_page: Dict[int, List[IngestionChunk]] = {}
+        for chunk in chunks:
+            try:
+                method = str(
+                    getattr(chunk.metadata, "extraction_method", "") or ""
+                ).lower()
+                if chunk.modality == Modality.TABLE and method in vlm_methods:
+                    page_no = int(
+                        getattr(chunk.metadata, "page_number", 0) or 0
+                    )
+                    if page_no > 0:
+                        vlm_tables_by_page.setdefault(page_no, []).append(chunk)
+            except Exception:
+                continue
+
+        if not vlm_tables_by_page:
+            return chunks
+
+        def _safe_bbox(ch: IngestionChunk) -> Optional[List[int]]:
+            try:
+                spatial = getattr(ch.metadata, "spatial", None)
+                bbox = getattr(spatial, "bbox", None)
+                if not bbox or len(bbox) != 4:
+                    return None
+                x0, y0, x1, y1 = [int(v) for v in bbox]
+                if x1 <= x0 or y1 <= y0:
+                    return None
+                return [x0, y0, x1, y1]
+            except Exception:
+                return None
+
+        kept: List[IngestionChunk] = []
+        dropped_total = 0
+        per_page_drops: Dict[int, int] = {}
+
+        for chunk in chunks:
+            try:
+                page_no = int(getattr(chunk.metadata, "page_number", 0) or 0)
+            except Exception:
+                kept.append(chunk)
+                continue
+
+            if chunk.modality != Modality.TEXT or page_no not in vlm_tables_by_page:
+                kept.append(chunk)
+                continue
+
+            text_bbox = _safe_bbox(chunk)
+            if text_bbox is None:
+                kept.append(chunk)
+                continue
+
+            should_drop = False
+            drop_iou = 0.0
+            for vlm_table in vlm_tables_by_page[page_no]:
+                tbl_bbox = _safe_bbox(vlm_table)
+                if tbl_bbox is None:
+                    continue
+                iou = bbox_iou(text_bbox, tbl_bbox)
+                if iou > threshold:
+                    should_drop = True
+                    drop_iou = iou
+                    break
+
+            if should_drop:
+                dropped_total += 1
+                per_page_drops[page_no] = per_page_drops.get(page_no, 0) + 1
+                logger.info(
+                    f"[VLM-TABLE-DEDUP] Dropping text chunk {chunk.chunk_id} "
+                    f"(page={page_no}, iou={drop_iou:.3f}, threshold={threshold:.2f})"
+                )
+                continue
+            kept.append(chunk)
+
+        if dropped_total > 0:
+            logger.info(
+                f"[VLM-TABLE-DEDUP] Suppressed {dropped_total} text chunks via "
+                f"IoU>{threshold:.2f} (per-page: {per_page_drops})"
+            )
+            print(
+                f"🔁 [VLM-TABLE-DEDUP] Suppressed {dropped_total} text chunks "
+                f"overlapping VLM tables (IoU>{threshold:.2f})",
                 flush=True,
             )
 
