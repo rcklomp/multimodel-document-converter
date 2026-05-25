@@ -16,15 +16,35 @@ scattering across the codebase.
 # chunk_id for cross-version mapping must rebuild from v2.9 outputs.
 __schema_version__ = "2.7.0"
 
-# Engine/runtime version. v2.15.0 ships under Option F (telemetry-
-# augmented hybrid) — adds document-class query telemetry infra +
-# narrow-fixture Phase 1 HyDE-bridging prep on top of the v2.14.0
-# local-LLM accelerator stack. NO RETRIEVAL-STACK CHANGES vs v2.13.0
-# (production retrieval is byte-for-byte identical: omlx
-# Qwen3-Embedding-8B-mxfp8 + BM25 + RRF + ModernBERT rerank against
-# `mmrag_v2_8__qwen3_local`). The Phase 3 telemetry hook is additive
-# in the soak harness only; it does not change retrieval results,
-# rerank scores, or candidate ordering.
+# Engine/runtime version. v2.16.0 is the **convergence release** —
+# MM-Converter-V2 is feature-complete as of this tag. Every open
+# carry-forward item from v2.11 → v2.15 received a binary disposition
+# (SHIP / KILL / OUT-OF-SCOPE for v3.0); see `docs/DECISIONS.md`
+# "v2.16 …" entries.
+#
+# Production retrieval stack: omlx Qwen3-Embedding-8B-mxfp8 + BM25 +
+# RRF + ModernBERT rerank against `mmrag_v2_8__qwen3_local` —
+# unchanged from v2.15.0 baseline shape. Phase 3 (partial_code
+# adjacency fetch) adds a bounded post-rerank stitch that is
+# mechanism-correct but currently inert on the production corpus (no
+# chunks carry `partial_code=True` from the HybridChunker path). Phase
+# 4 (VLM-table IoU dedup at 0.85) lands as an ingestion-layer change
+# in `BatchProcessor._apply_vlm_table_iou_dedup`. Phase 5 (dynamic
+# top-k) KILL'd by pre-flight; Phase 6 (query rewriting) KILL'd by
+# Phase 2 multi-factor verdict; Phase 7 (image re-read) KILL'd by
+# default (no user opt-in).
+#
+# v2.16 Phase 1 added the `personal_importance` decision-mechanism
+# overlay on the documented-limitation registry — HIGH forces Option
+# A regardless of telemetry. The cycle-open checklist gained a
+# 2-minute review item (`docs/CYCLE_OPEN_CHECKLIST.md` §5).
+#
+# Post-v2.16.0 governance: only bug-fix patches (v2.16.x) accepted.
+# New features = re-charter as v3.0. v2.17 fires only on §7 trigger
+# (e.g., Item #9 reopens for HybridChunker partial_code coverage,
+# which Phase 3 acceptance depends on). Audit history: 8 external
+# rounds + 1 self-audit; v2.15 §9 stopping rule fired at Round 8;
+# full archaeology at `docs/archive/plans/PLAN_V2.16_0.10.md`.
 #
 # Phases shipped under Option F (this cycle):
 #   Phase 3 [F] (telemetry) Documented-limitation registry + telemetry
@@ -79,4 +99,4 @@ __schema_version__ = "2.7.0"
 # phase executed; stopping rule fired at rounds 7+8 both 0 HIGH.
 # Full plan + Appendix A archaeology: docs/PLAN_V2.15.md.
 # Predecessor: v2.14.0 (2026-05-23, tag 122a62e; PUSHED to origin).
-__engine_version__ = "2.15.0"
+__engine_version__ = "2.16.0"

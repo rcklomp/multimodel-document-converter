@@ -1,10 +1,18 @@
 # MM-RAG Converter V2
 
+> **MM-Converter-V2 is feature-complete as of v2.16.0** (convergence
+> release, 2026-05-25). Production retrieval is stable; documented
+> limitations are explicit; only bug-fix patches (v2.16.x) accepted
+> post-tag. New features = re-charter as v3.0. See
+> [`docs/PLAN_V2.16.md`](docs/PLAN_V2.16.md) §10 for the v2.16.x /
+> v3.0 boundary; [`docs/DECISIONS.md`](docs/DECISIONS.md) "v2.16 …"
+> entries for per-phase ship / KILL / out-of-scope verdicts.
+
 Convert PDF, EPUB, HTML, and Office documents into structured JSONL datasets for Multimodal RAG systems.
 
 The converter extracts text, images, and tables from complex documents while preserving spatial layout, document hierarchy, and semantic context. It handles everything from born-digital magazines to degraded scanned manuals.
 
-**Version 2.13.0 SHIPPED** (annotated tag staged 2026-05-22 for user push to GitHub + Gitea) | predecessors `v2.12.0` (`5a2ce18`) → `v2.11.0` (`c2a461c`) → `v2.10.0` (`db6527c`) → `v2.9.0-rc1` (`3e06d1b`) → `v2.8.0` | Python 3.10 | Apple Silicon native | Docling 2.86.0 | Schema 2.7.0
+**Version 2.16.0 — convergence release.** Predecessors: `v2.15.0` (`fff67d9`) → `v2.14.0` (`122a62e`) → `v2.13.0` (`021ef05`) → `v2.12.0` (`5a2ce18`) → `v2.11.0` (`c2a461c`) → `v2.10.0` (`db6527c`) → `v2.9.0-rc1` (`3e06d1b`) → `v2.8.0`. Python 3.10 | Apple Silicon native | Docling 2.86.0 | Schema 2.7.0.
 
 > **v2.13.0 — local embedder release.** v2.13 closes two parallel
 > workstreams on top of v2.12.0's retrieval stack: Phase 1 swaps

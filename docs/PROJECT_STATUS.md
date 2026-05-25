@@ -1,20 +1,63 @@
 # Project Status
 
-Last updated: 2026-05-24
+Last updated: 2026-05-25
 
 Purpose: fast orientation for a new coding session. Read this before deeper project docs.
 
 ## Current Objective
 
-**v2.15.0 SHIPPED + PUSHED 2026-05-24** under **Option F**
-(telemetry-augmented hybrid). Engine 2.14.0 → 2.15.0; annotated
-tag `v2.15.0` on origin + GitHub at commit `fff67d9`. v2.15 adds
-Phase 3 [F] document-class telemetry infrastructure + Phase 1
-narrow-fixture sampler on top of the v2.14.x state — **NO
-retrieval-stack changes** (production retrieval is byte-for-byte
-identical to v2.14.0; the Phase 3 telemetry hook sits in the
-soak-harness write path AFTER each retrieve call, with zero
-impact on candidate ordering).
+**v2.16.0 CONVERGENCE RELEASE — FEATURE-COMPLETE FOR v2.X.** Engine
+2.15.0 → 2.16.0; v2.16.0 annotated tag PENDING user push to origin
++ GitHub at the close-out commit. Post-tag: only bug-fix patches
+(v2.16.x) accepted; new features = re-charter as v3.0.
+
+**Phases shipped (v2.16.0 scope):**
+- **Phase 0** SHIPPED — corpus expansion (7 new PDFs from data/raw/
+  ingested + classified + appended to Qdrant + BM25 rebuilt;
+  CANONICAL_34 → CANONICAL_DOCS rename across 5 sites; anti-drift
+  bridge test). 34 → 41 canonical docs.
+- **Phase 1** SHIPPED — personal_importance overlay (HIGH forces
+  Option A; MED uses telemetry; LOW reduces grace). validation-
+  query runner + fixtures for 2 HIGH classes (10 queries each).
+  Baseline captured at v2.15.0 stack: 0/10 + 0/10 on the
+  documented failure modes (Phase 3/4 targets).
+- **Phase 3** SHIPPED — partial_code adjacency fetch mechanism in
+  `retrieve_hybrid_reranked`. 8 bridge tests; v2.14 fingerprint
+  20/20 PASS unchanged. **INERT on current corpus** (HybridChunker
+  path doesn't set `partial_code=True` for academic_whitepaper /
+  technical_manual profiles). Item #9 (Docling config hunt) reopens
+  for v2.17 per §7 trigger #1 to extend partial_code coverage.
+- **Phase 4** SHIPPED — VLM-table IoU dedup (bbox_iou utility +
+  `dedup_vlm_table_iou_threshold` knob defaulting 0.85 +
+  `_apply_vlm_table_iou_dedup` pre-final-boundary-repair pass).
+  10 dedup + plan-knob bridge tests.
+- **Phase N** — engine bump 2.15.0 → 2.16.0; AFTER snapshot at
+  `docs/QUALITY_SNAPSHOT_2026-05-25_v2.16_after.md`; README
+  feature-complete banner; DECISIONS.md 10 new entries.
+
+**KILLed (with DECISIONS entries):**
+- **Phase 2 / Phase 6** — omlx deficit diagnosed as multi-factor
+  (5 deficit docs all -12.4 to -12.6pp uniform across heterogeneous
+  classes contradicts a single-cause hypothesis); apples-to-apples
+  re-test structurally blocked by dashscope-collection drop (v2.14
+  P3). Compound trigger fails → Phase 6 KILL. 2nd dead lever (HyDE
+  was the 1st). Item 4 (c) — full -12pp gap documented as accepted
+  embedder limit.
+- **Phase 5** — Dynamic top-k pre-flight KILL by gate leg (b)
+  (PASS-retention undefined; v2.15.0 baseline static=0).
+- **Phase 7** — Image re-read KILL by default (no user opt-in
+  promotion of image-heavy validation fixture).
+
+**Carry-Forward closures (8 KILL items in DECISIONS):** #9 (B1
+Docling config hunt, conditional → reopens for v2.17 per §7), #10
+(A2 HTML+summary split), #12 (B2 Code-Rescue heuristic), #13 (UIR
+refactor), #14 (VLM swap), #15 (magazine crop), #21 (remote
+CodeFormulaV2), #22 (HybridChunker per-item token guard).
+
+**v3.0 OUT-OF-SCOPE:** #11 (ColPali / VisRAG visual retrieval).
+
+Predecessor: **v2.15.0 SHIPPED + PUSHED 2026-05-24** under Option
+F. Annotated tag `v2.15.0` on origin + GitHub at commit `fff67d9`.
 
 **v2.15 phases shipped (Option F scope):**
 - **Phase 3 [F]** SHIPPED — full telemetry suite (5 modules + 2 docs + soak hook + 29 tests; DECISIONS.md "v2.15 Documented-Limitation Telemetry Threshold" transitioned PRE-CYCLE PROPOSAL → ACTIVE RULE)

@@ -54,16 +54,16 @@ def test_engine_and_schema_version_pinned() -> None:
     changed."""
     from mmrag_v2.version import __engine_version__, __schema_version__
 
-    # Current production tag (v2.15.0 ships under Option F — adds
-    # Phase 3 [F] document-class telemetry suite + Phase 1 narrow-
-    # fixture sampler on top of the v2.14.0 local-LLM accelerator
-    # stack. NO retrieval-stack changes vs v2.13.0 (pipeline.py is
-    # untouched this cycle; the Phase 3 hook is additive in the soak
-    # harness write path only). Phase 1 SOAK EXECUTION deferred-with-
-    # evidence under DoD silent-default per missing MLX_API_KEY in
-    # the autonomous-run environment.
-    # Bump this assertion when the next tag ships.
-    assert __engine_version__ == "2.15.0"
+    # Current production tag (v2.16.0 — convergence release;
+    # MM-Converter-V2 feature-complete). Adds Phase 1 personal_importance
+    # overlay, Phase 3 partial_code adjacency-fetch mechanism (inert
+    # on current corpus — see DECISIONS.md), Phase 4 VLM-table IoU
+    # dedup, and the CANONICAL_DOCS rename + 7-doc corpus expansion.
+    # Phase 5 (dynamic top-k) KILL'd by pre-flight; Phase 6 (query
+    # rewriting) KILL'd by Phase 2 verdict; Phase 7 (image re-read)
+    # KILL'd default. Bump this assertion when the next tag ships
+    # (v2.16.x patch or v2.17 safety-valve cycle).
+    assert __engine_version__ == "2.16.0"
     assert __schema_version__ == "2.7.0"
 
     # Cross-check pyproject.toml stays in sync with version.py so a

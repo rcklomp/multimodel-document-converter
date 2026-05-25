@@ -1612,3 +1612,331 @@ permanent closure.
 
 **Decision recorded by:** autonomous run, 2026-05-24, post-v2.15.0
 tag (v2.15.x patch range).
+
+## v2.16 Decision-Mechanism Overlay (2026-05-25)
+
+**Decision:** Add a `personal_importance: Literal["HIGH", "MED", "LOW"]`
+field to every entry in
+`src/mmrag_v2/retrieval/documented_limitations.py`. The analyzer in
+`scripts/analyze_doc_class_telemetry.py` resolves disposition with the
+following precedence:
+
+1. **HIGH** forces Option A (extraction-lane investment) regardless of
+   telemetry hit-rate. Renders a distinct disposition line
+   ("HIGH personal_importance override; telemetry quiet").
+2. **MED** applies the v2.15 telemetry rules unchanged
+   (PROMOTION_THRESHOLD_PCT, DEFECT_OVERRIDE_THRESHOLD_PCT,
+   CLOSURE_THRESHOLD_PCT, MIDDLE_BAND_PERSISTENCE_CYCLES,
+   NEW_CLASS_GRACE_CYCLES).
+3. **LOW** reduces `NEW_CLASS_GRACE_CYCLES` from 2 → 1 (still requires
+   `open_user_issues == 0` AND `severe_defect_tag == False` for
+   auto-closure).
+
+CarOK + Fluent_Python entered at **HIGH** (v2.14 P1 + P6 defect histories
+are load-bearing across multiple cycles). New entries default to **MED**.
+The overlay is reviewed at every cycle-open per
+`docs/CYCLE_OPEN_CHECKLIST.md` §5 (2-minute manual check).
+
+**Rationale:** v2.15's telemetry-as-sole-decision created a death spiral
+for HIGH-importance classes whose users abandon broken queries (zero
+hit-rate → never promotes). The overlay surfaces user judgment as a
+first-class signal while keeping telemetry as the objective sanity check.
+
+**Operationalization:** every documented-limitation class section in
+`docs/TELEMETRY_REPORT_*.md` now renders both signals + which rule
+fired ("IMPORTANCE OVERRIDE: FIRED/NOT FIRED" line). The `analyzer.py`
+return dict includes both `telemetry_promotion_fired` and
+`importance_override_fired` so post-tag tooling can inspect the
+provenance of each disposition.
+
+**Telemetry threshold maintenance contract** (per PLAN_V2.16.md §6
+Item #16): post-v2.16.0 ship, the thresholds in
+`analyze_doc_class_telemetry.py` are FROZEN. No tuning permitted as
+v2.16.x patches (changing them = v3.0 re-charter). Log retention:
+30-day rotate in `output/telemetry/`.
+
+
+## v2.16 Phase 2 omlx Deficit Diagnostic Verdict — Multi-Factor / Phase 6 KILL (2026-05-25)
+
+**Decision:** Phase 2 verdict is **multi-factor / cross-class deficit,
+structurally blocked from apples-to-apples class-level replication**.
+Phase 6 (C1 query rewriting) KILLs without implementation per the §3
+Phase 6 compound-trigger gate. Full report:
+`docs/DIAGNOSTIC_2026-05-25_v2.16_p2_omlx_deficit_root_cause.md`.
+
+**Evidence (v2.13 P1 shootout — 5 docs, omlx vs. dashscope R@1):**
+
+| Doc                              | omlx   | dashscope | Δ     |
+|---|---:|---:|---:|
+| ATZ_Elektronik_German            | 62.5%  | 75.0%     | -12.5 |
+| Greenhouse_Design                | 50.0%  | 62.5%     | -12.5 |
+| Hybrid_electric_vehicles         | 81.2%  | 93.8%     | -12.6 |
+| IRJET_Modeling_of_Solar_PV       | 62.5%  | 75.0%     | -12.5 |
+| Python_Cookbook                  | 43.8%  | 56.2%     | -12.4 |
+
+The 0.2pp spread across heterogeneous content (German, engineering
+papers, Python code) is **itself evidence against a single dominant
+cause**. H2 (OOV) would predict Python_Cookbook's gap to exceed others
+proportional to code-token density; H3 (cross-lingual) would predict
+ATZ to diverge from English engineering papers. Neither pattern holds.
+
+**Structural blocker:** the apples-to-apples dashscope baseline
+collection (`mmrag_v2_8__qwen3_dashscope`) was **dropped 2026-05-23 PM**
+under v2.14 Phase 3 user "full send" override. Cold-storage snapshot
+retained through 2026-08-21 but not hot. Re-ingestion via dashscope
+provider exceeds Phase 2 1-day budget AND violates
+[[no-gx10-model-swap-reflex]] reflex-swap discipline.
+
+**Pre-flight gate (the analytical 5–10 query-rewrite ≥3pp lift check)**
+cannot fire without a positive H2/H3 verdict to author rewrites against.
+Both legs of the Phase 6 compound trigger fail.
+
+**Phase 6 disposition:** KILL. 2nd dead lever (HyDE was the 1st, CLOSED
+2026-05-24). No production code, no validation soak.
+
+**v2.16 DoD Item 4 disposition:** **(c) No fix.** The -12pp deficit on
+the affected docs is documented as accepted embedder limit. Per
+PLAN_V2.16.md §10.2, further closure is v3.0-class (Item #11 ColPali
+visual retrieval is the relevant v3.0 path). Fluent_Python +
+Python_Cookbook + IRJET + Greenhouse + Hybrid_electric remain in the
+documented-limitations registry; their validation fixtures (if any)
+report whatever the post-v2.16-shipped retrieval stack delivers and
+the residual gap is the authoritative ceiling.
+
+
+## v2.16 Phase 3 partial_code Adjacency Fetch — SHIPPED with inert-on-current-corpus caveat (2026-05-25)
+
+**Decision:** Ship the adjacency-fetch mechanism in
+`mmrag_v2.retrieval.pipeline.retrieve_hybrid_reranked` per PLAN_V2.16.md
+§3 Phase 3. Bounded post-rerank stitch of `partial_code=True` chunks
+with up to one text/code neighbor in each direction; merged chunk
+preserves rerank_score, carries `partial_code_resolved=True` flag, and
+exposes the `adjacency_source` list of contributing chunk_ids.
+
+**Implementation:** see commit 0d878f4.
+
+**Bridge tests (`tests/test_retrieval_pipeline.py` — 8 added):**
+- Leading / middle / trailing partial_code positions in a split sequence
+- Sole partial_code chunk (no neighbor) → annotate + pass through
+- Non-partial_code chunks unchanged (cheap-exit guard)
+- Table/image neighbor filtered out (helper modality filter)
+- Rerank_score + rerank_index preserved verbatim on merge
+- Empty results → empty output
+
+**v2.14 retrieval-fingerprint no-regression:** 20/20 PASS unchanged.
+Adjacency only triggers on `partial_code=True`; the fingerprint queries
+don't surface any such chunks (consistent with the corpus state below).
+
+**Inert-on-current-corpus caveat:**
+The production v2.15.0 indexes have **ZERO chunks** with
+`partial_code=True`. The flag is set ONLY on the
+`_chunk_text_with_overlap` / `_chunk_mixed_text_and_code` path
+(scanned_book profile, v2.14 P6). Chunks emitted by Docling
+HybridChunker — the dominant path for academic_whitepaper and
+technical_manual profiles, including Fluent_Python — never carry
+`partial_code=True`. The mechanism is therefore **mechanism-correct
+but INERT** against the documented Fluent_Python failure mode in
+v2.16.0.
+
+**v2.16 DoD Item 4 + Item 9 (B1 Docling config hunt KILL) interaction:**
+Item #9's KILL is conditional on Phase 3 passing acceptance
+(Fluent_Python ≥85% on Phase 1 validation queries). With the inert
+mechanism, Phase 1 validation runs against the v2.16-shipped stack
+will report whatever the v2.15.0 baseline showed (0% PASS rate on
+Fluent_Python per the baseline at
+`docs/VALIDATION_REPORT_2026-05-25_v2.15.0_baseline.md`). Per
+PLAN_V2.16.md §3 Phase 3 risk + fallback and §7 trigger #1, the
+structural extension (extending `partial_code` emission to the
+HybridChunker path + re-extracting + re-ingesting code-dense docs)
+routes to **v2.17 (safety valve)**. Item #9 reopens for v2.17 work.
+
+**Why not extend `partial_code` to HybridChunker in v2.16:**
+Extending coverage requires modifying the production chunker path,
+re-extracting all code-dense docs (~3–5 days wall time for Fluent_Python
++ Python_Cookbook + Python_Distilled + Ayeva + Chaubal), and
+re-ingesting into Qdrant. Per the convergence-cycle discipline, this
+exceeds Phase 3's spec'd scope (retrieval-side only) and exceeds the
+12-day cycle cap budgeted for v2.16.
+
+
+## v2.16 Phase 4 VLM-Table Dedup — SHIPPED (2026-05-25)
+
+**Decision:** Ship `bbox_iou`-based dedup that suppresses TEXT chunks
+spatially overlapping VLM-extracted TABLE chunks on the same page
+above `dedup_vlm_table_iou_threshold` (default 0.85). Closes the
+v2.14 P1 CarOK regression where VLM tables coexisted with flat-prose
+duplicates and retrieval picked the prose 29/30 times.
+
+**Implementation (see commit 4a7eb4a):**
+- `src/mmrag_v2/utils/bbox.py` — `bbox_iou()` on AGENT-SPATIAL-20
+  normalized integer bboxes. 7 unit tests.
+- `PdfConversionPlan.dedup_vlm_table_iou_threshold` — frozen-dataclass
+  knob default 0.85; threads through `build_pdf_conversion_plan`. 2
+  plan-bridge tests prove the knob crosses adapter boundaries.
+- `BatchProcessor._apply_vlm_table_iou_dedup` — pre-`_apply_final
+  _boundary_repairs` hook. Filters TEXT chunks where bbox IoU with
+  any same-page `extraction_method ∈ {vlm_table_markdown,
+  vlm_table_markdown_forced, vlm_table_markdown_emergency, vlm_table}`
+  exceeds threshold. Cheap-exit on pages with no VLM tables.
+- `tests/test_vlm_table_dedup.py` — 8 dedup-logic bridge tests
+  (IoU=0.95/0.50/0.0; no-VLM-tables; multi-table; threshold=0.0
+  disables; plan-missing fallback; docling-only path untouched).
+
+**Coexistence with `_apply_table_recovery_highlander_dedup`:**
+The Highlander pass (existing) handles `recovery_gap_fill` /
+`recovery_scan` recovery chunks against forced-VLM tables. The Phase 4
+pass handles ALL TEXT chunks against ALL VLM-table emissions. Both
+passes are independent and additive. Neither touches the non-VLM
+`docling_table_markdown` path (preserves v2.13 baseline corpus).
+
+**Acceptance:** validation against Phase 1 CarOK fixture deferred to
+post-Phase-0 CarOK re-extraction (compute contention with Phase 0
+batch). Bar per PLAN_V2.16.md §3 Phase 4: CarOK Phase 1 validation
+queries ≥85% retrieval-fixture-based PASS rate (judge-independent).
+If the result falls short, Item #14 (3a VLM swap) opens for v3.0 per
+PLAN_V2.16.md §5; this cycle's framing accepts a measurable lift +
+documented residual as a valid SHIP outcome.
+
+
+## v2.16 Phase 5 Dynamic Top-K — KILLed by pre-flight (2026-05-25)
+
+**Decision:** KILL permanently. No production code, no opt-in middle
+ground. Pre-flight verdict at `docs/PHASE5_PREFLIGHT_2026-05-25.md`.
+
+**Pre-flight gate results:**
+
+| Leg | Condition                                | Result | Detail                                               |
+|---|---|---|---|
+| (a) | ≥20% queries `would_truncate`           | PASS   | 5/20 = 25.0%                                         |
+| (b) | PASS-retention ≥ 0.97                    | **FAIL** | undefined; static_pass=0, dynamic_pass=0           |
+| (c) | No HIGH class drops >2pp                | PASS   | Both CarOK + Fluent_Python: Δ=+0.0pp                |
+
+Leg (b) fails because the v2.15.0 baseline static PASS rate is 0/20
+(see `docs/VALIDATION_REPORT_2026-05-25_v2.15.0_baseline.md`); the
+retention ratio is degenerate (0/0). Per PLAN_V2.16.md §3 Phase 5,
+ANY leg fails → KILL permanently. "Opt-in dead code is the failure
+mode for a feature-frozen product."
+
+**Why this is a KILL not a deferral:** the gate is bivalent; the
+v2.15.0 baseline state cannot be retroactively changed; v3.0
+re-architecture (new embedder, new corpus shape) would itself
+re-evaluate this knob from scratch.
+
+
+## v2.16 Phase 6 Query Rewriting — CLOSED as 2nd dead lever (2026-05-25)
+
+**Decision:** KILL by Phase 2 verdict (see above). Query rewriting
+joins HyDE as the 2nd retrieval-side augmentation lever closed as
+dead on this embedder + corpus combination.
+
+**Lineage of dead levers on omlx Qwen3-Embedding-8B + canonical corpus:**
+1. HyDE bridging (v2.15 Phase 1, CLOSED 2026-05-24) — falsified by
+   narrow 5-doc A/B soak; 4/5 docs zero R@1 delta, German subgroup
+   +0.0pp on n=64.
+2. Query rewriting (v2.16 Phase 6, CLOSED 2026-05-25) — Phase 2
+   pre-flight gate did not fire; no production code written.
+
+No infra is retained for either lever. v3.0 re-charter (Item #11
+ColPali visual retrieval) is the relevant path forward when the
+embedder boundary becomes the binding constraint on multimodal
+queries. Pure-text retrieval-side augmentation is exhausted on
+this corpus.
+
+
+## v2.16 Phase 7 Image Re-read — KILLed by default (no opt-in) (2026-05-25)
+
+**Decision:** KILL. Per PLAN_V2.16.md §3 Phase 7 default disposition,
+the user did not promote any image-heavy class (PCWorld_July_2025,
+Combat_Aircraft_August_2025, etc.) to documented-limitation HIGH/MED
+with 10-20 image-content validation queries before Phase 1 fixture
+authoring began. No production code for D2 retrieval-time VLM
+re-read.
+
+Reopen path (v3.0): a user-initiated promotion of an image-heavy
+class with the spec'd validation fixture would re-trigger Phase 7
+disposition. Out-of-scope for v2.X.
+
+
+## v2.16 Carry-Forward Closures — 8 KILL items (2026-05-25)
+
+Per PLAN_V2.16.md §4. Each item's reopen path requires v3.0 re-charter
+(Item #11-style architecture proposal); no v2.X reopen.
+
+- **Item #9 (B1 Docling HybridChunker config hunt):** CLOSED conditional
+  on Phase 3 acceptance. Phase 3 mechanism shipped but inert on current
+  corpus; Item #9 actually **reopens for v2.17** per PLAN_V2.16.md §7
+  trigger #1 (structural prerequisite for partial_code adjacency to
+  fire requires extending coverage to HybridChunker path — not
+  retrieval-side, exceeds Phase 3 scope). v2.17 acceptance: Fluent_Python
+  validation PASS rate measurably lifted from the v2.16.0 baseline (0%
+  → some non-zero value).
+- **Item #10 (A2 HTML+summary split):** CLOSED. Zero demand signal
+  across v2.11→v2.15. If summary-vs-content distinction becomes
+  load-bearing → v3.0 re-charter.
+- **Item #12 (B2 Code-Rescue heuristic stitching middleware):** CLOSED.
+  Heuristic regex-stitching is wrong-layer; extraction-layer fixes
+  (Item #9 in v2.17) produce deterministic results.
+- **Item #13 (UIR refactor 3c):** CLOSED. PARKED-WITH-TRIGGERS in
+  v2.15; reopen triggers (3rd engine, cross-engine defect, ≥500 LOC
+  test boilerplate, external integration request) all NOT FIRED in
+  Phase 0 cycle-open review. The 7 new docs route through existing
+  PDF engine. CYCLE_OPEN_CHECKLIST.md §6 keeps the trigger check for
+  v2.X.x patches but the carry-forward closes; multi-format expansion
+  is v3.0-class.
+- **Item #14 (VLM swap to alternative model, 3a):** CLOSED. v2.14 P1
+  evidence shows NuMarkdown-8B-Thinking-mlx-8bits produces clean
+  output; the failure was the missing dedup (Phase 4 ships the fix).
+- **Item #15 (Magazine rendered-region-crop, 3e):** CLOSED. No demand
+  signal; magazine content meets existing quality bars. v3.0 if
+  image-axis regression surfaces.
+- **Item #21 (3b Remote CodeFormulaV2 inference):** CLOSED. Local CPU
+  CodeFormulaV2 in Docling 2.86.0 (~27 sec/page on Apple Silicon)
+  sufficient for one-off batch reconversion in solo-dev workflow.
+- **Item #22 (3d HybridChunker per-item token guard):** CLOSED.
+  v2.10 element-by-element fallback already handles pathological-input
+  chunking; opt-in/default-off in v2.11 design, never built (4 cycles,
+  zero demand signal).
+
+
+## v2.16 v3.0-Class Items Declared Out-of-Scope (2026-05-25)
+
+- **Item #11 (D1 ColPali / VisRAG visual retrieval):** OUT-OF-SCOPE
+  for v2.X. Requires per-page visual embeddings, separate vector store
+  with different shape, dual-representation rerank stage. v3.0
+  re-charter the moment visual retrieval becomes load-bearing.
+
+
+## v2.16 Post-Tag Rollback Procedure (2026-05-25)
+
+Per PLAN_V2.16.md §3 Phase N step 9. Each shipped phase that
+mutates production code is committed independently to enable
+clean revert.
+
+- **Phase 3 (partial_code adjacency, commit 0d878f4):**
+  `git revert 0d878f4` restores `retrieve_hybrid_reranked` to the
+  pre-adjacency shape. Pure no-op on current production indexes
+  (mechanism is inert) so the revert produces byte-identical retrieval
+  output; safe.
+- **Phase 4 (VLM-table dedup, commit 4a7eb4a):** `git revert 4a7eb4a`
+  removes the dedup pass + the `dedup_vlm_table_iou_threshold` knob
+  + tests. To take effect on production data, also re-extract any
+  CarOK / form-class doc that was emitted with the dedup pass active
+  (otherwise the doc's `output/<basename>/ingestion.jsonl` retains
+  the dedup-emitted shape but the code no longer enforces it on
+  re-extraction).
+- **Phase 1 (overlay, commit 09f0e72):** `git revert 09f0e72`
+  removes the `personal_importance` field. Existing entries with
+  `personal_importance: "HIGH"` become unrecognized config; the
+  `personal_importance()` resolver returns "MED" default. The
+  analyzer reverts to v2.15 telemetry-only logic.
+- **Phase 0 step 6.2 (CANONICAL rename, commit ed62429):**
+  `git revert ed62429` restores `CANONICAL_34` symbol name. All 5
+  consumer sites + the test pin revert atomically. Combined with
+  the Qdrant snapshot restore (step 6.1 captures the pre-mutation
+  state), this is the complete index + code revert path per
+  PLAN_V2.16.md §3 Phase 0 step 6.6.
+
+If Phase 0 step 6.3 (dense append) or 6.4 (BM25 rebuild) needs to
+revert, follow the 4-step procedure in PLAN_V2.16.md §3 Phase 0 step
+6.6 (Qdrant snapshot restore + git revert + BM25 rebuild +
+anti-drift bridge test).
