@@ -6,10 +6,12 @@ Purpose: fast orientation for a new coding session. Read this before deeper proj
 
 ## Current Objective
 
-**v2.16.0 CONVERGENCE RELEASE — FEATURE-COMPLETE FOR v2.X.** Engine
-2.15.0 → 2.16.0; v2.16.0 annotated tag PENDING user push to origin
-+ GitHub at the close-out commit. Post-tag: only bug-fix patches
-(v2.16.x) accepted; new features = re-charter as v3.0.
+**v2.16.0 CONVERGENCE RELEASE — FEATURE-COMPLETE FOR v2.X. SHIPPED +
+PUSHED 2026-05-25** at commit `15d1349` (annotated tag `v2.16.0` =
+`53726ec`) on origin (Gitea at `10.0.10.241`) + GitHub
+(`rcklomp/multimodel-document-converter`). Engine 2.15.0 → 2.16.0.
+Post-tag: only bug-fix patches (v2.16.x) accepted; new features =
+re-charter as v3.0.
 
 **Phases shipped (v2.16.0 scope):**
 - **Phase 0** SHIPPED — corpus expansion (7 new PDFs from data/raw/
@@ -66,7 +68,7 @@ F. Annotated tag `v2.15.0` on origin + GitHub at commit `fff67d9`.
 - **Phase N** — engine bump + AFTER snapshot + version-pin test update + **v2.15.0 tag PUSHED to origin + GitHub** (commit `fff67d9`)
 
 **v2.16 cycle plan: Draft v0.8 in mid-audit (Round 7 pending).**
-Convergence-cycle plan at `docs/PLAN_V2.16.md` (Round 1-6
+Convergence-cycle plan at `docs/archive/plans/PLAN_V2.16.md` (Round 1-6
 dispositions in Appendix A). Round 6 (2026-05-25) accepted 4 HIGH
 iteration-fallout findings from v0.7 propagation gaps + 1 MED +
 2 LOW. None required disposition changes; all were
@@ -83,7 +85,7 @@ open for execution; opens when audit clears the stopping rule
 - **Phase 4 [A]** Docling HybridChunker tuning — carry-fwd 6.1 trigger active (Docling ≥2.87 OR 90d)
 - **Phase 5 [E]** retrieval-side investments — v2.16 contingent on F→E telemetry escalation
 
-**Active canonical baseline:** [`docs/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md`](QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md).
+**Active canonical baseline:** [`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md`](archive/snapshots/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md).
 **Cycle history:** [`docs/archive/plans/PLAN_V2.15.md`](archive/plans/PLAN_V2.15.md) (CLOSED 2026-05-24; Draft v0.9 + 8-round audit archaeology in Appendix A).
 **Cycle-open process:** [`docs/CYCLE_OPEN_CHECKLIST.md`](CYCLE_OPEN_CHECKLIST.md) (NEW in v2.15; load-bearing for v2.16+ telemetry analyzer run, Docling watcher, calibration freshness, cycle_slip.log).
 
@@ -382,7 +384,7 @@ disposes every open carry-forward to SHIP / KILL / OUT-OF-SCOPE
 ## Current Quality Summary
 
 Source of truth for v2.15.0:
-[`docs/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md`](QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md).
+[`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md`](archive/snapshots/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md).
 Strict-gate corpus state unchanged from v2.10: **34 PASS / 0 WARN /
 0 FAIL** — extraction/chunking/validation are untouched by v2.11 →
 v2.15 (all five cycles changed only the retrieval side / OCR
@@ -437,10 +439,10 @@ origin + GitHub at commit `fff67d9`. Authoritative scope +
 execution outcomes in [`docs/archive/plans/PLAN_V2.15.md`](archive/plans/PLAN_V2.15.md)
 (Draft v0.9 — 8-round audit archaeology in Appendix A). AFTER
 snapshot at
-[`docs/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md`](QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md).
+[`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md`](archive/snapshots/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md).
 
 **v2.16 convergence-cycle plan at Draft v0.5 (mid-audit).**
-[`docs/PLAN_V2.16.md`](PLAN_V2.16.md) frames v2.16 as the final
+[`docs/archive/plans/PLAN_V2.16.md`](archive/plans/PLAN_V2.16.md) frames v2.16 as the final
 v2.X release: every open item gets SHIP / KILL / OUT-OF-SCOPE
 (v3.0). Round 1-3 dispositions captured in Appendix A; Round 4
 required (Round 3 returned 5 HIGH structural findings). Cycle

@@ -12,22 +12,19 @@ This file provides guidance to Claude Code when working with this repository.
 6. `docs/TESTING.md` — test conventions.
 7. `docs/QUALITY_GATES.md` — gate definitions.
 8. `docs/ARCHITECTURE.md` — pipeline architecture.
-9. `docs/QUALITY_SNAPSHOT_2026-05-25_v2.16_after.md` — **current canonical baseline**. **v2.16.0 CONVERGENCE RELEASE — FEATURE-COMPLETE FOR v2.X.** Engine 2.15.0 → 2.16.0; tag staged for user push to origin + GitHub. Phase 1 personal_importance overlay + Phase 3 partial_code adjacency-fetch mechanism (mechanism shipped + inert on current corpus) + Phase 4 VLM-table IoU dedup + Phase 0 corpus expansion (34 → 41 docs) + CANONICAL_DOCS rename. Phase 2 verdict multi-factor → Phase 6 KILL. Phase 5 KILL by pre-flight. Phase 7 KILL by default. Test suite: 1145 passed / 17 skipped / 0 failed. Post-tag: only bug-fix patches (v2.16.x); new features = re-charter as v3.0. v2.17 fires only on `PLAN_V2.16.md` §7 triggers (Item #9 reopens for HybridChunker `partial_code` coverage extension).
-10. `docs/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md` — predecessor canonical (v2.15.0, tag `fff67d9`).
-11. `docs/CYCLE_OPEN_CHECKLIST.md` — load-bearing for v2.16+ cycle-open (telemetry analyzer + USER_ISSUES review + Docling watcher + cal freshness + §5 personal_importance review + cycle_slip.log spec).
-12. `docs/PLAN_V2.16.md` — **closed cycle plan** (final v2.X tag). Convergence cycle SHIPPED 2026-05-25. 8 external audit rounds + 1 self-audit; v2.15 §9 stopping rule fired at Round 8. Full v0.10 audit archaeology preserved at `docs/archive/plans/PLAN_V2.16_0.10.md`.
-13. `docs/USER_ISSUES.md` — active issues backlog.
-14. `docs/archive/PLAN_V2.16_AUDIT_PROMPT.md` — audit-prompt template (archived at v2.16.0 close).
-15. `docs/CONVERSION_PROFILES.md` — per-profile conversion rules.
+9. `docs/QUALITY_SNAPSHOT_2026-05-25_v2.16_after.md` — **current canonical baseline**. **v2.16.0 CONVERGENCE RELEASE — FEATURE-COMPLETE FOR v2.X. SHIPPED + PUSHED 2026-05-25** at commit `15d1349` (tag `53726ec`) on origin (Gitea) + GitHub. Phase 1 personal_importance overlay + Phase 3 partial_code adjacency-fetch mechanism (mechanism shipped + inert on current corpus) + Phase 4 VLM-table IoU dedup + Phase 0 corpus expansion (34 → 38 docs honest reduction; 4 of 7 new PASS strict gate, 3 dropped as v3.0 test cases). Phase 2 verdict multi-factor → Phase 6 KILL. Phase 5 KILL by pre-flight. Phase 7 KILL by default. Test suite: 1145 passed / 17 skipped / 0 failed. Post-tag: only bug-fix patches (v2.16.x); new features = re-charter as v3.0. v2.17 fires only on §7 triggers (Form_0013 smoke disposition + HybridChunker partial_code coverage extension reopen Item #9). Plan archived at `docs/archive/plans/PLAN_V2.16.md`.
+10. `docs/CYCLE_OPEN_CHECKLIST.md` — load-bearing for v2.16+ cycle-open (telemetry analyzer + USER_ISSUES review + Docling watcher + cal freshness + §5 personal_importance review + cycle_slip.log spec).
+11. `docs/USER_ISSUES.md` — active issues backlog.
+12. `docs/CONVERSION_PROFILES.md` — per-profile conversion rules.
 
 ## Historical reference (`docs/archive/`)
 
-- `docs/archive/plans/` — predecessor execution histories: PLAN_V2.10 through PLAN_V2.15 (closed, tagged, pushed); PLAN_V2.15_AUDIT_PROMPT.md; PLAN_V2.16_0.10.md (v2.16 70+ finding audit archaeology preserved as reference).
-- `docs/archive/snapshots/` — predecessor quality snapshots v2.8 through v2.14 (current canonical baseline v2.16 stays top-level; v2.15 retained top-level for delta reproducibility).
+- `docs/archive/plans/` — predecessor execution histories: PLAN_V2.10 through PLAN_V2.16 (all closed, tagged, pushed); PLAN_V2.15_AUDIT_PROMPT.md + PLAN_V2.16_AUDIT_PROMPT.md; PLAN_V2.16_0.10.md (v2.16 70+ finding audit archaeology preserved as reference).
+- `docs/archive/snapshots/` — predecessor quality snapshots v2.8 through v2.15 (current canonical baseline v2.16 stays top-level).
+- `docs/archive/diagnostics/` — v2.9–v2.10 phase diagnostic reports + v2.16 Phase 2 omlx-deficit + v2.16 Phase 5 pre-flight verdicts.
+- `docs/archive/misc/` — v2.14 handoff + judge eval + v2.15/v2.16 telemetry reports + v2.16 corpus-expansion inventory + v2.16 validation reports + v2.16 Form_0013 smoke-fail diagnostic.
 - `docs/archive/calibrations/` — v2.14 Phase 0 calibration runs. Operative verdict per v2.14 close-out: FP8-14B (`RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic`) — rel 82.2% / format 90.7% TRUSTWORTHY / faith 76.6%.
-- `docs/archive/diagnostics/` — v2.9–v2.10 phase diagnostic reports (heading reclassification, missing pages, cross-page splits, OCR).
 - `docs/archive/soaks/` — v2.14/v2.15 soak reports (intent-HyDE FALSIFIED; v2.15 narrow-HyDE AB).
-- `docs/archive/misc/` — HANDOFF_V2.14, JUDGE_EVAL openrouter shortlist, TELEMETRY_REPORT 2026-05-24.
 - `docs/archive/quality_snapshots/` — v2.8-era raw audit outputs.
 
 Use the three-layer docs model:

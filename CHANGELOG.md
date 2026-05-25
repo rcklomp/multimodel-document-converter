@@ -8,7 +8,7 @@ All notable changes to this project will be documented in this file. Current beh
 
 **FEATURE-COMPLETE FOR v2.X PROJECT.** Post-tag: only bug-fix patches
 (v2.16.x); new features = re-charter as v3.0. v2.17 fires only on
-[`PLAN_V2.16.md`](docs/PLAN_V2.16.md) §7 safety-valve triggers.
+[`PLAN_V2.16.md`](docs/archive/plans/PLAN_V2.16.md) §7 safety-valve triggers.
 
 Audit history: 8 external rounds + 1 self-audit (v2.15 §9 stopping
 rule fired at Round 8). Full archaeology at
@@ -53,7 +53,7 @@ with per-class JSON fixtures in
 or `ast.parse`, (c) `expected_anchor_regexes` matches top-1 content.
 Nonzero exit code if any class drops below `target_pass_rate` for
 cycle-open / CI gating. v2.15.0 baseline captured at
-[`docs/VALIDATION_REPORT_2026-05-25_v2.15.0_baseline.md`](docs/VALIDATION_REPORT_2026-05-25_v2.15.0_baseline.md).
+[`docs/archive/misc/VALIDATION_REPORT_2026-05-25_v2.15.0_baseline.md`](docs/archive/misc/VALIDATION_REPORT_2026-05-25_v2.15.0_baseline.md).
 
 CYCLE_OPEN_CHECKLIST.md gains §5 — 2-minute `personal_importance`
 review at every cycle-open.
@@ -76,7 +76,7 @@ profiles go through Docling HybridChunker which does not set the
 flag. The mechanism is correct + tested but does not change v2.16.0
 retrieval output for the documented Fluent_Python failure mode.
 Item #9 (B1 Docling config hunt) reopens for **v2.17** per
-[`PLAN_V2.16.md`](docs/PLAN_V2.16.md) §7 trigger #1 (extend
+[`PLAN_V2.16.md`](docs/archive/plans/PLAN_V2.16.md) §7 trigger #1 (extend
 `partial_code` coverage to the HybridChunker path).
 
 ### Phase 4 — VLM-table IoU dedup (SHIPPED)
@@ -110,7 +110,7 @@ content (German, engineering, code) contradicts a single-cause H2
 Phase 6 (C1 Query rewriting) KILLs without implementation — compound
 trigger fails both legs. 2nd dead lever (HyDE was the 1st).
 Full report:
-[`docs/DIAGNOSTIC_2026-05-25_v2.16_p2_omlx_deficit_root_cause.md`](docs/DIAGNOSTIC_2026-05-25_v2.16_p2_omlx_deficit_root_cause.md).
+[`docs/archive/diagnostics/DIAGNOSTIC_2026-05-25_v2.16_p2_omlx_deficit_root_cause.md`](docs/archive/diagnostics/DIAGNOSTIC_2026-05-25_v2.16_p2_omlx_deficit_root_cause.md).
 
 Per Item 4 (c), the -12pp deficit on the affected docs is documented
 as accepted embedder limit; further closure is v3.0-class (Item #11
@@ -119,7 +119,7 @@ ColPali / visual retrieval).
 ### Phase 5 — Dynamic top-k pre-flight KILL
 
 Pre-flight verdict at
-[`docs/PHASE5_PREFLIGHT_2026-05-25.md`](docs/PHASE5_PREFLIGHT_2026-05-25.md).
+[`docs/archive/diagnostics/PHASE5_PREFLIGHT_2026-05-25.md`](docs/archive/diagnostics/PHASE5_PREFLIGHT_2026-05-25.md).
 
 | Leg | Condition | Result |
 |---|---|---|
@@ -256,7 +256,7 @@ retrieve call).
 - **Tag:** `v2.15.0` on origin + GitHub at commit `fff67d9`.
 
 Canonical AFTER snapshot:
-[`docs/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md`](docs/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md).
+[`docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md`](docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md).
 Plan history at
 [`docs/archive/plans/PLAN_V2.15.md`](docs/archive/plans/PLAN_V2.15.md)
 (Draft v0.9 + 8-round audit archaeology in Appendix A).

@@ -1662,7 +1662,7 @@ v2.16.x patches (changing them = v3.0 re-charter). Log retention:
 structurally blocked from apples-to-apples class-level replication**.
 Phase 6 (C1 query rewriting) KILLs without implementation per the §3
 Phase 6 compound-trigger gate. Full report:
-`docs/DIAGNOSTIC_2026-05-25_v2.16_p2_omlx_deficit_root_cause.md`.
+`docs/archive/diagnostics/DIAGNOSTIC_2026-05-25_v2.16_p2_omlx_deficit_root_cause.md`.
 
 **Evidence (v2.13 P1 shootout — 5 docs, omlx vs. dashscope R@1):**
 
@@ -1744,7 +1744,7 @@ Item #9's KILL is conditional on Phase 3 passing acceptance
 mechanism, Phase 1 validation runs against the v2.16-shipped stack
 will report whatever the v2.15.0 baseline showed (0% PASS rate on
 Fluent_Python per the baseline at
-`docs/VALIDATION_REPORT_2026-05-25_v2.15.0_baseline.md`). Per
+`docs/archive/misc/VALIDATION_REPORT_2026-05-25_v2.15.0_baseline.md`). Per
 PLAN_V2.16.md §3 Phase 3 risk + fallback and §7 trigger #1, the
 structural extension (extending `partial_code` emission to the
 HybridChunker path + re-extracting + re-ingesting code-dense docs)
@@ -1801,7 +1801,7 @@ documented residual as a valid SHIP outcome.
 ## v2.16 Phase 5 Dynamic Top-K — KILLed by pre-flight (2026-05-25)
 
 **Decision:** KILL permanently. No production code, no opt-in middle
-ground. Pre-flight verdict at `docs/PHASE5_PREFLIGHT_2026-05-25.md`.
+ground. Pre-flight verdict at `docs/archive/diagnostics/PHASE5_PREFLIGHT_2026-05-25.md`.
 
 **Pre-flight gate results:**
 
@@ -1812,7 +1812,7 @@ ground. Pre-flight verdict at `docs/PHASE5_PREFLIGHT_2026-05-25.md`.
 | (c) | No HIGH class drops >2pp                | PASS   | Both CarOK + Fluent_Python: Δ=+0.0pp                |
 
 Leg (b) fails because the v2.15.0 baseline static PASS rate is 0/20
-(see `docs/VALIDATION_REPORT_2026-05-25_v2.15.0_baseline.md`); the
+(see `docs/archive/misc/VALIDATION_REPORT_2026-05-25_v2.15.0_baseline.md`); the
 retention ratio is degenerate (0/0). Per PLAN_V2.16.md §3 Phase 5,
 ANY leg fails → KILL permanently. "Opt-in dead code is the failure
 mode for a feature-frozen product."

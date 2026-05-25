@@ -6,10 +6,10 @@
 > valve triggers.
 
 > Generated: 2026-05-25
-> Predecessor canonical: [v2.15.0 AFTER snapshot](QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md)
-> Plan: [`docs/PLAN_V2.16.md`](PLAN_V2.16.md)
+> Predecessor canonical: [v2.15.0 AFTER snapshot](archive/snapshots/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md)
+> Plan: [`docs/archive/plans/PLAN_V2.16.md`](archive/plans/PLAN_V2.16.md)
 > Decisions: [`docs/DECISIONS.md`](DECISIONS.md) "v2.16 …" entries
-> v2.16 Phase 1 baseline (for delta): [`docs/VALIDATION_REPORT_2026-05-25_v2.15.0_baseline.md`](VALIDATION_REPORT_2026-05-25_v2.15.0_baseline.md)
+> v2.16 Phase 1 baseline (for delta): [`docs/archive/misc/VALIDATION_REPORT_2026-05-25_v2.15.0_baseline.md`](archive/misc/VALIDATION_REPORT_2026-05-25_v2.15.0_baseline.md)
 
 ## 1. Phase outcomes
 
@@ -57,7 +57,7 @@ Per PLAN_V2.16.md §2:
 
 3. **Personal validation queries.** 2 HIGH classes fixturized
    (10 queries each). v2.15.0 baseline captured at
-   `docs/VALIDATION_REPORT_2026-05-25_v2.15.0_baseline.md` (0/10 +
+   `docs/archive/misc/VALIDATION_REPORT_2026-05-25_v2.15.0_baseline.md` (0/10 +
    0/10 — exact documented failure modes). Post-Phase-3/4 validation
    measured against this baseline; per DoD §3 Item 4 (b)/(c)
    exception, CarOK + Fluent_Python may ship below 85% if Phase 2
@@ -132,7 +132,7 @@ forward as ongoing infrastructure, not carry-forwards.
 ## 8. Predecessor reference
 
 For delta reproducibility:
-- v2.15.0 baseline: [QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md](QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md)
+- v2.15.0 baseline: [archive/snapshots/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md](archive/snapshots/QUALITY_SNAPSHOT_2026-05-24_v2.15_after.md)
 - v2.14.0 baseline: [archive/snapshots/QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md](archive/snapshots/QUALITY_SNAPSHOT_2026-05-23_v2.14_after.md)
 - v2.13.0 baseline: [archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md](archive/snapshots/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md)
 - v2.10 strict-gate baseline: [archive/snapshots/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md](archive/snapshots/QUALITY_SNAPSHOT_2026-05-16_v2.10_after.md)
@@ -148,5 +148,7 @@ For delta reproducibility:
 - Phase 0 calibration: fresh through 2026-06-22 (within T-72h not yet)
 - Audit history: 8 external rounds + 1 self-audit (v2.15 §9 stopping rule fired at Round 8)
 
-**Tag pending:** v2.16.0 annotated tag with "FINAL v2.X release"
-message; user push to origin + GitHub closes this cycle.
+**Tag PUSHED 2026-05-25:** v2.16.0 annotated tag (sha `53726ec`)
+on origin (Gitea at `10.0.10.241`) + GitHub
+(`rcklomp/multimodel-document-converter`) at commit `15d1349`.
+Cycle closed.

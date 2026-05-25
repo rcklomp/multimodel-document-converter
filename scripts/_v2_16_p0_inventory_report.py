@@ -91,7 +91,7 @@ def render(rows: list[dict]) -> str:
         "  Phase 0 (German content count visible in §1 above).",
         "  Phase 2 (omlx-deficit class-level test) verdict already",
         "  recorded as multi-factor in",
-        "  `docs/DIAGNOSTIC_2026-05-25_v2.16_p2_omlx_deficit_root_cause.md`",
+        "  `docs/archive/diagnostics/DIAGNOSTIC_2026-05-25_v2.16_p2_omlx_deficit_root_cause.md`",
         "  — replication would require a hot dashscope collection which",
         "  was dropped in v2.14 P3. Phase 6 KILL is final.",
         "- **Form-class docs** in this expansion: see §1. Phase 4",
@@ -138,7 +138,7 @@ def render(rows: list[dict]) -> str:
         "# Regenerate this report:",
         "python scripts/_v2_16_p0_inventory_report.py \\",
         "    --classifier-json output/_v2_16_p0_logs/classify_new7.json \\",
-        "    --output docs/CORPUS_EXPANSION_2026-05-25_v2.16_p0.md",
+        "    --output docs/archive/misc/CORPUS_EXPANSION_2026-05-25_v2.16_p0.md",
         "```",
     ])
     return "\n".join(lines)

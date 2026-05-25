@@ -10,9 +10,10 @@ observability changes, not schema changes.
 **Status:** PRODUCTION — **v2.16.0 is the FINAL v2.X tag** (convergence
 release). Post-tag: only bug-fix patches (v2.16.x); new features =
 re-charter as v3.0. v2.17 fires only on PLAN_V2.16.md §7 triggers.
-All v2.X tags through v2.15 are pushed to both `github` (rcklomp/
+All v2.X tags including v2.16.0 are pushed to both `github` (rcklomp/
 multimodel-document-converter) and `origin` (Gitea at 10.0.10.241);
-v2.16.0 staged for user push. See `docs/PROJECT_STATUS.md` for
+v2.16.0 = sha `53726ec` at commit `15d1349` (2026-05-25). See
+`docs/PROJECT_STATUS.md` for
 current ship state + per-cycle deltas. Predecessors: `v2.15.0`
 (2026-05-24, `fff67d9`), `v2.14.0` (2026-05-23, `122a62e`),
 `v2.13.0` (2026-05-22, `021ef05`), `v2.12.0` (2026-05-21,

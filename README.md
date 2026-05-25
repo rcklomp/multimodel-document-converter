@@ -4,7 +4,7 @@
 > release, 2026-05-25). Production retrieval is stable; documented
 > limitations are explicit; only bug-fix patches (v2.16.x) accepted
 > post-tag. New features = re-charter as v3.0. See
-> [`docs/PLAN_V2.16.md`](docs/PLAN_V2.16.md) §10 for the v2.16.x /
+> [`docs/archive/plans/PLAN_V2.16.md`](docs/archive/plans/PLAN_V2.16.md) §10 for the v2.16.x /
 > v3.0 boundary; [`docs/DECISIONS.md`](docs/DECISIONS.md) "v2.16 …"
 > entries for per-phase ship / KILL / out-of-scope verdicts.
 
