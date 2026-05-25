@@ -51,7 +51,7 @@ Check Docling release notes since the last cycle. Trigger:
 
 > If Docling minor version increments to ≥2.87 (current production
 > pin: 2.86.0 per `pyproject.toml`), reopen Phase 4 Approach 2
-> evaluation per `docs/PLAN_V2.15.md` carry-forward 6.1.
+> evaluation per `docs/archive/plans/PLAN_V2.15.md` carry-forward 6.1.
 
 Also re-check every 90 days regardless of version (the time-bound
 half of the trigger). The 90-day clock resets on each successful
@@ -74,7 +74,22 @@ re-cal date + 30 days. If expiring within 72h of cycle-open,
 schedule the re-cal now (don't wait for the T-72h pre-tag
 checkpoint to fire it).
 
-### 5. UIR refactor (3c) trigger conditions
+### 5. Documented-limitation `personal_importance` review
+
+2-minute review. Open
+[`src/mmrag_v2/retrieval/documented_limitations.py`](../src/mmrag_v2/retrieval/documented_limitations.py)
+and confirm the `personal_importance` value on every registered class
+still matches the current personal workflow. v2.16 Phase 1 added this
+overlay field: HIGH forces Option A treatment regardless of telemetry,
+MED applies the existing telemetry rules, LOW reduces auto-closure grace
+from 2 cycles to 1.
+
+Edit values directly when the user's day-to-day need shifts (e.g.,
+demoting a class from HIGH to MED once a fix has shipped and stabilized).
+The analyzer (item 1 above) renders both signals + which rule fired, so
+overlay changes flow through transparently.
+
+### 6. UIR refactor (3c) trigger conditions
 
 30-second review. Carry-forward 3c (UIR refactor) is PARKED WITH
 TRIGGERS per user disposition 2026-05-24. Reopens when ANY of the
@@ -97,7 +112,7 @@ If any trigger fires, add a `docs/PLAN_<id>_UIR.md` proposal entry
 to the cycle plan. Otherwise carry-forward 3c stays parked another
 cycle.
 
-### 6. cycle_slip.log review (carryover from prior cycle close-out)
+### 7. cycle_slip.log review (carryover from prior cycle close-out)
 
 Open `docs/cycle_slip.log` and check whether any blocking-step
 slip entries exist from the prior cycle. If so:
@@ -143,7 +158,7 @@ to compute the effective tag date.
 
 ### v2.15 Phase 6 T-72h slip-log trigger
 
-Per `docs/PLAN_V2.15.md` §Phase 6 (T-72h pre-tag checkpoint),
+Per `docs/archive/plans/PLAN_V2.15.md` §Phase 6 (T-72h pre-tag checkpoint),
 the slip log fires when EITHER:
 
 (a) re-cal wall-clock execution > 24h, OR
@@ -169,4 +184,4 @@ file-existence sub-trigger).
 
 Two-round-minimum audit recommendation: any future structural
 changes to this checklist should themselves get an audit pass
-before going live, per `docs/PLAN_V2.15.md` §9 stopping rule.
+before going live, per `docs/archive/plans/PLAN_V2.15.md` §9 stopping rule.

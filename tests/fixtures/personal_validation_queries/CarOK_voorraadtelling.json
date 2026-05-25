@@ -1,0 +1,108 @@
+{
+  "class": "CarOK_voorraadtelling",
+  "personal_importance": "HIGH",
+  "target_pass_rate": 0.85,
+  "_notes": "Dutch auto-parts inventory tables. Class-specific failure mode is multi-row table-value retrieval where flat-prose duplicates beat the structured table chunk. Q03, Q05, Q06, Q09 test that mode. Anchor regexes target unique part numbers / brand+part combinations that appear in the gold table chunks but not in prose duplicates of other pages.",
+  "queries": [
+    {
+      "id": "Q01_acdelco_brake_pads_part_number",
+      "query_text": "What's the part number for the ACDelco brake pads set for Peugeot 205?",
+      "expected": {
+        "top_5_gold_doc": true,
+        "format_constraint": "table_value",
+        "expected_anchor_regexes": ["AC529481D"]
+      },
+      "notes": "Page 1 first table row; ACDelco + Peugeot 205 unambiguously identify."
+    },
+    {
+      "id": "Q02_febi_signal_switch_vw_passat",
+      "query_text": "Which brand makes the directional signal switch for VW Passat in my stock?",
+      "expected": {
+        "top_5_gold_doc": true,
+        "format_constraint": "table_value",
+        "expected_anchor_regexes": ["Febi\\s*Bilstein.*Richtingaanwijzerschakelaar", "Richtingaanwijzerschakelaar.*Febi\\s*Bilstein"]
+      },
+      "notes": "Multi-row table; anchor requires brand+part to co-occur."
+    },
+    {
+      "id": "Q03_opel_interieurfilter_count",
+      "query_text": "How many Opel Interieurfilter parts are in stock (article number 1808012)?",
+      "expected": {
+        "top_5_gold_doc": true,
+        "format_constraint": "table_value",
+        "expected_anchor_regexes": ["1808012", "Interieurfilter.*Opel"]
+      },
+      "notes": "Multi-row test — requires the right table chunk. Part-number 1808012 is distinctive."
+    },
+    {
+      "id": "Q04_castrol_motorolie_price",
+      "query_text": "What's the price for the Castrol Edge FST 0W-30 motor oil (1 liter)?",
+      "expected": {
+        "top_5_gold_doc": true,
+        "format_constraint": "table_value",
+        "expected_anchor_regexes": ["Castrol\\s*Edge\\s*FST\\s*0W-?30"]
+      },
+      "notes": "Castrol Edge FST 0W-30 is a distinctive product name."
+    },
+    {
+      "id": "Q05_peugeot_205_parts",
+      "query_text": "Which parts do I have for a Peugeot 205?",
+      "expected": {
+        "top_5_gold_doc": true,
+        "format_constraint": "table_value",
+        "expected_anchor_regexes": ["Peugeot\\s*205"]
+      },
+      "notes": "Multi-row test — vehicle-compatibility lookup that touches multiple table rows."
+    },
+    {
+      "id": "Q06_gm_part_13356945",
+      "query_text": "What's General Motors part number 13356945?",
+      "expected": {
+        "top_5_gold_doc": true,
+        "format_constraint": "table_value",
+        "expected_anchor_regexes": ["13356945", "Luchtfilter.*835075"]
+      },
+      "notes": "Part-number lookup; 13356945 + Luchtfilter 835075 uniquely identifies."
+    },
+    {
+      "id": "Q07_renault_5_brake_pads",
+      "query_text": "Which brand brake pads do I have for the Renault 5 Super?",
+      "expected": {
+        "top_5_gold_doc": true,
+        "format_constraint": "table_value",
+        "expected_anchor_regexes": ["Renault\\s*5\\s*Super.*ACDelco", "ACDelco.*Renault\\s*5\\s*Super", "Renault\\s*5\\s*Super"]
+      },
+      "notes": "Multi-row vehicle-compatibility test."
+    },
+    {
+      "id": "Q08_audi_parts",
+      "query_text": "Welke onderdelen heb ik voor Audi?",
+      "expected": {
+        "top_5_gold_doc": true,
+        "format_constraint": "table_value",
+        "expected_anchor_regexes": ["Audi"]
+      },
+      "notes": "Dutch-language query against Dutch inventory; tests minority_language path."
+    },
+    {
+      "id": "Q09_espace_clio_parts",
+      "query_text": "Heb ik onderdelen voor de Renault Espace of Clio?",
+      "expected": {
+        "top_5_gold_doc": true,
+        "format_constraint": "table_value",
+        "expected_anchor_regexes": ["Espace", "Clio"]
+      },
+      "notes": "Dutch + multi-row + vehicle-compatibility combo."
+    },
+    {
+      "id": "Q10_gm_part_24420728",
+      "query_text": "What's General Motors part number 24420728?",
+      "expected": {
+        "top_5_gold_doc": true,
+        "format_constraint": "table_value",
+        "expected_anchor_regexes": ["24420728"]
+      },
+      "notes": "Part-number lookup; 24420728 is unique to one table row."
+    }
+  ]
+}

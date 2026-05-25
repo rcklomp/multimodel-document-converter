@@ -1,0 +1,108 @@
+{
+  "class": "Fluent_Python",
+  "personal_importance": "HIGH",
+  "target_pass_rate": 0.85,
+  "_notes": "Code-dense Python book. Class-specific failure mode is code-with-imports-and-usage spans that get cross-page truncation (e.g. p326 ends mid-statement at '    return'). Q01, Q04, Q06, Q09 target imports+usage spans which are the v2.16 Phase 3 adjacency-fetch test cases.",
+  "queries": [
+    {
+      "id": "Q01_lru_cache_memoization",
+      "query_text": "How do I memoize a recursive function using functools.lru_cache?",
+      "expected": {
+        "top_5_gold_doc": true,
+        "format_constraint": "runnable_code",
+        "expected_anchor_regexes": ["functools\\.lru_cache", "@functools\\.lru_cache"]
+      },
+      "notes": "Cross-span: import + decorator + function — exact failure mode Phase 3 targets."
+    },
+    {
+      "id": "Q02_sentence_iter_class",
+      "query_text": "Show me a Sentence class that implements __iter__ to yield words",
+      "expected": {
+        "top_5_gold_doc": true,
+        "format_constraint": "runnable_code",
+        "expected_anchor_regexes": ["class\\s+Sentence", "def\\s+__iter__"]
+      },
+      "notes": "Class + magic method; the Sentence example is canonical for iterator protocol."
+    },
+    {
+      "id": "Q03_asyncio_as_completed",
+      "query_text": "How do I use asyncio.as_completed to handle concurrent download tasks?",
+      "expected": {
+        "top_5_gold_doc": true,
+        "format_constraint": "runnable_code",
+        "expected_anchor_regexes": ["asyncio\\.(as_completed|get_event_loop)", "asyncio"]
+      },
+      "notes": "Async I/O example; tests runnable_code constraint."
+    },
+    {
+      "id": "Q04_sha256_concurrent_futures",
+      "query_text": "Show an example of SHA-256 hashing with concurrent.futures",
+      "expected": {
+        "top_5_gold_doc": true,
+        "format_constraint": "runnable_code",
+        "expected_anchor_regexes": ["from\\s+concurrent\\s+import\\s+futures", "concurrent\\.futures", "hashlib"]
+      },
+      "notes": "Multi-import + worker pool pattern; cross-span imports+usage."
+    },
+    {
+      "id": "Q05_repr_dunder",
+      "query_text": "How do I implement a custom __repr__ for a Python class?",
+      "expected": {
+        "top_5_gold_doc": true,
+        "format_constraint": "runnable_code",
+        "expected_anchor_regexes": ["def\\s+__repr__"]
+      },
+      "notes": "Dunder method definition."
+    },
+    {
+      "id": "Q06_fibonacci_clockdeco",
+      "query_text": "Show me a faster fibonacci using lru_cache with the clockdeco timer decorator",
+      "expected": {
+        "top_5_gold_doc": true,
+        "format_constraint": "runnable_code",
+        "expected_anchor_regexes": ["def\\s+fibonacci", "fibonacci.*lru_cache|lru_cache.*fibonacci"]
+      },
+      "notes": "Imports + double-decorator + function — Phase 3 cross-span target."
+    },
+    {
+      "id": "Q07_generator_yield",
+      "query_text": "How do I write a generator function that yields items lazily?",
+      "expected": {
+        "top_5_gold_doc": true,
+        "format_constraint": "runnable_code",
+        "expected_anchor_regexes": ["yield\\s+"]
+      },
+      "notes": "Generator basic."
+    },
+    {
+      "id": "Q08_oscon_schedule_test",
+      "query_text": "Show me a unit test for the OSCON conference schedule database",
+      "expected": {
+        "top_5_gold_doc": true,
+        "format_constraint": "runnable_code",
+        "expected_anchor_regexes": ["schedule\\.CONFERENCE", "def\\s+test_conference_record"]
+      },
+      "notes": "Test function pattern; the OSCON example."
+    },
+    {
+      "id": "Q09_taxi_process_simulation",
+      "query_text": "Show me the taxi fleet simulation example with yield Event",
+      "expected": {
+        "top_5_gold_doc": true,
+        "format_constraint": "runnable_code",
+        "expected_anchor_regexes": ["def\\s+taxi_process", "yield\\s+Event"]
+      },
+      "notes": "Function + yield generator pattern; the taxi simulation."
+    },
+    {
+      "id": "Q10_regex_word_tokenize",
+      "query_text": "Compile a regex that tokenizes words using re.compile",
+      "expected": {
+        "top_5_gold_doc": true,
+        "format_constraint": "runnable_code",
+        "expected_anchor_regexes": ["re\\.compile\\(['\"]\\\\w\\+['\"]\\)"]
+      },
+      "notes": "Regex compile pattern; the Sentence example tokenizer."
+    }
+  ]
+}

@@ -352,12 +352,23 @@ def test_analyzer_writes_report_file(tmp_path):
 
 
 def test_analyzer_empty_log(tmp_path):
-    """Empty log → 0/0 denominator → no trigger fires → defer."""
+    """Empty log → 0/0 denominator → no telemetry trigger fires.
+
+    v2.16 Phase 1 overlay note: CarOK + Fluent_Python both carry
+    `personal_importance: "HIGH"`, which forces Option A regardless of
+    telemetry. So with an empty log, telemetry triggers are NOT FIRED,
+    closure is NOT FIRED, but the IMPORTANCE OVERRIDE fires and the
+    disposition reads "HIGH personal_importance override; telemetry quiet".
+    This is the spec'd overlay behavior."""
     log = _build_log(tmp_path, [])
     issues = _build_issues(tmp_path, [])
     _, text = _run_analyzer(tmp_path, log, issues)
     section = text[text.index("## CarOK_voorraadtelling"):]
-    # All triggers NOT FIRED with empty log
+    # Telemetry triggers NOT FIRED with empty log (standard, defect-override,
+    # closure, middle-band).
     assert section.count("NOT FIRED") >= 4
-    # Disposition is defer
-    assert "Defer to next cycle" in section
+    # IMPORTANCE OVERRIDE fires for HIGH classes (CarOK + Fluent_Python entered
+    # at HIGH per PLAN_V2.16.md §3 Phase 1 step 1).
+    assert "IMPORTANCE OVERRIDE" in section
+    assert "FIRED" in section.split("IMPORTANCE OVERRIDE", 1)[1].split("\n", 1)[0]
+    assert "HIGH personal_importance override" in section

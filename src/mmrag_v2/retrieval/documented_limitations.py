@@ -39,7 +39,15 @@ Finding 3 (new-class grace period). See PLAN_V2.15.md Appendix A.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
+
+PersonalImportance = Literal["HIGH", "MED", "LOW"]
+"""v2.16 Phase 1 — decision-mechanism overlay.
+
+HIGH forces Option A regardless of telemetry hit-rate. MED follows the
+existing telemetry rules. LOW reduces NEW_CLASS_GRACE_CYCLES from 2 to 1.
+See PLAN_V2.16.md §3 Phase 1 step 1 + DECISIONS.md "v2.16 Decision-Mechanism
+Overlay"."""
 
 # Thresholds — keep in sync with DECISIONS.md
 # "v2.15 Documented-Limitation Telemetry Threshold" entry.
@@ -86,11 +94,16 @@ could be auto-closed before any human review."""
 #                       Finding 3.
 #   defect_summary    : one-line rationale for severe_defect_tag=True;
 #                       points at the canonical evidence doc.
+#   personal_importance : HIGH | MED | LOW. v2.16 overlay; HIGH forces
+#                         Option A regardless of telemetry hit-rate.
+#                         CarOK + Fluent_Python entered at HIGH; new
+#                         entries default to MED via add_class().
 DOCUMENTED_LIMITATION_CLASSES: list[dict] = [
     {
         "name": "CarOK_voorraadtelling",
         "severe_defect_tag": True,
         "added_cycle": "v2.15",
+        "personal_importance": "HIGH",
         "defect_summary": (
             "v2.14 P1 mini-soak Format -26.9pp regression; "
             "VLM tables + flat-prose duplicates coexist post "
@@ -103,6 +116,7 @@ DOCUMENTED_LIMITATION_CLASSES: list[dict] = [
         "name": "Fluent_Python",
         "severe_defect_tag": True,
         "added_cycle": "v2.15",
+        "personal_importance": "HIGH",
         "defect_summary": (
             "Docling extraction-layer prose+code intermixing at page "
             "boundaries; truncated CODE chunks (e.g. p326 ends mid-"
@@ -112,6 +126,17 @@ DOCUMENTED_LIMITATION_CLASSES: list[dict] = [
         ),
     },
 ]
+
+
+def personal_importance(name: str) -> PersonalImportance:
+    """Resolve a class's personal_importance with a MED default for legacy
+    entries (defensive — every entry in DOCUMENTED_LIMITATION_CLASSES has
+    the field, but new programmatic additions in Phase 1 fixtures may
+    not)."""
+    c = get_class(name)
+    if c is None:
+        return "MED"
+    return c.get("personal_importance", "MED")
 
 
 def class_names() -> list[str]:

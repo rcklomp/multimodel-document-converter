@@ -66,6 +66,7 @@ from mmrag_v2.retrieval.documented_limitations import (  # noqa: E402
     NEW_CLASS_GRACE_CYCLES,
     PROMOTION_THRESHOLD_PCT,
     cycles_since,
+    personal_importance,
 )
 
 DEFAULT_TELEMETRY_LOG = _REPO_ROOT / "output/telemetry/document_class_hits.jsonl"
@@ -195,10 +196,13 @@ def _classify(
     """
     severe = bool(class_meta.get("severe_defect_tag"))
     added = class_meta.get("added_cycle", "v2.15")
+    importance = class_meta.get("personal_importance", "MED")
     grace_n = cycles_since(added, current_cycle)
-    grace_elapsed = grace_n >= NEW_CLASS_GRACE_CYCLES
+    # v2.16 Phase 1 overlay: LOW reduces grace from 2 to 1.
+    effective_grace = 1 if importance == "LOW" else NEW_CLASS_GRACE_CYCLES
+    grace_elapsed = grace_n >= effective_grace
 
-    # Promotion arms (R5F1 standard + R6F1 defect-override)
+    # Promotion arms (R5F1 standard + R6F1 defect-override) — telemetry-only.
     standard_arm = (
         rate30_pct >= PROMOTION_THRESHOLD_PCT
         and (severe or open_issues >= 1)
@@ -206,7 +210,11 @@ def _classify(
     defect_arm = (
         severe and rate30_pct >= DEFECT_OVERRIDE_THRESHOLD_PCT
     )
-    promotion_fired = standard_arm or defect_arm
+    telemetry_promotion_fired = standard_arm or defect_arm
+
+    # v2.16 Phase 1 overlay: HIGH forces Option A regardless of telemetry.
+    importance_override_fired = importance == "HIGH"
+    promotion_fired = telemetry_promotion_fired or importance_override_fired
 
     # Closure: <1% AND no issues AND no defect-tag AND grace elapsed
     closure_fired = (
@@ -223,8 +231,12 @@ def _classify(
     new_streak = prior_middle_streak + 1 if in_middle_band_now else 0
     escalation_fired = new_streak >= MIDDLE_BAND_PERSISTENCE_CYCLES
 
-    # Disposition (priority: promotion > closure > escalation > defer)
-    if promotion_fired:
+    # Disposition (priority: HIGH-override > telemetry promotion > closure > escalation > defer).
+    # HIGH-override carries a distinct label so the reader can see overlay
+    # vs telemetry origin.
+    if importance_override_fired and not telemetry_promotion_fired:
+        disposition = "Option A treatment (HIGH personal_importance override; telemetry quiet)"
+    elif promotion_fired:
         disposition = "Option A treatment (extraction-lane investment)"
     elif closure_fired:
         disposition = "Option E closure (documented-limitation)"
@@ -239,12 +251,16 @@ def _classify(
     return {
         "severe_defect_tag": severe,
         "added_cycle": added,
+        "personal_importance": importance,
         "grace_period_elapsed": grace_elapsed,
         "grace_cycles_since_add": grace_n,
+        "effective_grace_cycles": effective_grace,
         "open_user_issues": open_issues,
         "consecutive_middle_cycles": new_streak,
         "standard_arm_fired": standard_arm,
         "defect_arm_fired": defect_arm,
+        "telemetry_promotion_fired": telemetry_promotion_fired,
+        "importance_override_fired": importance_override_fired,
         "promotion_fired": promotion_fired,
         "closure_fired": closure_fired,
         "escalation_fired": escalation_fired,
@@ -268,6 +284,7 @@ def _render_class_section(
     return (
         f"## {name}\n"
         f"- added_cycle: {class_meta.get('added_cycle', '?')}  ({grace_note})\n"
+        f"- personal_importance: {result['personal_importance']}\n"
         f"- severe_defect_tag: {result['severe_defect_tag']}\n"
         f"- 30-day hit-rate: {rate30_pct:.1f}% ({hits30} / {denom30} qualified queries)\n"
         f"- 60-day hit-rate: {rate60_pct:.1f}% ({hits60} / {denom60} qualified queries)\n"
@@ -277,6 +294,8 @@ def _render_class_section(
         f"{fire(result['standard_arm_fired'])}\n"
         f"- PROMOTION TRIGGER (defect-override arm: defect-tag AND >={DEFECT_OVERRIDE_THRESHOLD_PCT}%): "
         f"{fire(result['defect_arm_fired'])}\n"
+        f"- IMPORTANCE OVERRIDE (HIGH forces Option A regardless of telemetry): "
+        f"{fire(result['importance_override_fired'])}\n"
         f"- CLOSURE TRIGGER (<{CLOSURE_THRESHOLD_PCT}% AND 0 issues AND no defect-tag AND grace elapsed): "
         f"{fire(result['closure_fired'])}\n"
         f"- MIDDLE-BAND ESCALATION (>={MIDDLE_BAND_PERSISTENCE_CYCLES} consecutive cycles): "
