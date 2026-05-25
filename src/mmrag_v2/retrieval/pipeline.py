@@ -46,6 +46,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 from mmrag_v2.retrieval.config import get_reranker
 from mmrag_v2.retrieval.reranker import Reranker, RerankerError
@@ -511,7 +512,190 @@ def retrieve_hybrid_reranked(
             "rerank_score": r.get("rerank_score", 0.0),
             "rerank_index": r.get("rerank_index", -1),
         })
+
+    # v2.16 Phase 3: partial_code adjacency fetch.
+    # For each result chunk flagged `partial_code=True`, deterministically
+    # stitch up to one neighbor in each direction (text/code modalities
+    # only) into the merged content. Original rerank_score is preserved.
+    #
+    # NOTE: in current production indexes, partial_code is set ONLY on the
+    # `_chunk_text_with_overlap` scanned_book path (v2.14 P6). Chunks emitted
+    # by Docling HybridChunker (the dominant path for academic_whitepaper /
+    # technical_manual including Fluent_Python) never carry partial_code=True,
+    # so this mechanism is INERT against the documented Fluent_Python failure
+    # mode in v2.16.0. The mechanism stays in tree for future cycles + for
+    # the scanned_book corpus where partial_code coverage is real. Item #9
+    # routes to v2.17 per PLAN_V2.16.md §7 trigger #1.
+    out = _apply_partial_code_adjacency(
+        out,
+        qdrant_url=qdrant_url,
+        dense_collection=dense_collection,
+    )
+
     return out
+
+
+def _apply_partial_code_adjacency(
+    results: list[dict],
+    *,
+    qdrant_url: str,
+    dense_collection: str,
+) -> list[dict]:
+    """v2.16 Phase 3 — bounded post-rerank stitch of `partial_code=True`
+    chunks with up to one text/code neighbor in each direction.
+
+    Algorithm (per PLAN_V2.16.md §3 Phase 3):
+      for each result chunk where payload.partial_code is True:
+        prev = lookup(backward, filter={source_file, partial_code=True,
+                                        modality ∈ {text, code}})
+        next = lookup(forward,  filter={source_file, partial_code=True,
+                                        modality ∈ {text, code}})
+        if prev or next:
+          merged.content = concat(prev?.content, current.content, next?.content)
+          merged.metadata.partial_code_resolved = True
+          merged.metadata.adjacency_source = [prev_id?, current_id, next_id?]
+          # preserve original rerank_score / rerank_index
+        else:
+          merged.metadata.partial_code_resolved = False  # sole partial_code chunk
+
+    Schema ordering (from Phase 3 step 1 verification spike):
+      chunk_id format = `<doc_hash>_<page:03d>_<modality>_<content_hash8>`.
+      Page-number is stable in the chunk_id; within-page order is NOT
+      recoverable from chunk_id alone. Adjacency lookup uses (source_file,
+      page_number, modality ∈ {text, code}) and the partial_code flag to
+      identify the split halves of a single oversized code unit. When
+      multiple candidate neighbors exist on a page, the FIRST one in the
+      page-sorted list (lower page first, then any deterministic
+      tiebreaker by chunk_id) is used.
+
+    Non-partial_code chunks pass through unchanged. Same applies if no
+    adjacent partial_code neighbor exists in either direction (sole-chunk
+    case).
+    """
+    if not results:
+        return results
+    # Cheap exit when no result is partial_code-flagged (the common case).
+    if not any(((r.get("payload") or {}).get("partial_code") is True) for r in results):
+        return results
+
+    out: list[dict] = []
+    for r in results:
+        payload = r.get("payload") or {}
+        if payload.get("partial_code") is not True:
+            out.append(r)
+            continue
+        source_file = payload.get("source_file") or ""
+        page_number = payload.get("page_number")
+        chunk_id = payload.get("chunk_id")
+        if not source_file or page_number is None or not chunk_id:
+            out.append(r)
+            continue
+        prev_chunk, next_chunk = _find_partial_code_neighbors(
+            qdrant_url=qdrant_url,
+            dense_collection=dense_collection,
+            source_file=source_file,
+            anchor_page=page_number,
+            anchor_chunk_id=chunk_id,
+        )
+        if not prev_chunk and not next_chunk:
+            # Sole partial_code chunk — annotate + pass through.
+            merged_payload = {**payload, "partial_code_resolved": False}
+            out.append({**r, "payload": merged_payload})
+            continue
+        parts: list[str] = []
+        adjacency_source: list[str] = []
+        if prev_chunk:
+            parts.append((prev_chunk.get("content") or "").rstrip())
+            adjacency_source.append(prev_chunk.get("chunk_id") or "")
+        parts.append(payload.get("content") or "")
+        adjacency_source.append(chunk_id)
+        if next_chunk:
+            parts.append((next_chunk.get("content") or "").lstrip())
+            adjacency_source.append(next_chunk.get("chunk_id") or "")
+        merged_payload = {
+            **payload,
+            "content": "\n".join(parts),
+            "partial_code_resolved": True,
+            "adjacency_source": adjacency_source,
+        }
+        out.append({**r, "payload": merged_payload})
+    return out
+
+
+def _find_partial_code_neighbors(
+    *,
+    qdrant_url: str,
+    dense_collection: str,
+    source_file: str,
+    anchor_page: int,
+    anchor_chunk_id: str,
+) -> tuple[Optional[dict], Optional[dict]]:
+    """Scroll Qdrant for partial_code=True chunks in `source_file` with
+    page ∈ [anchor_page - 1, anchor_page + 1] (and modality ∈ {text, code}
+    via the modality field on the payload — code chunks have
+    `modality="text"` + `is_code=true` in the v2.7.0 schema, so we accept
+    both modalities).
+
+    Returns (prev, next) — each is the closest partial_code neighbor on
+    the smaller / larger page; None when there is no eligible neighbor in
+    that direction. Within a page, deterministic ordering is by chunk_id
+    ASC (stable + cheap; the within-page split halves rarely conflict
+    because partial_code emission already implies a single split sequence
+    per oversized unit).
+    """
+    import json as _json
+    import urllib.request as _urllib
+
+    body = _json.dumps({
+        "filter": {
+            "must": [
+                {"key": "source_file", "match": {"value": source_file}},
+                {"key": "partial_code", "match": {"value": True}},
+                {"key": "page_number",
+                 "range": {"gte": max(0, anchor_page - 1),
+                           "lte": anchor_page + 1}},
+            ]
+        },
+        "limit": 50,  # bounded — partial_code clusters are small
+        "with_payload": True,
+        "with_vector": False,
+    }).encode("utf-8")
+    try:
+        req = _urllib.Request(
+            f"{qdrant_url}/collections/{dense_collection}/points/scroll",
+            data=body, method="POST",
+        )
+        req.add_header("Content-Type", "application/json")
+        with _urllib.urlopen(req, timeout=10) as resp:
+            data = _json.loads(resp.read())
+    except Exception:
+        return (None, None)
+    points = data.get("result", {}).get("points", []) or []
+    # Filter to text/code modalities (skip tables/images) and exclude self.
+    candidates = []
+    for p in points:
+        payload = p.get("payload") or {}
+        cid = payload.get("chunk_id") or str(p.get("id") or "")
+        if cid == anchor_chunk_id:
+            continue
+        modality = payload.get("modality")
+        if modality and modality not in ("text", "code"):
+            continue
+        candidates.append(payload)
+    # Sort by (page, chunk_id) ASC — deterministic.
+    candidates.sort(key=lambda c: (c.get("page_number", 0), c.get("chunk_id", "")))
+    prev_neighbor = None
+    next_neighbor = None
+    for c in candidates:
+        pg = c.get("page_number", 0)
+        if pg < anchor_page or (pg == anchor_page and (c.get("chunk_id") or "") < anchor_chunk_id):
+            # Take the closest prev (last one seen with pg <= anchor_page).
+            prev_neighbor = c
+        elif pg > anchor_page or (pg == anchor_page and (c.get("chunk_id") or "") > anchor_chunk_id):
+            # Take the first next.
+            next_neighbor = c
+            break
+    return (prev_neighbor, next_neighbor)
 
 
 # Resolve REPO_ROOT once for the hybrid pipeline (used in the BM25 index path).

@@ -395,3 +395,176 @@ def test_attach_scores_skips_out_of_range_indices():
     assert len(out) == 2
     assert [c["chunk_id"] for c in out] == ["a", "b"]
     assert [c["rerank_score"] for c in out] == [0.9, 0.3]
+
+
+# ── v2.16 Phase 3 — partial_code adjacency fetch tests ──────────────────────
+
+
+def _pc_chunk(*, cid: str, page: int, partial: bool, content: str,
+              modality: str = "text", source: str = "src.pdf") -> dict:
+    """Build a {payload: …} chunk fixture for adjacency tests."""
+    return {
+        "id": cid,
+        "score": 0.9,
+        "rerank_score": 1.0,
+        "rerank_index": 0,
+        "payload": {
+            "chunk_id": cid,
+            "page_number": page,
+            "partial_code": partial,
+            "content": content,
+            "modality": modality,
+            "source_file": source,
+        },
+    }
+
+
+def _install_neighbors_mock(monkeypatch, *, prev=None, nxt=None):
+    """Patch `_find_partial_code_neighbors` so adjacency tests don't hit
+    a live qdrant. Returns (prev_payload, next_payload) per the
+    production helper contract."""
+    from mmrag_v2.retrieval import pipeline as _pipe
+    prev_payload = prev["payload"] if prev else None
+    next_payload = nxt["payload"] if nxt else None
+    monkeypatch.setattr(
+        _pipe, "_find_partial_code_neighbors",
+        lambda **kw: (prev_payload, next_payload),
+    )
+
+
+def test_adjacency_leading_partial_code_chunk_merges_with_next(monkeypatch):
+    """Leading split (prev=None, next=partial_code) → merged = current + next.
+    The original rerank_score is preserved verbatim."""
+    from mmrag_v2.retrieval.pipeline import _apply_partial_code_adjacency
+    current = _pc_chunk(cid="d_007_text_aaa", page=7, partial=True,
+                        content="def foo(x):\n    return")
+    next_c = _pc_chunk(cid="d_007_text_bbb", page=7, partial=True,
+                       content="x + 1")
+    _install_neighbors_mock(monkeypatch, prev=None, nxt=next_c)
+    out = _apply_partial_code_adjacency(
+        [current], qdrant_url="http://x", dense_collection="c",
+    )
+    assert len(out) == 1
+    payload = out[0]["payload"]
+    assert payload["partial_code_resolved"] is True
+    assert payload["adjacency_source"] == ["d_007_text_aaa", "d_007_text_bbb"]
+    assert "def foo(x):" in payload["content"]
+    assert "x + 1" in payload["content"]
+    # Original rerank_score preserved (no inflation).
+    assert out[0]["rerank_score"] == 1.0
+
+
+def test_adjacency_middle_partial_code_chunk_merges_with_both(monkeypatch):
+    """Middle of a split sequence (prev + next both partial_code) →
+    merged = prev + current + next. Concatenation order is prev → current → next."""
+    from mmrag_v2.retrieval.pipeline import _apply_partial_code_adjacency
+    current = _pc_chunk(cid="d_007_text_bbb", page=7, partial=True,
+                        content="X_MID")
+    prev_c = _pc_chunk(cid="d_007_text_aaa", page=7, partial=True,
+                       content="X_LEADING")
+    next_c = _pc_chunk(cid="d_007_text_ccc", page=7, partial=True,
+                       content="X_TRAILING")
+    _install_neighbors_mock(monkeypatch, prev=prev_c, nxt=next_c)
+    out = _apply_partial_code_adjacency(
+        [current], qdrant_url="http://x", dense_collection="c",
+    )
+    payload = out[0]["payload"]
+    assert payload["partial_code_resolved"] is True
+    assert payload["adjacency_source"] == [
+        "d_007_text_aaa", "d_007_text_bbb", "d_007_text_ccc",
+    ]
+    # Concatenation must preserve prev → current → next order.
+    leading_pos = payload["content"].index("X_LEADING")
+    mid_pos = payload["content"].index("X_MID")
+    trail_pos = payload["content"].index("X_TRAILING")
+    assert leading_pos < mid_pos < trail_pos
+
+
+def test_adjacency_trailing_partial_code_chunk_merges_with_prev(monkeypatch):
+    """Trailing split (prev=partial_code, next=None) → merged = prev + current."""
+    from mmrag_v2.retrieval.pipeline import _apply_partial_code_adjacency
+    current = _pc_chunk(cid="d_007_text_ccc", page=7, partial=True,
+                        content="return result")
+    prev_c = _pc_chunk(cid="d_007_text_bbb", page=7, partial=True,
+                       content="def foo(x):\n    y = bar(x)")
+    _install_neighbors_mock(monkeypatch, prev=prev_c, nxt=None)
+    out = _apply_partial_code_adjacency(
+        [current], qdrant_url="http://x", dense_collection="c",
+    )
+    payload = out[0]["payload"]
+    assert payload["partial_code_resolved"] is True
+    assert payload["adjacency_source"] == ["d_007_text_bbb", "d_007_text_ccc"]
+    assert "def foo(x):" in payload["content"]
+    assert "return result" in payload["content"]
+
+
+def test_adjacency_sole_partial_code_chunk_no_neighbor_passthrough(monkeypatch):
+    """Sole partial_code chunk — no neighbor in either direction.
+    Pass-through with partial_code_resolved=False (annotated; content
+    unchanged)."""
+    from mmrag_v2.retrieval.pipeline import _apply_partial_code_adjacency
+    current = _pc_chunk(cid="d_007_text_lone", page=7, partial=True,
+                       content="lonely chunk")
+    _install_neighbors_mock(monkeypatch, prev=None, nxt=None)
+    out = _apply_partial_code_adjacency(
+        [current], qdrant_url="http://x", dense_collection="c",
+    )
+    payload = out[0]["payload"]
+    assert payload["partial_code_resolved"] is False
+    assert payload["content"] == "lonely chunk"
+    assert "adjacency_source" not in payload
+
+
+def test_adjacency_does_not_alter_non_partial_code_chunks():
+    """Non-partial_code chunks pass through unchanged — same content,
+    no new metadata fields. Verifies the cheap-exit guard."""
+    from mmrag_v2.retrieval.pipeline import _apply_partial_code_adjacency
+    plain = _pc_chunk(cid="d_007_text_plain", page=7, partial=False,
+                     content="plain prose")
+    out = _apply_partial_code_adjacency(
+        [plain], qdrant_url="http://x", dense_collection="c",
+    )
+    assert out[0]["payload"] == plain["payload"]
+
+
+def test_adjacency_skips_table_modality_neighbor(monkeypatch):
+    """The neighbor lookup filters to text/code modalities only. A table
+    chunk on an adjacent page must not appear as the merged neighbor
+    payload — the helper has already filtered; verify the merge path
+    consumes only what the helper returns."""
+    from mmrag_v2.retrieval.pipeline import _apply_partial_code_adjacency
+    current = _pc_chunk(cid="d_007_text_a", page=7, partial=True, content="code")
+    # The neighbor mock returns (None, None) because the only nearby
+    # candidate was a table (filtered out by the helper).
+    _install_neighbors_mock(monkeypatch, prev=None, nxt=None)
+    out = _apply_partial_code_adjacency(
+        [current], qdrant_url="http://x", dense_collection="c",
+    )
+    payload = out[0]["payload"]
+    assert payload["partial_code_resolved"] is False
+    # Original content unchanged.
+    assert payload["content"] == "code"
+
+
+def test_adjacency_preserves_rerank_score_on_merge(monkeypatch):
+    """The plan's bridge test requirement: merged-chunk preserves the
+    original rerank_score AND rerank_index (no inflation, no shift)."""
+    from mmrag_v2.retrieval.pipeline import _apply_partial_code_adjacency
+    current = _pc_chunk(cid="d_007_text_a", page=7, partial=True, content="X")
+    current["rerank_score"] = 0.7345
+    current["rerank_index"] = 2
+    next_c = _pc_chunk(cid="d_007_text_b", page=7, partial=True, content="Y")
+    _install_neighbors_mock(monkeypatch, prev=None, nxt=next_c)
+    out = _apply_partial_code_adjacency(
+        [current], qdrant_url="http://x", dense_collection="c",
+    )
+    assert out[0]["rerank_score"] == 0.7345
+    assert out[0]["rerank_index"] == 2
+
+
+def test_adjacency_empty_results_returns_empty_list():
+    """Defensive — empty input results in empty output, no crash."""
+    from mmrag_v2.retrieval.pipeline import _apply_partial_code_adjacency
+    assert _apply_partial_code_adjacency(
+        [], qdrant_url="http://x", dense_collection="c",
+    ) == []
