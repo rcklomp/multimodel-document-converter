@@ -32,7 +32,10 @@ if str(SRC) not in sys.path:
 from mmrag_v2.retrieval.sparse import BM25Index  # noqa: E402
 
 
-# Mirror the canonical 34-doc list from rebuild_mmrag_v2_8_for_rc1.py.
+# Mirror the canonical docs list from rebuild_mmrag_v2_8_for_rc1.py.
+# v2.16 Phase 0: renamed CANONICAL_34 → CANONICAL_DOCS to reflect that
+# the list is the canonical-docs list, not a cardinality-fixed array
+# (now 41 entries post-Phase-0 corpus expansion).
 SCRIPTS = REPO_ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
@@ -42,7 +45,7 @@ spec = importlib.util.spec_from_file_location(
 )
 _rebuild_mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(_rebuild_mod)
-CANONICAL_34 = _rebuild_mod.CANONICAL_34
+CANONICAL_DOCS = _rebuild_mod.CANONICAL_DOCS
 
 
 def iter_text_chunks(jsonl_path: Path):
@@ -97,7 +100,7 @@ def main() -> int:
 
     print(f"=== BM25 index build ===")
     print(f"Source: {output_dir}/<doc>/ingestion.jsonl")
-    print(f"Docs:   {len(CANONICAL_34)} canonical")
+    print(f"Docs:   {len(CANONICAL_DOCS)} canonical")
     print()
 
     # Gather all text chunks across the canonical corpus.
@@ -105,7 +108,7 @@ def main() -> int:
     chunk_count_per_doc: dict[str, int] = {}
     missing_docs: list[str] = []
     t0 = time.perf_counter()
-    for doc_name in CANONICAL_34:
+    for doc_name in CANONICAL_DOCS:
         jsonl = output_dir / doc_name / "ingestion.jsonl"
         if not jsonl.exists():
             missing_docs.append(doc_name)

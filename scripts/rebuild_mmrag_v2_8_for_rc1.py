@@ -58,7 +58,12 @@ COLLECTION_DEFAULT = "mmrag_v2_8__qwen3_dashscope"
 COLLECTION_LEGACY = "mmrag_v2_8"  # v2.10 baseline (llava 4096-dim), retained for 30-day rollback
 QDRANT_URL_DEFAULT = "http://localhost:6333"
 
-CANONICAL_34 = [
+# v2.16 Phase 0: renamed CANONICAL_34 → CANONICAL_DOCS and extended from
+# 34 to 41 entries (7 new PDFs from data/raw/ ingested 2026-05-25). The
+# rename is atomic across all 5 consumer sites (synthetic_soak.py,
+# build_bm25_index.py, ingest_bm25_sparse.py, test_rebuild_resume.py,
+# and this file) per PLAN_V2.16.md §3 Phase 0 step 6.2.
+CANONICAL_DOCS = [
     "HarryPotter_and_the_Sorcerers_Stone",
     "Form_0013_invoice",
     "Form_betwistingsformulier",
@@ -93,6 +98,14 @@ CANONICAL_34 = [
     "Greenhouse_Design",
     "ChatGPT_Praktijk_handboek",
     "KI_En_ChatGPT_Praktische_Gids",
+    # v2.16 Phase 0 additions (data/raw/, ingested 2026-05-25):
+    "Bevestigingsmiddelen",
+    "ATZ_Aerodynamik_Nutzfahrzeugen",
+    "ATZ_ESF_Mercedes_2009",
+    "Schwungradspeicher",
+    "Eliasz_Zephyr_RTOS",
+    "Grundlagen_Fahrzeug_Motorentechnik",
+    "Digitale_Fotografie_Feb_2026",
 ]
 
 
@@ -271,7 +284,7 @@ def main() -> int:
     log(header, log_path)
     total_start = time.time()
 
-    for idx, name in enumerate(CANONICAL_34, start=1):
+    for idx, name in enumerate(CANONICAL_DOCS, start=1):
         jsonl = OUTPUT / name / "ingestion.jsonl"
         if not jsonl.exists():
             log(f"[{idx}/34] MISSING {name} — aborting", log_path)

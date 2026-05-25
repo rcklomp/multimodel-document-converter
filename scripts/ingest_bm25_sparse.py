@@ -42,7 +42,7 @@ _spec = importlib.util.spec_from_file_location(
 )
 _rebuild_mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_rebuild_mod)
-CANONICAL_34 = _rebuild_mod.CANONICAL_34
+CANONICAL_DOCS = _rebuild_mod.CANONICAL_DOCS
 
 QDRANT_URL_DEFAULT = "http://localhost:6333"
 COLLECTION_DEFAULT = "mmrag_v2_8__bm25_sparse"
@@ -172,7 +172,7 @@ def main() -> int:
     n_total = 0
     n_zero_sparse = 0
     n_per_doc: dict[str, int] = {}
-    for doc_name, cid, content in iter_text_chunks(output_dir, CANONICAL_34):
+    for doc_name, cid, content in iter_text_chunks(output_dir, CANONICAL_DOCS):
         indices, values = index.encode_document(content)
         n_total += 1
         n_per_doc[doc_name] = n_per_doc.get(doc_name, 0) + 1

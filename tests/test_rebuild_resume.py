@@ -68,17 +68,33 @@ def test_rebuild_script_help_lists_new_flags() -> None:
         assert flag in help_text, f"{flag} missing from rebuild --help"
 
 
-def test_canonical_34_list_present_and_complete() -> None:
+def test_canonical_docs_list_present_and_complete() -> None:
+    """v2.16 Phase 0: CANONICAL_34 renamed → CANONICAL_DOCS and extended
+    from 34 to 41 entries (7 new PDFs ingested from data/raw/ on
+    2026-05-25)."""
     mod = _load_rebuild_module()
-    assert hasattr(mod, "CANONICAL_34")
-    assert len(mod.CANONICAL_34) == 34
+    assert hasattr(mod, "CANONICAL_DOCS")
+    assert len(mod.CANONICAL_DOCS) == 41
     # Sanity: each canonical doc name corresponds to a directory under
-    # output/ (or did at v2.10 rebuild time). We can't assert the
-    # directory exists here (it's gitignored), but we can assert the
-    # list is a sequence of plausible identifiers.
-    assert all(isinstance(name, str) and name for name in mod.CANONICAL_34)
+    # output/ (or did at rebuild time). We can't assert the directory
+    # exists here (it's gitignored), but we can assert the list is a
+    # sequence of plausible identifiers.
+    assert all(isinstance(name, str) and name for name in mod.CANONICAL_DOCS)
     # First doc is the one historically ingested with --recreate.
-    assert mod.CANONICAL_34[0] == "HarryPotter_and_the_Sorcerers_Stone"
+    assert mod.CANONICAL_DOCS[0] == "HarryPotter_and_the_Sorcerers_Stone"
+    # v2.16 Phase 0 additions: all 7 must be present at the tail.
+    for new_doc in (
+        "Bevestigingsmiddelen",
+        "ATZ_Aerodynamik_Nutzfahrzeugen",
+        "ATZ_ESF_Mercedes_2009",
+        "Schwungradspeicher",
+        "Eliasz_Zephyr_RTOS",
+        "Grundlagen_Fahrzeug_Motorentechnik",
+        "Digitale_Fotografie_Feb_2026",
+    ):
+        assert new_doc in mod.CANONICAL_DOCS, (
+            f"Phase 0 addition {new_doc!r} missing from CANONICAL_DOCS"
+        )
 
 
 def test_doc_chunk_ids_skips_metadata_record(tmp_path: Path) -> None:

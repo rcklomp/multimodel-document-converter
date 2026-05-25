@@ -120,8 +120,11 @@ MIN_CHUNK_CHARS = 150
 MAX_CODE_RATIO = 0.4
 ADVERT_KEYWORDS = ("subscribe", "buy now", "click here", "limited time", "discount")
 
-# 34 canonical doc directories. Mirrors scripts/rebuild_mmrag_v2_8_for_rc1.py.
-CANONICAL_34 = [
+# Canonical doc directories. Mirrors scripts/rebuild_mmrag_v2_8_for_rc1.py.
+# v2.16 Phase 0: renamed from CANONICAL_34 → CANONICAL_DOCS and extended
+# from 34 to 41 entries (7 new PDFs ingested from data/raw/). Name
+# describes semantic role (the canonical docs list), not cardinality.
+CANONICAL_DOCS = [
     "HarryPotter_and_the_Sorcerers_Stone", "Form_0013_invoice", "Form_betwistingsformulier",
     "CarOK_voorraadtelling", "AIOS_LLM_Agent_Operating_System",
     "A_comprehensive_review_on_hybrid_electri", "Hybrid_electric_vehicles",
@@ -134,6 +137,14 @@ CANONICAL_34 = [
     "Fluent_Python", "Python_Distilled", "Ayeva_Python_Patterns",
     "Chaubal_PyTorch_Projects", "Earthship_Vol1", "Firearms", "Greenhouse_Design",
     "ChatGPT_Praktijk_handboek", "KI_En_ChatGPT_Praktische_Gids",
+    # v2.16 Phase 0 additions (data/raw/, ingested 2026-05-25):
+    "Bevestigingsmiddelen",
+    "ATZ_Aerodynamik_Nutzfahrzeugen",
+    "ATZ_ESF_Mercedes_2009",
+    "Schwungradspeicher",
+    "Eliasz_Zephyr_RTOS",
+    "Grundlagen_Fahrzeug_Motorentechnik",
+    "Digitale_Fotografie_Feb_2026",
 ]
 
 
@@ -179,10 +190,10 @@ def stage_sample(seed: int, n_chunks: int, work_path: Path) -> None:
         print(f"  sample: work file already exists at {work_path}; skip (delete to re-sample)")
         return
     rng = random.Random(seed)
-    print(f"  sample: stratified across {len(CANONICAL_34)} docs, target n={n_chunks}, seed={seed}")
-    per_doc_target = max(1, n_chunks // len(CANONICAL_34))
+    print(f"  sample: stratified across {len(CANONICAL_DOCS)} docs, target n={n_chunks}, seed={seed}")
+    per_doc_target = max(1, n_chunks // len(CANONICAL_DOCS))
     sampled: list[dict] = []
-    for doc_name in CANONICAL_34:
+    for doc_name in CANONICAL_DOCS:
         chunks = [c for c in _load_chunks(doc_name) if _is_eligible_text_chunk(c)]
         if not chunks:
             print(f"    {doc_name}: 0 eligible (skip)")
