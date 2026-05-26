@@ -158,15 +158,26 @@ touching anything else.
 
 In rough priority order (the Charter governs):
 
-1. **Charter §4.2 step 1** — execute the 2-hour C pre-spike using the
-   harness from this session against off-the-shelf ColPali (`pip install
-   colpali-engine` on the workstation; or HF Spaces). Suggested target:
-   `data/technical_report/ATZ.Elektronik...pdf` page 4 vs distractors
-   1, 2, 5 with query "Schaltbild eines NPN-Transistor-Verstärkers"
-   (the actual gold-page identification needs operator review against
-   `ATZ_Elektronik_German` content first). If PASS: Phase C is viable.
-   If FAIL: redirect to VLM-native parsing evaluation per §4.2 outcome
-   rules.
+1. **Charter §4.2 step 1 — ✅ COMPLETE, VERDICT PASS** (2026-05-26 PM).
+   Pre-spike report: [`V3_C_PRESPIKE_REPORT.md`](V3_C_PRESPIKE_REPORT.md).
+   Gold page 1 (Lifecycle Management diagram in ATZ_Elektronik_German)
+   ranked first via ColPali MaxSim against distractors {2, 3, 5} in run 1
+   AND distractors {2, 3, 4} with paraphrased query in run 2.
+   `colpali-engine==0.3.16` + `vidore/colpali-v1.3` on Apple Silicon MPS.
+   Margins are thin (1.5%–2.2%) partly because transformers 5.9.0
+   attribute-path rename left the ColPali LoRA adapter weights
+   unloaded — see report §"Phase C task C2 prerequisites" for the
+   LoRA resolution path. **Phase C is NOT dead weight** per Charter
+   §4.2 step 1 outcome rule.
+1b. **Charter §4.2 step 2 (C-spike, 2-3 days)** — NEXT executable step.
+   Single-doc full quantitative test with 20 queries from the v2.16
+   regression fixture targeting `ATZ_Elektronik_German`. Resolve the
+   LoRA attribute-path issue identified in the pre-spike before
+   running so PASS A (page recovery ≥60%) and PASS B (reranker
+   discrimination ≥60%) are measured against a correctly-loaded
+   model. Co-residency check (Charter §4.2 step 2 #9) validates
+   ColPali fits alongside Qwen3-Embedding-8B on omlx per
+   `src/mmrag_v2/omlx/scheduler.py` tenancy policy.
 2. **Charter Phase A task A0** — per-doc spike on `ATZ_Elektronik_German`
    using the V3 UIR types. Convert one doc through the
    (foundation-shipped) ConversionPlan + ConfidenceBreakdown +

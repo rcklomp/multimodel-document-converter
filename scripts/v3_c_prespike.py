@@ -62,6 +62,7 @@ class PreSpikeConfig:
     render_dpi: int = DEFAULT_RENDER_DPI
     colpali_mode: str = "dry-run"  # "dry-run" | "local" | "hf-spaces" | "omlx"
     output_dir: Optional[Path] = None
+    model_id: str = "vidore/colpali-v1.3"
 
 
 @dataclass(frozen=True)
@@ -131,41 +132,94 @@ def render_pages(
 # ---------------------------------------------------------------------------
 
 
+# Local-mode ColPali model registry. Operator may swap via --model-id.
+DEFAULT_LOCAL_COLPALI_MODEL = "vidore/colpali-v1.3"
+
+# Cache the loaded model + processor so embed_pages and embed_query
+# share a single load.
+_LOCAL_MODEL_CACHE: dict = {}
+
+
+def _load_local_colpali(model_id: str):
+    """Load ColPali model + processor lazily; cache for reuse within process."""
+    if model_id in _LOCAL_MODEL_CACHE:
+        return _LOCAL_MODEL_CACHE[model_id]
+    import torch
+    from colpali_engine.models import ColPali, ColPaliProcessor
+
+    # Apple Silicon path: prefer MPS when available. ColPali on MPS works
+    # with bfloat16 in recent transformers (4.5+). Fall back to CPU on
+    # platforms without MPS.
+    if torch.backends.mps.is_available():
+        device = "mps"
+        dtype = torch.bfloat16
+    elif torch.cuda.is_available():
+        device = "cuda"
+        dtype = torch.bfloat16
+    else:
+        device = "cpu"
+        dtype = torch.float32
+    log = logging.getLogger("v3_c_prespike")
+    log.info(
+        "Loading ColPali model %s on %s (dtype=%s) — first load downloads "
+        "~5GB and may take several minutes",
+        model_id, device, dtype,
+    )
+    model = ColPali.from_pretrained(
+        model_id,
+        torch_dtype=dtype,
+        device_map=device,
+    ).eval()
+    processor = ColPaliProcessor.from_pretrained(model_id)
+    _LOCAL_MODEL_CACHE[model_id] = (model, processor, device)
+    return model, processor, device
+
+
 def embed_pages_via_colpali(
     page_images,
     *,
     mode: str = "dry-run",
+    model_id: str = DEFAULT_LOCAL_COLPALI_MODEL,
 ):
     """Embed page images via ColPali.
 
-    Foundation-session status: STUB for non-`local` modes; `local` mode
-    delegates to the `colpali-engine` package if installed (the operator
-    is expected to `pip install colpali-engine` before running with
-    --colpali-mode local).
-
-    Returns a list of patch-vector matrices (numpy arrays of shape
-    (num_patches, embedding_dim)) — one per page.
+    `local` mode runs `colpali-engine` on the workstation (MPS/CUDA/CPU
+    based on availability). Returns a list of patch-vector matrices as
+    numpy arrays of shape (num_patches, embedding_dim) — one per page.
     """
     if mode == "dry-run":
         return [None for _ in page_images]
     if mode == "local":
-        try:
-            from colpali_engine.models import ColPali, ColPaliProcessor  # type: ignore
-        except ImportError as exc:
-            raise RuntimeError(
-                "ColPali local mode requires `pip install colpali-engine`. "
-                "Use --colpali-mode dry-run to validate harness wiring "
-                "without the model."
-            ) from exc
-        # Phase C task C2 will instantiate the model under the omlx
-        # tenancy contract; the per-spike harness loads it on the
-        # workstation CPU/MPS for the 2-hour falsification test.
-        # Implementation deferred to operator execution.
-        raise NotImplementedError(
-            "Local ColPali dispatch lands when the operator runs this "
-            "harness; see the module docstring for usage. The dry-run "
-            "mode is the foundation-session deliverable."
-        )
+        import torch
+
+        model, processor, device = _load_local_colpali(model_id)
+        # Process pages one-at-a-time. The pre-spike has at most 4 pages
+        # (gold + 3 distractors per Charter §4.2); batching all four
+        # through PaliGemma's forward path spikes MPS allocation to
+        # ~19 GiB and trips the watermark on a 64 GB Apple Silicon
+        # workstation. Single-image embedding holds at ~6-8 GiB.
+        outputs = []
+        for image in page_images:
+            batch = processor.process_images([image])
+            # Drop `labels` (and any other key the loss path would
+            # consume) — we only want hidden states for embedding, not
+            # the LM loss the PaliGemma forward computes when labels
+            # are present.
+            batch = {
+                k: v.to(device)
+                for k, v in batch.items()
+                if k != "labels"
+            }
+            with torch.inference_mode():
+                page_emb = model(**batch)
+            # ColPali returns (B, num_patches, dim). Take batch index 0
+            # and move to CPU immediately to free MPS memory.
+            outputs.append(page_emb[0].detach().to("cpu").float().numpy())
+            # Help the MPS allocator release intermediate buffers
+            # between pages.
+            if device == "mps" and hasattr(torch.mps, "empty_cache"):
+                torch.mps.empty_cache()
+        return outputs
     if mode == "hf-spaces":
         raise NotImplementedError(
             "HF Spaces dispatch deferred to operator-execution time; "
@@ -181,12 +235,30 @@ def embed_pages_via_colpali(
     raise ValueError(f"Unknown ColPali mode: {mode!r}")
 
 
-def embed_query_via_colpali(query: str, *, mode: str = "dry-run"):
-    """Embed a query string via ColPali. Same dispatch as page embedding."""
-    _ = query
+def embed_query_via_colpali(
+    query: str,
+    *,
+    mode: str = "dry-run",
+    model_id: str = DEFAULT_LOCAL_COLPALI_MODEL,
+):
+    """Embed a query string via ColPali."""
     if mode == "dry-run":
         return None
-    return embed_pages_via_colpali([None], mode=mode)[0]
+    if mode == "local":
+        import torch
+
+        model, processor, device = _load_local_colpali(model_id)
+        batch = processor.process_queries([query])
+        # Drop labels — see embed_pages_via_colpali docstring on the loss
+        # path spike. Query path doesn't even pass image features so the
+        # memory pressure is much lower, but the labels-fast-path rule
+        # still applies.
+        batch = {k: v.to(device) for k, v in batch.items() if k != "labels"}
+        with torch.inference_mode():
+            query_embs = model(**batch)
+        # query_embs shape: (1, num_query_tokens, dim) — drop batch dim.
+        return query_embs[0].detach().to("cpu").float().numpy()
+    raise NotImplementedError(f"Query embedding for mode={mode!r} not implemented")
 
 
 # ---------------------------------------------------------------------------
@@ -267,11 +339,18 @@ def run_prespike(config: PreSpikeConfig) -> PreSpikeResult:
             passed=False,  # dry-run is NOT a PASS — operator must run live
         )
 
-    log.info("Embedding query via ColPali (%s)", config.colpali_mode)
-    query_emb = embed_query_via_colpali(config.query, mode=config.colpali_mode)
-    log.info("Embedding %d pages via ColPali (%s)", len(page_renders), config.colpali_mode)
+    log.info("Embedding query via ColPali (%s, model=%s)", config.colpali_mode, config.model_id)
+    query_emb = embed_query_via_colpali(
+        config.query, mode=config.colpali_mode, model_id=config.model_id
+    )
+    log.info(
+        "Embedding %d pages via ColPali (%s, model=%s)",
+        len(page_renders), config.colpali_mode, config.model_id,
+    )
     page_embs = embed_pages_via_colpali(
-        [img for _, img in page_renders], mode=config.colpali_mode
+        [img for _, img in page_renders],
+        mode=config.colpali_mode,
+        model_id=config.model_id,
     )
 
     pairs: List[Tuple[int, float]] = []
@@ -355,6 +434,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="Equivalent to --colpali-mode dry-run.",
     )
+    parser.add_argument(
+        "--model-id",
+        type=str,
+        default="vidore/colpali-v1.3",
+        help=(
+            "ColPali model identifier (default vidore/colpali-v1.3). "
+            "Only consulted by --colpali-mode=local."
+        ),
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -372,6 +460,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         render_dpi=args.render_dpi,
         colpali_mode=mode,
         output_dir=args.output_dir,
+        model_id=args.model_id,
     )
     if not (72 <= config.render_dpi <= 600):
         parser.error(
