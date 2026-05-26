@@ -631,3 +631,264 @@ def create_document(
     logger.info(f"Created UIR: {doc.summary()}")
 
     return doc
+
+
+# ============================================================================
+# V3.0 UIR CONTRACT (additive — see docs/ARCHITECTURE_V3_DRAFT_0.5.md §3.2)
+# ============================================================================
+#
+# These types are introduced for the v3.0 UIR refactor (Phase A). They live
+# alongside the v2.X types above (Element, ElementType, UniversalPage,
+# UniversalDocument) which remain the v2.16 production types. The Charter
+# §7.1 type-vocabulary reconciliation specifies a one-way migration with
+# no two-way shims — ElementType is replaced by Modality at the end of
+# Phase A, not during the foundation session.
+#
+# Imports remain at module level (already present above): dataclass, field,
+# Enum, Optional, Tuple, Dict, Any, Set, List.
+# Add: Literal for ExtractionWarning.severity; uuid for continuation groups.
+# These are stdlib-only additions; no new third-party dependency.
+
+import uuid as _uuid  # noqa: E402  (intentionally after the v2.X block)
+from typing import Literal, Set  # noqa: E402,F811  (Set may already be unused above)
+
+
+class Modality(Enum):
+    """V3.0 UIR modality. Charter §3.2.
+
+    Replaces today's ElementType (TEXT/IMAGE/TABLE) with five values
+    after Phase A migration (Charter §7.1). During Phase A development
+    both vocabularies co-exist; ElementType is deleted from the codebase
+    at end of Phase A per Charter §7.1 reconciliation table.
+    """
+
+    TEXT = "text"
+    IMAGE = "image"
+    TABLE = "table"
+    CODE = "code"
+    FORM = "form"
+
+
+class LocatorType(Enum):
+    """How to locate this element in its source document. Charter §3.2."""
+
+    BBOX = "bbox"  # Fixed-layout: PDF, scanned images
+    FLOW_OFFSET = "flow_offset"  # Reflowable: EPUB, HTML
+    DOM_PATH = "dom_path"  # Structured: HTML, DOCX
+
+
+class CoordinateFrame(Enum):
+    """The frame `bbox` values are expressed in. Charter §3.2.
+
+    [0,1000] is a normalization, not a frame — the frame says what was
+    normalized.
+    """
+
+    PDF_PAGE_PORTRAIT = "pdf_page_portrait"
+    PDF_PAGE_LANDSCAPE = "pdf_page_landscape"
+    PDF_PAGE_ROTATED = "pdf_page_rotated"  # Page rotation handled at extraction
+    IMAGE_NATIVE = "image_native"  # Scanned image native pixel frame
+    EPUB_VIEWPORT = "epub_viewport"  # Reflowable; bbox at default viewport
+    UNKNOWN = "unknown"
+
+
+class StructuralFlag(Enum):
+    """Closed vocabulary of structural flags. Charter §3.2.
+
+    Open-ended `Dict[str, bool]` is forbidden — the semantic-identity
+    gate ('flags additive') requires a canonical registry to diff against.
+    Additions to this enum require an ADR per Charter §3.2.
+    """
+
+    PARTIAL_CODE_IN_BLOCK = "partial_code_in_block"  # v2.16 in-block oversized
+    PARTIAL_CODE_CROSS_PAGE = "partial_code_cross_page"  # v3.0 new (activates inert)
+    PARTIAL_TABLE_CROSS_PAGE = "partial_table_cross_page"  # v3.1+ deferred (reserved)
+    CROSS_PAGE_SPLIT = "cross_page_split"
+    ORPHAN_LABEL = "orphan_label"
+    PICTURE_CLASSIFICATION_LABEL = "picture_classification_label"
+    DROP_CAP_REPAIRED = "drop_cap_repaired"
+    READING_ORDER_REPAIRED = "reading_order_repaired"
+    OCR_FORCED = "ocr_forced"
+    OCR_FALLBACK = "ocr_fallback"
+    BBOX_IOU_DEDUPED = "bbox_iou_deduped"
+    TRAILING_PREPOSITION_HEALED = "trailing_preposition_healed"
+
+
+@dataclass
+class ExtractionWarning:
+    """Structured signal from the extraction engine. Charter §3.2.
+
+    Replaces today's DOM-coupled inspection of Docling internals. The
+    chunker / sanitizer / quality gate consult these instead of reaching
+    back into engine-specific objects.
+    """
+
+    code: str  # e.g. "DOCLING_OCR_LOW_CONFIDENCE", "PAGE_ROTATION_CORRECTED"
+    severity: Literal["info", "warn", "error"]
+    message: str
+    source_element_id: Optional[str] = None
+
+
+@dataclass
+class Locator:
+    """Source-document location, format-appropriate. Charter §3.2."""
+
+    type: LocatorType
+    # For BBOX type:
+    bbox: Optional[List[int]] = None  # [x1, y1, x2, y2] in [0, 1000]
+    page_number: Optional[int] = None
+    coordinate_frame: CoordinateFrame = CoordinateFrame.UNKNOWN
+    # For FLOW_OFFSET / DOM_PATH types:
+    path: Optional[str] = None  # CFI, DOM XPath, or character offset range
+
+    def __post_init__(self) -> None:
+        if self.type == LocatorType.BBOX:
+            if self.bbox is None:
+                raise ValueError("Locator(type=BBOX) requires bbox")
+            if len(self.bbox) != 4:
+                raise ValueError(
+                    f"Locator.bbox must be 4 ints, got len={len(self.bbox)}"
+                )
+            for i, coord in enumerate(self.bbox):
+                if not isinstance(coord, int):
+                    raise TypeError(
+                        f"Locator.bbox[{i}]={coord!r} must be int (REQ-COORD-01)"
+                    )
+                if not (0 <= coord <= 1000):
+                    raise ValueError(
+                        f"Locator.bbox[{i}]={coord} out of range [0,1000] "
+                        "(REQ-COORD-01)"
+                    )
+        elif self.type in (LocatorType.FLOW_OFFSET, LocatorType.DOM_PATH):
+            if self.path is None:
+                raise ValueError(
+                    f"Locator(type={self.type.value}) requires path"
+                )
+
+
+@dataclass
+class ConfidenceBreakdown:
+    """Per-source confidence scores. Charter §3.2.
+
+    Single-sentinel convention: a field that is None means 'not measured
+    for this chunk'. Whether a field is *applicable* is recorded in
+    `applicable` (Set[str]) to avoid the two-sentinel encoding (None vs
+    -1.0) that Draft 0.3 had. A field that is in `applicable` but has
+    value None = 'applicable but unavailable' — request a re-extraction
+    or treat as missing data.
+    """
+
+    layout_confidence: Optional[float] = None
+    text_extraction_confidence: Optional[float] = None
+    ocr_confidence: Optional[float] = None
+    classification_confidence: Optional[float] = None
+    applicable: Set[str] = field(default_factory=set)
+
+    _VALID_FIELDS = frozenset(
+        {
+            "layout_confidence",
+            "text_extraction_confidence",
+            "ocr_confidence",
+            "classification_confidence",
+        }
+    )
+
+    def __post_init__(self) -> None:
+        for name in self.applicable:
+            if name not in self._VALID_FIELDS:
+                raise ValueError(
+                    f"ConfidenceBreakdown.applicable contains unknown field "
+                    f"name {name!r}; valid: {sorted(self._VALID_FIELDS)}"
+                )
+        for name in self._VALID_FIELDS:
+            value = getattr(self, name)
+            if value is not None and not (0.0 <= value <= 1.0):
+                raise ValueError(
+                    f"ConfidenceBreakdown.{name}={value} out of range [0,1]"
+                )
+
+
+@dataclass
+class UIRChunk:
+    """V3.0 UIR chunk. Charter §3.2.
+
+    Emitted by ElementProcessor; consumed by chunker + sanitizer. The
+    provenance contract for sanitization (content / content_original /
+    content_sanitized / sanitization_status) is documented in the
+    Charter §3.2 docstring; the same semantics apply here.
+
+    Note: the foundation session adds this type to the codebase. The
+    v3.0 chunker and ElementProcessor rewrite that consumes it lands
+    in Phase A tasks A2-A3.
+    """
+
+    modality: Modality
+    content: str  # Always authoritative
+    locator: Locator
+    confidence: ConfidenceBreakdown
+    extraction_method: str  # "docling_direct" | "ocr_tesseract" | ...
+    extraction_engine_version: str  # e.g., "docling-2.86.0"
+    extraction_warnings: List[ExtractionWarning] = field(default_factory=list)
+    structural_flags: Set[StructuralFlag] = field(default_factory=set)
+    source_element_ids: List[str] = field(default_factory=list)
+    asset_ref: Optional[str] = None  # Path to extracted image/asset (IMAGE)
+    lang: Optional[str] = None  # ISO 639-1 language code
+    reading_order: Optional[int] = None  # Monotonic logical position
+
+    # Provenance fields (Charter §3.2):
+    content_original: Optional[str] = None  # Pre-sanitization raw extraction
+    content_sanitized: Optional[str] = None  # LLM output when attempted
+    sanitizer_model_id: Optional[str] = None
+    sanitizer_prompt_version: Optional[str] = None  # Git-hash of prompt template
+    sanitization_status: str = "not_applied"
+    # Allowed sanitization_status values:
+    #   "not_applied" | "accepted" | "rejected:<guard_name>"
+    #     | "skipped:endpoint_unreachable" | "skipped:<reason>"
+
+    # Hierarchical context:
+    parent_element_id: Optional[str] = None  # Table cell → parent table
+    parent_heading: Optional[str] = None  # Nearest ancestor heading text
+
+    # Cross-page sibling grouping (Charter §3.2, NEW in 0.5):
+    #   Shared UUID across chunks that are halves/parts of the same logical
+    #   element split across pages (cross-page code block, cross-page table).
+    #   Required for the adjacency-fetch mechanism to identify which chunk
+    #   is the continuation, not just that some continuation exists. None
+    #   when the chunk is not part of a split.
+    continuation_group_id: Optional[str] = None
+
+    # UIR internal contract version (Charter §3.2, NEW in 0.5):
+    #   Distinct from schema_version (which stamps the output JSONL).
+    #   uir_version governs the internal extraction→chunking contract so
+    #   the ElementProcessor knows which UIR generation it is consuming.
+    #   Bumped on additive field changes to UIRChunk/UniversalDocument/
+    #   UniversalPage.
+    uir_version: str = "3.0"
+
+    _VALID_SANITIZATION_STATUS_PREFIXES = (
+        "not_applied",
+        "accepted",
+        "rejected:",
+        "skipped:",
+    )
+
+    def __post_init__(self) -> None:
+        if not any(
+            self.sanitization_status == prefix
+            or self.sanitization_status.startswith(prefix)
+            for prefix in self._VALID_SANITIZATION_STATUS_PREFIXES
+        ):
+            raise ValueError(
+                f"UIRChunk.sanitization_status={self.sanitization_status!r} "
+                f"must be one of: not_applied, accepted, rejected:*, "
+                f"skipped:*"
+            )
+
+    @staticmethod
+    def new_continuation_group_id() -> str:
+        """Generate a fresh continuation_group_id (UUIDv4).
+
+        Use this when emitting the first chunk of a cross-page split; pass
+        the same id to all sibling chunks in the group.
+        """
+        return str(_uuid.uuid4())
