@@ -169,19 +169,42 @@ In rough priority order (the Charter governs):
    unloaded — see report §"Phase C task C2 prerequisites" for the
    LoRA resolution path. **Phase C is NOT dead weight** per Charter
    §4.2 step 1 outcome rule.
-1b. **Charter §4.2 step 2 (C-spike, 2-3 days)** — NEXT executable step.
-   Single-doc full quantitative test with 20 queries from the v2.16
-   regression fixture targeting `ATZ_Elektronik_German`. **LoRA
-   attribute-path issue resolved** in commit following the pre-spike
-   (see `scripts/v3_c_prespike.py::_apply_colpali_lora_adapter` +
-   `tests/test_v3_c_prespike_harness.py::TestColPaliLoraRemap`); 254/254
-   adapter weights apply cleanly. C-spike can run against the same
-   harness path. PASS A (page recovery ≥60%) and PASS B (reranker
-   discrimination ≥60%) measured against the post-LoRA baseline:
-   3.2% margin on primary, 23% on sensitivity. Co-residency check
-   (Charter §4.2 step 2 #9) validates ColPali fits alongside
-   Qwen3-Embedding-8B on omlx per `src/mmrag_v2/omlx/scheduler.py`
-   tenancy policy.
+1b. **Charter §4.2 step 2 (C-spike) — ✅ COMPLETE, VERDICT: PASS A FAIL + PASS B FAIL.**
+   Full report: [`V3_C_SPIKE_REPORT.md`](V3_C_SPIKE_REPORT.md).
+   Raw traces: [`V3_C_SPIKE_RUN1.json`](V3_C_SPIKE_RUN1.json) (PASS A),
+   [`V3_C_SPIKE_PASS_B.json`](V3_C_SPIKE_PASS_B.json) (PASS B).
+   Single-doc test on `ATZ_Elektronik_German`, 20 hand-crafted queries,
+   production text leg (`retrieve_hybrid_reranked`) + ColPali visual
+   leg (LoRA-patched) + bounded-join rerank.
+
+   Aggregate:
+   - Visual top-1 accuracy: 55% (11/20); Text top-1: 55% (11/20)
+   - PASS A visual recovery on text-failed: 44.4% (4/9) — threshold ≥60% FAIL
+   - PASS A visual harm on text-passed:     36.4% (4/11) — threshold ≤10% FAIL
+   - PASS B rerank top-1 on gold page:      47.4% (9/19) — threshold ≥60% FAIL
+
+   Failure-mode diagnosis: page-1 over-pull on body-text queries because
+   page 1 carries the only visually-rich element (Lifecycle Management
+   flowchart). The hybrid bounded-join mechanism IS working (Q07, Q08,
+   Q13 demonstrate rescue of visual-only-failures via text-leg
+   candidates in the union) — the cap is page-level granularity.
+
+1c. **NEXT executable step — operator decision required.** Three options
+   per `V3_C_SPIKE_REPORT.md` §"Charter outcome + recommendation":
+
+   (a) **Strict Charter §4.2 outcome rule:** PASS A FAIL → "Phase C as
+       designed is dead; redirect to VLM-native parsing evaluation or
+       alternative visual model."
+   (b) **Sequenced falsification (operator's recommended path):** re-run
+       the same C-spike harness with `--model-id vidore/colqwen2.5-v0.2`
+       (or similar). If PASS A + PASS B improve materially, the model
+       was the limit. If not, region-level granularity is the binding
+       constraint — expand Phase C scope per Charter §4.2 step 2 #8
+       PASS B FAIL outcome rule.
+   (c) **Defer with larger-fixture test:** build a 50+ query per-chunk
+       gold fixture for ATZ before re-evaluating. Charter PASS B
+       requires fixture-based gold; the page-level proxy used here is
+       looser.
 2. **Charter Phase A task A0** — per-doc spike on `ATZ_Elektronik_German`
    using the V3 UIR types. Convert one doc through the
    (foundation-shipped) ConversionPlan + ConfidenceBreakdown +

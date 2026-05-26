@@ -1,0 +1,1114 @@
+{
+  "target_doc_id": "6fccda8bd625",
+  "n_qualifying": 19,
+  "n_passing": 9,
+  "pass_b_rate": 0.47368421052631576,
+  "pass_b_verdict": false,
+  "threshold": 0.6,
+  "results": [
+    {
+      "query_id": "Q01",
+      "query_text": "Lifecycle Management Anforderungsanalyse bis System-Integration",
+      "gold_page": 1,
+      "visual_top_pages": [
+        1,
+        3,
+        2,
+        5,
+        4
+      ],
+      "gold_in_visual_top5": true,
+      "qualifies_for_pass_b": true,
+      "candidate_set_size": 31,
+      "rerank_top1_chunk_id": "6fccda8bd625_001_text_8cc91926",
+      "rerank_top1_page": 1,
+      "rerank_top1_doc_id": "6fccda8bd625",
+      "rerank_top1_provenance": "both",
+      "rerank_top5": [
+        {
+          "chunk_id": "6fccda8bd625_001_text_8cc91926",
+          "doc_id": "6fccda8bd625",
+          "page_number": 1,
+          "rerank_score": 0.8958007097244263,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_005_text_2fdc6d44",
+          "doc_id": "6fccda8bd625",
+          "page_number": 5,
+          "rerank_score": 0.8630480766296387,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_002_text_97a119ec",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.8482427000999451,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_002_text_e64878ad",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.844765305519104,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_003_text_1639814c",
+          "doc_id": "6fccda8bd625",
+          "page_number": 3,
+          "rerank_score": 0.844765305519104,
+          "provenance": "both"
+        }
+      ],
+      "passes_pass_b": true
+    },
+    {
+      "query_id": "Q02",
+      "query_text": "Effizientere Software Entwicklung durchg\u00e4ngige Prozesskette Spezifikation",
+      "gold_page": 1,
+      "visual_top_pages": [
+        1,
+        3,
+        5,
+        2,
+        4
+      ],
+      "gold_in_visual_top5": true,
+      "qualifies_for_pass_b": true,
+      "candidate_set_size": 31,
+      "rerank_top1_chunk_id": "6fccda8bd625_004_text_16dfe72d",
+      "rerank_top1_page": 4,
+      "rerank_top1_doc_id": "6fccda8bd625",
+      "rerank_top1_provenance": "both",
+      "rerank_top5": [
+        {
+          "chunk_id": "6fccda8bd625_004_text_16dfe72d",
+          "doc_id": "6fccda8bd625",
+          "page_number": 4,
+          "rerank_score": 0.9094521999359131,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_001_text_8cc91926",
+          "doc_id": "6fccda8bd625",
+          "page_number": 1,
+          "rerank_score": 0.9004092216491699,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_002_text_1c02a782",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.8922562599182129,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_002_text_098d18ab",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.887672483921051,
+          "provenance": "visual_page"
+        },
+        {
+          "chunk_id": "6fccda8bd625_005_text_de23eff4",
+          "doc_id": "6fccda8bd625",
+          "page_number": 5,
+          "rerank_score": 0.8594359755516052,
+          "provenance": "visual_page"
+        }
+      ],
+      "passes_pass_b": false
+    },
+    {
+      "query_id": "Q03",
+      "query_text": "Bruch zwischen Spezifikation und Test in der Prozesskette",
+      "gold_page": 1,
+      "visual_top_pages": [
+        1,
+        5,
+        2,
+        3,
+        4
+      ],
+      "gold_in_visual_top5": true,
+      "qualifies_for_pass_b": true,
+      "candidate_set_size": 31,
+      "rerank_top1_chunk_id": "6fccda8bd625_001_text_8cc91926",
+      "rerank_top1_page": 1,
+      "rerank_top1_doc_id": "6fccda8bd625",
+      "rerank_top1_provenance": "both",
+      "rerank_top5": [
+        {
+          "chunk_id": "6fccda8bd625_001_text_8cc91926",
+          "doc_id": "6fccda8bd625",
+          "page_number": 1,
+          "rerank_score": 0.9679720401763916,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_002_text_5f2de913",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.9522391557693481,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_003_text_8bfff9de_o2",
+          "doc_id": "6fccda8bd625",
+          "page_number": 3,
+          "rerank_score": 0.9355145692825317,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_004_text_16dfe72d",
+          "doc_id": "6fccda8bd625",
+          "page_number": 4,
+          "rerank_score": 0.9213528037071228,
+          "provenance": "visual_page"
+        },
+        {
+          "chunk_id": "6fccda8bd625_002_text_1c02a782",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.9121223092079163,
+          "provenance": "both"
+        }
+      ],
+      "passes_pass_b": true
+    },
+    {
+      "query_id": "Q04",
+      "query_text": "BMW SWC ECU Komponenten-Modell ECU-Subsystem Lifecycle-Diagramm",
+      "gold_page": 1,
+      "visual_top_pages": [
+        1,
+        3,
+        5,
+        2,
+        6
+      ],
+      "gold_in_visual_top5": true,
+      "qualifies_for_pass_b": true,
+      "candidate_set_size": 38,
+      "rerank_top1_chunk_id": "6fccda8bd625_005_text_2fdc6d44",
+      "rerank_top1_page": 5,
+      "rerank_top1_doc_id": "6fccda8bd625",
+      "rerank_top1_provenance": "both",
+      "rerank_top5": [
+        {
+          "chunk_id": "6fccda8bd625_005_text_2fdc6d44",
+          "doc_id": "6fccda8bd625",
+          "page_number": 5,
+          "rerank_score": 0.8483783006668091,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "af66389a8345_128_text_a81c0bba",
+          "doc_id": "af66389a8345",
+          "page_number": 128,
+          "rerank_score": 0.8347411155700684,
+          "provenance": "text"
+        },
+        {
+          "chunk_id": "6fccda8bd625_003_text_1639814c",
+          "doc_id": "6fccda8bd625",
+          "page_number": 3,
+          "rerank_score": 0.8310784101486206,
+          "provenance": "visual_page"
+        },
+        {
+          "chunk_id": "6fccda8bd625_002_text_e64878ad",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.8310784101486206,
+          "provenance": "visual_page"
+        },
+        {
+          "chunk_id": "6fccda8bd625_003_text_fe44fd64",
+          "doc_id": "6fccda8bd625",
+          "page_number": 3,
+          "rerank_score": 0.8262256383895874,
+          "provenance": "visual_page"
+        }
+      ],
+      "passes_pass_b": false
+    },
+    {
+      "query_id": "Q05",
+      "query_text": "Anforderungsanalyse Architekturentwicklung Komponenten-Entwicklung Implementierung Test System-Integration Reihenfolge",
+      "gold_page": 1,
+      "visual_top_pages": [
+        2,
+        3,
+        4,
+        5,
+        1
+      ],
+      "gold_in_visual_top5": true,
+      "qualifies_for_pass_b": true,
+      "candidate_set_size": 33,
+      "rerank_top1_chunk_id": "6fccda8bd625_002_text_1c02a782",
+      "rerank_top1_page": 2,
+      "rerank_top1_doc_id": "6fccda8bd625",
+      "rerank_top1_provenance": "both",
+      "rerank_top5": [
+        {
+          "chunk_id": "6fccda8bd625_002_text_1c02a782",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.8917678594589233,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_002_text_5f2de913",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.8818941712379456,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_004_text_8a94d4f4",
+          "doc_id": "6fccda8bd625",
+          "page_number": 4,
+          "rerank_score": 0.8772532939910889,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_003_text_fe44fd64",
+          "doc_id": "6fccda8bd625",
+          "page_number": 3,
+          "rerank_score": 0.8772532939910889,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "af66389a8345_306_text_274a0b3a",
+          "doc_id": "af66389a8345",
+          "page_number": 306,
+          "rerank_score": 0.8756101727485657,
+          "provenance": "text"
+        }
+      ],
+      "passes_pass_b": false
+    },
+    {
+      "query_id": "Q06",
+      "query_text": "OEM Modellpalette Herausforderungen Komplexit\u00e4t Softwareumfang",
+      "gold_page": 2,
+      "visual_top_pages": [
+        2,
+        5,
+        4,
+        3,
+        1
+      ],
+      "gold_in_visual_top5": true,
+      "qualifies_for_pass_b": true,
+      "candidate_set_size": 33,
+      "rerank_top1_chunk_id": "6fccda8bd625_002_text_098d18ab",
+      "rerank_top1_page": 2,
+      "rerank_top1_doc_id": "6fccda8bd625",
+      "rerank_top1_provenance": "both",
+      "rerank_top5": [
+        {
+          "chunk_id": "6fccda8bd625_002_text_098d18ab",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.0,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_005_text_020715d2",
+          "doc_id": "6fccda8bd625",
+          "page_number": 5,
+          "rerank_score": 0.0,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_002_text_1c02a782",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.0,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_001_text_8cc91926",
+          "doc_id": "6fccda8bd625",
+          "page_number": 1,
+          "rerank_score": 0.0,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_005_text_6132308f",
+          "doc_id": "6fccda8bd625",
+          "page_number": 5,
+          "rerank_score": 0.0,
+          "provenance": "both"
+        }
+      ],
+      "passes_pass_b": true
+    },
+    {
+      "query_id": "Q07",
+      "query_text": "ECU-SW-Entwicklungsprozess inhomogen Prozessbr\u00fcche heterogen",
+      "gold_page": 2,
+      "visual_top_pages": [
+        1,
+        2,
+        3,
+        5,
+        4
+      ],
+      "gold_in_visual_top5": true,
+      "qualifies_for_pass_b": true,
+      "candidate_set_size": 28,
+      "rerank_top1_chunk_id": "6fccda8bd625_002_text_e52ce504",
+      "rerank_top1_page": 2,
+      "rerank_top1_doc_id": "6fccda8bd625",
+      "rerank_top1_provenance": "both",
+      "rerank_top5": [
+        {
+          "chunk_id": "6fccda8bd625_002_text_e52ce504",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.9015585780143738,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_002_text_5f2de913",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.8855358958244324,
+          "provenance": "text"
+        },
+        {
+          "chunk_id": "6fccda8bd625_001_text_8cc91926",
+          "doc_id": "6fccda8bd625",
+          "page_number": 1,
+          "rerank_score": 0.8768203854560852,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_002_text_1c02a782",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.8720186948776245,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_005_text_2fdc6d44",
+          "doc_id": "6fccda8bd625",
+          "page_number": 5,
+          "rerank_score": 0.8678720593452454,
+          "provenance": "both"
+        }
+      ],
+      "passes_pass_b": true
+    },
+    {
+      "query_id": "Q08",
+      "query_text": "vertikaler Bruch Entwicklungsphase Spezifikation Implementierung",
+      "gold_page": 2,
+      "visual_top_pages": [
+        3,
+        2,
+        5,
+        1,
+        4
+      ],
+      "gold_in_visual_top5": true,
+      "qualifies_for_pass_b": true,
+      "candidate_set_size": 33,
+      "rerank_top1_chunk_id": "6fccda8bd625_002_text_5f2de913",
+      "rerank_top1_page": 2,
+      "rerank_top1_doc_id": "6fccda8bd625",
+      "rerank_top1_provenance": "both",
+      "rerank_top5": [
+        {
+          "chunk_id": "6fccda8bd625_002_text_5f2de913",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.9530069828033447,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_002_text_1c02a782",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.9447677135467529,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_001_text_8cc91926",
+          "doc_id": "6fccda8bd625",
+          "page_number": 1,
+          "rerank_score": 0.8975541591644287,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_003_text_8bfff9de_o2",
+          "doc_id": "6fccda8bd625",
+          "page_number": 3,
+          "rerank_score": 0.8971483707427979,
+          "provenance": "visual_page"
+        },
+        {
+          "chunk_id": "6fccda8bd625_003_text_2c6f3b00",
+          "doc_id": "6fccda8bd625",
+          "page_number": 3,
+          "rerank_score": 0.8819012641906738,
+          "provenance": "both"
+        }
+      ],
+      "passes_pass_b": true
+    },
+    {
+      "query_id": "Q09",
+      "query_text": "Klaus Eder Berner Mattner Systemtechnik Gesch\u00e4ftsf\u00fchrer",
+      "gold_page": 3,
+      "visual_top_pages": [
+        2,
+        6,
+        5,
+        1,
+        4
+      ],
+      "gold_in_visual_top5": false,
+      "qualifies_for_pass_b": false,
+      "candidate_set_size": 0,
+      "rerank_top1_chunk_id": null,
+      "rerank_top1_page": null,
+      "rerank_top1_doc_id": null,
+      "rerank_top1_provenance": null,
+      "rerank_top5": [],
+      "passes_pass_b": false
+    },
+    {
+      "query_id": "Q10",
+      "query_text": "Realisierung LCM f\u00fcr ECU-Software S\u00e4ulen Werkzeuge",
+      "gold_page": 3,
+      "visual_top_pages": [
+        1,
+        3,
+        5,
+        2,
+        4
+      ],
+      "gold_in_visual_top5": true,
+      "qualifies_for_pass_b": true,
+      "candidate_set_size": 26,
+      "rerank_top1_chunk_id": "6fccda8bd625_005_text_2fdc6d44",
+      "rerank_top1_page": 5,
+      "rerank_top1_doc_id": "6fccda8bd625",
+      "rerank_top1_provenance": "both",
+      "rerank_top5": [
+        {
+          "chunk_id": "6fccda8bd625_005_text_2fdc6d44",
+          "doc_id": "6fccda8bd625",
+          "page_number": 5,
+          "rerank_score": 0.9281622171401978,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_003_text_8bfff9de",
+          "doc_id": "6fccda8bd625",
+          "page_number": 3,
+          "rerank_score": 0.9233238101005554,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_004_text_8a94d4f4",
+          "doc_id": "6fccda8bd625",
+          "page_number": 4,
+          "rerank_score": 0.9150990843772888,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_003_text_fe44fd64",
+          "doc_id": "6fccda8bd625",
+          "page_number": 3,
+          "rerank_score": 0.9150990843772888,
+          "provenance": "text"
+        },
+        {
+          "chunk_id": "6fccda8bd625_002_text_97a119ec",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.9095727801322937,
+          "provenance": "both"
+        }
+      ],
+      "passes_pass_b": false
+    },
+    {
+      "query_id": "Q11",
+      "query_text": "FormalSpec Spezifikationssprache Anforderungen formale Notation",
+      "gold_page": 3,
+      "visual_top_pages": [
+        1,
+        4,
+        3,
+        5,
+        2
+      ],
+      "gold_in_visual_top5": true,
+      "qualifies_for_pass_b": true,
+      "candidate_set_size": 39,
+      "rerank_top1_chunk_id": "6fccda8bd625_002_text_1c02a782",
+      "rerank_top1_page": 2,
+      "rerank_top1_doc_id": "6fccda8bd625",
+      "rerank_top1_provenance": "both",
+      "rerank_top5": [
+        {
+          "chunk_id": "6fccda8bd625_002_text_1c02a782",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.0,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "af66389a8345_240_image_fbdfb4e4",
+          "doc_id": "af66389a8345",
+          "page_number": 240,
+          "rerank_score": 0.0,
+          "provenance": "text"
+        },
+        {
+          "chunk_id": "af66389a8345_010_text_c17f92d0_s1",
+          "doc_id": "af66389a8345",
+          "page_number": 10,
+          "rerank_score": 0.7238756418228149,
+          "provenance": "text"
+        },
+        {
+          "chunk_id": "988b4f3d88a2_5003_text_c6b6a2bd",
+          "doc_id": "988b4f3d88a2",
+          "page_number": 5003,
+          "rerank_score": 0.0,
+          "provenance": "text"
+        },
+        {
+          "chunk_id": "1e7e436164a3_106_text_5ee5605a",
+          "doc_id": "1e7e436164a3",
+          "page_number": 106,
+          "rerank_score": 0.0,
+          "provenance": "text"
+        }
+      ],
+      "passes_pass_b": false
+    },
+    {
+      "query_id": "Q12",
+      "query_text": "horizontaler Bruch Konzept Test-Toolkette Modularit\u00e4t",
+      "gold_page": 4,
+      "visual_top_pages": [
+        2,
+        5,
+        4,
+        3,
+        1
+      ],
+      "gold_in_visual_top5": true,
+      "qualifies_for_pass_b": true,
+      "candidate_set_size": 35,
+      "rerank_top1_chunk_id": "6fccda8bd625_002_text_1c02a782",
+      "rerank_top1_page": 2,
+      "rerank_top1_doc_id": "6fccda8bd625",
+      "rerank_top1_provenance": "visual_page",
+      "rerank_top5": [
+        {
+          "chunk_id": "6fccda8bd625_002_text_1c02a782",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.8937578201293945,
+          "provenance": "visual_page"
+        },
+        {
+          "chunk_id": "6fccda8bd625_003_text_fe44fd64",
+          "doc_id": "6fccda8bd625",
+          "page_number": 3,
+          "rerank_score": 0.8834508657455444,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_004_text_8a94d4f4",
+          "doc_id": "6fccda8bd625",
+          "page_number": 4,
+          "rerank_score": 0.8834508657455444,
+          "provenance": "text"
+        },
+        {
+          "chunk_id": "6fccda8bd625_005_text_de23eff4",
+          "doc_id": "6fccda8bd625",
+          "page_number": 5,
+          "rerank_score": 0.8802496194839478,
+          "provenance": "visual_page"
+        },
+        {
+          "chunk_id": "6fccda8bd625_001_text_8cc91926",
+          "doc_id": "6fccda8bd625",
+          "page_number": 1,
+          "rerank_score": 0.8570806384086609,
+          "provenance": "text"
+        }
+      ],
+      "passes_pass_b": false
+    },
+    {
+      "query_id": "Q13",
+      "query_text": "Prozessdurchg\u00e4ngigkeit ohne kritische Br\u00fcche Entwicklungsphase",
+      "gold_page": 4,
+      "visual_top_pages": [
+        1,
+        4,
+        3,
+        2,
+        5
+      ],
+      "gold_in_visual_top5": true,
+      "qualifies_for_pass_b": true,
+      "candidate_set_size": 33,
+      "rerank_top1_chunk_id": "6fccda8bd625_004_text_16dfe72d",
+      "rerank_top1_page": 4,
+      "rerank_top1_doc_id": "6fccda8bd625",
+      "rerank_top1_provenance": "both",
+      "rerank_top5": [
+        {
+          "chunk_id": "6fccda8bd625_004_text_16dfe72d",
+          "doc_id": "6fccda8bd625",
+          "page_number": 4,
+          "rerank_score": 0.9525132775306702,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_001_text_8cc91926",
+          "doc_id": "6fccda8bd625",
+          "page_number": 1,
+          "rerank_score": 0.8968513607978821,
+          "provenance": "visual_page"
+        },
+        {
+          "chunk_id": "6fccda8bd625_004_text_7bb7359c",
+          "doc_id": "6fccda8bd625",
+          "page_number": 4,
+          "rerank_score": 0.8955299854278564,
+          "provenance": "visual_page"
+        },
+        {
+          "chunk_id": "6fccda8bd625_002_text_1c02a782",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.8950416445732117,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_002_text_5f2de913",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.8948820233345032,
+          "provenance": "both"
+        }
+      ],
+      "passes_pass_b": true
+    },
+    {
+      "query_id": "Q14",
+      "query_text": "modularer HiL Hardware-in-the-Loop Testumgebung modulare Architektur",
+      "gold_page": 4,
+      "visual_top_pages": [
+        4,
+        5,
+        3,
+        2,
+        1
+      ],
+      "gold_in_visual_top5": true,
+      "qualifies_for_pass_b": true,
+      "candidate_set_size": 34,
+      "rerank_top1_chunk_id": "6fccda8bd625_005_text_86b275f0",
+      "rerank_top1_page": 5,
+      "rerank_top1_doc_id": "6fccda8bd625",
+      "rerank_top1_provenance": "text",
+      "rerank_top5": [
+        {
+          "chunk_id": "6fccda8bd625_005_text_86b275f0",
+          "doc_id": "6fccda8bd625",
+          "page_number": 5,
+          "rerank_score": 0.8392684459686279,
+          "provenance": "text"
+        },
+        {
+          "chunk_id": "6fccda8bd625_005_text_de23eff4",
+          "doc_id": "6fccda8bd625",
+          "page_number": 5,
+          "rerank_score": 0.8362759351730347,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_004_text_16dfe72d",
+          "doc_id": "6fccda8bd625",
+          "page_number": 4,
+          "rerank_score": 0.8345650434494019,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_003_text_8bfff9de",
+          "doc_id": "6fccda8bd625",
+          "page_number": 3,
+          "rerank_score": 0.8305848836898804,
+          "provenance": "text"
+        },
+        {
+          "chunk_id": "6fccda8bd625_004_text_7bb7359c",
+          "doc_id": "6fccda8bd625",
+          "page_number": 4,
+          "rerank_score": 0.7992994785308838,
+          "provenance": "both"
+        }
+      ],
+      "passes_pass_b": false
+    },
+    {
+      "query_id": "Q15",
+      "query_text": "MESSINA Erweiterungen Klassifikationsbaum-Methode CTM CTE",
+      "gold_page": 5,
+      "visual_top_pages": [
+        4,
+        5,
+        6,
+        3,
+        2
+      ],
+      "gold_in_visual_top5": true,
+      "qualifies_for_pass_b": true,
+      "candidate_set_size": 37,
+      "rerank_top1_chunk_id": "6fccda8bd625_005_text_ed9a4c12",
+      "rerank_top1_page": 5,
+      "rerank_top1_doc_id": "6fccda8bd625",
+      "rerank_top1_provenance": "both",
+      "rerank_top5": [
+        {
+          "chunk_id": "6fccda8bd625_005_text_ed9a4c12",
+          "doc_id": "6fccda8bd625",
+          "page_number": 5,
+          "rerank_score": 0.9538368582725525,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_004_text_fbe491d0",
+          "doc_id": "6fccda8bd625",
+          "page_number": 4,
+          "rerank_score": 0.9538368582725525,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_005_text_de23eff4",
+          "doc_id": "6fccda8bd625",
+          "page_number": 5,
+          "rerank_score": 0.8466696739196777,
+          "provenance": "text"
+        },
+        {
+          "chunk_id": "6fccda8bd625_005_text_86b275f0",
+          "doc_id": "6fccda8bd625",
+          "page_number": 5,
+          "rerank_score": 0.8088152408599854,
+          "provenance": "text"
+        },
+        {
+          "chunk_id": "6fccda8bd625_004_text_16dfe72d",
+          "doc_id": "6fccda8bd625",
+          "page_number": 4,
+          "rerank_score": 0.79416424036026,
+          "provenance": "both"
+        }
+      ],
+      "passes_pass_b": true
+    },
+    {
+      "query_id": "Q16",
+      "query_text": "automatische Testfallgenerierung reaktive Tests",
+      "gold_page": 5,
+      "visual_top_pages": [
+        5,
+        4,
+        1,
+        2,
+        3
+      ],
+      "gold_in_visual_top5": true,
+      "qualifies_for_pass_b": true,
+      "candidate_set_size": 38,
+      "rerank_top1_chunk_id": "6fccda8bd625_004_text_fbe491d0",
+      "rerank_top1_page": 4,
+      "rerank_top1_doc_id": "6fccda8bd625",
+      "rerank_top1_provenance": "both",
+      "rerank_top5": [
+        {
+          "chunk_id": "6fccda8bd625_004_text_fbe491d0",
+          "doc_id": "6fccda8bd625",
+          "page_number": 4,
+          "rerank_score": 0.9308792948722839,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_005_text_ed9a4c12",
+          "doc_id": "6fccda8bd625",
+          "page_number": 5,
+          "rerank_score": 0.9308792948722839,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_002_text_5f2de913",
+          "doc_id": "6fccda8bd625",
+          "page_number": 2,
+          "rerank_score": 0.867903470993042,
+          "provenance": "visual_page"
+        },
+        {
+          "chunk_id": "6fccda8bd625_004_text_7bb7359c",
+          "doc_id": "6fccda8bd625",
+          "page_number": 4,
+          "rerank_score": 0.8570468425750732,
+          "provenance": "visual_page"
+        },
+        {
+          "chunk_id": "a414e7cb0259_21015_text_21fe697b",
+          "doc_id": "a414e7cb0259",
+          "page_number": 21015,
+          "rerank_score": 0.8414329290390015,
+          "provenance": "text"
+        }
+      ],
+      "passes_pass_b": false
+    },
+    {
+      "query_id": "Q17",
+      "query_text": "modularHiL MESSINA Werkzeugkette Migrationsstrategie",
+      "gold_page": 5,
+      "visual_top_pages": [
+        5,
+        4,
+        6,
+        3,
+        2
+      ],
+      "gold_in_visual_top5": true,
+      "qualifies_for_pass_b": true,
+      "candidate_set_size": 36,
+      "rerank_top1_chunk_id": "6fccda8bd625_005_text_de23eff4",
+      "rerank_top1_page": 5,
+      "rerank_top1_doc_id": "6fccda8bd625",
+      "rerank_top1_provenance": "both",
+      "rerank_top5": [
+        {
+          "chunk_id": "6fccda8bd625_005_text_de23eff4",
+          "doc_id": "6fccda8bd625",
+          "page_number": 5,
+          "rerank_score": 0.9002584218978882,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_004_text_16dfe72d",
+          "doc_id": "6fccda8bd625",
+          "page_number": 4,
+          "rerank_score": 0.8951234817504883,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_005_text_86b275f0",
+          "doc_id": "6fccda8bd625",
+          "page_number": 5,
+          "rerank_score": 0.877861738204956,
+          "provenance": "text"
+        },
+        {
+          "chunk_id": "6fccda8bd625_005_text_ed9a4c12",
+          "doc_id": "6fccda8bd625",
+          "page_number": 5,
+          "rerank_score": 0.8481355905532837,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_004_text_fbe491d0",
+          "doc_id": "6fccda8bd625",
+          "page_number": 4,
+          "rerank_score": 0.8481355905532837,
+          "provenance": "text"
+        }
+      ],
+      "passes_pass_b": true
+    },
+    {
+      "query_id": "Q18",
+      "query_text": "Veranstaltungshinweise ATZ MTZ Jahreskalender recherchefreundlich",
+      "gold_page": 6,
+      "visual_top_pages": [
+        6,
+        5,
+        1,
+        4,
+        2
+      ],
+      "gold_in_visual_top5": true,
+      "qualifies_for_pass_b": true,
+      "candidate_set_size": 36,
+      "rerank_top1_chunk_id": "6fccda8bd625_006_text_24f2ab1b",
+      "rerank_top1_page": 6,
+      "rerank_top1_doc_id": "6fccda8bd625",
+      "rerank_top1_provenance": "both",
+      "rerank_top5": [
+        {
+          "chunk_id": "6fccda8bd625_006_text_24f2ab1b",
+          "doc_id": "6fccda8bd625",
+          "page_number": 6,
+          "rerank_score": 0.9009827375411987,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "6fccda8bd625_006_text_bbcd26db",
+          "doc_id": "6fccda8bd625",
+          "page_number": 6,
+          "rerank_score": 0.8699421882629395,
+          "provenance": "both"
+        },
+        {
+          "chunk_id": "af66389a8345_116_text_ea25a7c1",
+          "doc_id": "af66389a8345",
+          "page_number": 116,
+          "rerank_score": 0.7550708055496216,
+          "provenance": "text"
+        },
+        {
+          "chunk_id": "07a1232cccf4_029_text_a98dc279",
+          "doc_id": "07a1232cccf4",
+          "page_number": 29,
+          "rerank_score": 0.7340978384017944,
+          "provenance": "text"
+        },
+        {
+          "chunk_id": "af66389a8345_189_text_ea320ad2",
+          "doc_id": "af66389a8345",
+          "page_number": 189,
+          "rerank_score": 0.7167482376098633,
+          "provenance": "text"
+        }
+      ],
+      "passes_pass_b": true
+    },
+    {
+      "query_id": "Q19",
+      "query_text": "Impressum Springer Vieweg Anzeigenleitung Verlag",
+      "gold_page": 6,
+      "visual_top_pages": [
+        6,
+        2,
+        1,
+        4,
+        5
+      ],
+      "gold_in_visual_top5": true,
+      "qualifies_for_pass_b": true,
+      "candidate_set_size": 39,
+      "rerank_top1_chunk_id": "af66389a8345_004_text_042074b9",
+      "rerank_top1_page": 4,
+      "rerank_top1_doc_id": "af66389a8345",
+      "rerank_top1_provenance": "text",
+      "rerank_top5": [
+        {
+          "chunk_id": "af66389a8345_004_text_042074b9",
+          "doc_id": "af66389a8345",
+          "page_number": 4,
+          "rerank_score": 0.8911042809486389,
+          "provenance": "text"
+        },
+        {
+          "chunk_id": "af66389a8345_116_text_f9572c6c",
+          "doc_id": "af66389a8345",
+          "page_number": 116,
+          "rerank_score": 0.8324292898178101,
+          "provenance": "text"
+        },
+        {
+          "chunk_id": "6fccda8bd625_004_image_54fcc743",
+          "doc_id": "6fccda8bd625",
+          "page_number": 4,
+          "rerank_score": 0.811610221862793,
+          "provenance": "visual_page"
+        },
+        {
+          "chunk_id": "af66389a8345_004_text_afa641c8",
+          "doc_id": "af66389a8345",
+          "page_number": 4,
+          "rerank_score": 0.7899613976478577,
+          "provenance": "text"
+        },
+        {
+          "chunk_id": "af66389a8345_034_text_36999c6a_o2",
+          "doc_id": "af66389a8345",
+          "page_number": 34,
+          "rerank_score": 0.7864018678665161,
+          "provenance": "text"
+        }
+      ],
+      "passes_pass_b": false
+    },
+    {
+      "query_id": "Q20",
+      "query_text": "Abonnementbedingungen Bezugspreis ATZ Elektronik Jahrgang",
+      "gold_page": 6,
+      "visual_top_pages": [
+        6,
+        5,
+        4,
+        2,
+        1
+      ],
+      "gold_in_visual_top5": true,
+      "qualifies_for_pass_b": true,
+      "candidate_set_size": 39,
+      "rerank_top1_chunk_id": "a4c2916a64c2_020_text_3839ffaf",
+      "rerank_top1_page": 20,
+      "rerank_top1_doc_id": "a4c2916a64c2",
+      "rerank_top1_provenance": "text",
+      "rerank_top5": [
+        {
+          "chunk_id": "a4c2916a64c2_020_text_3839ffaf",
+          "doc_id": "a4c2916a64c2",
+          "page_number": 20,
+          "rerank_score": 0.0,
+          "provenance": "text"
+        },
+        {
+          "chunk_id": "6fccda8bd625_006_text_334b4a78",
+          "doc_id": "6fccda8bd625",
+          "page_number": 6,
+          "rerank_score": 0.0,
+          "provenance": "text"
+        },
+        {
+          "chunk_id": "a4c2916a64c2_020_text_17b4adbc",
+          "doc_id": "a4c2916a64c2",
+          "page_number": 20,
+          "rerank_score": 0.0,
+          "provenance": "text"
+        },
+        {
+          "chunk_id": "af66389a8345_189_text_ea320ad2",
+          "doc_id": "af66389a8345",
+          "page_number": 189,
+          "rerank_score": 0.0,
+          "provenance": "text"
+        },
+        {
+          "chunk_id": "ae1c6740af40_005_text_f094e44c",
+          "doc_id": "ae1c6740af40",
+          "page_number": 5,
+          "rerank_score": 0.0,
+          "provenance": "text"
+        }
+      ],
+      "passes_pass_b": false
+    }
+  ]
+}
