@@ -223,16 +223,40 @@ def _apply_colpali_lora_adapter(model, model_id: str) -> int:
     return applied
 
 
+def _get_model_classes(model_id: str):
+    """Dispatch model_id -> (ModelClass, ProcessorClass).
+
+    Supports the ColPali family + ColQwen2.5 variants. Adding more
+    variants is a single tuple addition; the rest of the pipeline
+    (rendering, batching, MaxSim, query embed) is model-agnostic.
+    """
+    from colpali_engine import models as cpe_models
+
+    mid_lower = model_id.lower()
+    if "colqwen2.5" in mid_lower or "colqwen2_5" in mid_lower:
+        return cpe_models.ColQwen2_5, cpe_models.ColQwen2_5_Processor
+    if "colqwen3.5" in mid_lower or "colqwen3_5" in mid_lower:
+        return cpe_models.ColQwen3_5, cpe_models.ColQwen3_5Processor
+    if "colqwen3" in mid_lower:
+        return cpe_models.ColQwen3, cpe_models.ColQwen3Processor
+    if "colqwen2" in mid_lower:
+        return cpe_models.ColQwen2, cpe_models.ColQwen2Processor
+    if "colmodernvbert" in mid_lower:
+        return cpe_models.ColModernVBert, cpe_models.ColModernVBertProcessor
+    # default: ColPali (PaliGemma base)
+    return cpe_models.ColPali, cpe_models.ColPaliProcessor
+
+
 def _load_local_colpali(model_id: str):
-    """Load ColPali model + processor lazily; cache for reuse within process."""
+    """Load ColPali (or variant) model + processor lazily; cache per process."""
     if model_id in _LOCAL_MODEL_CACHE:
         return _LOCAL_MODEL_CACHE[model_id]
     import torch
-    from colpali_engine.models import ColPali, ColPaliProcessor
 
-    # Apple Silicon path: prefer MPS when available. ColPali on MPS works
-    # with bfloat16 in recent transformers (4.5+). Fall back to CPU on
-    # platforms without MPS.
+    ModelCls, ProcessorCls = _get_model_classes(model_id)
+
+    # Apple Silicon path: prefer MPS when available. Recent transformers
+    # support MPS bfloat16 for both PaliGemma and Qwen2.5-VL.
     if torch.backends.mps.is_available():
         device = "mps"
         dtype = torch.bfloat16
@@ -244,24 +268,25 @@ def _load_local_colpali(model_id: str):
         dtype = torch.float32
     log = logging.getLogger("v3_c_prespike")
     log.info(
-        "Loading ColPali model %s on %s (dtype=%s) — first load downloads "
+        "Loading %s model %s on %s (dtype=%s) — first load downloads "
         "~5GB and may take several minutes",
-        model_id, device, dtype,
+        ModelCls.__name__, model_id, device, dtype,
     )
-    model = ColPali.from_pretrained(
+    model = ModelCls.from_pretrained(
         model_id,
         torch_dtype=dtype,
         device_map=device,
     ).eval()
-    processor = ColPaliProcessor.from_pretrained(model_id)
-    # Patch in the LoRA adapter manually — transformers 5.x renamed the
-    # PaliGemma attribute paths and the standard adapter loader silently
-    # leaves the LoRA weights at their initialization. Without this
-    # patch, the model runs as raw PaliGemma + a randomly-initialized
-    # projection head, which still works (gold ranks first) but with
-    # much thinner margins than the trained ColPali.
-    applied = _apply_colpali_lora_adapter(model, model_id)
-    log.info("ColPali LoRA adapter: %d weights applied", applied)
+    processor = ProcessorCls.from_pretrained(model_id)
+    # Apply the LoRA adapter remap only to the PaliGemma-based ColPali
+    # checkpoints — that's the family with the transformers-5.x
+    # attribute-path-rename problem. Qwen2.5-based models use a different
+    # base architecture; the standard from_pretrained loader handles
+    # their adapters correctly. If a future Qwen variant exhibits the
+    # same silent-LoRA-skip symptom, add it here.
+    if ModelCls.__name__ == "ColPali":
+        applied = _apply_colpali_lora_adapter(model, model_id)
+        log.info("ColPali LoRA adapter: %d weights applied", applied)
     _LOCAL_MODEL_CACHE[model_id] = (model, processor, device)
     return model, processor, device
 
