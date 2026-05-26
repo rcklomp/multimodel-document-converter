@@ -1,8 +1,45 @@
 # Project Status
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
 Purpose: fast orientation for a new coding session. Read this before deeper project docs.
+
+## v3.0 Foundation Session — landed 2026-05-26 (autonomous)
+
+**V3.0 is now under active charter** —
+[`docs/ARCHITECTURE_V3_DRAFT_0.5.md`](ARCHITECTURE_V3_DRAFT_0.5.md).
+The Charter targets ~72 days of solo-dev work across Phase A (UIR
+refactor, 24d), Phase B (LLM sanitization, 18-22d), Phase C (ColPali
+visual retrieval, 12d), Phase D (modality-aware gates, 12d).
+
+A foundation-only autonomous session shipped **purely additive
+scaffolding** across 3 commits (`eb7db72`, `02fdf25`, `f581cff` on
+`main`). v2.16 production paths are unmodified and v2.16 remains the
+live system; foundation work is `git revert`-clean.
+
+**Foundation deliverables:** V3 UIR contract types (Modality,
+StructuralFlag, Locator, ConfidenceBreakdown, UIRChunk per Charter §3.2);
+format-agnostic ConversionPlan parent (`render_dpi` validated [72, 600]);
+sanitization package skeleton (orchestrator, 8-layer guard stack —
+6 functional, 1 partial, 1 stub; cache-key contract; golden-set scorer;
+prompts module; graceful-degradation sentinel accounting); omlx tenancy
+package (4-level priority scheduler + co-residency monitor); identity-half
+gate CI tool; fusion v3 helpers (leg-skip re-norm + bounded page→chunk
+join + RetrievalDebugPayload); C pre-spike harness (Charter §4.2 step 1,
+rendering FUNCTIONAL, ColPali dispatch fenced until operator).
+
+**Tests:** 1306 passed (was 1145; +161 new), 17 skipped (unchanged),
+0 failed.
+
+**See:** [`docs/PLAN_V3.md`](PLAN_V3.md) for the full landed-vs-next
+breakdown including the hand-off note + next executable steps. Phase A
+administrative docs:
+[`PHASE_A_INTENTIONAL_DELTAS.md`](PHASE_A_INTENTIONAL_DELTAS.md),
+[`PHASE_A_SCOPE_NEGOTIATION.md`](PHASE_A_SCOPE_NEGOTIATION.md),
+[`PHASE_A_SKIP_AUDIT.md`](PHASE_A_SKIP_AUDIT.md).
+
+**Reversibility:** `git revert f581cff 02fdf25 eb7db72` restores v2.16
+state without touching anything else.
 
 ## Current Objective
 

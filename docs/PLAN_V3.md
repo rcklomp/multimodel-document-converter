@@ -19,38 +19,102 @@ Per Charter §4:
 | **C** | Visual Retrieval (ColPali) | 12d | NOT STARTED |
 | **D** | Modality-Aware Gates | 12d | NOT STARTED |
 
-## Foundation work (2026-05-26 autonomous session)
+## Foundation work — LANDED (2026-05-26 autonomous session)
 
 **Scope:** purely additive scaffolding. No modifications to v2.16 production
-code paths. v2.16 must remain runnable + reversible by `git revert` of the
-foundation commits.
+code paths. v2.16 remains runnable + reversible by `git revert` of the
+three foundation commits.
 
-Tasks attempted in this session (∼9 hour autonomous block):
+**Commits (reverse chronological):**
+- `f581cff` — identity-half gate + C pre-spike harness + fusion v3 helpers
+- `02fdf25` — sanitization + omlx scaffolding (Phase B + C contract)
+- `eb7db72` — UIR contract types + ConversionPlan + Phase A admin docs
+
+**Tests:** baseline 1145 → 1306 passing (+161 new V3 tests across 5 files);
+skipped count unchanged at 17; zero failures.
+
+### What landed
 
 1. **Docs scaffolding** — this plan + Phase A administrative templates
    ([`PHASE_A_INTENTIONAL_DELTAS.md`](PHASE_A_INTENTIONAL_DELTAS.md),
    [`PHASE_A_SCOPE_NEGOTIATION.md`](PHASE_A_SCOPE_NEGOTIATION.md),
-   [`PHASE_A_SKIP_AUDIT.md`](PHASE_A_SKIP_AUDIT.md)).
-2. **V3 UIR contract types** — additive to
+   [`PHASE_A_SKIP_AUDIT.md`](PHASE_A_SKIP_AUDIT.md) — 17 tests classified).
+2. **V3 UIR contract types** — additive in
    [`src/mmrag_v2/universal/intermediate.py`](../src/mmrag_v2/universal/intermediate.py):
-   `Modality`, `StructuralFlag`, `LocatorType`, `CoordinateFrame`,
-   `ExtractionWarning`, `Locator`, `ConfidenceBreakdown`, `UIRChunk`.
-3. **`ConversionPlan` parent class** — new file
+   `Modality` (5-value: TEXT/IMAGE/TABLE/CODE/FORM), closed-vocabulary
+   `StructuralFlag` (12 values including `PARTIAL_CODE_CROSS_PAGE`,
+   `PARTIAL_TABLE_CROSS_PAGE` reserved), `LocatorType`, `CoordinateFrame`,
+   `ExtractionWarning`, `Locator` (with REQ-COORD-01 validation),
+   `ConfidenceBreakdown` (single-sentinel + applicable Set per §3.2),
+   `UIRChunk` (provenance fields + `continuation_group_id` + `uir_version`
+   per Draft 0.5 audit A2 #1 + #5).
+3. **`ConversionPlan` parent class** —
    [`src/mmrag_v2/universal/conversion_plan.py`](../src/mmrag_v2/universal/conversion_plan.py)
-   with `render_dpi` validation `[72, 600]` per Charter §3.2.
-4. **Sanitization package** scaffolding — new
+   with `render_dpi` validation `[72, 600]` per Charter §3.2 (Draft 0.5
+   audit A2 #4); `engine_options` opaque blob for Docling-specific toggles.
+4. **Sanitization package** —
    [`src/mmrag_v2/sanitization/`](../src/mmrag_v2/sanitization/)
-   subpackage per Charter §5.1:
-   - `orchestrator.py` — mode flag handling stub
-   - `llm_sanitizer.py` — GX10 client + cache stub
-   - `guards/` — 8 guard stubs (one file per guard)
-   - `golden_set.py`, `prompts.py`, `graceful_degradation.py`
-5. **omlx package** scaffolding per §7.7 tenancy policy:
-   - `omlx/scheduler.py`, `omlx/coresidency_monitor.py`
-6. **A8 skipped-tests audit** — classify each currently-skipped test
-   (still-skip / re-enable-now / re-enable-post-A) per Charter Phase A task A8.
-7. **C pre-spike harness** — scripted skeleton for the 2-hour falsification
-   test per Charter §4.2 step 1.
+   per Charter §5.1:
+   - `orchestrator.py` — `SanitizationMode` enum (off/llm/heuristic/
+     both-and-diff); only OFF currently dispatches non-trivially
+   - `llm_sanitizer.py` — content-pinning cache key contract per §7.4
+     (FUNCTIONAL); `sanitize_via_llm()` fenced with `NotImplementedError`
+     until Phase B
+   - `guards/` — 8-layer stack per §3.3:
+     - 1 edit_distance, 3 code_span, 4 order_preservation, 5 token_alignment,
+       6 prompt_boundary, 8 dedup_ratio: **FUNCTIONAL** (Levenshtein /
+       regex / SHA-256 / Jaccard shingles)
+     - 2 numeric_entity: **PARTIAL** (regex tier shipped; spaCy NER
+       deferred — Phase B can `pip install spacy` if needed)
+     - 7 entity_relation: **STUB** (returns sentinel `metric_value=-1.0`
+       so its absence is observable rather than silent; requires spaCy
+       dep parse)
+   - `golden_set.py` — immutable JSONL schema + 50-chunk dominance scorer
+     per §3.3 #5 (file empty until Phase B B2)
+   - `prompts.py` — versioned template + git-hash `prompt_version()` per
+     §7.4 cache-key contract; cost note enforced per §3.3 prompt-migration
+     cost
+   - `graceful_degradation.py` — `SentinelAccount` with 5%-rate
+     `LLM_SENTINEL_DEGRADED` marker per §3.3
+5. **omlx package** —
+   [`src/mmrag_v2/omlx/`](../src/mmrag_v2/omlx/) per Charter §7.7:
+   - `scheduler.py` — 4-level priority queue (QUERY_TEXT_EMBED <
+     QUERY_RERANK < QUERY_VISUAL_EMBED < INGEST_VISUAL_EMBED); FIFO
+     within priority; latency budget constants from §7.7 #5;
+     query-path queue-depth limit (3) from §7.7 failure mode
+   - `coresidency_monitor.py` — rolling 60s eviction window per §7.6;
+     `is_forkback_triggered()` implements R6 signal (>1 eviction/min)
+6. **Identity-half gate** —
+   [`src/mmrag_v2/v3_identity_gate.py`](../src/mmrag_v2/v3_identity_gate.py)
+   per Charter §3.2 + §8.2:
+   - §8.2 normalization rules: metadata-field drop, confidence ±0.01,
+     structural_flags additive (handles v2.X Dict[str, bool] AND v3 Set)
+   - Stable identity key (doc_id|page|content-hash) with NFC + CRLF→LF +
+     trailing-whitespace strip per §3.2
+   - Content projection NFC + CRLF→LF + trailing-strip; internal
+     whitespace difference IS a real delta (Charter "modulo trailing
+     whitespace" strict)
+   - CLI: `python -m mmrag_v2.v3_identity_gate --baseline ... --candidate ...`
+   - Phase A A2 / A5 will use this as the "did this refactor break
+     anything" feedback loop
+7. **Fusion v3 helpers** —
+   [`src/mmrag_v2/retrieval/fusion_v3.py`](../src/mmrag_v2/retrieval/fusion_v3.py)
+   per Charter §3.4 + §7.8:
+   - `renormalize_on_leg_skip()` — L2 norm per §3.4 #6 (PROSE
+     (1.0, 1.0, 0.1) with visual skipped → (0.707, 0.707))
+   - `bounded_page_chunk_join()` — top-N per page per §3.4 #4
+     (REPLACES Draft 0.3 broadcast)
+   - `RetrievalDebugPayload` dataclass per §7.8 (Draft 0.5 audit C10
+     on-demand per-query inspection without global tracing)
+8. **C pre-spike harness** —
+   [`scripts/v3_c_prespike.py`](../scripts/v3_c_prespike.py) per
+   Charter §4.2 step 1:
+   - 200 DPI PyMuPDF rendering — FUNCTIONAL on real PDFs
+   - MaxSim numpy implementation per §3.4 #3 — FUNCTIONAL
+   - ColPali dispatch — fenced with `NotImplementedError` until operator
+     installs `colpali-engine` (`--colpali-mode local`) or wires HF
+     Spaces or omlx (`--colpali-mode hf-spaces|omlx`)
+   - Dry-run validated against the actual `ATZ_Elektronik` PDF in tree
 
 ## NOT done in foundation session
 
@@ -94,12 +158,64 @@ touching anything else.
 
 In rough priority order (the Charter governs):
 
-1. **Charter §4.2 Step 1**: execute the 2-hour C pre-spike using the
-   harness from this session against a workstation off-the-shelf ColPali
-   inference (HF Spaces or local) and the gold + 3 distractor pages
-   from `ATZ_Elektronik_German`.
-2. **A0**: per-doc spike on `ATZ_Elektronik_German` using the V3 UIR
-   types — does the semantic-identity gate pass on this doc alone
-   with both halves (identity ≥95% + explained-delta ≤5%)?
-3. Decide scope-negotiation outcome per Charter §Phase A protocol:
-   full UIR refactor vs UIR-shim fallback.
+1. **Charter §4.2 step 1** — execute the 2-hour C pre-spike using the
+   harness from this session against off-the-shelf ColPali (`pip install
+   colpali-engine` on the workstation; or HF Spaces). Suggested target:
+   `data/technical_report/ATZ.Elektronik...pdf` page 4 vs distractors
+   1, 2, 5 with query "Schaltbild eines NPN-Transistor-Verstärkers"
+   (the actual gold-page identification needs operator review against
+   `ATZ_Elektronik_German` content first). If PASS: Phase C is viable.
+   If FAIL: redirect to VLM-native parsing evaluation per §4.2 outcome
+   rules.
+2. **Charter Phase A task A0** — per-doc spike on `ATZ_Elektronik_German`
+   using the V3 UIR types. Convert one doc through the
+   (foundation-shipped) ConversionPlan + ConfidenceBreakdown +
+   StructuralFlag types and compare to the v2.16 baseline via
+   `mmrag_v2.v3_identity_gate`. Per Charter §Phase A A0 acceptance:
+   semantic-identity gate passes on this doc alone (both halves);
+   intentional deltas list ≤30 lines. If A0 exceeds 4 days OR
+   explained-delta exceeds 5%, the Phase A scope-negotiation protocol
+   fires (see [`PHASE_A_SCOPE_NEGOTIATION.md`](PHASE_A_SCOPE_NEGOTIATION.md))
+   — pick from options (a) defer subset, (b) UIR-shim fallback,
+   (c) widen tolerance, (d) split A2 across cycles, OR invoke
+   content-derived `chunk_id` (regret #4 contingent option).
+3. **Decide scope-negotiation outcome** per Charter §Phase A protocol
+   BEFORE committing to A2's full chunker/mapper/serializer rewrite.
+   Default plan: full UIR refactor; fallback: UIR-shim (Charter §Phase A
+   "preferred fallback because it preserves the C13/R15 chunk_id
+   stability contract while reducing the refactor surface by ~50%").
+4. **A7 (last 6h of Phase A)** — three consecutive heuristic-only soak
+   runs to baseline σ per axis. Phase B's dominance criterion gates on
+   σ, so this is unblock work for Phase B.
+5. **A8 re-enable post-A** — verify the 9 tests classified as
+   `re-enable-post-A` in [`PHASE_A_SKIP_AUDIT.md`](PHASE_A_SKIP_AUDIT.md)
+   still pass with their env-gates ON after the UIR refactor lands.
+6. **A9** — acquire 5-of-8 holdout documents before Phase A start
+   (per Charter §3.5 #5 acquisition plan).
+
+## Hand-off note (foundation-session author)
+
+The foundation session deliberately did NOT touch v2.16 production
+paths. All work is additive — new files, new tests, new packages — so
+the only way for the foundation to break v2.16 is by importing a v3
+type into a v2.X production module (which no foundation code does).
+Verification: `pytest tests/` reports 1306 passed / 17 skipped / 0
+failed, same skip count as v2.16 baseline.
+
+The Charter scope-negotiation protocol (Charter §Phase A) is the most
+important safety mechanism for the next step. Phase A's 24-day budget
+is "a working assumption, not a guarantee" (Charter §Phase A, R22).
+A0 (per-doc spike) MUST land before A2 is committed to, because A0's
+evidence determines whether the full refactor is the right scope or
+the UIR-shim fallback should ship. Three foundation deliverables are
+designed to feed A0:
+  - `mmrag_v2.universal.intermediate.UIRChunk` for the v3 emission target
+  - `mmrag_v2.v3_identity_gate.compare_for_identity()` for the
+    feedback loop
+  - `docs/PHASE_A_INTENTIONAL_DELTAS.md` for the explained-delta
+    enumeration
+
+The C pre-spike is cheap and decisive — Charter §4.2 step 1 budgets
+2 hours of operator time. Running it BEFORE A0 is fine because the
+pre-spike does not depend on UIR (it embeds rendered page images).
+A FAIL here saves the entire ~12-day Phase C from being scheduled.
