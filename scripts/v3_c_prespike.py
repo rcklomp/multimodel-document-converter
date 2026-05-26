@@ -140,6 +140,89 @@ DEFAULT_LOCAL_COLPALI_MODEL = "vidore/colpali-v1.3"
 _LOCAL_MODEL_CACHE: dict = {}
 
 
+def _remap_colpali_lora_keys(checkpoint_keys, model_keys):
+    """Build a key-rename map from PaliGemma-pre-5.x checkpoint to transformers-5.x model.
+
+    `colpali-engine` ships LoRA adapters keyed on the pre-transformers-5.x
+    PaliGemma attribute path (`model.language_model.model.layers.*`) wrapped
+    in the PEFT `base_model.model.` prefix with `.lora_A.weight` /
+    `.lora_B.weight` suffixes. The current model expects the
+    transformers-5.x path (`model.model.language_model.layers.*`) with
+    `.lora_A.default.weight` / `.lora_B.default.weight` suffixes (and
+    no PEFT prefix because ColPali's `from_pretrained` builds the LoRA
+    structure into the model class directly rather than via PeftModel).
+
+    Pure-string transformation; no model inspection beyond key sets so
+    this function is testable in isolation.
+    """
+    import re
+
+    def remap(k: str) -> str:
+        if k.startswith("base_model.model."):
+            k = k[len("base_model.model."):]
+        k = k.replace(
+            "model.language_model.model.layers.",
+            "model.model.language_model.layers.",
+        )
+        k = re.sub(r"\.lora_A\.weight$", ".lora_A.default.weight", k)
+        k = re.sub(r"\.lora_B\.weight$", ".lora_B.default.weight", k)
+        return k
+
+    model_key_set = set(model_keys)
+    mapping = {}
+    unmatched = []
+    for k in checkpoint_keys:
+        nk = remap(k)
+        if nk in model_key_set:
+            mapping[k] = nk
+        else:
+            unmatched.append((k, nk))
+    return mapping, unmatched
+
+
+def _apply_colpali_lora_adapter(model, model_id: str) -> int:
+    """Manually load + remap the ColPali LoRA adapter into the model.
+
+    Returns the number of keys successfully applied. Bypasses the
+    standard `from_pretrained` adapter loader because the checkpoint
+    key naming was pinned for pre-transformers-5.x and the current
+    transformers (5.x) attribute paths don't match.
+    """
+    from huggingface_hub import hf_hub_download
+    from safetensors.torch import load_file
+
+    log = logging.getLogger("v3_c_prespike")
+    fn = hf_hub_download(model_id, "adapter_model.safetensors")
+    ckpt = load_file(fn)
+    model_sd = model.state_dict()
+    mapping, unmatched = _remap_colpali_lora_keys(list(ckpt), list(model_sd))
+    if unmatched:
+        log.warning(
+            "ColPali LoRA remap: %d/%d keys did not match the model; "
+            "first unmatched: %s",
+            len(unmatched), len(ckpt), unmatched[0],
+        )
+    log.info(
+        "ColPali LoRA remap: applying %d of %d adapter weights",
+        len(mapping), len(ckpt),
+    )
+    # Write the remapped tensors into the model's parameters in-place.
+    applied = 0
+    for ckpt_key, model_key in mapping.items():
+        target = model_sd[model_key]
+        source = ckpt[ckpt_key].to(target.dtype).to(target.device)
+        if target.shape != source.shape:
+            log.warning(
+                "Shape mismatch on %s: model=%s ckpt=%s — skipping",
+                model_key, tuple(target.shape), tuple(source.shape),
+            )
+            continue
+        with __import__("torch").no_grad():
+            target.copy_(source)
+        applied += 1
+    return applied
+
+
 def _load_local_colpali(model_id: str):
     """Load ColPali model + processor lazily; cache for reuse within process."""
     if model_id in _LOCAL_MODEL_CACHE:
@@ -171,6 +254,14 @@ def _load_local_colpali(model_id: str):
         device_map=device,
     ).eval()
     processor = ColPaliProcessor.from_pretrained(model_id)
+    # Patch in the LoRA adapter manually — transformers 5.x renamed the
+    # PaliGemma attribute paths and the standard adapter loader silently
+    # leaves the LoRA weights at their initialization. Without this
+    # patch, the model runs as raw PaliGemma + a randomly-initialized
+    # projection head, which still works (gold ranks first) but with
+    # much thinner margins than the trained ColPali.
+    applied = _apply_colpali_lora_adapter(model, model_id)
+    log.info("ColPali LoRA adapter: %d weights applied", applied)
     _LOCAL_MODEL_CACHE[model_id] = (model, processor, device)
     return model, processor, device
 

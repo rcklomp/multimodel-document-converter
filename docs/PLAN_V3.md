@@ -171,13 +171,17 @@ In rough priority order (the Charter governs):
    §4.2 step 1 outcome rule.
 1b. **Charter §4.2 step 2 (C-spike, 2-3 days)** — NEXT executable step.
    Single-doc full quantitative test with 20 queries from the v2.16
-   regression fixture targeting `ATZ_Elektronik_German`. Resolve the
-   LoRA attribute-path issue identified in the pre-spike before
-   running so PASS A (page recovery ≥60%) and PASS B (reranker
-   discrimination ≥60%) are measured against a correctly-loaded
-   model. Co-residency check (Charter §4.2 step 2 #9) validates
-   ColPali fits alongside Qwen3-Embedding-8B on omlx per
-   `src/mmrag_v2/omlx/scheduler.py` tenancy policy.
+   regression fixture targeting `ATZ_Elektronik_German`. **LoRA
+   attribute-path issue resolved** in commit following the pre-spike
+   (see `scripts/v3_c_prespike.py::_apply_colpali_lora_adapter` +
+   `tests/test_v3_c_prespike_harness.py::TestColPaliLoraRemap`); 254/254
+   adapter weights apply cleanly. C-spike can run against the same
+   harness path. PASS A (page recovery ≥60%) and PASS B (reranker
+   discrimination ≥60%) measured against the post-LoRA baseline:
+   3.2% margin on primary, 23% on sensitivity. Co-residency check
+   (Charter §4.2 step 2 #9) validates ColPali fits alongside
+   Qwen3-Embedding-8B on omlx per `src/mmrag_v2/omlx/scheduler.py`
+   tenancy policy.
 2. **Charter Phase A task A0** — per-doc spike on `ATZ_Elektronik_German`
    using the V3 UIR types. Convert one doc through the
    (foundation-shipped) ConversionPlan + ConfidenceBreakdown +

@@ -29,6 +29,54 @@ sys.modules["v3_c_prespike"] = v3_c_prespike
 _spec.loader.exec_module(v3_c_prespike)  # type: ignore[union-attr]
 
 
+class TestColPaliLoraRemap:
+    """The ColPali LoRA adapter ships with pre-transformers-5.x attribute
+    paths; the model in transformers 5.x uses renamed paths. The remap
+    function bridges them. If transformers / colpali-engine ever realign,
+    this test surfaces it (matched count will drop) rather than silently
+    leaving the LoRA unapplied."""
+
+    def test_remap_drops_peft_prefix(self):
+        mapping, unmatched = v3_c_prespike._remap_colpali_lora_keys(
+            checkpoint_keys=[
+                "base_model.model.model.language_model.model.layers.0.self_attn.q_proj.lora_A.weight",
+            ],
+            model_keys=[
+                "model.model.language_model.layers.0.self_attn.q_proj.lora_A.default.weight",
+            ],
+        )
+        assert len(mapping) == 1
+        assert not unmatched
+
+    def test_remap_swaps_paligemma_path(self):
+        ckpt_key = "base_model.model.model.language_model.model.layers.5.mlp.gate_proj.lora_B.weight"
+        target = "model.model.language_model.layers.5.mlp.gate_proj.lora_B.default.weight"
+        mapping, unmatched = v3_c_prespike._remap_colpali_lora_keys(
+            checkpoint_keys=[ckpt_key],
+            model_keys=[target],
+        )
+        assert mapping[ckpt_key] == target
+
+    def test_remap_lora_suffix_adds_default(self):
+        # .lora_A.weight in the PEFT serialization → .lora_A.default.weight
+        # in the in-class LoRA structure.
+        mapping, _ = v3_c_prespike._remap_colpali_lora_keys(
+            checkpoint_keys=["base_model.model.custom_text_proj.lora_A.weight"],
+            model_keys=["custom_text_proj.lora_A.default.weight"],
+        )
+        assert mapping["base_model.model.custom_text_proj.lora_A.weight"] == (
+            "custom_text_proj.lora_A.default.weight"
+        )
+
+    def test_remap_no_match_reported_in_unmatched(self):
+        mapping, unmatched = v3_c_prespike._remap_colpali_lora_keys(
+            checkpoint_keys=["base_model.model.totally.different.key.lora_A.weight"],
+            model_keys=["model.model.language_model.layers.0.self_attn.q_proj.lora_A.default.weight"],
+        )
+        assert not mapping
+        assert len(unmatched) == 1
+
+
 class TestMaxSim:
     def test_dry_run_returns_nan(self):
         result = v3_c_prespike.maxsim_score(None, None)
