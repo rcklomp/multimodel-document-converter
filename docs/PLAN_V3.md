@@ -189,22 +189,52 @@ In rough priority order (the Charter governs):
    Q13 demonstrate rescue of visual-only-failures via text-leg
    candidates in the union) — the cap is page-level granularity.
 
-1c. **NEXT executable step — operator decision required.** Three options
-   per `V3_C_SPIKE_REPORT.md` §"Charter outcome + recommendation":
+1c. **Phase C outcome — LOCKED 2026-05-26 PM: region-level scope expansion.**
 
-   (a) **Strict Charter §4.2 outcome rule:** PASS A FAIL → "Phase C as
-       designed is dead; redirect to VLM-native parsing evaluation or
-       alternative visual model."
-   (b) **Sequenced falsification (operator's recommended path):** re-run
-       the same C-spike harness with `--model-id vidore/colqwen2.5-v0.2`
-       (or similar). If PASS A + PASS B improve materially, the model
-       was the limit. If not, region-level granularity is the binding
-       constraint — expand Phase C scope per Charter §4.2 step 2 #8
-       PASS B FAIL outcome rule.
-   (c) **Defer with larger-fixture test:** build a 50+ query per-chunk
-       gold fixture for ATZ before re-evaluating. Charter PASS B
-       requires fixture-based gold; the page-level proxy used here is
-       looser.
+   The strict Charter §4.2 outcome rule on PASS A FAIL reads "Phase C as
+   designed is dead; redirect to VLM-native or alternative visual model."
+   The diagnostic evidence in [`V3_C_SPIKE_REPORT.md`](V3_C_SPIKE_REPORT.md)
+   is more precise: the failure mode is page-1 over-pull on body-text
+   queries (page-level granularity cap), the hybrid bounded-join
+   mechanism IS working (Q07/Q08/Q13 rescued visual-only-failed queries),
+   visual+text legs are demonstrably complementary (different 4/20 each).
+   The model itself is not the binding constraint — granularity is.
+
+   ColQwen2.5 falsification attempt was killed at user request after the
+   run produced all-NaN MaxSim scores (likely MPS bfloat16 instability
+   on Qwen2.5-VL; debugging deferred). The verdict locked here does NOT
+   depend on that debug because the failure mode is granularity-driven,
+   not modality-driven — swapping ColPali variants would test the wrong
+   axis.
+
+   **Decision:** Phase C task C3 (visual index build) is rescheduled to
+   be region-level from the start. Region = a single chunk's bbox crop
+   at 200 DPI, embedded as a ColPali patch-vector matrix. MaxSim then
+   operates at chunk-level (replacing the bounded page-to-chunk join
+   which was a workaround). Charter §3.4 #4 bounded join + Charter §4.2
+   step 2 #8 PASS B FAIL outcome rule both fold into a single design
+   decision: chunks ARE the retrieval unit on the visual leg too.
+
+   No more local ColPali / ColQwen runs from this workstation. Phase C
+   C2 (omlx ColPali deployment) is the next ColPali-touching milestone
+   and that happens on the LAN GPU server, not the dev workstation.
+
+1d. **Phase A task A0 (per-doc spike) — ✅ COMPLETE 2026-05-26 PM, VERDICT PASS.**
+   Report: [`V3_PHASE_A_A0_REPORT.md`](V3_PHASE_A_A0_REPORT.md).
+   Identity ratio 1.0000 (62/62 distinct identity keys matched); 0 deltas
+   to enumerate (cap ≤30). 24-day Phase A budget is justified by
+   evidence; no scope-negotiation trigger fires. The v3.0 UIR contract
+   (Modality, Locator, ConfidenceBreakdown, UIRChunk, StructuralFlag)
+   carries v2.X chunk content losslessly under §8.2 normalization rules.
+
+   Pure CPU + file I/O. No GPU, no omlx, no Qdrant. Wall time <1s.
+
+1e. **NEXT executable step — Phase A task A1.** Refactor
+   `engines/pdf_plan.py::PdfConversionPlan` to inherit from the
+   foundation-shipped `universal/conversion_plan.py::ConversionPlan`
+   parent. Existing tests must pass without modification (Charter A1
+   acceptance). No re-extraction work yet — A2 is the chunker /
+   serializer rewrite that follows.
 2. **Charter Phase A task A0** — per-doc spike on `ATZ_Elektronik_German`
    using the V3 UIR types. Convert one doc through the
    (foundation-shipped) ConversionPlan + ConfidenceBreakdown +

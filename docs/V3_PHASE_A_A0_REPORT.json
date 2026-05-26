@@ -1,0 +1,14 @@
+{
+  "target_doc_id": "6fccda8bd625",
+  "source_path": "output/ATZ_Elektronik_German/ingestion.jsonl",
+  "v2x_chunk_count": 63,
+  "v3_uirchunk_count": 63,
+  "identity_ratio": 1.0,
+  "matched": 62,
+  "differing": 0,
+  "missing": 0,
+  "new_in_candidate": 0,
+  "sample_differing_keys": [],
+  "sample_missing_keys": [],
+  "mapper_errors": []
+}
