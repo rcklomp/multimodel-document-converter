@@ -49,7 +49,7 @@ v2.X -> v3.0 field map:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .intermediate import (
     ConfidenceBreakdown,
@@ -85,6 +85,62 @@ _MODALITY_MAP = {
 # extraction-method-vocabulary normalization is an A2 concern.
 
 
+# Legacy v2.X categorical ocr_confidence values observed in real corpus
+# outputs (Earthship_Vol1, others — 982 occurrences across 53 outputs as
+# of 2026-05-27 corpus survey). The v3.0 contract uses numeric
+# confidence in [0, 1]; we map the 3-level categorical to representative
+# midpoints. The mapping is applied identically by the baseline
+# projection (uir_exporter._baseline_identity_projection) so the
+# identity gate sees the same float on both sides.
+#
+# These numbers are NOT calibrated against OCR accuracy ground truth.
+# They are conventional midpoints (~0.5 / ~0.75 / ~0.95) for low /
+# medium / high qualitative bands. Phase B sanitization is the right
+# place to revisit if downstream Quality work depends on these values.
+_CATEGORICAL_OCR_CONFIDENCE = {
+    "high": 0.95,
+    "medium": 0.75,
+    "low": 0.50,
+}
+
+
+def normalize_ocr_confidence(value: Any) -> Optional[float]:
+    """Coerce a v2.X ocr_confidence value to Optional[float] in [0, 1].
+
+    Handles three shapes observed in v2.X outputs:
+      - None / missing                         → None
+      - numeric (int / float)                  → float(value)
+      - legacy categorical string              → mapped float per
+        `_CATEGORICAL_OCR_CONFIDENCE`
+      - unrecognized string                    → None (warned)
+
+    Returning None for unrecognized strings is the conservative choice;
+    the identity gate's confidence-rounding rule (Charter §8.2 ±0.01)
+    tolerates None == None equality on both sides.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        key = value.strip().lower()
+        mapped = _CATEGORICAL_OCR_CONFIDENCE.get(key)
+        if mapped is not None:
+            return mapped
+        logger.warning(
+            "Unrecognized v2.X ocr_confidence value %r; treating as None. "
+            "Add to _CATEGORICAL_OCR_CONFIDENCE if this is a known v2.X "
+            "categorical, or fix the producer if it should be numeric.",
+            value,
+        )
+        return None
+    logger.warning(
+        "Unexpected v2.X ocr_confidence type %s (value=%r); treating as None.",
+        type(value).__name__, value,
+    )
+    return None
+
+
 def map_v2x_to_v3_uirchunk(v2x_chunk: Dict[str, Any]) -> UIRChunk:
     """Project a single v2.X IngestionChunk dict to a v3.0 UIRChunk.
 
@@ -114,20 +170,27 @@ def map_v2x_to_v3_uirchunk(v2x_chunk: Dict[str, Any]) -> UIRChunk:
     bbox_raw = spatial.get("bbox") if isinstance(spatial, dict) else None
 
     if bbox_raw is None or page_number is None:
-        # Allow image-modality chunks without bbox to fall back to a
-        # FLOW_OFFSET locator at the page level. v2.X image chunks
-        # occasionally omit a precise bbox.
-        if modality == Modality.IMAGE and page_number is not None:
+        # When bbox is missing but page_number is known, fall back to a
+        # FLOW_OFFSET locator at page-level. v2.X has three legitimate
+        # sources of missing bbox:
+        #   - IMAGE chunks where the producer omitted spatial
+        #   - TEXT chunks emitted by the recovery_scan path
+        #     (e.g. Fluent_Python p008 — content extracted but no
+        #     layout-model bbox)
+        #   - any chunk emitted by a non-Docling fallback engine
+        # When BOTH bbox and page_number are missing, the chunk truly
+        # has no source-location at all; raise rather than fabricate.
+        if page_number is not None:
             locator = Locator(
                 type=LocatorType.FLOW_OFFSET,
-                page_number=page_number,
+                page_number=int(page_number),
                 coordinate_frame=CoordinateFrame.UNKNOWN,
-                path=f"page:{page_number}:image",
+                path=f"page:{int(page_number)}:{modality.value}",
             )
         else:
             raise ValueError(
-                f"v2.X chunk {v2x_chunk.get('chunk_id')!r} missing "
-                "page_number or bbox required for BBOX locator"
+                f"v2.X chunk {v2x_chunk.get('chunk_id')!r} missing both "
+                "page_number AND bbox; no source-location can be recovered"
             )
     else:
         # v2.X already stores bbox in [0,1000] normalized integers
@@ -142,9 +205,11 @@ def map_v2x_to_v3_uirchunk(v2x_chunk: Dict[str, Any]) -> UIRChunk:
         )
 
     # --- confidence ---
-    ocr_conf = metadata.get("ocr_confidence")
+    # v2.X stored ocr_confidence as either numeric (float in [0,1]) or
+    # as legacy 3-level categorical string ("high"/"medium"/"low") in
+    # older outputs. `normalize_ocr_confidence` handles both shapes.
     confidence = ConfidenceBreakdown(
-        ocr_confidence=float(ocr_conf) if ocr_conf is not None else None,
+        ocr_confidence=normalize_ocr_confidence(metadata.get("ocr_confidence")),
     )
 
     # --- structural / hierarchy ---

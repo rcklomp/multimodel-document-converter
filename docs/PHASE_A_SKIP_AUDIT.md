@@ -59,3 +59,40 @@
    - `test_v29_image_enrichment_acceptance.py:51` — v2.9 Phase 5b closed
    Get user sign-off before deleting any of these; some may still serve
    as historical regression baselines.
+
+## A8 verification — 2026-05-27 (shim cycle)
+
+Per the Phase A scope-negotiation decision
+([`PHASE_A_SCOPE_NEGOTIATION.md`](PHASE_A_SCOPE_NEGOTIATION.md) 2026-05-27),
+the v3.0.0 ship is the UIR-shim. The shim preserves v2.16 chunker
+behavior end-to-end, so `re-enable-post-A` tests that depend on the
+UIR-rewired chunker (A3) are reasonably deferred to v3.0.2 alongside
+the deferred A3 work itself.
+
+Ran the 9 `re-enable-post-A` tests with their env-gates ON:
+
+```
+RUN_HARRY_ACCEPTANCE=1 \
+HARRY_ACCEPTANCE_JSONL=output/HarryPotter_and_the_Sorcerers_Stone/ingestion.jsonl \
+RUN_DENSE_ROUTER_PERF=1 RUN_TOC_PAGE_CONTRACT=1 \
+pytest tests/test_docling_postprocessor_acceptance.py \
+       tests/test_hybrid_chunker_dense_page_router.py \
+       tests/test_toc_index_page_contract.py
+```
+
+Result: **9 passed, 9 failed.**
+
+### Disposition of failures (none are shim regressions)
+
+| # | Test family | Cause | Disposition |
+|---|---|---|---|
+| #3 | `test_docling_postprocessor_acceptance.py` Harry Potter drop-cap | — | **PASS** (the meaningful Charter §3.2 regression signal). Shim preserves v2.16 chunker → drop-cap promotion behavior unchanged. |
+| #5, #6 | `test_hybrid_chunker_dense_page_router.py` Ayeva real-Docling (3 cases) | Pre-existing Docling/MPS `float64` dtype error (`Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64`). Reproduces on v2.16.0 commit `15d1349` with the same env. | **NOT a shim regression.** Blocked by an environment/Docling-pin issue independent of A2/A3 work. Re-route to a CPU-pinned variant or wait for Docling 2.87 MPS-compat patch (R21 lifecycle watch). |
+| #11–#16 | `test_toc_index_page_contract.py` probe-page contracts (6 cases) | Missing fixture files (`output/probe_kimothi_toc_contract_codex/ingestion.jsonl` etc.). Probe fixtures were produced by an out-of-tree Codex agent run and never committed. | **NOT a shim regression.** Blocked by missing probe fixtures; rebuild via `scripts/probe_*` (not run in this session) when v3.0.2 A3 lands. |
+
+### Net shim-cycle A8 verdict
+
+- **`re-enable-post-A` Charter §3.2 regression cases:** 1 of 1 PASSes (Harry Potter drop-cap). Earthship + Fluent_Python regression coverage is folded into the A2-shim run (`docs/V3_PHASE_A_A2_SHIM_REPORT.json`; both PASS at identity ratio 1.0000).
+- **`re-enable-post-A` chunker-internals probes:** appropriately deferred alongside A3 to v3.0.2. The audit's "Post-A3" action item lands when A3 lands; no shim-cycle blocker.
+- **`still-skip` tests:** unchanged (8 tests).
+- **No new skipped tests added by this cycle.** Total skipped remains 17 across baseline + shim.

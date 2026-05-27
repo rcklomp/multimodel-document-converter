@@ -1,0 +1,33 @@
+# V3.0.0 chunk_id rewrite map (shim cycle)
+#
+# Charter: docs/ARCHITECTURE_V3_DRAFT_0.5.md Phase A task A6 / C13 / R15 /
+# §7.12 cumulative chunk_id rewrite map.
+#
+# Per the 2026-05-27 Phase A scope-negotiation decision
+# (docs/PHASE_A_SCOPE_NEGOTIATION.md), v3.0.0 ships under option (b)
+# UIR-shim. The shim preserves the v2.16 chunker output unchanged and
+# projects existing v2.X chunks to v3.0 UIRChunks at the export boundary
+# via v2x_to_v3_mapper (proven lossless: A0 verdict PASS at identity
+# ratio 1.0000 on ATZ_Elektronik_German; A2-shim verdict PASS at
+# identity ratio 1.0000 on Earthship_Vol1.phase3_baseline + Fluent_Python
+# + HarryPotter — 3,890 chunks total).
+#
+# Consequence: NO chunk_ids change between v2.16 and v3.0.0. The
+# rewrite-map mechanism per C13/R15 is honored by publishing this file
+# (a row count of zero is a valid map) and downstream consumers can
+# confirm via this file that no migration work is required against v3.0.0.
+#
+# The full chunker / mapper / serializer rewrite (Charter Phase A task A2
+# in its non-shim form) is rebooked to v3.0.2 under a future dedicated
+# cycle plan. The v3.0.2 rewrite-map will live at
+# docs/CHUNK_ID_REWRITE_MAP_3.0.2.csv and per §7.12 will be cumulative
+# (v3.0.0 -> v3.0.2 transitively composed with this empty map = the
+# v3.0.2 rewrite only).
+#
+# Columns:
+#   v2.16.0_chunk_id      — chunk_id as emitted by v2.16.0 ingestion
+#   v3.0.0_chunk_id       — chunk_id as emitted by v3.0.0 ingestion
+#   reason                — short tag for why this chunk_id changed
+#                           (e.g., "reading_order_rewrite",
+#                           "modality_widening", "content_normalization")
+v2.16.0_chunk_id,v3.0.0_chunk_id,reason

@@ -40,6 +40,7 @@ from typing import Any, Dict, List, Optional
 
 from mmrag_v2.universal.v2x_to_v3_mapper import (
     map_v2x_corpus_to_v3,
+    normalize_ocr_confidence,
     uirchunk_to_identity_projection,
 )
 from mmrag_v2.v3_identity_gate import compare_for_identity
@@ -108,9 +109,12 @@ def baseline_projection(chunk: Dict[str, Any], doc_id: str) -> Dict[str, Any]:
     parent_heading = hierarchy.get("parent_heading") if isinstance(hierarchy, dict) else None
     if parent_heading is not None:
         payload["parent_heading"] = parent_heading
-    ocr_conf = metadata.get("ocr_confidence")
+    # Categorical-aware (legacy "high"/"medium"/"low" maps to numeric);
+    # mirrors uir_exporter._baseline_identity_projection so the A2-shim
+    # exporter and the A0 spike see the same baseline shape.
+    ocr_conf = normalize_ocr_confidence(metadata.get("ocr_confidence"))
     if ocr_conf is not None:
-        payload["confidence_breakdown"] = {"ocr_confidence": float(ocr_conf)}
+        payload["confidence_breakdown"] = {"ocr_confidence": ocr_conf}
     return payload
 
 

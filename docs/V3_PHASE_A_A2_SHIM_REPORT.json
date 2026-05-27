@@ -1,0 +1,58 @@
+{
+  "doc_count": 4,
+  "all_pass": true,
+  "reports": [
+    {
+      "source_path": "output/ATZ_Elektronik_German/ingestion.jsonl",
+      "output_path": "output/ATZ_Elektronik_German/v3_uir.jsonl",
+      "doc_id": "6fccda8bd625",
+      "v2x_chunk_count": 63,
+      "uir_chunk_count": 63,
+      "mapper_errors": [],
+      "identity_ratio": 1.0,
+      "identity_matched": 62,
+      "identity_differing": 0,
+      "identity_missing": 0,
+      "identity_new": 0
+    },
+    {
+      "source_path": "output/Earthship_Vol1.phase3_baseline/ingestion.jsonl",
+      "output_path": "output/Earthship_Vol1.phase3_baseline/v3_uir.jsonl",
+      "doc_id": "aa11d5ea2275",
+      "v2x_chunk_count": 990,
+      "uir_chunk_count": 990,
+      "mapper_errors": [],
+      "identity_ratio": 1.0,
+      "identity_matched": 984,
+      "identity_differing": 0,
+      "identity_missing": 0,
+      "identity_new": 0
+    },
+    {
+      "source_path": "output/Fluent_Python/ingestion.jsonl",
+      "output_path": "output/Fluent_Python/v3_uir.jsonl",
+      "doc_id": "1e7e436164a3",
+      "v2x_chunk_count": 2149,
+      "uir_chunk_count": 2149,
+      "mapper_errors": [],
+      "identity_ratio": 1.0,
+      "identity_matched": 2149,
+      "identity_differing": 0,
+      "identity_missing": 0,
+      "identity_new": 0
+    },
+    {
+      "source_path": "output/HarryPotter_and_the_Sorcerers_Stone/ingestion.jsonl",
+      "output_path": "output/HarryPotter_and_the_Sorcerers_Stone/v3_uir.jsonl",
+      "doc_id": "f0a0beca0506",
+      "v2x_chunk_count": 688,
+      "uir_chunk_count": 688,
+      "mapper_errors": [],
+      "identity_ratio": 1.0,
+      "identity_matched": 688,
+      "identity_differing": 0,
+      "identity_missing": 0,
+      "identity_new": 0
+    }
+  ]
+}

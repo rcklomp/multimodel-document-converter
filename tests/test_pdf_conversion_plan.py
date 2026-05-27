@@ -658,6 +658,37 @@ def _find_raw_converter_invocations(source: str):
         yield (node.lineno, receiver.attr)
 
 
+def test_guard_walker_covers_v3_universal_package():
+    """Charter Phase A task A4: guard tests cover v3.0 paths.
+
+    The existing `_production_python_files()` walker is generic
+    (`rglob("*.py")` over `src/mmrag_v2/`), so it naturally picks up new
+    v3.0 packages (`universal/`, `sanitization/`, `omlx/`). This test
+    pins that coverage: if a future refactor narrows the walker (e.g.,
+    by excluding `universal/`), this assertion breaks loudly rather
+    than silently letting v3.0 paths construct PdfPipelineOptions /
+    DocumentConverter outside the adapter.
+
+    Files asserted here are the v3.0-shim entry points that A2
+    (Phase A scope-negotiation option (b)) landed; see
+    docs/PHASE_A_SCOPE_NEGOTIATION.md 2026-05-27 entry.
+    """
+    discovered = {p.name for p in _production_python_files()}
+    must_be_covered = {
+        "v2x_to_v3_mapper.py",      # A0 lossless projection
+        "uir_exporter.py",          # A2 shim JSONL exporter
+        "conversion_plan.py",       # A1 ConversionPlan parent
+        "intermediate.py",          # UIRChunk + Modality + StructuralFlag
+        "v3_identity_gate.py",      # gate consumer
+    }
+    missing = must_be_covered - discovered
+    assert missing == set(), (
+        f"Guard walker no longer covers v3.0 surface files: {missing}. "
+        f"Restore the walk (`_production_python_files`) or add the files "
+        f"back into src/mmrag_v2/."
+    )
+
+
 def test_no_raw_converter_invocation_outside_adapter():
     """No production file may call `.convert()` on a cached Docling converter.
 
