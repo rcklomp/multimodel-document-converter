@@ -31,12 +31,23 @@ import re
 import warnings
 from datetime import datetime, timezone
 from enum import Enum
-from typing import List, Literal, Optional, Union
+from typing import TYPE_CHECKING, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 # Centralized versioning (single source of truth)
 from ..version import __schema_version__
+
+# Phase A step 1 (Charter §3.2 + C14): Modality is unified with the v3.0 UIR
+# vocabulary. The 5-value Modality (TEXT/IMAGE/TABLE/CODE/FORM) lives in
+# `universal/intermediate.py` as the single source of truth, and is
+# re-exported from this module for backward compatibility with all v2.16
+# importers (production paths only emit TEXT/IMAGE/TABLE; the widening to
+# CODE/FORM is additive).
+from ..universal.intermediate import Modality
+
+if TYPE_CHECKING:
+    from ..universal.intermediate import UIRChunk
 
 
 # ============================================================================
@@ -125,17 +136,12 @@ class FileType(str, Enum):
     TXT = "txt"
 
 
-class Modality(str, Enum):
-    """
-    Content modality types per SRS Section 6.1 and ARCHITECTURE.md V3.0.0.
-
-    Valid values: text, image, table
-    SHADOW modality is REMOVED per V3.0.0 architecture (NEVER "shadow").
-    """
-
-    TEXT = "text"
-    IMAGE = "image"
-    TABLE = "table"
+# Modality is now imported from `..universal.intermediate` at the top of this
+# module. It carries the v3.0 five-value vocabulary
+# (TEXT/IMAGE/TABLE/CODE/FORM) per Charter §3.2 and C14. v2.16 production
+# paths only emit TEXT/IMAGE/TABLE; CODE/FORM are reserved for the v3.0
+# chunker rewrite (Phase A steps 2-5). SHADOW remains REMOVED per
+# ARCHITECTURE.md V3.0.0.
 
 
 class ExtractionMethod(str, Enum):
@@ -177,6 +183,33 @@ class ChunkType(str, Enum):
     QUOTE = "quote"
     CODE = "code"
     TITLE = "title"
+
+
+# Charter §3.2 + C14: ChunkType narrows to derive from Modality. Each
+# ChunkType value maps to exactly one Modality — no two-way shim. The
+# inverse direction (Modality -> default ChunkType) is captured below as
+# `MODALITY_TO_DEFAULT_CHUNKTYPE` for the v3.0 native emission path used
+# by IngestionChunk.from_uir.
+CHUNKTYPE_TO_MODALITY: dict = {
+    ChunkType.PARAGRAPH: Modality.TEXT,
+    ChunkType.HEADING: Modality.TEXT,
+    ChunkType.LIST_ITEM: Modality.TEXT,
+    ChunkType.CAPTION: Modality.TEXT,
+    ChunkType.FOOTNOTE: Modality.TEXT,
+    ChunkType.QUOTE: Modality.TEXT,
+    ChunkType.CODE: Modality.CODE,
+    ChunkType.TITLE: Modality.TEXT,
+}
+
+MODALITY_TO_DEFAULT_CHUNKTYPE: dict = {
+    Modality.TEXT: ChunkType.PARAGRAPH,
+    Modality.CODE: ChunkType.CODE,
+    # IMAGE/TABLE/FORM chunks carry chunk_type=None per the v2.16 schema
+    # — they are not text-classification rows.
+    Modality.IMAGE: None,
+    Modality.TABLE: None,
+    Modality.FORM: None,
+}
 
 
 # ============================================================================
@@ -674,6 +707,237 @@ class IngestionChunk(BaseModel):
         # ingestion code paths). Do not append [Visual: ...] here — it would duplicate
         # the description, inflating the embedding vector for no benefit.
         return " ".join(parts)
+
+    # ------------------------------------------------------------------
+    # V3.0 UIR bridge (Charter §3.2 Phase A step 1)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_uir(
+        cls,
+        uir: "UIRChunk",
+        *,
+        doc_id: str,
+        source_file: str,
+        file_type: FileType = FileType.PDF,
+        position: int = 0,
+        page_width: Optional[int] = None,
+        page_height: Optional[int] = None,
+        chunk_type: Optional[ChunkType] = None,
+        prev_text: Optional[str] = None,
+        next_text: Optional[str] = None,
+        breadcrumb_path: Optional[List[str]] = None,
+        profile_type: Optional[str] = None,
+        profile_sensitivity: Optional[float] = None,
+        min_image_dims: Optional[str] = None,
+        confidence_threshold: Optional[float] = None,
+        document_domain: Optional[str] = None,
+        document_modality: Optional[str] = None,
+    ) -> "IngestionChunk":
+        """V3.0 native emission: build an IngestionChunk from a UIRChunk.
+
+        Charter §3.2 (Phase A step 1): the chunker rewrite (steps 2-5) emits
+        UIRChunks; serialization to JSONL goes through this builder. The
+        v2.16 factory functions (`create_text_chunk`, `create_image_chunk`,
+        `create_table_chunk`) remain in place for v2.X paths that still
+        construct chunks directly from extraction primitives; this builder
+        is the canonical entry for v3.0 UIR-native paths.
+
+        External context not present on UIRChunk (doc_id, source_file,
+        file_type, position, page dimensions) is supplied by the caller —
+        normally the UIR-native chunker that owns the UniversalDocument.
+        """
+        # Lazy import — keeps the schema → universal edge unidirectional for
+        # the at-import-time path while still letting from_uir use UIR types.
+        from ..universal.intermediate import (
+            LocatorType,
+            StructuralFlag,
+        )
+
+        # --- Resolve modality + chunk_type (C14 reconciliation) ---
+        modality = uir.modality
+        if chunk_type is None:
+            chunk_type = MODALITY_TO_DEFAULT_CHUNKTYPE.get(modality)
+
+        # --- Resolve spatial / page_number from the Locator ---
+        page_number: int
+        spatial: Optional[SpatialMetadata] = None
+        if uir.locator.type == LocatorType.BBOX:
+            if uir.locator.page_number is None:
+                raise ValueError(
+                    "UIRChunk.locator(type=BBOX) missing page_number; "
+                    "cannot project to IngestionChunk (page_number is required)"
+                )
+            page_number = int(uir.locator.page_number)
+            spatial = SpatialMetadata(
+                bbox=list(uir.locator.bbox) if uir.locator.bbox else None,
+                page_width=page_width,
+                page_height=page_height,
+            )
+        else:
+            if uir.locator.page_number is None:
+                raise ValueError(
+                    "UIRChunk.locator missing page_number; cannot project to "
+                    "IngestionChunk (page_number is required)"
+                )
+            page_number = int(uir.locator.page_number)
+            # FLOW_OFFSET / DOM_PATH locators have no bbox; only stamp
+            # page dimensions when the caller supplies them.
+            if page_width is not None or page_height is not None:
+                spatial = SpatialMetadata(
+                    bbox=None,
+                    page_width=page_width,
+                    page_height=page_height,
+                )
+
+        # --- Hierarchy / semantic context ---
+        hierarchy = HierarchyMetadata(
+            parent_heading=uir.parent_heading,
+            breadcrumb_path=list(breadcrumb_path) if breadcrumb_path else [],
+        )
+
+        # --- OCR confidence (numeric on UIR → categorical on v2.16 schema) ---
+        ocr_conf_level: Optional[str] = None
+        if uir.confidence.ocr_confidence is not None:
+            ocr_conf_level = get_ocr_confidence_level(
+                float(uir.confidence.ocr_confidence)
+            )
+
+        # --- Structural flags → v2.16 metadata fields ---
+        partial_code: Optional[bool] = None
+        if (
+            StructuralFlag.PARTIAL_CODE_IN_BLOCK in uir.structural_flags
+            or StructuralFlag.PARTIAL_CODE_CROSS_PAGE in uir.structural_flags
+        ):
+            partial_code = True
+
+        # --- Asset reference ---
+        asset_ref: Optional[AssetReference] = None
+        if uir.asset_ref:
+            asset_ref = AssetReference(
+                file_path=uir.asset_ref,
+                mime_type="image/png",
+            )
+
+        # --- chunk_id (matches v2.16 derivation) ---
+        cid = _generate_chunk_id(
+            doc_id=doc_id,
+            content=uir.content,
+            page=page_number,
+            modality=modality.value,
+            position=position,
+        )
+
+        metadata = ChunkMetadata(
+            source_file=source_file,
+            file_type=file_type,
+            page_number=page_number,
+            chunk_type=chunk_type,
+            hierarchy=hierarchy,
+            spatial=spatial,
+            extraction_method=uir.extraction_method or "docling",
+            ocr_confidence=ocr_conf_level,
+            partial_code=partial_code,
+            search_priority="high" if modality == Modality.TEXT else (
+                "medium" if modality == Modality.TABLE else "low"
+            ),
+            profile_type=profile_type,
+            profile_sensitivity=profile_sensitivity,
+            min_image_dims=min_image_dims,
+            confidence_threshold=confidence_threshold,
+            document_domain=document_domain,
+            document_modality=document_modality,
+        )
+
+        semantic_context: Optional[SemanticContext] = None
+        if prev_text or next_text or hierarchy.parent_heading or hierarchy.breadcrumb_path:
+            semantic_context = SemanticContext(
+                prev_text_snippet=prev_text[:MAX_CONTEXT_SNIPPET_CHARS] if prev_text else None,
+                next_text_snippet=next_text[:MAX_CONTEXT_SNIPPET_CHARS] if next_text else None,
+                parent_heading=hierarchy.parent_heading,
+                breadcrumb_path=hierarchy.breadcrumb_path or None,
+            )
+
+        return cls(
+            chunk_id=cid,
+            doc_id=doc_id,
+            content=uir.content,
+            modality=modality,
+            metadata=metadata,
+            asset_ref=asset_ref,
+            semantic_context=semantic_context,
+        )
+
+    def to_uir(self) -> "UIRChunk":
+        """Reverse builder: project this IngestionChunk into a UIRChunk.
+
+        Charter §3.2 round-trip: `from_uir(to_uir(c), ...)` must be
+        identity-preserving on the content + locator + modality + structural
+        flag axes (v2.16 metadata fields with no UIR analog are not part of
+        the round-trip).
+
+        Used by the identity-half gate and by tests; not used by the
+        production v3.0 emission path (which goes UIR → IngestionChunk in
+        one direction only).
+        """
+        # Lazy imports to avoid loading UIR types at module load.
+        from ..universal.intermediate import (
+            ConfidenceBreakdown,
+            CoordinateFrame,
+            Locator,
+            LocatorType,
+            StructuralFlag,
+            UIRChunk,
+        )
+
+        bbox: Optional[List[int]] = None
+        if self.metadata.spatial and self.metadata.spatial.bbox:
+            bbox = list(self.metadata.spatial.bbox)
+
+        if bbox:
+            locator = Locator(
+                type=LocatorType.BBOX,
+                bbox=bbox,
+                page_number=self.metadata.page_number,
+                coordinate_frame=CoordinateFrame.PDF_PAGE_PORTRAIT,
+            )
+        else:
+            locator = Locator(
+                type=LocatorType.FLOW_OFFSET,
+                page_number=self.metadata.page_number,
+                coordinate_frame=CoordinateFrame.UNKNOWN,
+                path=f"page:{self.metadata.page_number}:{self.modality.value}",
+            )
+
+        confidence_breakdown = ConfidenceBreakdown()
+        if self.metadata.ocr_confidence is not None:
+            level = self.metadata.ocr_confidence
+            if level == "high":
+                confidence_breakdown.ocr_confidence = 0.95
+            elif level == "medium":
+                confidence_breakdown.ocr_confidence = 0.75
+            elif level == "low":
+                confidence_breakdown.ocr_confidence = 0.50
+            confidence_breakdown.applicable.add("ocr_confidence")
+
+        structural_flags = set()
+        if self.metadata.partial_code:
+            # v2.16 only emits the in-block case; the cross-page flag is
+            # the Phase A activation target.
+            structural_flags.add(StructuralFlag.PARTIAL_CODE_IN_BLOCK)
+
+        return UIRChunk(
+            modality=self.modality,
+            content=self.content,
+            locator=locator,
+            confidence=confidence_breakdown,
+            extraction_method=self.metadata.extraction_method or "docling_direct",
+            extraction_engine_version="docling-2.86.0",
+            structural_flags=structural_flags,
+            asset_ref=self.asset_ref.file_path if self.asset_ref else None,
+            parent_heading=self.metadata.hierarchy.parent_heading,
+            source_element_ids=[self.chunk_id],
+        )
 
 
 # ============================================================================

@@ -653,13 +653,16 @@ import uuid as _uuid  # noqa: E402  (intentionally after the v2.X block)
 from typing import Literal, Set  # noqa: E402,F811  (Set may already be unused above)
 
 
-class Modality(Enum):
+class Modality(str, Enum):
     """V3.0 UIR modality. Charter §3.2.
 
     Replaces today's ElementType (TEXT/IMAGE/TABLE) with five values
-    after Phase A migration (Charter §7.1). During Phase A development
-    both vocabularies co-exist; ElementType is deleted from the codebase
-    at end of Phase A per Charter §7.1 reconciliation table.
+    after Phase A migration (Charter §7.1). Inherits from `str` so the
+    same enum is the single source of truth for the Pydantic
+    `IngestionChunk.modality` field as well — eliminating the v2.16
+    duplicate `schema.ingestion_schema.Modality` enum (C14 one-direction
+    reconciliation: Modality replaces ElementType; ChunkType derives
+    from Modality).
     """
 
     TEXT = "text"
