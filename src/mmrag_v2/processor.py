@@ -500,6 +500,51 @@ def _union_docling_item_bboxes_for_uir(
     return [0, 0, COORD_SCALE, COORD_SCALE]
 
 
+def _section_header_page_to_uir_chunk(
+    items: List[Any],
+    page_number: int,
+    page_w: float,
+    page_h: float,
+) -> Optional[UIRChunk]:
+    """Phase A step 3 boundary: section-header-only page items → UIRChunk.
+
+    Charter §3.2: the bridge encapsulates the Docling label check (only
+    `section_header` / `title` labels permitted) + text extraction + union
+    bbox. Returns None for mixed-content pages (any non-heading label) or
+    pages where no heading text remains after extraction.
+
+    `page_number` is the OUTPUT page number (already includes any
+    `page_offset` the caller applied) — i.e. the value that will land on
+    `IngestionChunk.metadata.page_number`.
+    """
+    labels = {_docling_item_label(it) for it in items}
+    if not labels.issubset({"section_header", "title"}):
+        return None
+
+    heading_lines = [_docling_item_text(it) for it in items]
+    heading_lines = [ln for ln in heading_lines if ln]
+    if not heading_lines:
+        return None
+
+    content = "\n".join(heading_lines)
+    bbox = _union_docling_item_bboxes_for_uir(items, page_w, page_h)
+    primary_heading = heading_lines[0]
+    return UIRChunk(
+        modality=Modality.TEXT,
+        content=content,
+        locator=UIRLocator(
+            type=UIRLocatorType.BBOX,
+            bbox=bbox,
+            page_number=page_number,
+            coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
+        ),
+        confidence=UIRConfidenceBreakdown(),
+        extraction_method="hybrid_chunker_section_header_page",
+        extraction_engine_version="docling-2.86.0",
+        parent_heading=primary_heading,
+    )
+
+
 def _dense_page_to_uir_chunk(
     doc: Any,
     raw_page: int,
@@ -4084,6 +4129,10 @@ class V2DocumentProcessor:
         signal (answers "where does Chapter / Part X start?"), so we
         emit the chunk rather than mark the page blank-equivalent.
         """
+        # Charter §3.2 Phase A step 3: the Docling boundary is encapsulated
+        # in `_section_header_page_to_uir_chunk` (one call per candidate
+        # page). The method body operates on UIR-typed inputs after the
+        # bridge call and emits IngestionChunks via IngestionChunk.from_uir.
         if not hasattr(doc, "iterate_items"):
             return []
 
@@ -4095,8 +4144,9 @@ class V2DocumentProcessor:
             if page_no is not None:
                 covered_pages.add(int(page_no))
 
-        # Group Docling items per (raw) page number, classifying labels.
-        # raw_page is the doc-local page index; out_page adds page_offset.
+        # Group Docling items per (raw) page number. This is the Docling
+        # boundary scan — the per-page item list it produces is the input
+        # to the UIR bridge below.
         items_per_page: Dict[int, List[Any]] = {}
         for item, _level in doc.iterate_items():
             raw_page = _docling_item_page_no(item)
@@ -4110,6 +4160,7 @@ class V2DocumentProcessor:
             Path(source_file).stem.replace("_", " ") if source_file else "Document"
         )
 
+        intelligence_md = self._intelligence_metadata
         emitted: List[IngestionChunk] = []
         for raw_page in sorted(items_per_page.keys()):
             out_page = raw_page + page_offset
@@ -4121,56 +4172,45 @@ class V2DocumentProcessor:
                 # a separate defect.
                 continue
 
-            items = items_per_page[raw_page]
-            labels = {_docling_item_label(it) for it in items}
-            # Only fire when every item on this page is a heading-style
-            # label. Mixed-content pages (text + section_header) are out
-            # of scope; their chunk drop is the cross-page-split defect
-            # being diagnosed in Phase B3 Step 3.
-            if not labels.issubset({"section_header", "title"}):
-                continue
-
-            heading_lines = [_docling_item_text(it) for it in items]
-            heading_lines = [ln for ln in heading_lines if ln]
-            if not heading_lines:
-                continue
-            content = "\n".join(heading_lines)
-
             page_w, page_h = page_dims.get(
                 out_page, page_dims.get(raw_page, (612.0, 792.0))
             )
-            bbox = self._union_docling_item_bboxes(items, page_w, page_h)
 
-            # The page heading is its own breadcrumb anchor.
-            primary_heading = heading_lines[0]
-            hierarchy = HierarchyMetadata(
-                parent_heading=primary_heading,
-                breadcrumb_path=[clean_name, primary_heading, f"Page {out_page}"],
-                level=2,
+            # --- Docling boundary: convert page slice to UIR (returns
+            # None when the page is mixed-label or has no heading text) ---
+            page_uir = _section_header_page_to_uir_chunk(
+                items=items_per_page[raw_page],
+                page_number=out_page,
+                page_w=page_w,
+                page_h=page_h,
             )
-            chunk = create_text_chunk(
+            if page_uir is None:
+                continue
+
+            # --- UIR-native emission ---
+            primary_heading = page_uir.parent_heading or ""
+            breadcrumb = [clean_name, primary_heading, f"Page {out_page}"]
+
+            chunk = IngestionChunk.from_uir(
+                page_uir,
                 doc_id=doc_hash,
-                content=content,
                 source_file=source_file,
                 file_type=file_type,
-                page_number=out_page,
-                bbox=bbox,
-                hierarchy=hierarchy,
-                chunk_type=ChunkType.HEADING,
+                position=self._next_chunk_position(),
                 page_width=int(page_w),
                 page_height=int(page_h),
-                extraction_method="hybrid_chunker_section_header_page",
-                position=self._next_chunk_position(),
-                **self._intelligence_metadata,
+                chunk_type=ChunkType.HEADING,
+                breadcrumb_path=breadcrumb,
+                **intelligence_md,
             )
-            chunk.metadata.refined_content = content
+
+            # v2.16 invariants that from_uir doesn't auto-populate:
+            chunk.metadata.refined_content = page_uir.content
             chunk.metadata.search_priority = "high"
-            chunk.semantic_context = SemanticContext(
-                prev_text_snippet=None,
-                next_text_snippet=None,
-                parent_heading=primary_heading,
-                breadcrumb_path=hierarchy.breadcrumb_path,
-            )
+            # v2.16 dictated hierarchy.level=2 explicitly for section-header
+            # page chunks (chapter / part dividers), independent of the
+            # 3-element breadcrumb. Preserve the literal v2.16 value.
+            chunk.metadata.hierarchy.level = 2
             emitted.append(chunk)
 
         if emitted:
