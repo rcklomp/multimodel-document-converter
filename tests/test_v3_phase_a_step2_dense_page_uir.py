@@ -23,11 +23,11 @@ from typing import Any, List
 
 import pytest
 
-from mmrag_v2.processor import (
-    _dense_page_to_uir_chunk,
-    _union_docling_item_bboxes_for_uir,
-    V2DocumentProcessor,
+from mmrag_v2.engines.pdf_extraction import (
+    dense_page_to_uir_chunk as _dense_page_to_uir_chunk,
+    union_item_bboxes_for_uir as _union_docling_item_bboxes_for_uir,
 )
+from mmrag_v2.processor import V2DocumentProcessor
 from mmrag_v2.schema.ingestion_schema import (
     ChunkType,
     FileType,

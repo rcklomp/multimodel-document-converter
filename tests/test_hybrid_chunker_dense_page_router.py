@@ -137,7 +137,7 @@ def test_document_index_lines_dedups_per_entry_across_grid_cells():
     # duplication PLUS sliding-window overlap between unique cells, with
     # entries separated by single space (digit-then-letter boundary), not
     # newlines. The helper must dedup at entry granularity in both axes.
-    from mmrag_v2.processor import _docling_document_index_lines
+    from mmrag_v2.engines.pdf_extraction import document_index_lines as _docling_document_index_lines
 
     # Two cells that are byte-equal duplicates of the same sliding window.
     win_a = SimpleNamespace(text="Mock Object pattern  235 behavior verification  235 implementing  237, 238")

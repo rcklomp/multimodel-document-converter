@@ -10,12 +10,12 @@ from unittest.mock import patch
 
 import pytest
 
-from mmrag_v2.processor import (
+from mmrag_v2.engines.pdf_extraction import (
     _BACK_INDEX_ENTRY_RE,
     _BACK_INDEX_MARKER_RE,
-    _classify_dense_back_index_pages_by_source,
-    _extract_pdf_page_lines,
-    _is_back_index_page_by_lines,
+    classify_dense_back_index_pages_by_source as _classify_dense_back_index_pages_by_source,
+    extract_pdf_page_lines as _extract_pdf_page_lines,
+    is_back_index_page_by_lines as _is_back_index_page_by_lines,
 )
 
 
@@ -146,7 +146,7 @@ def test_classify_uses_extractor_and_excludes_known_pages() -> None:
     def fake_extract(pdf_path: object, page_no: int) -> list[str]:
         return fake_pages.get(page_no, [])
 
-    with patch("mmrag_v2.processor._extract_pdf_page_lines", side_effect=fake_extract):
+    with patch("mmrag_v2.engines.pdf_extraction.extract_pdf_page_lines", side_effect=fake_extract):
         # exclude={3} mimics a Docling-classified back-index page already covered.
         result = _classify_dense_back_index_pages_by_source(
             pdf_path=Path("/tmp/fake.pdf"),

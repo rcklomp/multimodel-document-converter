@@ -1,14 +1,14 @@
 """
-V2DocumentProcessor - Docling-Native Document Processing Engine
+V2DocumentProcessor - Layout-Native Document Processing Engine
 ================================================================
-ENGINE_USE: Docling v2.86.0 (Native Layout Analysis)
+ENGINE_USE: extraction engine v2.86.0 (Native Layout Analysis)
 
-This module implements the V2.0 compliant document processor using Docling's
+This module implements the V2.0 compliant document processor using the engine's
 native layout analysis engine. It processes PDF, EPUB, HTML, DOCX documents
 and produces validated ingestion.jsonl output per SRS Section 6.
 
 REQ Compliance:
-- REQ-PDF-01: Rich structure extraction via Docling
+- REQ-PDF-01: Rich structure extraction via the engine
 - REQ-PDF-02: Image/figure extraction with 10px padding (REQ-MM-01)
 - REQ-PDF-03: Hybrid OCR fallback via Tesseract
 - REQ-STATE: Hierarchical breadcrumb tracking via ContextStateV2
@@ -16,7 +16,7 @@ REQ Compliance:
 - REQ-CHUNK-03: VLM descriptions truncated to 400 chars
 
 SRS Section 4: PDF Processing Pipeline
-"The system MUST use a Docling-native processing pipeline for structured
+"The system MUST use a layout-native processing pipeline for structured
 document extraction with layout analysis."
 
 Author: Claude 4.5 Opus (Architect)
@@ -69,14 +69,13 @@ from .schema.ingestion_schema import (
     calculate_hierarchy_level,
     COORD_SCALE,
 )
-from .engines.docling_adapter import DoclingPdfAdapter
+from .engines.pdf_extraction import PdfExtractionAdapter
 from .engines.pdf_plan import PdfConversionPlan, build_pdf_conversion_plan
-# V3.0 UIR contract (Charter §3.2 Phase A step 2+): chunker call sites consume
-# UIR types rather than DoclingDocument layout classes. Each method's
-# Docling-side boundary is captured by a module-level `_*_to_uir_*` helper
-# (located alongside the existing _docling_* helpers); the method body then
-# operates on UIR-typed inputs and emits IngestionChunks via
-# IngestionChunk.from_uir.
+# V3.0 UIR contract (Charter §3.2): chunker call sites consume UIR types
+# only — the underlying extraction-engine layout classes never reach
+# this module. The `engines/pdf_extraction.py` module owns the engine
+# boundary and produces (UIRChunk, ChunkType) pairs for the chunker to
+# emit IngestionChunks against via `IngestionChunk.from_uir`.
 from .universal.intermediate import (
     ConfidenceBreakdown as UIRConfidenceBreakdown,
     CoordinateFrame as UIRCoordinateFrame,
@@ -109,873 +108,49 @@ from .vision.vision_manager import VisionManager, create_vision_manager
 logger = logging.getLogger(__name__)
 
 
-_INDEX_REF_RE = re.compile(r"\b\d{1,4}(,\s*\d{1,4}){2,}\b")
-_TOC_LEADER_RE = re.compile(r"(?:\.|�){2,}\s*\d{1,4}\s*$")
-# Single-page back-index entry shape (e.g. "Argilla platform for A/B testing, 157" or
-# "evolution to Agentic RAG, 45-55"). Used to detect Adedeji-style back-index pages
-# whose entries each carry a single page or page-range — these escape _INDEX_REF_RE
-# (which requires 3+ comma-separated page numbers per entry).
-_BACK_INDEX_ENTRY_RE = re.compile(
-    r"^\s*[A-Za-z][^,\n]{1,80}?,\s*\d{1,4}(\s*[-,]\s*\d{1,4})*\s*$"
-)
-# Page footer/header marker on back-index pages: "280 | Index" or "Index | 281".
-_BACK_INDEX_MARKER_RE = re.compile(
-    r"^(\d{1,4}\s*\|\s*Index|Index\s*\|\s*\d{1,4}|Index)\s*$"
-)
-_BACK_INDEX_MIN_LINES = 20
-_BACK_INDEX_RATIO = 0.65
-_BACK_INDEX_RATIO_WITH_MARKER = 0.50
-# Back-index entries within a Docling DocumentIndex cell are separated by a
-# single space between the previous entry's trailing digit and the next
-# entry's leading letter. Splitting on this boundary lets us dedup at entry
-# granularity across overlapping sliding-window cells.
-_INDEX_ENTRY_SPLIT = re.compile(r"(?<=\d)\s+(?=[A-Za-z])")
-_SHORT_INDEX_LABELS = {
-    "tablecell",
-    "table_cell",
-    "listitem",
-    "list_item",
-    "documentindex",
-    "document_index",
-}
-
-
-def _docling_item_page_no(item: Any) -> Optional[int]:
-    prov = getattr(item, "prov", None)
-    if not prov:
-        return None
-    first = prov[0] if isinstance(prov, list) else prov
-    page_no = getattr(first, "page_no", None)
-    return int(page_no) if page_no else None
-
-
-def _docling_item_prov_list(item: Any) -> List[Any]:
-    """Return all ProvenanceItem entries on a Docling item as a list."""
-    prov = getattr(item, "prov", None)
-    if not prov:
-        return []
-    return list(prov) if isinstance(prov, list) else [prov]
-
-
-CROSS_PAGE_CONTINUED_MARKER = "[CROSS_PAGE_CONTINUED]"
-
-# v2.10 Phase 7 (`KI_EPUB_EXTRACTION_LANE_REWRITE`): EPUB chapter marker.
-# `_epub_to_html` prepends ``<p>__MMRAG_EPUB_CH_NNNN__</p>`` to each spine
-# chapter; ``_apply_epub_synthetic_pagination`` reads the marker out of the
-# emitted chunk content to derive a per-chapter synthetic page_number
-# (``chapter_1based * 1000 + position_in_chapter // 5``) and emit the
-# documented full-page bbox sentinel ``[0, 0, 1000, 1000]``.
+# Charter §3.2 (ARCHITECTURE_V3_DRAFT_0.5.md): the chunker is engine-
+# agnostic. Every byte of extraction-engine coupling (page-item iteration,
+# label/prov inspection, HybridChunker invocation, UIRChunk → UIR
+# conversion, dense-index / back-index detection) lives in the engine
+# module `engines/pdf_extraction.py`. This module imports the engine's
+# UIR-producing helpers under neutral names and never touches the
+# underlying extraction-engine types directly.
+# EPUB synthetic-pagination markers (non-extraction-engine; `_epub_to_html`
+# prepends `<p>__MMRAG_EPUB_CH_NNNN__</p>` to each spine chapter so
+# `_apply_epub_synthetic_pagination` can derive a per-chapter
+# synthetic page_number).
 _EPUB_CHAPTER_MARKER_PREFIX = "__MMRAG_EPUB_CH_"
 _EPUB_CHAPTER_MARKER_RE = re.compile(r"__MMRAG_EPUB_CH_(\d+)__")
 
 
-# Stop-word leads that mark a short standalone chunk as a SYNTACTIC
-# CONTINUATION of its parent_heading rather than a new title or body
-# sentence. A title typed by Docling as ``label=text`` (so we receive
-# it as ``chunk_type=PARAGRAPH``) shows this shape when HybridChunker
-# slices a multi-page title across pages — the trailing slice starts
-# with a connector word like "and"/"of"/"the" because the head of
-# the title lives on the previous page (the chunk's parent_heading).
-# Used by ``_looks_like_subtitle_continuation`` to promote such
-# chunks to ``ChunkType.HEADING`` so they aren't counted as
-# retrieval-noise micro-fragments by the strict gate. Set is
-# deliberately small: only universal English stopwords that
-# (a) don't start a new sentence with terminal punctuation, and
-# (b) don't start an isolated noun-phrase title in normal English.
-_SUBTITLE_CONTINUATION_LEADS = frozenset({
-    "and", "or", "the", "a", "an", "of", "in", "to", "on", "at",
-    "by", "for", "with", "from", "into", "onto", "upon",
-})
+from .engines.pdf_extraction import (
+    CROSS_PAGE_CONTINUED_MARKER,
+    EXTRACTION_ENGINE_VERSION,
+    EXTRACTION_METHOD_NATIVE,
+    EXTRACTION_METHOD_TABLE_MARKDOWN,
+    EXTRACTION_METHOD_TABLE_MARKDOWN_FALLBACK,
+    looks_like_subtitle_continuation as _looks_like_subtitle_continuation_engine,  # re-export under legacy test alias
+    sanitize_toc_index_text as _sanitize_toc_index_text,
+    split_doc_chunk_text_by_page as _split_doc_chunk_text_by_page,
+    classify_dense_index_pages as _classify_dense_index_pages,
+    classify_dense_back_index_pages_by_source as _classify_dense_back_index_pages_by_source,
+    dense_page_to_uir_chunk as _dense_page_to_uir_chunk,
+    doc_chunk_first_label as _doc_chunk_first_label,
+    doc_chunk_to_uir_chunks as _engine_chunk_to_uir,
+    doc_chunk_validated_headings as _doc_chunk_validated_headings,
+    extract_pdf_page_lines as _extract_pdf_page_lines,
+    invoke_text_chunker as _invoke_text_chunker,
+    item_label as _item_label,
+    item_page_no as _item_page_no,
+    item_prov_list as _item_prov_list,
+    item_text as _item_text,
+    looks_like_subtitle_continuation as _looks_like_subtitle_continuation,
+    section_header_page_to_uir_chunk as _section_header_page_to_uir_chunk,
+    text_items_for_page as _text_items_for_page,
+    union_item_bboxes_for_uir as _union_item_bboxes_for_uir,
+)
 
-# Terminal characters that prove a chunk is a complete sentence /
-# clause / TOC-style trailing-page-number line, so the chunk is NOT
-# a subtitle continuation.
-_SUBTITLE_TERMINAL_CHARS = (".", "?", "!", ":", ";", ",")
 
-
-def _looks_like_subtitle_continuation(
-    content: str,
-    chunk_type: "ChunkType",
-    parent_heading: Optional[str],
-) -> bool:
-    """Return True iff a tentatively-PARAGRAPH chunk is structurally
-    a subtitle / title fragment that should be re-typed as HEADING.
-
-    Universal signals (all required):
-
-    * already a ``chunk_type=PARAGRAPH`` candidate (Docling
-      ``label=text`` produces this — nothing to do for code / list
-      / already-classified-heading items);
-    * 1 <= length < 30 characters;
-    * single line (no ``\\n``);
-    * no terminal sentence / clause punctuation in
-      ``_SUBTITLE_TERMINAL_CHARS``;
-    * has a non-empty ``parent_heading`` that is NOT identical to
-      the chunk's own content (anti-sentinel);
-    * the first alphabetic word is one of the
-      ``_SUBTITLE_CONTINUATION_LEADS`` stopwords (lowercase). This
-      is the signature of a title that was split across a page
-      boundary: the trailing slice starts mid-phrase
-      (``"... and the Sorcerer's Stone"``), not as a new sentence
-      or stand-alone noun-phrase title.
-
-    No filename / page-number / document-specific checks; purely
-    structural. Conservative: surveyed against the full v2.10 Phase
-    4 reconvert + smoke corpus only HarryPotter p7
-    ``"and the Sorcerer's Stone"`` qualifies — `Logo`, `Bar chart`,
-    `zip() function, 62, 314`, `[CROSS_PAGE_CONTINUED]`, and OCR-
-    junk fragments do not.
-    """
-    if chunk_type != ChunkType.PARAGRAPH:
-        return False
-    text = (content or "").strip()
-    if not text or len(text) >= 30:
-        return False
-    # We deliberately do NOT reject content with embedded ``\n``.
-    # Docling 2.86 produces multi-page title slices where the
-    # trailing slice looks like ``"and the Subtitle\nBY"`` — the
-    # ``BY`` is a downstream-trimmed structural fragment that
-    # ``_deduplicate_chunk_overlap`` removes by the time the chunk
-    # reaches the gate; the connector-lead + parent_heading +
-    # no-terminal-punct combination is already strong enough to
-    # discriminate without a ``\n`` check (verified against the
-    # full v2.10 reconvert + smoke corpus).
-    if text.endswith(_SUBTITLE_TERMINAL_CHARS):
-        return False
-    parent = str(parent_heading or "").strip()
-    if not parent or parent == text:
-        return False
-    match = re.match(r"^([A-Za-z]+)", text)
-    if not match:
-        return False
-    first_word = match.group(1).lower()
-    if first_word not in _SUBTITLE_CONTINUATION_LEADS:
-        return False
-    return True
-
-
-def _resolve_doc_item_text(item: Any, doc: Any) -> str:
-    """Return the actual text content of a Docling DocChunk doc_item.
-
-    In Docling 2.86 ``dc.meta.doc_items`` may yield bare ``DocItem``
-    references (no ``.text`` attribute) instead of the resolved
-    ``TextItem``. The real text lives at ``doc.texts[idx]`` for
-    self_refs like ``#/texts/12``. Try the in-place attribute first
-    (already-resolved item), then fall back to the reference lookup
-    against the parsed Docling document. Returns ``""`` if neither
-    path produces text.
-    """
-    text = getattr(item, "text", None)
-    if isinstance(text, str) and text:
-        return text
-    self_ref = getattr(item, "self_ref", None) or ""
-    if doc is not None and isinstance(self_ref, str) and self_ref.startswith("#/texts/"):
-        try:
-            idx = int(self_ref.rsplit("/", 1)[-1])
-        except ValueError:
-            return ""
-        texts = getattr(doc, "texts", None) or []
-        if 0 <= idx < len(texts):
-            resolved = texts[idx]
-            resolved_text = getattr(resolved, "text", None)
-            if isinstance(resolved_text, str):
-                return resolved_text
-    return ""
-
-
-def _split_doc_chunk_text_by_page(
-    dc: Any,
-    page_offset: int,
-    doc: Optional[Any] = None,
-) -> Dict[int, str]:
-    """Reconstruct per-page text contributions for a HybridChunker DocChunk.
-
-    Background: Docling text items can span multiple PDF pages and expose
-    that with a list of ``prov`` entries, each carrying ``page_no`` and
-    ``charspan`` (character offsets within the item's serialized text).
-    HybridChunker may also further slice such an item into multiple
-    DocChunks. The previous v2.9 cross-page split path attributed the
-    whole DocChunk to ``prov[0].page_no`` and broadcast the same text to
-    every page that contributed any item, then deduped per page —
-    causing the later page's content to be silently dropped or attributed
-    to the earlier page.
-
-    This helper aligns ``dc.text`` against each item's per-prov text
-    slice (via ``prov.charspan``) so each page receives only the portion
-    of ``dc.text`` that actually came from that page. Result keys are
-    global (per-batch local + ``page_offset``); values are the
-    non-empty reconstructed slice.
-
-    Pages whose ``prov.charspan`` does not overlap ``dc.text`` (the item
-    references them but THIS DocChunk does not include any of their
-    text — another DocChunk will) are NOT included in the result.
-
-    When ``doc`` is supplied, bare ``DocItem`` references (Docling 2.86
-    exposes these on ``dc.meta.doc_items`` instead of resolved
-    ``TextItem`` instances) are dereferenced against ``doc.texts`` so
-    their real text contributes to per-page slicing. Items whose text
-    is still empty after dereferencing (serializer-only contributors —
-    rare tables/captions) are silently skipped; the caller is
-    responsible for the "no contributor was sliceable" fallback so a
-    multi-page DocChunk never silently disappears.
-    """
-    dc_text = getattr(dc, "text", "") or ""
-    if not dc_text or not (getattr(dc, "meta", None) and getattr(dc.meta, "doc_items", None)):
-        return {}
-
-    per_page_parts: Dict[int, List[str]] = {}
-    dc_cursor = 0
-
-    for item in dc.meta.doc_items:
-        item_text = _resolve_doc_item_text(item, doc)
-        prov_list = _docling_item_prov_list(item)
-        if not prov_list:
-            continue
-
-        if not item_text:
-            # Serializer-only contributor (rare table/caption). No
-            # item.text to slice by charspan; skip and let the caller
-            # handle the "no real slice for any page" fallback if
-            # needed.
-            continue
-
-        sig_len = min(60, len(item_text))
-        item_sig = item_text[:sig_len]
-        item_pos_in_dc = dc_text.find(item_sig, dc_cursor)
-
-        if item_pos_in_dc >= 0:
-            item_actual_len = min(len(dc_text) - item_pos_in_dc, len(item_text))
-            for prov in prov_list:
-                p_raw = int(getattr(prov, "page_no", 0) or 0)
-                if not p_raw:
-                    continue
-                p_dst = p_raw + page_offset
-                charspan = getattr(prov, "charspan", None)
-                if charspan and len(charspan) >= 2:
-                    cs_start = max(0, min(item_actual_len, int(charspan[0])))
-                    cs_end = max(0, min(item_actual_len, int(charspan[1])))
-                else:
-                    cs_start, cs_end = 0, item_actual_len
-                if cs_end > cs_start:
-                    fragment = dc_text[item_pos_in_dc + cs_start : item_pos_in_dc + cs_end]
-                    if fragment.strip():
-                        per_page_parts.setdefault(p_dst, []).append(fragment)
-            dc_cursor = item_pos_in_dc + item_actual_len
-            continue
-
-        avail_in_dc = len(dc_text) - dc_cursor
-        if avail_in_dc <= 0:
-            continue
-        dc_sig_len = min(60, avail_in_dc)
-        dc_sig = dc_text[dc_cursor : dc_cursor + dc_sig_len]
-        dc_start_in_item = item_text.find(dc_sig)
-        if dc_start_in_item < 0:
-            continue
-
-        common_len = min(len(item_text) - dc_start_in_item, avail_in_dc)
-        for prov in prov_list:
-            p_raw = int(getattr(prov, "page_no", 0) or 0)
-            if not p_raw:
-                continue
-            p_dst = p_raw + page_offset
-            charspan = getattr(prov, "charspan", None)
-            if charspan and len(charspan) >= 2:
-                cs_start, cs_end = int(charspan[0]), int(charspan[1])
-            else:
-                cs_start, cs_end = 0, len(item_text)
-            ov_start = max(cs_start, dc_start_in_item)
-            ov_end = min(cs_end, dc_start_in_item + common_len)
-            if ov_end > ov_start:
-                dc_ov_start = dc_cursor + (ov_start - dc_start_in_item)
-                dc_ov_end = dc_cursor + (ov_end - dc_start_in_item)
-                fragment = dc_text[dc_ov_start:dc_ov_end]
-                if fragment.strip():
-                    per_page_parts.setdefault(p_dst, []).append(fragment)
-        dc_cursor += common_len
-
-    out: Dict[int, str] = {}
-    for page, fragments in per_page_parts.items():
-        joined = "".join(fragments).strip()
-        if joined:
-            out[page] = joined
-    return out
-
-
-def _docling_item_label(item: Any) -> str:
-    label = getattr(item, "label", "")
-    value = getattr(label, "value", label)
-    return str(value or "").replace("-", "_").replace(" ", "_").lower()
-
-
-def _docling_item_text(item: Any) -> str:
-    return str(getattr(item, "text", "") or "").strip()
-
-
-def _docling_text_items_for_page(doc: Any, page_no: int) -> List[Any]:
-    texts = getattr(doc, "texts", None)
-    if texts is None:
-        return [
-            item
-            for item, _level in doc.iterate_items()
-            if _docling_item_page_no(item) == page_no and _docling_item_text(item)
-        ]
-    return [
-        item
-        for item in texts
-        if _docling_item_page_no(item) == page_no and _docling_item_text(item)
-    ]
-
-
-def _docling_document_index_items_for_page(doc: Any, page_no: int) -> List[Any]:
-    return [
-        item
-        for item, _level in doc.iterate_items()
-        if _docling_item_page_no(item) == page_no
-        and _docling_item_label(item) in {"document_index", "documentindex"}
-    ]
-
-
-def _docling_document_index_lines(item: Any) -> List[str]:
-    # Docling 2.86 emits DocumentIndex grids with massive byte-equal cell
-    # repetition (15-67x per page on Ayeva back-index) AND each surviving
-    # unique cell carries a sliding window over the same back-index entry
-    # sequence. Splitting at entry boundaries (digit-then-letter) and
-    # deduping at entry granularity collapses both layers of duplication
-    # so retrieval sees each back-index reference exactly once per page.
-    data = getattr(item, "data", None)
-    grid = getattr(data, "grid", None)
-    if grid:
-        seen: set[str] = set()
-        lines: List[str] = []
-        for row in grid:
-            for cell in row:
-                cell_text = str(getattr(cell, "text", "") or "")
-                if not cell_text.strip():
-                    continue
-                # Split at entry boundary; preserves alphabet-header cells
-                # like "M" / "S" that have no digit (split returns one piece).
-                for raw_entry in _INDEX_ENTRY_SPLIT.split(cell_text):
-                    entry = _sanitize_toc_index_text(raw_entry)
-                    if entry and entry not in seen:
-                        lines.append(entry)
-                        seen.add(entry)
-        if lines:
-            return lines
-    text = _docling_item_text(item)
-    return [text] if text else []
-
-
-def _union_docling_item_bboxes_for_uir(
-    items: List[Any], page_w: float, page_h: float
-) -> List[int]:
-    """Module-level twin of `V2DocumentProcessor._union_docling_item_bboxes`.
-
-    Used by Phase A UIR-native bridge helpers (Charter §3.2 step 2+) so the
-    boundary code can be invoked without a processor instance. Behavior is
-    identical to the method: returns the union bbox in normalized 0-1000
-    integer coordinates, or `[0, 0, 1000, 1000]` when no item has a usable
-    `prov[].bbox`.
-    """
-    left, top, right, bottom = COORD_SCALE, COORD_SCALE, 0, 0
-    have_bbox = False
-    for item in items:
-        prov = getattr(item, "prov", None)
-        if not prov:
-            continue
-        first = prov[0] if isinstance(prov, list) else prov
-        bbox = getattr(first, "bbox", None)
-        if not bbox:
-            continue
-        x0 = int(float(getattr(bbox, "l", 0)) / page_w * COORD_SCALE)
-        y0 = int(float(getattr(bbox, "t", 0)) / page_h * COORD_SCALE)
-        x1 = int(float(getattr(bbox, "r", page_w)) / page_w * COORD_SCALE)
-        y1 = int(float(getattr(bbox, "b", page_h)) / page_h * COORD_SCALE)
-        left = min(left, max(0, min(COORD_SCALE, x0)))
-        top = min(top, max(0, min(COORD_SCALE, min(y0, y1))))
-        right = max(right, max(0, min(COORD_SCALE, x1)))
-        bottom = max(bottom, max(0, min(COORD_SCALE, max(y0, y1))))
-        have_bbox = True
-    if have_bbox and right > left and bottom > top:
-        return [left, top, right, bottom]
-    return [0, 0, COORD_SCALE, COORD_SCALE]
-
-
-def _docling_doc_chunk_to_uir_chunks(
-    dc: Any,
-    page_offset: int,
-    page_dims: Dict[int, Tuple[float, float]],
-    doc: Any,
-    last_hybrid_heading: Optional[str],
-) -> List[Tuple[UIRChunk, "ChunkType"]]:
-    """Phase A step 4 INPUT boundary: HybridChunker DocChunk → UIRChunks.
-
-    Charter §3.2: this is the only Docling-coupled boundary for the
-    HybridChunker iteration path. It encapsulates the cross-page split
-    detection, per-page bbox computation from prov entries, Docling
-    item-label → ChunkType promotion, and subtitle-continuation heuristic.
-    After this helper returns, the caller operates on UIR-typed pairs
-    `(UIRChunk, ChunkType)` only — `dc.meta`, `dc.text`, `dc.meta.doc_items`,
-    `dc.meta.headings` are not touched downstream.
-
-    Returns an empty list for empty/whitespace-only DocChunks. Returns
-    multiple tuples for cross-page DocChunks (one per contributing page,
-    each with PDF_PAGE_PORTRAIT-frame Locator and per-page-sliced text);
-    each fragment that is CODE in a cross-page split carries the
-    `StructuralFlag.PARTIAL_CODE_CROSS_PAGE` flag for the retrieval
-    adjacency-fetch mechanism. Returns one tuple for single-page DocChunks.
-
-    `parent_heading` is intentionally NOT set on the emitted UIRChunks —
-    heading carry-forward is iteration-local state that the caller manages
-    (see `_process_text_with_hybrid_chunker`).
-    """
-    # Late import keeps the heavy StructuralFlag import scoped to the call.
-    from .universal.intermediate import StructuralFlag
-
-    text = dc.text
-    if not text or not text.strip():
-        return []
-
-    # Cross-page detection: walk every prov entry on every doc_item.
-    _prov_by_page: Dict[int, List[Tuple[Any, Any]]] = {}
-    if dc.meta and dc.meta.doc_items:
-        for _it in dc.meta.doc_items:
-            for _prov in _docling_item_prov_list(_it):
-                _p_raw = int(getattr(_prov, "page_no", 0) or 0)
-                if not _p_raw:
-                    continue
-                _prov_by_page.setdefault(_p_raw + page_offset, []).append((_it, _prov))
-
-    if len(_prov_by_page) > 1:
-        # ---- Cross-page DocChunk: split per page ----
-        per_page_text = _split_doc_chunk_text_by_page(dc, page_offset, doc=doc)
-        if not per_page_text:
-            first_page = sorted(_prov_by_page.keys())[0]
-            per_page_text = {first_page: CROSS_PAGE_CONTINUED_MARKER}
-        out: List[Tuple[UIRChunk, "ChunkType"]] = []
-        for _ppage, _page_text in per_page_text.items():
-            _prov_pairs = _prov_by_page.get(_ppage, [])
-            _bbox_l, _bbox_t, _bbox_r, _bbox_b = COORD_SCALE, COORD_SCALE, 0, 0
-            _have_bbox = False
-            _pw, _ph = page_dims.get(_ppage, (612.0, 792.0))
-            _page_chunk_type: "ChunkType" = ChunkType.PARAGRAPH
-            for _it, _prov in _prov_pairs:
-                _ib = getattr(_prov, "bbox", None)
-                if _ib:
-                    _x0 = int(float(getattr(_ib, "l", 0)) / _pw * COORD_SCALE)
-                    _y0 = int(float(getattr(_ib, "t", 0)) / _ph * COORD_SCALE)
-                    _x1 = int(float(getattr(_ib, "r", _pw)) / _pw * COORD_SCALE)
-                    _y1 = int(float(getattr(_ib, "b", _ph)) / _ph * COORD_SCALE)
-                    _bbox_l = min(_bbox_l, max(0, min(COORD_SCALE, _x0)))
-                    _bbox_t = min(_bbox_t, max(0, min(COORD_SCALE, min(_y0, _y1))))
-                    _bbox_r = max(_bbox_r, max(0, min(COORD_SCALE, _x1)))
-                    _bbox_b = max(_bbox_b, max(0, min(COORD_SCALE, max(_y0, _y1))))
-                    _have_bbox = True
-                _label_obj = getattr(_it, "label", "")
-                _label_str = getattr(_label_obj, "value", _label_obj)
-                _label_str = str(_label_str or "").lower()
-                if _label_str == "code":
-                    _page_chunk_type = ChunkType.CODE
-                elif _label_str == "list_item":
-                    if _page_chunk_type == ChunkType.PARAGRAPH:
-                        _page_chunk_type = ChunkType.LIST_ITEM
-                elif "heading" in _label_str or "title" in _label_str:
-                    if _page_chunk_type == ChunkType.PARAGRAPH:
-                        _page_chunk_type = ChunkType.HEADING
-            # Subtitle-continuation promotion uses the carry-forward heading
-            # (passed in by the caller) — kept identical to v2.16 behavior.
-            if _looks_like_subtitle_continuation(
-                _page_text, _page_chunk_type, last_hybrid_heading
-            ):
-                _page_chunk_type = ChunkType.HEADING
-
-            _emit_method = (
-                "hybrid_chunker_pagesplit_fallback"
-                if _page_text == CROSS_PAGE_CONTINUED_MARKER
-                else "hybrid_chunker_pagesplit"
-            )
-            _ppage_bbox = (
-                [_bbox_l, _bbox_t, _bbox_r, _bbox_b]
-                if _have_bbox and _bbox_r > _bbox_l and _bbox_b > _bbox_t
-                else [0, 0, COORD_SCALE, COORD_SCALE]
-            )
-            _flags: set = {StructuralFlag.CROSS_PAGE_SPLIT}
-            # v2.17 partial_code cross-page activation: predicate is "this
-            # cross-page DocChunk has a CODE chunk_type AND was split across
-            # >1 pages". `_is_cross_page_code` name preserved for the
-            # source-level guard test in
-            # tests/test_partial_code_cross_page_hybrid.py.
-            _is_cross_page_code = (
-                _page_chunk_type == ChunkType.CODE
-                and len(per_page_text) > 1
-            )
-            if _is_cross_page_code:
-                _flags.add(StructuralFlag.PARTIAL_CODE_CROSS_PAGE)
-            out.append(
-                (
-                    UIRChunk(
-                        modality=Modality.TEXT,
-                        content=_page_text,
-                        locator=UIRLocator(
-                            type=UIRLocatorType.BBOX,
-                            bbox=_ppage_bbox,
-                            page_number=_ppage,
-                            coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
-                        ),
-                        confidence=UIRConfidenceBreakdown(),
-                        extraction_method=_emit_method,
-                        extraction_engine_version="docling-2.86.0",
-                        structural_flags=_flags,
-                    ),
-                    _page_chunk_type,
-                )
-            )
-        return out
-
-    # ---- Single-page DocChunk ----
-    page_no = 1
-    bbox: Optional[List[int]] = None
-    if dc.meta and dc.meta.doc_items:
-        first_item = dc.meta.doc_items[0]
-        if hasattr(first_item, "prov") and first_item.prov:
-            prov = (
-                first_item.prov[0]
-                if isinstance(first_item.prov, list)
-                else first_item.prov
-            )
-            page_no = (getattr(prov, "page_no", 1) or 1) + page_offset
-            prov_bbox = getattr(prov, "bbox", None)
-            if prov_bbox:
-                pw, ph = page_dims.get(page_no, (612.0, 792.0))
-                x0 = int(float(getattr(prov_bbox, "l", 0)) / pw * COORD_SCALE)
-                y0 = int(float(getattr(prov_bbox, "t", 0)) / ph * COORD_SCALE)
-                x1 = int(float(getattr(prov_bbox, "r", pw)) / pw * COORD_SCALE)
-                y1 = int(float(getattr(prov_bbox, "b", ph)) / ph * COORD_SCALE)
-                bbox = [
-                    max(0, min(COORD_SCALE, x0)),
-                    max(0, min(COORD_SCALE, min(y0, y1))),
-                    max(0, min(COORD_SCALE, x1)),
-                    max(0, min(COORD_SCALE, max(y0, y1))),
-                ]
-
-    chunk_type: "ChunkType" = ChunkType.PARAGRAPH
-    label = ""
-    if dc.meta and dc.meta.doc_items:
-        label = getattr(dc.meta.doc_items[0], "label", "")
-    label_value = getattr(label, "value", label)
-    label_str = str(label_value or "")
-    if label_str == "code":
-        chunk_type = ChunkType.CODE
-    elif label_str == "list_item":
-        chunk_type = ChunkType.LIST_ITEM
-    elif "heading" in label_str or "title" in label_str:
-        chunk_type = ChunkType.HEADING
-
-    _stripped = text.strip()
-    # Subtitle-continuation promotion on the single-page path.
-    if _looks_like_subtitle_continuation(_stripped, chunk_type, last_hybrid_heading):
-        chunk_type = ChunkType.HEADING
-
-    return [
-        (
-            UIRChunk(
-                modality=Modality.TEXT,
-                content=_stripped,
-                locator=UIRLocator(
-                    type=UIRLocatorType.BBOX,
-                    bbox=bbox or [0, 0, COORD_SCALE, COORD_SCALE],
-                    page_number=page_no,
-                    coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
-                ),
-                confidence=UIRConfidenceBreakdown(),
-                extraction_method="hybrid_chunker",
-                extraction_engine_version="docling-2.86.0",
-            ),
-            chunk_type,
-        )
-    ]
-
-
-def _section_header_page_to_uir_chunk(
-    items: List[Any],
-    page_number: int,
-    page_w: float,
-    page_h: float,
-) -> Optional[UIRChunk]:
-    """Phase A step 3 boundary: section-header-only page items → UIRChunk.
-
-    Charter §3.2: the bridge encapsulates the Docling label check (only
-    `section_header` / `title` labels permitted) + text extraction + union
-    bbox. Returns None for mixed-content pages (any non-heading label) or
-    pages where no heading text remains after extraction.
-
-    `page_number` is the OUTPUT page number (already includes any
-    `page_offset` the caller applied) — i.e. the value that will land on
-    `IngestionChunk.metadata.page_number`.
-    """
-    labels = {_docling_item_label(it) for it in items}
-    if not labels.issubset({"section_header", "title"}):
-        return None
-
-    heading_lines = [_docling_item_text(it) for it in items]
-    heading_lines = [ln for ln in heading_lines if ln]
-    if not heading_lines:
-        return None
-
-    content = "\n".join(heading_lines)
-    bbox = _union_docling_item_bboxes_for_uir(items, page_w, page_h)
-    primary_heading = heading_lines[0]
-    return UIRChunk(
-        modality=Modality.TEXT,
-        content=content,
-        locator=UIRLocator(
-            type=UIRLocatorType.BBOX,
-            bbox=bbox,
-            page_number=page_number,
-            coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
-        ),
-        confidence=UIRConfidenceBreakdown(),
-        extraction_method="hybrid_chunker_section_header_page",
-        extraction_engine_version="docling-2.86.0",
-        parent_heading=primary_heading,
-    )
-
-
-def _dense_page_to_uir_chunk(
-    doc: Any,
-    raw_page: int,
-    source_text_only_pages: set[int],
-    pdf_path: Optional[Path],
-    page_w: float,
-    page_h: float,
-) -> Optional[UIRChunk]:
-    """Phase A step 2 boundary: Docling dense-index page slice → UIRChunk.
-
-    Charter §3.2: this is the single Docling-coupled boundary for the
-    dense-index emission path. After this helper returns, the chunker
-    method (`_emit_dense_index_page_chunks`) operates on UIR types only.
-
-    Returns the page-level UIRChunk (text content joined, union bbox,
-    PDF_PAGE_PORTRAIT coordinate frame) or None when the page has no
-    extractable content. `extraction_method` distinguishes the
-    source-PDF fallback from the standard Docling path.
-    """
-    if raw_page in source_text_only_pages:
-        items = _docling_text_items_for_page(doc, raw_page)
-        lines = _extract_pdf_page_lines(pdf_path, raw_page)
-        method = "hybrid_chunker_pageskip_source_pdf"
-    else:
-        index_items = _docling_document_index_items_for_page(doc, raw_page)
-        if index_items:
-            items = index_items
-            lines = [
-                line
-                for item in index_items
-                for line in _docling_document_index_lines(item)
-            ]
-        else:
-            items = _docling_text_items_for_page(doc, raw_page)
-            lines = [
-                _docling_item_text(item)
-                for item in items
-                if _docling_item_text(item)
-            ]
-        method = "hybrid_chunker_pageskip"
-
-    text = _sanitize_toc_index_text("\n".join(lines))
-    if not text:
-        return None
-
-    bbox = _union_docling_item_bboxes_for_uir(items, page_w, page_h)
-    return UIRChunk(
-        modality=Modality.TEXT,
-        content=text,
-        locator=UIRLocator(
-            type=UIRLocatorType.BBOX,
-            bbox=bbox,
-            page_number=raw_page,
-            coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
-        ),
-        confidence=UIRConfidenceBreakdown(),
-        extraction_method=method,
-        extraction_engine_version="docling-2.86.0",
-    )
-
-
-def _classify_dense_index_pages(doc: Any) -> set[int]:
-    """Return pages that should bypass HybridChunker as dense TOC/index pages.
-
-    Docling's ``document_index`` label is authoritative: real Ayeva index
-    pages expose empty DocumentIndex containers during ``iterate_items()``
-    while their text lives inside the node's table data. When Docling does
-    not emit DocumentIndex, the secondary shape gates catch TOC/index pages
-    made from table cells or list items.
-    """
-    by_page: Dict[int, Dict[str, int]] = {}
-    dense_pages: set[int] = set()
-    for item, _level in doc.iterate_items():
-        page_no = _docling_item_page_no(item)
-        if page_no is None:
-            continue
-        text = _docling_item_text(item)
-        label = _docling_item_label(item)
-        if label in {"document_index", "documentindex"}:
-            dense_pages.add(page_no)
-        stats = by_page.setdefault(
-            page_no,
-            {
-                "items": 0,
-                "text_items": 0,
-                "index_refs": 0,
-                "toc_leaders": 0,
-                "short_index_tokens": 0,
-                "digit_short_tokens": 0,
-            },
-        )
-        stats["items"] += 1
-        if text:
-            stats["text_items"] += 1
-        if _INDEX_REF_RE.search(text):
-            stats["index_refs"] += 1
-        if _TOC_LEADER_RE.search(text):
-            stats["toc_leaders"] += 1
-        if (
-            label in _SHORT_INDEX_LABELS
-            and text
-            and len(text) <= 12
-            and "\n" not in text
-        ):
-            stats["short_index_tokens"] += 1
-            if re.fullmatch(r"\d{1,4}", text):
-                stats["digit_short_tokens"] += 1
-
-    for page_no, stats in by_page.items():
-        if page_no in dense_pages:
-            continue
-        text_items = stats["text_items"]
-        if text_items < 5:
-            continue
-        index_score = (
-            stats["index_refs"] * 3
-            + stats["toc_leaders"] * 3
-            + stats["short_index_tokens"]
-        )
-        evidence_count = stats["index_refs"] + stats["toc_leaders"]
-        signal_ratio = (
-            stats["index_refs"] + stats["toc_leaders"] + stats["short_index_tokens"]
-        ) / max(text_items, 1)
-        if (
-            (
-                text_items >= 18
-                and index_score >= 14
-                and signal_ratio >= 0.35
-                and (evidence_count >= 2 or stats["digit_short_tokens"] >= 6)
-            )
-            or (stats["index_refs"] >= 4 and stats["short_index_tokens"] >= 8)
-            or (stats["toc_leaders"] >= 5 and signal_ratio >= 0.30)
-            or (stats["toc_leaders"] >= 4 and signal_ratio >= 0.80)
-        ):
-            dense_pages.add(page_no)
-    return dense_pages
-
-
-def _sanitize_toc_index_text(text: str) -> str:
-    marker = re.compile(r",\s*\d+\s*=")
-    cleaned = marker.sub(" ", text or "")
-    # Plan v2.9 Phase B1: many publisher TOC templates render dotted
-    # leaders via a `.` glyph that lacks a ToUnicode mapping. Docling
-    # then emits U+FFFD (replacement char) runs in those regions
-    # (e.g. "About the Author ��������� xxix"). The TOC entry's
-    # title and page number remain readable; the leader region is
-    # cosmetic. Collapse U+FFFD runs (with surrounding whitespace)
-    # into a single space so:
-    #   1. Downstream corruption detectors (qa_conversion_audit,
-    #      qa_universal_invariants) do not flag the chunk as
-    #      irreparably corrupt.
-    #   2. Retrieval sees a clean "title ... page" surface form
-    #      instead of "title ��� page".
-    cleaned = re.sub(r"[ \t]*�[� \t]*", " ", cleaned)
-    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
-    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
-    return cleaned.strip()
-
-
-def _extract_pdf_page_lines(pdf_path: Optional[Path], page_no: int) -> List[str]:
-    """Return non-empty lines from source-PDF page via pypdfium2.
-
-    Used by `_classify_dense_back_index_pages_by_source` and the source-PDF
-    fallback emitter to bypass Docling's layout extraction on pages where it
-    silently mangles dense back-index content.
-    """
-    if pdf_path is None:
-        return []
-    try:
-        import pypdfium2 as pdfium
-    except ImportError:
-        return []
-    try:
-        pdf = pdfium.PdfDocument(str(pdf_path))
-    except Exception:
-        return []
-    try:
-        if page_no < 1 or page_no > len(pdf):
-            return []
-        text = pdf[page_no - 1].get_textpage().get_text_bounded() or ""
-        return [line for line in text.splitlines() if line.strip()]
-    except Exception:
-        return []
-    finally:
-        try:
-            pdf.close()
-        except Exception:
-            pass
-
-
-def _is_back_index_page_by_lines(lines: List[str]) -> bool:
-    """True when source-PDF lines match a typical back-index page shape.
-
-    Detects the Adedeji-style back-index that escapes Docling's
-    `document_index` label: dense lines of `Topic, page` entries with the
-    "<n> | Index" page marker. Threshold tuned on Adedeji p298-316 (positive)
-    vs Adedeji body / Hao body / Kimothi back-index (negative; Kimothi is
-    handled by the Docling label and stays out of this fallback).
-    """
-    n_lines = len(lines)
-    if n_lines < _BACK_INDEX_MIN_LINES:
-        return False
-    n_idx = sum(1 for line in lines if _BACK_INDEX_ENTRY_RE.match(line.strip()))
-    ratio = n_idx / n_lines
-    if ratio >= _BACK_INDEX_RATIO:
-        return True
-    has_marker = any(_BACK_INDEX_MARKER_RE.match(line.strip()) for line in lines)
-    return ratio >= _BACK_INDEX_RATIO_WITH_MARKER and has_marker
-
-
-def _classify_dense_back_index_pages_by_source(
-    pdf_path: Optional[Path],
-    total_pages: int,
-    exclude: set[int],
-) -> set[int]:
-    """Detect back-index pages by source-PDF content shape.
-
-    Runs after `_classify_dense_index_pages` for pages it didn't catch.
-    Uses pypdfium2 to read clean source-PDF text, sidestepping any
-    Docling layout corruption.
-
-    Args:
-        pdf_path: Source PDF path; if None, returns an empty set.
-        total_pages: Total page count of the document (1-indexed range).
-        exclude: Pages already classified by Docling-based detection; skipped.
-    """
-    if pdf_path is None or total_pages < 1:
-        return set()
-    found: set[int] = set()
-    for page_no in range(1, total_pages + 1):
-        if page_no in exclude:
-            continue
-        lines = _extract_pdf_page_lines(pdf_path, page_no)
-        if _is_back_index_page_by_lines(lines):
-            found.add(page_no)
-    return found
 
 
 # ============================================================================
@@ -1073,7 +248,7 @@ TECHNICAL_KEYWORDS = [
 
 class V2DocumentProcessor:
     """
-    V2.0 compliant document processor using Docling-native layout analysis.
+    V2.0 compliant document processor using layout-native layout analysis.
 
     This processor:
     1. Accepts PDF, EPUB, HTML, DOCX files
@@ -1120,7 +295,7 @@ class V2DocumentProcessor:
         conversion_plan: Optional[PdfConversionPlan] = None,
         # Force table serialization through VLM route (when available)
         force_table_vlm: bool = False,
-        # Shared Docling converter for batch processing (avoids model reload)
+        # Shared engine converter for batch processing (avoids model reload)
         external_converter: Optional[Any] = None,
     ) -> None:
         """
@@ -1142,7 +317,7 @@ class V2DocumentProcessor:
             source_file_override: Override source filename (for batch processing)
             extraction_strategy: Dynamic extraction strategy from StrategyOrchestrator
             conversion_plan: Shared PDF conversion policy
-            force_table_vlm: Force table image -> VLM markdown path (fallback to OCR/docling if needed)
+            force_table_vlm: Force table image -> VLM markdown path (fallback to OCR/engine markdown if needed)
         """
         # Store extraction strategy for dynamic thresholds
         self._extraction_strategy = extraction_strategy
@@ -1184,7 +359,7 @@ class V2DocumentProcessor:
             self._doc_image_density = _raw_meta.pop("image_density", None)
             self._doc_avg_text_per_page = _raw_meta.pop("avg_text_per_page", None)
             # Workstream B: pop needs_code_enrichment before storing — it is used
-            # only to configure the Docling converter, not as a chunk field.
+            # only to configure the engine converter, not as a chunk field.
             self.needs_code_enrichment = bool(_raw_meta.pop("needs_code_enrichment", False))
             self._extraction_route = "native_digital"
             self._max_chunker_input_chars = 500_000
@@ -1234,7 +409,7 @@ class V2DocumentProcessor:
         self.ocr_engine = ocr_engine
         self.max_pages = max_pages
 
-        # Initialize Docling converter — reuse external converter if provided
+        # Initialize engine converter — reuse external converter if provided
         # to avoid reloading the picture classification model per batch.
         adapter_plan = conversion_plan or build_pdf_conversion_plan(
             enable_ocr=enable_ocr,
@@ -1249,10 +424,10 @@ class V2DocumentProcessor:
             avg_text_per_page=self._doc_avg_text_per_page or 0.0,
             **self._intelligence_metadata,
         )
-        self._adapter = DoclingPdfAdapter(adapter_plan)
+        self._adapter = PdfExtractionAdapter(adapter_plan)
         if external_converter is not None:
             self._converter = external_converter
-            logger.info("[PROCESSOR] Reusing shared Docling converter (batch mode)")
+            logger.info("[PROCESSOR] Reusing shared engine converter (batch mode)")
         else:
             self._converter = self._adapter.get_converter()
 
@@ -1305,7 +480,7 @@ class V2DocumentProcessor:
         self._section_detector = create_section_detector()
 
         logger.info(
-            f"ENGINE_USE: Docling v2.86.0 | V2DocumentProcessor initialized | "
+            f"ENGINE_USE: extraction engine v2.86.0 | V2DocumentProcessor initialized | "
             f"OCR: {ocr_engine if enable_ocr else 'disabled'} | "
             f"Vision: {vision_provider} | "
             f"Max pages: {max_pages if max_pages else 'ALL'} | "
@@ -1466,7 +641,7 @@ class V2DocumentProcessor:
         ``book.spine`` (the canonical reading order) instead of
         ``get_items_of_type`` (which returns manifest order). Prepends a
         marker paragraph ``__MMRAG_EPUB_CH_NNNN__`` to each non-empty
-        chapter so the post-Docling pass (``_apply_epub_synthetic_pagination``)
+        chapter so the post-extraction pass (``_apply_epub_synthetic_pagination``)
         can derive a per-chunk synthetic ``page_number``. Stashes the
         chapter count on ``self._epub_chapter_count`` and the spine
         chapter names on ``self._epub_spine_chapter_names`` for the
@@ -1557,7 +732,7 @@ class V2DocumentProcessor:
             bbox = [0, 0, 1000, 1000]
             extraction_method = "epub_html"
 
-        Pre-marker fallback: Docling's HTML parser sometimes drops the
+        Pre-marker fallback: the HTML parser sometimes drops the
         first one or more marker paragraphs (e.g. KI EPUB's titlepage +
         colophon are stripped before the first surviving marker reaches
         the chunk stream). Chunks that arrive before any marker are
@@ -1567,7 +742,7 @@ class V2DocumentProcessor:
         marker survives (catastrophic), the buffer flushes to chapter 1.
 
         Chunks that become empty after marker removal are dropped (those
-        are the marker-only paragraphs Docling emits as standalone chunks).
+        are the marker-only paragraphs the engine emits as standalone chunks).
         ``chunk_id`` is regenerated with the new ``page_number`` and a
         monotonic global position so the v2.9 chunk_id position-component
         contract (no duplicate chunk_ids within a document) holds across
@@ -1738,7 +913,7 @@ class V2DocumentProcessor:
         # Body text must not be validated as a heading. The heading validator
         # intentionally rejects long/multi-sentence strings; using it here
         # drops legitimate element-by-element fallback text from TOC/index
-        # pages when HybridChunker times out on dense Docling cells.
+        # pages when HybridChunker times out on dense engine cells.
         if len(text) < 2:
             logger.debug(f"[DENOISE] Rejected content (too short): '{text}'")
             return True
@@ -1757,7 +932,7 @@ class V2DocumentProcessor:
         """
         Heuristic code detector for programming books/manuals.
 
-        Docling/PyMuPDF often preserve indentation/newlines for code blocks; we prefer
+        The extraction engine + PyMuPDF often preserve indentation/newlines for code blocks; we prefer
         to keep those blocks intact (and avoid sentence splitting / denoising).
         """
         if not text:
@@ -1808,7 +983,7 @@ class V2DocumentProcessor:
         return False
 
     def _extract_heading_level(self, label: str) -> Optional[int]:
-        """Extract heading level from Docling label."""
+        """Extract heading level from engine label."""
         label_lower = label.lower()
         if "title" in label_lower:
             return 1
@@ -1902,7 +1077,7 @@ class V2DocumentProcessor:
                 crop = (122, 316, 367, 633)
 
         Args:
-            element: Docling element (may have .image attribute)
+            element: engine element (may have .image attribute)
             bbox_normalized: Bounding box in 0-1000 normalized scale (or None)
             page_images: Dict of page number → rendered PIL Image
             page_no: Batch page number (for page_images lookup)
@@ -1914,7 +1089,7 @@ class V2DocumentProcessor:
         extracted_image: Optional[Image.Image] = None
 
         try:
-            # PRIORITY 1: Use Docling's native extracted image when available.
+            # PRIORITY 1: Use the engine-extracted image when available.
             #
             # This yields "clean" assets (not page crops) and avoids the common failure mode
             # where bbox crops cut off chart axes / labels / code text in technical books.
@@ -2017,7 +1192,7 @@ class V2DocumentProcessor:
                     f"[IRON-06 VIOLATION] Page image buffer missing for page {page_no}. "
                     f"Cannot apply REQ-MM-01 10px padding. Processing HALTED. "
                     f"This should NOT happen with generate_page_images=True. "
-                    f"Check Docling configuration and batch_processor page_images dict."
+                    f"Check Engine configuration and batch_processor page_images dict."
                 )
                 logger.error(error_msg)
                 raise RuntimeError(error_msg)
@@ -2050,7 +1225,7 @@ class V2DocumentProcessor:
         REQ-MM-01: 10px padding is applied BEFORE normalization in _apply_padding()
 
         Args:
-            element: Docling element with potential .image attribute
+            element: engine element with potential .image attribute
             asset_path: Relative path for saving (e.g., "assets/xxx_001_figure_01.png")
             bbox_normalized: Bounding box in 0-1000 normalized scale
             page_images: Dict of page number → rendered PIL Image (at 2.0x scale)
@@ -2336,11 +1511,11 @@ class V2DocumentProcessor:
             md_lines.append("| " + ln.replace("|", "\\|") + " |")
         return "\n".join(md_lines)
 
-    def _extract_docling_table_text(self, element: Any, page_no: int, doc: Any = None) -> str:
+    def _extract_table_text(self, element: Any, page_no: int, doc: Any = None) -> str:
         """
-        Best-effort extraction of richer table text from Docling table elements.
+        Best-effort extraction of richer table text from engine table elements.
 
-        Some Docling table elements expose markdown/structured export methods while
+        Some engine table elements expose markdown/structured export methods while
         `element.text` may contain only placeholders. This helper probes common
         export APIs and falls back safely.
         """
@@ -2356,7 +1531,7 @@ class V2DocumentProcessor:
             if not callable(method):
                 continue
             try:
-                # New Docling API requires doc argument
+                # New engine API requires doc argument
                 if doc is not None:
                     value = method(doc=doc)
                 else:
@@ -2387,7 +1562,7 @@ class V2DocumentProcessor:
         table_image: Optional[Image.Image],
         page_no: int,
     ) -> str:
-        """OCR-based fallback for table chunks when Docling table text is missing."""
+        """OCR-based fallback for table chunks when engine table text is missing."""
         if table_image is None:
             return ""
         if not self.enable_ocr:
@@ -2425,7 +1600,7 @@ class V2DocumentProcessor:
         table_image: Optional[Image.Image],
         page_no: int,
     ) -> str:
-        """VLM fallback for table markdown extraction when OCR/docling are insufficient."""
+        """VLM fallback for table markdown extraction when OCR/engine markdown are insufficient."""
         if table_image is None or self._vision_manager is None:
             return ""
 
@@ -2448,7 +1623,7 @@ class V2DocumentProcessor:
             if not self._is_valid_vlm_table_markdown(markdown, page_no):
                 logger.warning(
                     f"[TABLE-QUALITY] Page {page_no}: VLM table markdown failed quality gate, "
-                    "falling back to OCR/docling"
+                    "falling back to OCR/engine markdown"
                 )
                 return ""
             logger.info(
@@ -2499,13 +1674,13 @@ class V2DocumentProcessor:
         state: ContextStateV2,
         text_buffer: List[str],
         element_indices: Dict[str, int],
-        docling_processed_pages: set,
+        engine_processed_pages: set,
         pages_with_prior_chunks: Optional[set] = None,
     ) -> Generator[IngestionChunk, None, None]:
         """
         FIX 1: SHADOW EXTRACTION (REQ-MM-05/06/07)
 
-        Scan PDF for bitmaps/images that Docling may have missed.
+        Scan PDF for bitmaps/images that the engine may have missed.
         This is the "safety net" that catches large editorial images.
 
         THRESHOLD (SRS v2.4 STRICT):
@@ -2514,7 +1689,7 @@ class V2DocumentProcessor:
 
         PLAN_V2.10 Phase 3 (2026-05-12): page-coverage-conditional
         relaxation. When `pages_with_prior_chunks` is supplied and the
-        page is NOT in that set (Docling and the main pipeline produced
+        page is NOT in that set (Engine and the main pipeline produced
         nothing for it), the size threshold drops to 200x200 so mid-
         sized chapter-intro diagrams (Python_Distilled pp 686/688/913:
         453x258-290) still emit one image chunk and avoid landing as
@@ -2522,22 +1697,22 @@ class V2DocumentProcessor:
         for that lane too — too-narrow icons and thin banners remain
         filtered.
 
-        This method runs AFTER Docling processing and extracts any
+        This method runs AFTER engine processing and extracts any
         visual elements that meet the threshold but weren't extracted
-        by Docling's AI-driven layout analysis.
+        by the AI-driven layout analysis.
 
         Args:
             file_path: Path to original PDF file
             doc_hash: Document hash for asset naming
             source_file: Source filename
             file_type: FileType enum
-            page_images: Rendered page images (from Docling)
+            page_images: Rendered page images (from the engine)
             page_dims: Page dimensions dict
             page_offset: Page offset for batch processing
             state: Context state for breadcrumbs
             text_buffer: Text buffer for prev_text context
             element_indices: Element counters (figure, table)
-            docling_processed_pages: Set of pages Docling processed
+            engine_processed_pages: Set of pages engine-processed
 
         Yields:
             IngestionChunk objects for shadow-extracted assets
@@ -2557,8 +1732,8 @@ class V2DocumentProcessor:
                 batch_page_no = page_idx + 1  # 1-indexed
                 actual_page_no = batch_page_no + page_offset
 
-                # Only process pages that Docling processed
-                if batch_page_no not in docling_processed_pages:
+                # Only process pages that engine-processed
+                if batch_page_no not in engine_processed_pages:
                     continue
 
                 page = pdf_doc[page_idx]
@@ -3326,7 +2501,7 @@ class V2DocumentProcessor:
         if not file_path.exists():
             raise FileNotFoundError(f"Document not found: {file_path}")
 
-        logger.info(f"ENGINE_USE: Docling v2.86.0 | Processing: {file_path.name}")
+        logger.info(f"ENGINE_USE: extraction engine v2.86.0 | Processing: {file_path.name}")
 
         # Use overrides for batch processing, otherwise compute from file
         doc_hash = self._doc_hash_override or self._compute_doc_hash(file_path)
@@ -3348,7 +2523,7 @@ class V2DocumentProcessor:
             logger.info(f"Batch processing mode: page_offset={self._page_offset}")
 
         # EPUB pre-processing: extract XHTML chapters to a temporary HTML file.
-        # Docling 2.86.0 supports HTML but not EPUB natively.
+        # extraction engine 2.86.0 supports HTML but not EPUB natively.
         _tmp_epub_html: Optional[Path] = None
         if file_path.suffix.lower() == ".epub":
             _tmp_epub_html = self._epub_to_html(file_path)
@@ -3358,13 +2533,13 @@ class V2DocumentProcessor:
             else:
                 raise ValueError(f"Failed to extract HTML from EPUB: {input_path}")
 
-        print("⏳ Starting Docling layout analysis...", flush=True)
-        logger.info("Starting Docling document conversion...")
+        print("⏳ Starting engine layout analysis...", flush=True)
+        logger.info("Starting extraction-engine conversion...")
 
         import time as _time
 
         _start = _time.perf_counter()
-        # Route through the adapter so post-Docling sanity stages (reading-order
+        # Route through the adapter so post-extraction sanity stages (reading-order
         # y-sort, drop-cap promotion) run when the plan opts in. Calling the
         # raw self._converter would bypass them and re-create the page-13
         # swap and dislocated drop-cap fixed by PLAN_DOCLING_POSTPROCESSOR.md.
@@ -3374,8 +2549,8 @@ class V2DocumentProcessor:
         result = self._adapter.convert(str(file_path))
         _elapsed = _time.perf_counter() - _start
 
-        print(f"✓ Docling conversion complete in {_elapsed:.1f}s", flush=True)
-        logger.info(f"Docling conversion completed in {_elapsed:.1f}s")
+        print(f"✓ extraction conversion complete in {_elapsed:.1f}s", flush=True)
+        logger.info(f"extraction conversion completed in {_elapsed:.1f}s")
 
         # Reset cross-call state for the dense-index per-element table skip set.
         self._dense_index_pages_skip_table = set()
@@ -3405,7 +2580,7 @@ class V2DocumentProcessor:
         # ================================================================
         # HYBRID CHUNKER PATH (Phase 1 of migration)
         # ================================================================
-        # Use Docling's HybridChunker for text elements (sentence-aware
+        # Use the engine's HybridChunker for text elements (sentence-aware
         # splitting, proper heading hierarchy). Process IMAGE/TABLE
         # elements through the existing element-by-element pipeline.
         #
@@ -3428,7 +2603,7 @@ class V2DocumentProcessor:
 
         # Guard: estimate total document text size before chunking, and
         # detect any single pathological element (e.g. an index page that
-        # Docling extracts as one mega-element) that would feed a
+        # the engine extracts as one mega-element) that would feed a
         # multi-million-token sequence to the sentence-transformer tokenizer.
         if _use_hybrid:
             _max_chars = getattr(self, "_max_chunker_input_chars", 500_000)
@@ -3538,7 +2713,7 @@ class V2DocumentProcessor:
         # V3.0.0: Pending context queue for IMAGE and TABLE next_text_snippet
         pending_visual_chunks: List[IngestionChunk] = []
         # PLAN_V2.10 Phase 3: track pages with any chunk so SHADOW-EXTRACTION
-        # can use a page-coverage-aware threshold for pages Docling left
+        # can use a page-coverage-aware threshold for pages the engine left
         # entirely empty (Python_Distilled pp 686/688/913: mid-size diagrams
         # that fall just below the standard 300x300 / 40% threshold but the
         # rendered page is non-blank, so the strict gate flags it as
@@ -3612,10 +2787,10 @@ class V2DocumentProcessor:
 
         # ================================================================
         # FIX 1: SHADOW EXTRACTION (REQ-MM-05/06/07)
-        # Shadow scan runs AFTER Docling to catch missed large images
+        # Shadow scan runs AFTER engine extraction to catch missed large images
         # ================================================================
         logger.info(
-            "[SHADOW-EXTRACTION] Running post-Docling shadow scan for missed visual assets..."
+            "[SHADOW-EXTRACTION] Running post-extraction shadow scan for missed visual assets..."
         )
         for shadow_chunk in self._run_shadow_extraction(
             file_path=Path(input_path),
@@ -3628,7 +2803,7 @@ class V2DocumentProcessor:
             state=state,
             text_buffer=text_buffer,
             element_indices=element_indices,
-            docling_processed_pages=set(page_images.keys()),
+            engine_processed_pages=set(page_images.keys()),
             pages_with_prior_chunks=pages_with_prior_chunks,
         ):
             # Shadow chunks may also be IMAGE/TABLE, handle pending context
@@ -3663,7 +2838,7 @@ class V2DocumentProcessor:
 
         assets_saved = len(list(self.assets_dir.glob("*.png")))
         logger.info(
-            f"ENGINE_USE: Docling v2.86.0 | Completed: {file_path.name} | "
+            f"ENGINE_USE: extraction engine v2.86.0 | Completed: {file_path.name} | "
             f"Doc ID: {doc_hash} | Assets saved: {assets_saved}"
         )
 
@@ -3684,17 +2859,15 @@ class V2DocumentProcessor:
         page_offset: int = 0,
         pdf_path: Optional[Path] = None,
     ) -> List["IngestionChunk"]:
-        """Process text elements using Docling's HybridChunker.
+        """Process text elements via the engine's sentence-aware chunker.
 
-        Replaces custom element-by-element text chunking with Docling's
-        sentence-boundary-aware chunker. Produces IngestionChunks with
-        proper heading hierarchy from the document structure.
+        Charter §3.2: HybridChunker invocation lives behind the engine's
+        `_invoke_text_chunker` entry point. This method consumes the raw
+        chunker output, converts each segment through `_engine_chunk_to_uir`,
+        and emits IngestionChunks via `IngestionChunk.from_uir`. The engine
+        is the only place that touches the underlying extraction-engine
+        chunker class.
         """
-        from docling_core.transforms.chunker import HybridChunker
-        import signal
-
-        _chunker_timeout = 120  # seconds per batch; fall back if exceeded
-
         # Phase 4 Step 4: seed `_last_hybrid_heading` from the prior batch's
         # state so heading carry-forward survives V2DocumentProcessor
         # re-instantiation between batches. Without this, batches that
@@ -3714,104 +2887,45 @@ class V2DocumentProcessor:
                     seeded,
                 )
 
-        chunker_kwargs: Dict[str, Any] = {
-            "tokenizer": "sentence-transformers/all-MiniLM-L6-v2",
-            "max_tokens": 350,  # ~1400 chars — keeps chunks under the 1500-char oversize gate
-        }
-        dense_index_pages = _classify_dense_index_pages(doc)
-        # Phase 4 Step 2: source-PDF fallback for back-index pages that escape
-        # the Docling-based classifier (Adedeji 298-316 ship without the
-        # `document_index` label and produce silently-truncated or visibly
-        # corrupted text chunks under HybridChunker).
-        total_pages = len(page_dims) if page_dims else 0
-        source_back_index_pages = _classify_dense_back_index_pages_by_source(
-            pdf_path=pdf_path,
-            total_pages=total_pages,
-            exclude=dense_index_pages,
-        )
-        if source_back_index_pages:
-            logger.info(
-                "[HYBRID-CHUNKER] Source-PDF back-index detection added page(s): %s",
-                sorted((page + page_offset) for page in source_back_index_pages),
+        # Engine boundary: run the sentence-aware text chunker + dense-
+        # index detection in one call. The engine returns the raw chunker
+        # output (`doc_chunks`) for iteration here, plus the
+        # dense_index_pages / source_back_index_pages sets the per-element
+        # emitter consults to skip table emission.
+        try:
+            invocation = _invoke_text_chunker(
+                doc=doc,
+                page_offset=page_offset,
+                page_dims=page_dims,
+                pdf_path=pdf_path,
+                suppress_layout_label_text=getattr(
+                    self, "_suppress_layout_label_text", False
+                ),
+                timeout_seconds=120,
             )
-            dense_index_pages = dense_index_pages | source_back_index_pages
+        except TimeoutError:
+            raise  # Let caller set _use_hybrid=False via its except block
+
+        dense_index_pages = invocation.dense_index_pages
         # Stash dense_index_pages so the per-element table/image emitter
-        # downstream can skip emission on these pages (otherwise Docling's
-        # corrupted table chunk for Adedeji p301 still leaks through).
-        # Use GLOBAL page numbers because `_process_element_v2` checks
-        # against `batch_page_no + page_offset`.
+        # downstream can skip emission on these pages. Use GLOBAL page
+        # numbers because `_process_element_v2` checks against
+        # `batch_page_no + page_offset`.
         self._dense_index_pages_skip_table = {
             page + page_offset for page in dense_index_pages
         }
-        if dense_index_pages:
-            logger.info(
-                "[HYBRID-CHUNKER] Routing dense TOC/index page(s) around "
-                "HybridChunker: %s",
-                sorted((page + page_offset) for page in dense_index_pages),
-            )
-        if getattr(self, "_suppress_layout_label_text", False) or dense_index_pages:
-            from .engines.docling_serializers import MmragChunkingSerializerProvider
-            chunker_kwargs["serializer_provider"] = MmragChunkingSerializerProvider(
-                skip_pages=dense_index_pages
-            )
-        chunker = HybridChunker(**chunker_kwargs)
-
-        # Per-batch time guard: HybridChunker's sentence-transformer
-        # tokenizer can be slow on dense pages. If a single batch exceeds
-        # the timeout, fall back to element-by-element chunking.
-        def _chunker_alarm(signum, frame):
-            raise TimeoutError("HybridChunker exceeded per-batch time limit")
-
-        old_handler = signal.signal(signal.SIGALRM, _chunker_alarm)
-        try:
-            signal.alarm(_chunker_timeout)
-            doc_chunks = list(chunker.chunk(doc))
-            signal.alarm(0)  # Cancel alarm
-        except TimeoutError:
-            signal.alarm(0)
-            logger.error(
-                "[HYBRID-CHUNKER-GUARD] Per-batch timeout fired despite "
-                "pre-flight dense-page routing — investigate which page "
-                "slipped the classifier. Falling back to element-by-element "
-                "chunking."
-            )
-            raise  # Let caller set _use_hybrid=False via its except block
-        finally:
-            signal.signal(signal.SIGALRM, old_handler)
-
-        if dense_index_pages:
-            leaked_pages: set[int] = set()
-            kept_doc_chunks = []
-            for dc in doc_chunks:
-                pages = set()
-                if dc.meta and dc.meta.doc_items:
-                    for _it in dc.meta.doc_items:
-                        _p = _docling_item_page_no(_it)
-                        if _p is not None:
-                            pages.add(_p)
-                leak = pages & dense_index_pages
-                if leak:
-                    leaked_pages.update(leak)
-                    continue
-                kept_doc_chunks.append(dc)
-            if leaked_pages:
-                logger.error(
-                    "[HYBRID-CHUNKER] Serializer skip leaked dense page item(s) "
-                    "from page(s) %s; dropping affected DocChunk(s)",
-                    sorted((page + page_offset) for page in leaked_pages),
-                )
-            doc_chunks = kept_doc_chunks
+        doc_chunks = invocation.doc_chunks
 
         # v2.9: keep DOCUMENT_INDEX (TOC) elements. Previously these
         # were filtered out as boilerplate, but TOC pages contain real
         # navigation content (chapter titles, section refs, page nums)
         # that the page-coverage gate legitimately expects to see. The
         # garbled-TOC filter at finalization (`_TOC_MARKER` regex) still
-        # drops chunks where Docling's cell-marker noise leaks through;
+        # drops chunks where the engine's cell-marker noise leaks through;
         # legitimate TOC pages survive that filter and are emitted.
 
         chunks: List[IngestionChunk] = []
-        # v2.9: per-page content dedup. Docling's HybridChunker can yield
+        # v2.9: per-page content dedup. the engine's HybridChunker can yield
         # the same doc_chunk text 60+ times for cell-rich tables (e.g. the
         # squadron-roster table on Combat Aircraft p66 produced 73 byte-
         # equal text dupes). The downstream chunk_id position counter
@@ -3822,21 +2936,16 @@ class V2DocumentProcessor:
         _seen_per_page: Dict[int, set[str]] = {}
         _hybrid_dedup_skipped = 0
 
-        # Charter §3.2 Phase A step 4 INPUT boundary: each DocChunk is
-        # converted to UIR by `_docling_doc_chunk_to_uir_chunks` BEFORE
-        # the iteration logic runs. Inside the loop body, only UIR types
-        # (UIRChunk, Locator) and v2.16 schema types (IngestionChunk,
-        # ChunkType) are touched — `dc.meta`, `dc.text`, `dc.meta.doc_items`,
-        # `dc.meta.headings` are accessed at exactly two places:
-        #   (1) the bridge call (Docling → UIR conversion).
-        #   (2) `dc.meta.headings` for the heading carry-forward (caller-
-        #       managed iteration-local state; carries Docling-specific
-        #       header validation rules that are not part of the UIR
-        #       contract for v3.0).
-        from .state.context_state import is_valid_heading
+        # Charter §3.2 INPUT boundary: each chunker output segment is
+        # converted to UIR by `_engine_chunk_to_uir`. Inside the loop body
+        # only UIR types (UIRChunk, Locator) and v2.16 schema types
+        # (IngestionChunk, ChunkType) are touched. The validated-heading
+        # list per segment also comes from the engine
+        # (`_doc_chunk_validated_headings`) so no extraction-engine
+        # metadata fields are accessed directly here.
         for i, dc in enumerate(doc_chunks):
             _carryover_heading = getattr(self, "_last_hybrid_heading", None)
-            uir_pairs = _docling_doc_chunk_to_uir_chunks(
+            uir_pairs = _engine_chunk_to_uir(
                 dc=dc,
                 page_offset=page_offset,
                 page_dims=page_dims,
@@ -3854,16 +2963,11 @@ class V2DocumentProcessor:
                     f"emitting per-page text"
                 )
 
-            # Heading carry-forward state lives at the caller. The bridge
+            # Heading carry-forward state lives at the caller. The engine
             # carries no heading info on cross-page splits (v2.16 used the
             # doc-name root only); single-page emissions inherit
             # self._last_hybrid_heading when no explicit heading is present.
-            headings: List[str] = []
-            if dc.meta and dc.meta.headings:
-                for h in dc.meta.headings:
-                    h_text = h if isinstance(h, str) else getattr(h, "text", str(h))
-                    if is_valid_heading(h_text):
-                        headings.append(h_text)
+            headings: List[str] = _doc_chunk_validated_headings(dc)
             if headings and not is_cross_page:
                 self._last_hybrid_heading = headings[-1]
 
@@ -3875,7 +2979,7 @@ class V2DocumentProcessor:
                 _page_no = _uir.locator.page_number
                 _page_w, _page_h = page_dims.get(_page_no, (612.0, 792.0))
 
-                # Dedup at the page level (UIR content, not DocChunk text).
+                # Dedup at the page level (UIR content, not UIRChunk text).
                 _page_seen = _seen_per_page.setdefault(_page_no, set())
                 if _uir.content in _page_seen:
                     _hybrid_dedup_skipped += 1
@@ -3936,8 +3040,8 @@ class V2DocumentProcessor:
                 )
                 chunk.metadata.refined_content = _uir.content
                 chunk.metadata.hierarchy.level = _level
-                # Post-refiner contextualization needs the DocChunk reference
-                # (Docling-side state); kept on single-page emissions only,
+                # Post-refiner contextualization needs the UIRChunk reference
+                # (engine-side state); kept on single-page emissions only,
                 # matching v2.16 (cross-page splits did not preserve _dc_ref).
                 if not is_cross_page:
                     chunk._dc_ref = dc  # type: ignore[attr-defined]
@@ -3946,7 +3050,7 @@ class V2DocumentProcessor:
         if _hybrid_dedup_skipped:
             logger.info(
                 f"[HYBRID-CHUNKER] Dedup-skipped {_hybrid_dedup_skipped} byte-equal "
-                f"text emissions (Docling cell-rich-table cluster)"
+                f"text emissions (engine cell-rich-table cluster)"
             )
 
         if dense_index_pages:
@@ -3966,7 +3070,7 @@ class V2DocumentProcessor:
             chunks.sort(key=lambda ch: ch.metadata.page_number if ch.metadata else 0)
 
         # Plan v2.9 Phase B3 (2026-05-11): section-header-only pages.
-        # HybridChunker treats `section_header` Docling items as heading
+        # HybridChunker treats `section_header` engine items as heading
         # metadata to be propagated into the breadcrumbs of subsequent
         # text chunks. On pages whose ONLY content is one or more
         # section_header items (chapter divider / part-opener pages,
@@ -4026,7 +3130,7 @@ class V2DocumentProcessor:
     ) -> List["IngestionChunk"]:
         """Emit IngestionChunks for dense TOC/index pages (UIR-native).
 
-        Charter §3.2 Phase A step 2: the Docling boundary is encapsulated
+        Charter §3.2 Phase A step 2: the extraction boundary is encapsulated
         in `_dense_page_to_uir_chunk` (one call per page). Everything after
         the bridge call operates on UIR types — chunk-splitting, breadcrumb
         synthesis, and emission via `IngestionChunk.from_uir`.
@@ -4049,7 +3153,7 @@ class V2DocumentProcessor:
             out_page = raw_page + page_offset
             page_w, page_h = page_dims.get(out_page, page_dims.get(raw_page, (612.0, 792.0)))
 
-            # --- Docling boundary: convert page slice to UIR (one call) ---
+            # --- Engine boundary: convert page slice to UIR (one call) ---
             page_uir = _dense_page_to_uir_chunk(
                 doc=doc,
                 raw_page=raw_page,
@@ -4120,7 +3224,7 @@ class V2DocumentProcessor:
         page_offset: int = 0,
     ) -> List["IngestionChunk"]:
         """Plan v2.9 Phase B3: emit one chunk for each page whose only
-        Docling items are `section_header` (a chapter / part divider
+        engine items are `section_header` (a chapter / part divider
         page).
 
         Skips pages already covered by another chunk (the hybrid_chunker
@@ -4136,7 +3240,7 @@ class V2DocumentProcessor:
         signal (answers "where does Chapter / Part X start?"), so we
         emit the chunk rather than mark the page blank-equivalent.
         """
-        # Charter §3.2 Phase A step 3: the Docling boundary is encapsulated
+        # Charter §3.2 Phase A step 3: the extraction boundary is encapsulated
         # in `_section_header_page_to_uir_chunk` (one call per candidate
         # page). The method body operates on UIR-typed inputs after the
         # bridge call and emits IngestionChunks via IngestionChunk.from_uir.
@@ -4151,15 +3255,15 @@ class V2DocumentProcessor:
             if page_no is not None:
                 covered_pages.add(int(page_no))
 
-        # Group Docling items per (raw) page number. This is the Docling
+        # Group engine items per (raw) page number. This is the engine
         # boundary scan — the per-page item list it produces is the input
         # to the UIR bridge below.
         items_per_page: Dict[int, List[Any]] = {}
         for item, _level in doc.iterate_items():
-            raw_page = _docling_item_page_no(item)
+            raw_page = _item_page_no(item)
             if raw_page is None:
                 continue
-            if not _docling_item_text(item):
+            if not _item_text(item):
                 continue
             items_per_page.setdefault(raw_page, []).append(item)
 
@@ -4183,7 +3287,7 @@ class V2DocumentProcessor:
                 out_page, page_dims.get(raw_page, (612.0, 792.0))
             )
 
-            # --- Docling boundary: convert page slice to UIR (returns
+            # --- Engine boundary: convert page slice to UIR (returns
             # None when the page is mixed-label or has no heading text) ---
             page_uir = _section_header_page_to_uir_chunk(
                 items=items_per_page[raw_page],
@@ -4229,7 +3333,7 @@ class V2DocumentProcessor:
             )
         return emitted
 
-    def _union_docling_item_bboxes(
+    def _union_item_bboxes(
         self,
         items: List[Any],
         page_w: float,
@@ -4322,10 +3426,10 @@ class V2DocumentProcessor:
         # ========================================================================
         # PAGE NUMBER EXTRACTION - PROVENANCE LOCKED (REQ-PAGE-01)
         # ========================================================================
-        # RULE: Page number MUST come from Docling provenance, NOT counters.
+        # RULE: Page number MUST come from engine provenance, NOT counters.
         # The prov[0].page_no is the absolute truth from the PDF.
         batch_page_no = 1
-        docling_prov_page = None  # For validation
+        provenance_page = None  # For validation
         bbox = None
 
         if hasattr(element, "prov") and element.prov:
@@ -4333,18 +3437,18 @@ class V2DocumentProcessor:
 
             # PROVENANCE-BASED PAGE NUMBER (MANDATORY)
             if hasattr(prov, "page_no") and prov.page_no is not None:
-                docling_prov_page = prov.page_no
+                provenance_page = prov.page_no
                 batch_page_no = prov.page_no
                 logger.debug(
-                    f"[PAGE-PROV] Element '{label[:20]}' → Docling prov.page_no={docling_prov_page}"
+                    f"[PAGE-PROV] Element '{label[:20]}' → engine prov.page_no={provenance_page}"
                 )
             else:
                 # Fallback: try page attribute
                 if hasattr(prov, "page") and prov.page is not None:
-                    docling_prov_page = prov.page
+                    provenance_page = prov.page
                     batch_page_no = prov.page
                     logger.debug(
-                        f"[PAGE-PROV] Element '{label[:20]}' → Docling prov.page={docling_prov_page}"
+                        f"[PAGE-PROV] Element '{label[:20]}' → engine prov.page={provenance_page}"
                     )
                 else:
                     logger.warning(
@@ -4442,7 +3546,7 @@ class V2DocumentProcessor:
                     f"[METADATA-VALIDATION-ERROR] Page mismatch! "
                     f"Filename says page {filename_page}, "
                     f"metadata says page {page_no}. "
-                    f"Docling prov={docling_prov_page}, offset={page_offset}. "
+                    f"engine prov={provenance_page}, offset={page_offset}. "
                     f"STOPPING TO PREVENT CORRUPT DATA."
                 )
                 logger.error(error_msg)
@@ -4596,7 +3700,7 @@ class V2DocumentProcessor:
             print(
                 f"    📸 Asset: {asset_name} | "
                 f"Page={page_no} | "
-                f"DoclingProv={docling_prov_page}",
+                f"EngineProv={provenance_page}",
                 flush=True,
             )
 
@@ -4685,8 +3789,8 @@ class V2DocumentProcessor:
                     coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
                 ),
                 confidence=UIRConfidenceBreakdown(),
-                extraction_method="docling",
-                extraction_engine_version="docling-2.86.0",
+                extraction_method=EXTRACTION_METHOD_NATIVE,
+                extraction_engine_version=EXTRACTION_ENGINE_VERSION,
                 asset_ref=asset_path,
                 parent_heading=hierarchy.parent_heading if hierarchy else None,
             )
@@ -4711,7 +3815,7 @@ class V2DocumentProcessor:
 
         elif "table" in label_lower:
             # Phase 4 Step 2: skip table emission on dense back-index pages
-            # routed through `_emit_dense_index_page_chunks` — Docling's table
+            # routed through `_emit_dense_index_page_chunks` — the engine's table
             # extraction on these pages produces page-corrupted output (e.g.
             # Adedeji p301: 9-chunk repetition loop).
             if page_no in getattr(self, "_dense_index_pages_skip_table", set()):
@@ -4764,20 +3868,20 @@ class V2DocumentProcessor:
 
             table_content = (text or "").strip()
             if self._is_table_placeholder_text(table_content, page_no):
-                recovered_table_text = self._extract_docling_table_text(element, page_no)
+                recovered_table_text = self._extract_table_text(element, page_no)
                 if recovered_table_text:
                     table_content = recovered_table_text
 
-            table_extraction_method = "docling"
-            docling_markdown = ""
+            table_extraction_method = EXTRACTION_METHOD_NATIVE
+            engine_table_markdown = ""
             if table_content and not self._is_table_placeholder_text(table_content, page_no):
-                docling_markdown = self._table_text_to_markdown(table_content)
-                if self._is_markdown_table(docling_markdown):
-                    table_content = docling_markdown
-                    table_extraction_method = "docling_table_markdown"
+                engine_table_markdown = self._table_text_to_markdown(table_content)
+                if self._is_markdown_table(engine_table_markdown):
+                    table_content = engine_table_markdown
+                    table_extraction_method = EXTRACTION_METHOD_TABLE_MARKDOWN
 
             # Guard against placeholder or text-soup table output:
-            # Prefer VLM table serialization, then OCR, then docling markdown fallback.
+            # Prefer VLM table serialization, then OCR, then engine-table-markdown fallback.
             vlm_attempted = False
             # v2.14 Phase 1 (2026-05-23): `force_table_vlm` truly forces, even when
             # the resolved profile sets `vlm_table_enabled=False` (e.g. technical_manual
@@ -4799,7 +3903,7 @@ class V2DocumentProcessor:
                 (not vlm_table_enabled)
                 and (not self.enable_ocr)
                 and self._is_table_placeholder_text(table_content, page_no)
-                and not docling_markdown
+                and not engine_table_markdown
                 and (saved_table_image is not None)
             )
 
@@ -4822,7 +3926,7 @@ class V2DocumentProcessor:
                 else:
                     logger.warning(
                         f"[TABLE-VLM] Page {page_no}: forced VLM serialization returned empty, "
-                        "falling back to OCR/docling path."
+                        "falling back to OCR/engine markdown path."
                     )
 
             if self._is_unstructured_table_text(table_content, page_no):
@@ -4850,9 +3954,9 @@ class V2DocumentProcessor:
                             else self._table_text_to_markdown(ocr_markdown)
                         )
                         table_extraction_method = "ocr_table_markdown"
-                    elif docling_markdown:
-                        table_content = docling_markdown
-                        table_extraction_method = "docling_table_markdown_fallback"
+                    elif engine_table_markdown:
+                        table_content = engine_table_markdown
+                        table_extraction_method = EXTRACTION_METHOD_TABLE_MARKDOWN_FALLBACK
 
             if self._is_table_placeholder_text(table_content, page_no):
                 table_content = f"[Table extraction unavailable on page {page_no}]"
@@ -4897,7 +4001,7 @@ class V2DocumentProcessor:
                 ),
                 confidence=UIRConfidenceBreakdown(),
                 extraction_method=table_extraction_method,
-                extraction_engine_version="docling-2.86.0",
+                extraction_engine_version=EXTRACTION_ENGINE_VERSION,
                 asset_ref=asset_path,
                 parent_heading=hierarchy.parent_heading if hierarchy else None,
             )
@@ -4938,7 +4042,7 @@ class V2DocumentProcessor:
             or "section" in label_lower
             or "list" in label_lower
             or "caption" in label_lower
-            or "code" in label_lower  # Programming books: Docling emits code blocks as \"code\"
+            or "code" in label_lower  # Programming books: the engine emits code blocks as \"code\"
             or "footnote" in label_lower  # Common in manuals/books; should be treated as TEXT
             or "formula" in label_lower  # Math/formulas are text-like (often missed otherwise)
             or "equation" in label_lower  # Alias for formula-like regions
@@ -5011,7 +4115,7 @@ class V2DocumentProcessor:
 
                         # Denormalize bbox for cropping (0-1000 → pixels)
                         page_w, page_h = page_dims.get(batch_page_no, (612.0, 792.0))
-                        scale = 2.0  # Docling render scale
+                        scale = 2.0  # engine render scale
 
                         # bbox is normalized 0-1000, convert to pixels
                         x0 = int((bbox[0] / COORD_SCALE) * page_w * scale)
@@ -5195,8 +4299,8 @@ class V2DocumentProcessor:
                         content=chunk_text,
                         locator=_txt_locator,
                         confidence=UIRConfidenceBreakdown(),
-                        extraction_method="docling",
-                        extraction_engine_version="docling-2.86.0",
+                        extraction_method=EXTRACTION_METHOD_NATIVE,
+                        extraction_engine_version=EXTRACTION_ENGINE_VERSION,
                         structural_flags=_txt_flags,
                         parent_heading=hierarchy.parent_heading if hierarchy else None,
                     )
@@ -5297,7 +4401,7 @@ class V2DocumentProcessor:
                 chunk_count += 1
 
         logger.info(
-            f"ENGINE_USE: Docling v2.86.0 | " f"Written {chunk_count} chunks to {final_output_path}"
+            f"ENGINE_USE: extraction engine v2.86.0 | " f"Written {chunk_count} chunks to {final_output_path}"
         )
 
         return str(final_output_path)
@@ -5384,7 +4488,7 @@ class V2DocumentProcessor:
                 logger.debug(f"[ATOMIC-WRITE] {chunk_count} chunks written to {final_output_path}")
 
         logger.info(
-            f"ENGINE_USE: Docling v2.86.0 | "
+            f"ENGINE_USE: extraction engine v2.86.0 | "
             f"Written {chunk_count} chunks ATOMICALLY to {final_output_path}"
         )
 

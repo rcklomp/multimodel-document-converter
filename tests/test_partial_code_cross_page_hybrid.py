@@ -171,7 +171,15 @@ def test_emit_site_carries_v2_17_predicate():
     verify the metadata field still arrives populated on emitted chunks.
     """
     from pathlib import Path
-    src = Path(__file__).resolve().parents[1] / "src" / "mmrag_v2" / "processor.py"
+    # v3.0 Phase A Command 05: the cross-page emit logic moved from
+    # processor.py into the extraction-engine module
+    # (engines/pdf_extraction.py) so the chunker is engine-agnostic.
+    # The predicate + the StructuralFlag wiring live in the engine
+    # module now; the guard scans that file.
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "src" / "mmrag_v2" / "engines" / "pdf_extraction.py"
+    )
     text = src.read_text(encoding="utf-8")
     # The predicate variable name must still be present in the cross-page
     # emit branch:
