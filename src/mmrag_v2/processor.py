@@ -2755,30 +2755,43 @@ class V2DocumentProcessor:
                         elif page_marker not in " ".join(breadcrumbs):
                             breadcrumbs = [breadcrumbs[0], page_marker] + breadcrumbs[1:]
 
-                        hierarchy = HierarchyMetadata(
-                            parent_heading=state.get_parent_heading(),
-                            breadcrumb_path=breadcrumbs,
-                            level=len(breadcrumbs) if breadcrumbs else None,
-                        )
-
-                        # Create IMAGE chunk with extraction_method="shadow"
-                        yield create_image_chunk(
-                            doc_id=doc_hash,
+                        # Charter §3.2 Phase A: shadow-extraction image emit
+                        # via UIR. IMAGE modality requires bbox + asset_ref;
+                        # visual_description is a v2.16 metadata field set
+                        # post-construction (no UIR field yet).
+                        _shadow_uir = UIRChunk(
+                            modality=Modality.IMAGE,
                             content=content,
+                            locator=UIRLocator(
+                                type=UIRLocatorType.BBOX,
+                                bbox=list(bbox_normalized),
+                                page_number=actual_page_no,
+                                coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
+                            ),
+                            confidence=UIRConfidenceBreakdown(),
+                            extraction_method="shadow",
+                            extraction_engine_version="pymupdf-shadow",
+                            asset_ref=asset_path,
+                            parent_heading=state.get_parent_heading(),
+                        )
+                        _shadow_chunk = IngestionChunk.from_uir(
+                            _shadow_uir,
+                            doc_id=doc_hash,
                             source_file=source_file,
                             file_type=file_type,
-                            page_number=actual_page_no,
-                            asset_path=asset_path,
-                            bbox=bbox_normalized,
-                            hierarchy=hierarchy,
-                            prev_text=prev_text,
-                            visual_description=visual_description,
+                            position=self._next_chunk_position(),
                             page_width=int(page_w),
                             page_height=int(page_h),
-                            extraction_method="shadow",  # REQ-MM-07: Mark as shadow
-                            position=self._next_chunk_position(),
+                            prev_text=prev_text,
+                            breadcrumb_path=breadcrumbs,
                             **self._intelligence_metadata,
                         )
+                        _shadow_chunk.metadata.visual_description = visual_description
+                        # v2.16 literal level on this branch:
+                        _shadow_chunk.metadata.hierarchy.level = (
+                            len(breadcrumbs) if breadcrumbs else None
+                        )
+                        yield _shadow_chunk
 
                     except Exception as img_err:
                         logger.error(
@@ -4661,23 +4674,40 @@ class V2DocumentProcessor:
             # REQ-COORD-02: Get page dimensions for UI overlay support
             img_page_w, img_page_h = page_dims.get(batch_page_no, (612.0, 792.0))
 
-            yield create_image_chunk(
-                doc_id=doc_hash,
+            # Charter §3.2 Phase A: per-element image emit via UIR.
+            _img_uir = UIRChunk(
+                modality=Modality.IMAGE,
                 content=content,
+                locator=UIRLocator(
+                    type=UIRLocatorType.BBOX,
+                    bbox=list(image_bbox),
+                    page_number=page_no,
+                    coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
+                ),
+                confidence=UIRConfidenceBreakdown(),
+                extraction_method="docling",
+                extraction_engine_version="docling-2.86.0",
+                asset_ref=asset_path,
+                parent_heading=hierarchy.parent_heading if hierarchy else None,
+            )
+            _img_chunk = IngestionChunk.from_uir(
+                _img_uir,
+                doc_id=doc_hash,
                 source_file=source_file,
                 file_type=file_type,
-                page_number=page_no,
-                asset_path=asset_path,
-                bbox=image_bbox,
-                hierarchy=hierarchy,
-                prev_text=prev_text,
-                visual_description=visual_description,
+                position=self._next_chunk_position(),
                 page_width=int(img_page_w),
                 page_height=int(img_page_h),
-                position=self._next_chunk_position(),
-                # V2.4: Intelligence Stack Metadata
+                prev_text=prev_text,
+                breadcrumb_path=(
+                    list(hierarchy.breadcrumb_path) if hierarchy else []
+                ),
                 **self._intelligence_metadata,
             )
+            _img_chunk.metadata.visual_description = visual_description
+            if hierarchy and hierarchy.level is not None:
+                _img_chunk.metadata.hierarchy.level = hierarchy.level
+            yield _img_chunk
 
         elif "table" in label_lower:
             # Phase 4 Step 2: skip table emission on dense back-index pages
@@ -4850,53 +4880,48 @@ class V2DocumentProcessor:
             # Create table or text chunk depending on whether an asset image is available.
             # Non-PDF formats (HTML, EPUB, DOCX) cannot render table images, so tables
             # are emitted as TEXT with chunk_type=table to satisfy QA-CHECK-05.
-            if asset_path is not None:
-                table_chunk = create_table_chunk(
-                    doc_id=doc_hash,
-                    content=table_content,
-                    source_file=source_file,
-                    file_type=file_type,
+            # Charter §3.2 Phase A: table emission via UIR.
+            # When asset_path is None (non-PDF formats: HTML/EPUB/DOCX cannot
+            # render table images), emit as TEXT modality with the same UIR
+            # locator + extraction method. With asset, emit as TABLE.
+            _tbl_modality = Modality.TABLE if asset_path is not None else Modality.TEXT
+            _tbl_chunk_type = None if asset_path is not None else ChunkType.PARAGRAPH
+            _tbl_uir = UIRChunk(
+                modality=_tbl_modality,
+                content=table_content,
+                locator=UIRLocator(
+                    type=UIRLocatorType.BBOX,
+                    bbox=list(table_bbox),
                     page_number=page_no,
-                    bbox=table_bbox,
-                    hierarchy=hierarchy,
-                    asset_path=asset_path,
-                    page_width=int(tbl_page_w),
-                    page_height=int(tbl_page_h),
-                    extraction_method=table_extraction_method,
-                    position=self._next_chunk_position(),
-                    # V2.4: Intelligence Stack Metadata
-                    **self._intelligence_metadata,
-                )
-            else:
-                # No rendered image available (non-PDF) — emit as TEXT chunk
-                table_chunk = create_text_chunk(
-                    doc_id=doc_hash,
-                    content=table_content,
-                    source_file=source_file,
-                    file_type=file_type,
-                    page_number=page_no,
-                    bbox=table_bbox,
-                    hierarchy=hierarchy,
-                    chunk_type=ChunkType.PARAGRAPH,
-                    page_width=int(tbl_page_w),
-                    page_height=int(tbl_page_h),
-                    extraction_method=table_extraction_method,
-                    position=self._next_chunk_position(),
-                    # V2.4: Intelligence Stack Metadata
-                    **self._intelligence_metadata,
-                )
+                    coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
+                ),
+                confidence=UIRConfidenceBreakdown(),
+                extraction_method=table_extraction_method,
+                extraction_engine_version="docling-2.86.0",
+                asset_ref=asset_path,
+                parent_heading=hierarchy.parent_heading if hierarchy else None,
+            )
+            table_chunk = IngestionChunk.from_uir(
+                _tbl_uir,
+                doc_id=doc_hash,
+                source_file=source_file,
+                file_type=file_type,
+                position=self._next_chunk_position(),
+                page_width=int(tbl_page_w),
+                page_height=int(tbl_page_h),
+                chunk_type=_tbl_chunk_type,
+                prev_text=prev_text_table,
+                breadcrumb_path=(
+                    list(hierarchy.breadcrumb_path) if hierarchy else []
+                ),
+                **self._intelligence_metadata,
+            )
+            if hierarchy and hierarchy.level is not None:
+                table_chunk.metadata.hierarchy.level = hierarchy.level
 
-            # REQ-MM-03: TABLE CONTEXT PARITY - Initialize semantic context
-            if table_chunk.semantic_context is None:
-                table_chunk.semantic_context = SemanticContext(
-                    prev_text_snippet=prev_text_table,
-                    next_text_snippet=None,  # Will be filled by pending queue
-                    parent_heading=hierarchy.parent_heading,
-                    breadcrumb_path=hierarchy.breadcrumb_path,
-                )
-            else:
-                table_chunk.semantic_context.prev_text_snippet = prev_text_table
-
+            # REQ-MM-03: TABLE CONTEXT PARITY — `from_uir` already created the
+            # SemanticContext (prev_text_table was passed in); next_text_snippet
+            # stays None for the pending-queue to fill on the following TEXT.
             yield table_chunk
 
         # ========================================================================
@@ -5141,33 +5166,68 @@ class V2DocumentProcessor:
                         except Exception as refiner_error:
                             logger.error(f"[REFINER] Failed on page {page_no}: {refiner_error}")
 
-                    yield create_text_chunk(
-                        doc_id=doc_hash,
+                    # Charter §3.2 Phase A: per-element text emission via UIR.
+                    # `partial_code=True` for the in-block CODE oversize case is
+                    # routed via StructuralFlag.PARTIAL_CODE_IN_BLOCK so from_uir
+                    # maps it back to metadata.partial_code=True.
+                    from .universal.intermediate import StructuralFlag as _SF_TEXT
+                    _txt_flags: set = set()
+                    if chunk_type == ChunkType.CODE and chunk_partial_code:
+                        _txt_flags.add(_SF_TEXT.PARTIAL_CODE_IN_BLOCK)
+                    # text_bbox may be None on this branch (chunked code path);
+                    # FLOW_OFFSET locator when bbox absent.
+                    if text_bbox:
+                        _txt_locator = UIRLocator(
+                            type=UIRLocatorType.BBOX,
+                            bbox=list(text_bbox),
+                            page_number=page_no,
+                            coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
+                        )
+                    else:
+                        _txt_locator = UIRLocator(
+                            type=UIRLocatorType.FLOW_OFFSET,
+                            page_number=page_no,
+                            coordinate_frame=UIRCoordinateFrame.UNKNOWN,
+                            path=f"page:{page_no}:element:{i}",
+                        )
+                    _txt_uir = UIRChunk(
+                        modality=Modality.TEXT,
                         content=chunk_text,
+                        locator=_txt_locator,
+                        confidence=UIRConfidenceBreakdown(),
+                        extraction_method="docling",
+                        extraction_engine_version="docling-2.86.0",
+                        structural_flags=_txt_flags,
+                        parent_heading=hierarchy.parent_heading if hierarchy else None,
+                    )
+                    _txt_chunk = IngestionChunk.from_uir(
+                        _txt_uir,
+                        doc_id=doc_hash,
                         source_file=source_file,
                         file_type=file_type,
-                        page_number=page_no,
-                        hierarchy=hierarchy,
-                        chunk_type=chunk_type,
-                        bbox=text_bbox,
+                        position=self._next_chunk_position(),
                         page_width=int(page_w) if text_bbox and page_w else None,
                         page_height=int(page_h) if text_bbox and page_h else None,
+                        chunk_type=chunk_type,
                         prev_text=prev_text_context,
                         next_text=next_text_context,
-                        refined_content=refined_content,
-                        refinement_applied=refinement_applied,
-                        corruption_score=corruption_score,
-                        refinement_provider=refinement_provider,
-                        refinement_model=refinement_model,
-                        content_classification=self._classify_text_content(
-                            chunk_text,
-                            chunk_type,
+                        breadcrumb_path=(
+                            list(hierarchy.breadcrumb_path) if hierarchy else []
                         ),
-                        position=self._next_chunk_position(),
-                        partial_code=chunk_partial_code if chunk_type == ChunkType.CODE else None,
-                        # V2.4: Intelligence Stack Metadata
                         **self._intelligence_metadata,
                     )
+                    # v2.16 invariants that from_uir doesn't auto-populate:
+                    _txt_chunk.metadata.refined_content = refined_content
+                    _txt_chunk.metadata.refinement_applied = refinement_applied
+                    _txt_chunk.metadata.corruption_score = corruption_score
+                    _txt_chunk.metadata.refinement_provider = refinement_provider
+                    _txt_chunk.metadata.refinement_model = refinement_model
+                    _txt_chunk.metadata.content_classification = (
+                        self._classify_text_content(chunk_text, chunk_type)
+                    )
+                    if hierarchy and hierarchy.level is not None:
+                        _txt_chunk.metadata.hierarchy.level = hierarchy.level
+                    yield _txt_chunk
 
     def _classify_text_content(self, text: str, chunk_type: ChunkType) -> str:
         """Deterministic metadata classification for emitted text chunks."""

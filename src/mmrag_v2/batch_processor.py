@@ -9105,27 +9105,43 @@ class BatchProcessor:
                             continue
 
                         doc_title = Path(source_file).stem if source_file else "Document"
-                        hierarchy = HierarchyMetadata(
-                            parent_heading=None,
-                            breadcrumb_path=[doc_title, f"Page {page_no}", "[RECOVERED-FRONT]"],
-                            level=3,
-                        )
                         _pg_wh = page_size_per_page.get(page_no)
-                        recovery_chunk = create_text_chunk(
-                            doc_id=self._doc_hash or "unknown",
+                        # Charter §3.2 Phase A step 5 site 4 (recovery_frontpage):
+                        # build UIRChunk with BBOX locator (front-page rescue
+                        # always has the block's source bbox normalized to
+                        # [0,1000]), then emit via from_uir.
+                        _rec_bbox = _normalize_bbox_pdf_points(page_no, bbox)
+                        _rec_uir = UIRChunk(
+                            modality=Modality.TEXT,
                             content=text_clean,
+                            locator=UIRLocator(
+                                type=UIRLocatorType.BBOX,
+                                bbox=list(_rec_bbox),
+                                page_number=page_no,
+                                coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
+                            ),
+                            confidence=UIRConfidenceBreakdown(),
+                            extraction_method="recovery_frontpage",
+                            extraction_engine_version="pymupdf-recovery",
+                        )
+                        recovery_chunk = IngestionChunk.from_uir(
+                            _rec_uir,
+                            doc_id=self._doc_hash or "unknown",
                             source_file=source_file,
                             file_type=FileType.PDF,
-                            page_number=page_no,
-                            hierarchy=hierarchy,
-                            bbox=_normalize_bbox_pdf_points(page_no, bbox),
+                            position=self._next_chunk_position(),
                             page_width=int(_pg_wh[0]) if _pg_wh and _pg_wh[0] > 0 else None,
                             page_height=int(_pg_wh[1]) if _pg_wh and _pg_wh[1] > 0 else None,
-                            extraction_method="recovery_frontpage",
-                            content_classification=self._classify_recovery_text_content(text_clean),
-                            position=self._next_chunk_position(),
+                            breadcrumb_path=[doc_title, f"Page {page_no}", "[RECOVERED-FRONT]"],
                             **self._intelligence_metadata,
                         )
+                        recovery_chunk.metadata.content_classification = (
+                            self._classify_recovery_text_content(text_clean)
+                        )
+                        # v2.16 literal: hierarchy.level=3 explicit on the
+                        # original. Auto-compute from len(breadcrumb)=3 also
+                        # gives 3, but set explicitly for parity.
+                        recovery_chunk.metadata.hierarchy.level = 3
                         _apply_toc_recovery_policy(recovery_chunk, toc_like_page)
                         recovery_chunks.append(recovery_chunk)
                         total_rescued += 1
@@ -9183,25 +9199,38 @@ class BatchProcessor:
                         )
 
                         # Create recovery chunk
+                        # Charter §3.2 Phase A step 5 site 5 (recovery_scan):
+                        # no bbox available (paragraph-level orphan; bbox is
+                        # block-level only for some recovery paths). FLOW_OFFSET
+                        # locator preserves the v2.16 shape (SpatialMetadata
+                        # absent on this branch).
                         doc_title = Path(source_file).stem if source_file else "Document"
-                        hierarchy = HierarchyMetadata(
-                            parent_heading=None,
-                            breadcrumb_path=[doc_title, f"Page {page_no}", "[RECOVERED]"],
-                            level=3,
-                        )
-
-                        recovery_chunk = create_text_chunk(
-                            doc_id=self._doc_hash or "unknown",
+                        _scan_uir = UIRChunk(
+                            modality=Modality.TEXT,
                             content=para_clean,
+                            locator=UIRLocator(
+                                type=UIRLocatorType.FLOW_OFFSET,
+                                page_number=page_no,
+                                coordinate_frame=UIRCoordinateFrame.UNKNOWN,
+                                path=f"page:{page_no}:recovery_scan:{para_idx}",
+                            ),
+                            confidence=UIRConfidenceBreakdown(),
+                            extraction_method="recovery_scan",
+                            extraction_engine_version="pymupdf-recovery",
+                        )
+                        recovery_chunk = IngestionChunk.from_uir(
+                            _scan_uir,
+                            doc_id=self._doc_hash or "unknown",
                             source_file=source_file,
                             file_type=FileType.PDF,
-                            page_number=page_no,
-                            hierarchy=hierarchy,
-                            extraction_method="recovery_scan",  # Marks as rescued text
-                            content_classification=self._classify_recovery_text_content(para_clean),
                             position=self._next_chunk_position(),
+                            breadcrumb_path=[doc_title, f"Page {page_no}", "[RECOVERED]"],
                             **self._intelligence_metadata,
                         )
+                        recovery_chunk.metadata.content_classification = (
+                            self._classify_recovery_text_content(para_clean)
+                        )
+                        recovery_chunk.metadata.hierarchy.level = 3
                         _apply_toc_recovery_policy(recovery_chunk, toc_like_page)
 
                         recovery_chunks.append(recovery_chunk)
@@ -9247,33 +9276,58 @@ class BatchProcessor:
                                 f"'{block_text[:80]}...' classification={classification or 'text'}"
                             )
                             doc_title = Path(source_file).stem if source_file else "Document"
-                            hierarchy = HierarchyMetadata(
-                                parent_heading=None,
-                                breadcrumb_path=[doc_title, f"Page {page_no}", label],
-                                level=3,
-                            )
                             cleaned_block = _clean_recovery_text(
                                 block_text.strip(), is_code=(classification == "code")
                             )
                             if len(cleaned_block) < 20:
                                 continue
                             _pg_wh2 = page_size_per_page.get(page_no)
-                            recovery_chunk = create_text_chunk(
-                                doc_id=self._doc_hash or "unknown",
+                            # Charter §3.2 Phase A step 5 site 6 (recovery_subsurface):
+                            # text under figure; carries the figure's bbox + the
+                            # figure's asset_ref (so retrieval can link rescued
+                            # text back to the visual context it was extracted
+                            # from). The asset_ref on UIRChunk is the path str —
+                            # post-construction we copy the parent fig_chunk's
+                            # full AssetReference (mime_type, width_px, height_px,
+                            # file_size_bytes) onto the recovery chunk.
+                            _sub_bbox = [int(v) for v in fig_bbox]
+                            _sub_asset_path = (
+                                fig_chunk.asset_ref.file_path
+                                if fig_chunk.asset_ref
+                                else None
+                            )
+                            _sub_uir = UIRChunk(
+                                modality=Modality.TEXT,
                                 content=cleaned_block,
+                                locator=UIRLocator(
+                                    type=UIRLocatorType.BBOX,
+                                    bbox=_sub_bbox,
+                                    page_number=page_no,
+                                    coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
+                                ),
+                                confidence=UIRConfidenceBreakdown(),
+                                extraction_method="recovery_subsurface",
+                                extraction_engine_version="pymupdf-recovery",
+                                asset_ref=_sub_asset_path,
+                            )
+                            recovery_chunk = IngestionChunk.from_uir(
+                                _sub_uir,
+                                doc_id=self._doc_hash or "unknown",
                                 source_file=source_file,
                                 file_type=FileType.PDF,
-                                page_number=page_no,
-                                hierarchy=hierarchy,
-                                bbox=[int(v) for v in fig_bbox],
+                                position=self._next_chunk_position(),
                                 page_width=int(_pg_wh2[0]) if _pg_wh2 and _pg_wh2[0] > 0 else None,
                                 page_height=int(_pg_wh2[1]) if _pg_wh2 and _pg_wh2[1] > 0 else None,
-                                extraction_method="recovery_subsurface",
-                                asset_ref=fig_chunk.asset_ref,
-                                content_classification=classification,
-                                position=self._next_chunk_position(),
+                                breadcrumb_path=[doc_title, f"Page {page_no}", label],
                                 **self._intelligence_metadata,
                             )
+                            # v2.16 invariant: subsurface chunks inherit the
+                            # parent figure's full AssetReference (not just
+                            # file_path).
+                            if recovery_chunk.asset_ref is not None and fig_chunk.asset_ref is not None:
+                                recovery_chunk.asset_ref = fig_chunk.asset_ref
+                            recovery_chunk.metadata.content_classification = classification
+                            recovery_chunk.metadata.hierarchy.level = 3
                             _apply_toc_recovery_policy(recovery_chunk, toc_like_page)
                             recovery_chunks.append(recovery_chunk)
                             total_rescued += 1
@@ -9344,27 +9398,37 @@ class BatchProcessor:
                             f"classification={classification or 'text'}"
                         )
                         doc_title = Path(source_file).stem if source_file else "Document"
-                        hierarchy = HierarchyMetadata(
-                            parent_heading=None,
-                            breadcrumb_path=[doc_title, f"Page {page_no}", label],
-                            level=3,
-                        )
                         _pg_wh3 = page_size_per_page.get(page_no)
-                        recovery_chunk = create_text_chunk(
-                            doc_id=self._doc_hash or "unknown",
+                        # Charter §3.2 Phase A step 5 site 7 (recovery_gap_fill):
+                        # spatial-gap rescue beyond figures. Bbox via the
+                        # pdf-points→normalized helper; BBOX locator.
+                        _gap_bbox = _normalize_bbox_pdf_points(page_no, bbox)
+                        _gap_uir = UIRChunk(
+                            modality=Modality.TEXT,
                             content=text_clean,
+                            locator=UIRLocator(
+                                type=UIRLocatorType.BBOX,
+                                bbox=list(_gap_bbox),
+                                page_number=page_no,
+                                coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
+                            ),
+                            confidence=UIRConfidenceBreakdown(),
+                            extraction_method="recovery_gap_fill",
+                            extraction_engine_version="pymupdf-recovery",
+                        )
+                        recovery_chunk = IngestionChunk.from_uir(
+                            _gap_uir,
+                            doc_id=self._doc_hash or "unknown",
                             source_file=source_file,
                             file_type=FileType.PDF,
-                            page_number=page_no,
-                            hierarchy=hierarchy,
-                            bbox=_normalize_bbox_pdf_points(page_no, bbox),
+                            position=self._next_chunk_position(),
                             page_width=int(_pg_wh3[0]) if _pg_wh3 and _pg_wh3[0] > 0 else None,
                             page_height=int(_pg_wh3[1]) if _pg_wh3 and _pg_wh3[1] > 0 else None,
-                            extraction_method="recovery_gap_fill",
-                            content_classification=classification,
-                            position=self._next_chunk_position(),
+                            breadcrumb_path=[doc_title, f"Page {page_no}", label],
                             **self._intelligence_metadata,
                         )
+                        recovery_chunk.metadata.content_classification = classification
+                        recovery_chunk.metadata.hierarchy.level = 3
                         _apply_toc_recovery_policy(recovery_chunk, toc_like_page)
                         recovery_chunks.append(recovery_chunk)
                         total_rescued += 1
@@ -10059,11 +10123,6 @@ class BatchProcessor:
                     seen_hashes.add(h)
 
                     doc_title = self._current_pdf_path.stem
-                    hierarchy = HierarchyMetadata(
-                        parent_heading=None,
-                        breadcrumb_path=[doc_title, f"Page {page_no}", "[ENHANCED]"],
-                        level=3,
-                    )
                     # Normalize PyMuPDF block bbox (PDF points) to REQ-COORD-01 scale.
                     page_w = float(page.rect.width)
                     page_h = float(page.rect.height)
@@ -10080,21 +10139,36 @@ class BatchProcessor:
                         ]
                     else:
                         bbox = [0, 0, COORD_SCALE, COORD_SCALE]
-                    new_chunk = create_text_chunk(
-                        doc_id=self._doc_hash or "unknown",
+                    # Charter §3.2 Phase A step 5 site 8 (enhanced_frontpage):
+                    # PyMuPDF block recovery on enhanced front pages.
+                    _enh_uir = UIRChunk(
+                        modality=Modality.TEXT,
                         content=text_clean,
+                        locator=UIRLocator(
+                            type=UIRLocatorType.BBOX,
+                            bbox=list(bbox),
+                            page_number=page_no,
+                            coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
+                        ),
+                        confidence=UIRConfidenceBreakdown(),
+                        extraction_method="enhanced_frontpage",
+                        extraction_engine_version="pymupdf-recovery",
+                    )
+                    new_chunk = IngestionChunk.from_uir(
+                        _enh_uir,
+                        doc_id=self._doc_hash or "unknown",
                         source_file=str(self._current_pdf_path.name),
                         file_type=FileType.PDF,
-                        page_number=page_no,
-                        hierarchy=hierarchy,
-                        bbox=bbox,
+                        position=self._next_chunk_position(),
                         page_width=int(page_w) if page_w > 0 else None,
                         page_height=int(page_h) if page_h > 0 else None,
-                        extraction_method="enhanced_frontpage",
-                        content_classification=self._classify_recovery_text_content(text_clean),
-                        position=self._next_chunk_position(),
+                        breadcrumb_path=[doc_title, f"Page {page_no}", "[ENHANCED]"],
                         **self._intelligence_metadata,
                     )
+                    new_chunk.metadata.content_classification = (
+                        self._classify_recovery_text_content(text_clean)
+                    )
+                    new_chunk.metadata.hierarchy.level = 3
                     new_chunks.append(new_chunk)
         finally:
             if doc is not None:
@@ -10451,45 +10525,90 @@ class BatchProcessor:
                 # Generate new chunk_id with split suffix
                 new_chunk_id = f"{chunk.chunk_id}_s{idx+1}"
 
-                # Copy metadata but update for split
-                new_hierarchy = HierarchyMetadata(
+                # Charter §3.2 Phase A step 5 site 9 (smart-split): build
+                # a UIRChunk that inherits the parent's locator + extraction
+                # method, then emit via from_uir. The v2.16 chunk_id suffix
+                # `_sN` is overridden post-construction.
+                _orig_bbox = (
+                    chunk.metadata.spatial.bbox
+                    if chunk.metadata.spatial and chunk.metadata.spatial.bbox
+                    else None
+                )
+                _orig_pw = (
+                    chunk.metadata.spatial.page_width
+                    if chunk.metadata.spatial
+                    else None
+                )
+                _orig_ph = (
+                    chunk.metadata.spatial.page_height
+                    if chunk.metadata.spatial
+                    else None
+                )
+                _orig_breadcrumb = (
+                    list(chunk.metadata.hierarchy.breadcrumb_path)
+                    if chunk.metadata.hierarchy
+                    else []
+                )
+                _new_level = (
+                    (chunk.metadata.hierarchy.level or 2) + 1
+                    if chunk.metadata.hierarchy
+                    else 3
+                )
+                if _orig_bbox:
+                    _sp_locator = UIRLocator(
+                        type=UIRLocatorType.BBOX,
+                        bbox=list(_orig_bbox),
+                        page_number=chunk.metadata.page_number,
+                        coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
+                    )
+                else:
+                    _sp_locator = UIRLocator(
+                        type=UIRLocatorType.FLOW_OFFSET,
+                        page_number=chunk.metadata.page_number,
+                        coordinate_frame=UIRCoordinateFrame.UNKNOWN,
+                        path=f"page:{chunk.metadata.page_number}:smartsplit:{idx+1}",
+                    )
+                _sp_uir = UIRChunk(
+                    modality=Modality.TEXT,
+                    content=sub_text,
+                    locator=_sp_locator,
+                    confidence=UIRConfidenceBreakdown(),
+                    extraction_method=chunk.metadata.extraction_method,
+                    extraction_engine_version="docling-2.86.0",
                     parent_heading=(
                         chunk.metadata.hierarchy.parent_heading
                         if chunk.metadata.hierarchy
                         else None
                     ),
-                    breadcrumb_path=(
-                        chunk.metadata.hierarchy.breadcrumb_path if chunk.metadata.hierarchy else []
-                    )
-                    + [f"[Split {idx+1}/{len(sub_chunks)}]"],
-                    level=(
-                        (chunk.metadata.hierarchy.level or 2) + 1 if chunk.metadata.hierarchy else 3
-                    ),
                 )
-
-                # Create new chunk
-                new_chunk = create_text_chunk(
+                new_chunk = IngestionChunk.from_uir(
+                    _sp_uir,
                     doc_id=chunk.doc_id,
-                    content=sub_text,
                     source_file=chunk.metadata.source_file,
                     file_type=chunk.metadata.file_type,
-                    page_number=chunk.metadata.page_number,
-                    hierarchy=new_hierarchy,
+                    position=self._next_chunk_position(),
+                    page_width=_orig_pw,
+                    page_height=_orig_ph,
                     chunk_type=(chunk.metadata.chunk_type or ChunkType.PARAGRAPH),
-                    bbox=(chunk.metadata.spatial.bbox if chunk.metadata.spatial else None),
-                    page_width=(chunk.metadata.spatial.page_width if chunk.metadata.spatial else None),
-                    page_height=(chunk.metadata.spatial.page_height if chunk.metadata.spatial else None),
-                    extraction_method=chunk.metadata.extraction_method,
                     prev_text=(
-                        chunk.semantic_context.prev_text_snippet if chunk.semantic_context else None
+                        chunk.semantic_context.prev_text_snippet
+                        if chunk.semantic_context
+                        else None
                     ),
                     next_text=(
-                        chunk.semantic_context.next_text_snippet if chunk.semantic_context else None
+                        chunk.semantic_context.next_text_snippet
+                        if chunk.semantic_context
+                        else None
                     ),
-                    content_classification=getattr(chunk.metadata, "content_classification", None),
-                    position=self._next_chunk_position(),
+                    breadcrumb_path=(
+                        _orig_breadcrumb + [f"[Split {idx+1}/{len(sub_chunks)}]"]
+                    ),
                     **{k: v for k, v in self._intelligence_metadata.items() if v is not None},
                 )
+                new_chunk.metadata.content_classification = getattr(
+                    chunk.metadata, "content_classification", None
+                )
+                new_chunk.metadata.hierarchy.level = _new_level
 
                 # Override chunk_id with our custom split ID
                 new_chunk.chunk_id = new_chunk_id
