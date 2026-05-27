@@ -500,6 +500,201 @@ def _union_docling_item_bboxes_for_uir(
     return [0, 0, COORD_SCALE, COORD_SCALE]
 
 
+def _docling_doc_chunk_to_uir_chunks(
+    dc: Any,
+    page_offset: int,
+    page_dims: Dict[int, Tuple[float, float]],
+    doc: Any,
+    last_hybrid_heading: Optional[str],
+) -> List[Tuple[UIRChunk, "ChunkType"]]:
+    """Phase A step 4 INPUT boundary: HybridChunker DocChunk → UIRChunks.
+
+    Charter §3.2: this is the only Docling-coupled boundary for the
+    HybridChunker iteration path. It encapsulates the cross-page split
+    detection, per-page bbox computation from prov entries, Docling
+    item-label → ChunkType promotion, and subtitle-continuation heuristic.
+    After this helper returns, the caller operates on UIR-typed pairs
+    `(UIRChunk, ChunkType)` only — `dc.meta`, `dc.text`, `dc.meta.doc_items`,
+    `dc.meta.headings` are not touched downstream.
+
+    Returns an empty list for empty/whitespace-only DocChunks. Returns
+    multiple tuples for cross-page DocChunks (one per contributing page,
+    each with PDF_PAGE_PORTRAIT-frame Locator and per-page-sliced text);
+    each fragment that is CODE in a cross-page split carries the
+    `StructuralFlag.PARTIAL_CODE_CROSS_PAGE` flag for the retrieval
+    adjacency-fetch mechanism. Returns one tuple for single-page DocChunks.
+
+    `parent_heading` is intentionally NOT set on the emitted UIRChunks —
+    heading carry-forward is iteration-local state that the caller manages
+    (see `_process_text_with_hybrid_chunker`).
+    """
+    # Late import keeps the heavy StructuralFlag import scoped to the call.
+    from .universal.intermediate import StructuralFlag
+
+    text = dc.text
+    if not text or not text.strip():
+        return []
+
+    # Cross-page detection: walk every prov entry on every doc_item.
+    _prov_by_page: Dict[int, List[Tuple[Any, Any]]] = {}
+    if dc.meta and dc.meta.doc_items:
+        for _it in dc.meta.doc_items:
+            for _prov in _docling_item_prov_list(_it):
+                _p_raw = int(getattr(_prov, "page_no", 0) or 0)
+                if not _p_raw:
+                    continue
+                _prov_by_page.setdefault(_p_raw + page_offset, []).append((_it, _prov))
+
+    if len(_prov_by_page) > 1:
+        # ---- Cross-page DocChunk: split per page ----
+        per_page_text = _split_doc_chunk_text_by_page(dc, page_offset, doc=doc)
+        if not per_page_text:
+            first_page = sorted(_prov_by_page.keys())[0]
+            per_page_text = {first_page: CROSS_PAGE_CONTINUED_MARKER}
+        out: List[Tuple[UIRChunk, "ChunkType"]] = []
+        for _ppage, _page_text in per_page_text.items():
+            _prov_pairs = _prov_by_page.get(_ppage, [])
+            _bbox_l, _bbox_t, _bbox_r, _bbox_b = COORD_SCALE, COORD_SCALE, 0, 0
+            _have_bbox = False
+            _pw, _ph = page_dims.get(_ppage, (612.0, 792.0))
+            _page_chunk_type: "ChunkType" = ChunkType.PARAGRAPH
+            for _it, _prov in _prov_pairs:
+                _ib = getattr(_prov, "bbox", None)
+                if _ib:
+                    _x0 = int(float(getattr(_ib, "l", 0)) / _pw * COORD_SCALE)
+                    _y0 = int(float(getattr(_ib, "t", 0)) / _ph * COORD_SCALE)
+                    _x1 = int(float(getattr(_ib, "r", _pw)) / _pw * COORD_SCALE)
+                    _y1 = int(float(getattr(_ib, "b", _ph)) / _ph * COORD_SCALE)
+                    _bbox_l = min(_bbox_l, max(0, min(COORD_SCALE, _x0)))
+                    _bbox_t = min(_bbox_t, max(0, min(COORD_SCALE, min(_y0, _y1))))
+                    _bbox_r = max(_bbox_r, max(0, min(COORD_SCALE, _x1)))
+                    _bbox_b = max(_bbox_b, max(0, min(COORD_SCALE, max(_y0, _y1))))
+                    _have_bbox = True
+                _label_obj = getattr(_it, "label", "")
+                _label_str = getattr(_label_obj, "value", _label_obj)
+                _label_str = str(_label_str or "").lower()
+                if _label_str == "code":
+                    _page_chunk_type = ChunkType.CODE
+                elif _label_str == "list_item":
+                    if _page_chunk_type == ChunkType.PARAGRAPH:
+                        _page_chunk_type = ChunkType.LIST_ITEM
+                elif "heading" in _label_str or "title" in _label_str:
+                    if _page_chunk_type == ChunkType.PARAGRAPH:
+                        _page_chunk_type = ChunkType.HEADING
+            # Subtitle-continuation promotion uses the carry-forward heading
+            # (passed in by the caller) — kept identical to v2.16 behavior.
+            if _looks_like_subtitle_continuation(
+                _page_text, _page_chunk_type, last_hybrid_heading
+            ):
+                _page_chunk_type = ChunkType.HEADING
+
+            _emit_method = (
+                "hybrid_chunker_pagesplit_fallback"
+                if _page_text == CROSS_PAGE_CONTINUED_MARKER
+                else "hybrid_chunker_pagesplit"
+            )
+            _ppage_bbox = (
+                [_bbox_l, _bbox_t, _bbox_r, _bbox_b]
+                if _have_bbox and _bbox_r > _bbox_l and _bbox_b > _bbox_t
+                else [0, 0, COORD_SCALE, COORD_SCALE]
+            )
+            _flags: set = {StructuralFlag.CROSS_PAGE_SPLIT}
+            # v2.17 partial_code cross-page activation: predicate is "this
+            # cross-page DocChunk has a CODE chunk_type AND was split across
+            # >1 pages". `_is_cross_page_code` name preserved for the
+            # source-level guard test in
+            # tests/test_partial_code_cross_page_hybrid.py.
+            _is_cross_page_code = (
+                _page_chunk_type == ChunkType.CODE
+                and len(per_page_text) > 1
+            )
+            if _is_cross_page_code:
+                _flags.add(StructuralFlag.PARTIAL_CODE_CROSS_PAGE)
+            out.append(
+                (
+                    UIRChunk(
+                        modality=Modality.TEXT,
+                        content=_page_text,
+                        locator=UIRLocator(
+                            type=UIRLocatorType.BBOX,
+                            bbox=_ppage_bbox,
+                            page_number=_ppage,
+                            coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
+                        ),
+                        confidence=UIRConfidenceBreakdown(),
+                        extraction_method=_emit_method,
+                        extraction_engine_version="docling-2.86.0",
+                        structural_flags=_flags,
+                    ),
+                    _page_chunk_type,
+                )
+            )
+        return out
+
+    # ---- Single-page DocChunk ----
+    page_no = 1
+    bbox: Optional[List[int]] = None
+    if dc.meta and dc.meta.doc_items:
+        first_item = dc.meta.doc_items[0]
+        if hasattr(first_item, "prov") and first_item.prov:
+            prov = (
+                first_item.prov[0]
+                if isinstance(first_item.prov, list)
+                else first_item.prov
+            )
+            page_no = (getattr(prov, "page_no", 1) or 1) + page_offset
+            prov_bbox = getattr(prov, "bbox", None)
+            if prov_bbox:
+                pw, ph = page_dims.get(page_no, (612.0, 792.0))
+                x0 = int(float(getattr(prov_bbox, "l", 0)) / pw * COORD_SCALE)
+                y0 = int(float(getattr(prov_bbox, "t", 0)) / ph * COORD_SCALE)
+                x1 = int(float(getattr(prov_bbox, "r", pw)) / pw * COORD_SCALE)
+                y1 = int(float(getattr(prov_bbox, "b", ph)) / ph * COORD_SCALE)
+                bbox = [
+                    max(0, min(COORD_SCALE, x0)),
+                    max(0, min(COORD_SCALE, min(y0, y1))),
+                    max(0, min(COORD_SCALE, x1)),
+                    max(0, min(COORD_SCALE, max(y0, y1))),
+                ]
+
+    chunk_type: "ChunkType" = ChunkType.PARAGRAPH
+    label = ""
+    if dc.meta and dc.meta.doc_items:
+        label = getattr(dc.meta.doc_items[0], "label", "")
+    label_value = getattr(label, "value", label)
+    label_str = str(label_value or "")
+    if label_str == "code":
+        chunk_type = ChunkType.CODE
+    elif label_str == "list_item":
+        chunk_type = ChunkType.LIST_ITEM
+    elif "heading" in label_str or "title" in label_str:
+        chunk_type = ChunkType.HEADING
+
+    _stripped = text.strip()
+    # Subtitle-continuation promotion on the single-page path.
+    if _looks_like_subtitle_continuation(_stripped, chunk_type, last_hybrid_heading):
+        chunk_type = ChunkType.HEADING
+
+    return [
+        (
+            UIRChunk(
+                modality=Modality.TEXT,
+                content=_stripped,
+                locator=UIRLocator(
+                    type=UIRLocatorType.BBOX,
+                    bbox=bbox or [0, 0, COORD_SCALE, COORD_SCALE],
+                    page_number=page_no,
+                    coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
+                ),
+                confidence=UIRConfidenceBreakdown(),
+                extraction_method="hybrid_chunker",
+                extraction_engine_version="docling-2.86.0",
+            ),
+            chunk_type,
+        )
+    ]
+
+
 def _section_header_page_to_uir_chunk(
     items: List[Any],
     page_number: int,
@@ -3613,370 +3808,127 @@ class V2DocumentProcessor:
         # writer.
         _seen_per_page: Dict[int, set[str]] = {}
         _hybrid_dedup_skipped = 0
+
+        # Charter §3.2 Phase A step 4 INPUT boundary: each DocChunk is
+        # converted to UIR by `_docling_doc_chunk_to_uir_chunks` BEFORE
+        # the iteration logic runs. Inside the loop body, only UIR types
+        # (UIRChunk, Locator) and v2.16 schema types (IngestionChunk,
+        # ChunkType) are touched — `dc.meta`, `dc.text`, `dc.meta.doc_items`,
+        # `dc.meta.headings` are accessed at exactly two places:
+        #   (1) the bridge call (Docling → UIR conversion).
+        #   (2) `dc.meta.headings` for the heading carry-forward (caller-
+        #       managed iteration-local state; carries Docling-specific
+        #       header validation rules that are not part of the UIR
+        #       contract for v3.0).
+        from .state.context_state import is_valid_heading
         for i, dc in enumerate(doc_chunks):
-            text = dc.text
-            if not text or not text.strip():
+            _carryover_heading = getattr(self, "_last_hybrid_heading", None)
+            uir_pairs = _docling_doc_chunk_to_uir_chunks(
+                dc=dc,
+                page_offset=page_offset,
+                page_dims=page_dims,
+                doc=doc,
+                last_hybrid_heading=_carryover_heading,
+            )
+            if not uir_pairs:
                 continue
 
-            # v2.10 Phase 4: Detect cross-page DocChunks and split them
-            # so each contributing page receives its OWN per-page text
-            # (not a broadcast of the merged text). Two shapes trigger:
-            #   (a) Single Docling text item whose ``prov`` is a list
-            #       with multiple page_no entries (multi-page item; the
-            #       Python_Cookbook p127/p128 chapter-end shape). Each
-            #       prov has a ``charspan`` slicing the item's text per
-            #       page; HybridChunker may further slice this item
-            #       across multiple DocChunks. Attributing both DocChunks
-            #       to prov[0].page_no silently drops the later page.
-            #   (b) DocChunk aggregates several single-prov items each
-            #       on a different page (HARRY chapter-intro shape).
-            # Build the per-page item/prov map by walking ALL prov
-            # entries (not just prov[0]) so both shapes are detected.
-            _prov_by_page: Dict[int, List[Tuple[Any, Any]]] = {}
-            if dc.meta and dc.meta.doc_items:
-                for _it in dc.meta.doc_items:
-                    for _prov in _docling_item_prov_list(_it):
-                        _p_raw = int(getattr(_prov, "page_no", 0) or 0)
-                        if not _p_raw:
-                            continue
-                        _prov_by_page.setdefault(_p_raw + page_offset, []).append((_it, _prov))
+            is_cross_page = len(uir_pairs) > 1
+            if is_cross_page:
+                logger.info(
+                    f"[HYBRID-CHUNKER] Cross-page chunk split across "
+                    f"{sorted({u.locator.page_number for u, _ in uir_pairs})}: "
+                    f"emitting per-page text"
+                )
 
-            # Single-page case: original logic.
-            page_no = 1
-            bbox: Optional[List[int]] = None
-            page_w, page_h = 612.0, 792.0
-
-            if len(_prov_by_page) > 1:
-                # Multi-page DocChunk: ask the helper for per-page text
-                # using prov.charspan slicing. The helper returns only
-                # pages whose charspan-sliced fragment overlaps
-                # ``dc.text``, so a multi-prov item whose dc.text
-                # actually lives on ONE page collapses to a single-page
-                # emission — at the correct page, not blindly prov[0].
-                # Items whose ``.text`` attribute is empty
-                # (serializer-only — code/table) are silently skipped
-                # by the helper; missing pages here mean "covered by
-                # some other DocChunk", not "lost" — so do NOT emit
-                # markers for them. Marker emission is reserved for
-                # the all-pages-unreconstructable emergency below.
-                per_page_text = _split_doc_chunk_text_by_page(dc, page_offset, doc=doc)
-                if not per_page_text:
-                    # Reconstruction yielded nothing for any
-                    # contributing page (every item was
-                    # serializer-only / unsliceable). Emit ONE
-                    # marker at the earliest contributing page only
-                    # — the marker is a single sentinel signalling
-                    # "this multi-page DocChunk had content that
-                    # couldn't be sliced", not a per-page coverage
-                    # claim. Emitting markers on every contributing
-                    # page falsely populates truly-blank source
-                    # pages (e.g. Python_Distilled p1-p3 cover /
-                    # imprint pages are 0-text in the PDF) and
-                    # excludes them from `MISSING_PAGES_BLANK`
-                    # classification, then trips
-                    # `micro_non_label_ratio` in tight-window smoke
-                    # tests.
-                    first_page = sorted(_prov_by_page.keys())[0]
-                    logger.warning(
-                        "[HYBRID-CHUNKER] Cross-page reconstruction "
-                        "returned nothing for pages %s; emitting one "
-                        "marker chunk at the earliest contributing "
-                        "page p%s",
-                        sorted(_prov_by_page.keys()),
-                        first_page,
-                    )
-                    per_page_text = {first_page: CROSS_PAGE_CONTINUED_MARKER}
-                else:
-                    missing_pages = sorted(
-                        set(_prov_by_page.keys()) - set(per_page_text.keys())
-                    )
-                    if missing_pages:
-                        logger.debug(
-                            "[HYBRID-CHUNKER] Cross-page partial "
-                            "reconstruction: pages %s contributed items "
-                            "but no charspan-sliceable text; relying on "
-                            "their other DocChunks for coverage",
-                            missing_pages,
-                        )
-                if len(per_page_text) > 1:
-                    logger.info(
-                        f"[HYBRID-CHUNKER] Cross-page chunk split across "
-                        f"{sorted(per_page_text.keys())}: emitting per-page text"
-                    )
-                for _ppage, _page_text in per_page_text.items():
-                    _prov_pairs = _prov_by_page.get(_ppage, [])
-                    _bbox_l, _bbox_t, _bbox_r, _bbox_b = 1000, 1000, 0, 0
-                    _have_bbox = False
-                    _pw, _ph = page_dims.get(_ppage, (612.0, 792.0))
-                    _page_chunk_type = ChunkType.PARAGRAPH
-                    for _it, _prov in _prov_pairs:
-                        _ib = getattr(_prov, "bbox", None)
-                        if _ib:
-                            _x0 = int(float(getattr(_ib, "l", 0)) / _pw * COORD_SCALE)
-                            _y0 = int(float(getattr(_ib, "t", 0)) / _ph * COORD_SCALE)
-                            _x1 = int(float(getattr(_ib, "r", _pw)) / _pw * COORD_SCALE)
-                            _y1 = int(float(getattr(_ib, "b", _ph)) / _ph * COORD_SCALE)
-                            _bbox_l = min(_bbox_l, max(0, min(COORD_SCALE, _x0)))
-                            _bbox_t = min(_bbox_t, max(0, min(COORD_SCALE, min(_y0, _y1))))
-                            _bbox_r = max(_bbox_r, max(0, min(COORD_SCALE, _x1)))
-                            _bbox_b = max(_bbox_b, max(0, min(COORD_SCALE, max(_y0, _y1))))
-                            _have_bbox = True
-                        # Preserve item label as chunk_type so heading
-                        # / code / list_item items don't get mis-typed
-                        # as paragraph (which trips the strict gate's
-                        # micro_non_label_ratio when title/subtitle
-                        # text is short).
-                        _label_obj = getattr(_it, "label", "")
-                        _label_str = getattr(_label_obj, "value", _label_obj)
-                        _label_str = str(_label_str or "").lower()
-                        if _label_str == "code":
-                            _page_chunk_type = ChunkType.CODE
-                        elif _label_str == "list_item":
-                            if _page_chunk_type == ChunkType.PARAGRAPH:
-                                _page_chunk_type = ChunkType.LIST_ITEM
-                        elif "heading" in _label_str or "title" in _label_str:
-                            if _page_chunk_type == ChunkType.PARAGRAPH:
-                                _page_chunk_type = ChunkType.HEADING
-                    if _page_text == CROSS_PAGE_CONTINUED_MARKER:
-                        _emit_method = "hybrid_chunker_pagesplit_fallback"
-                    else:
-                        _emit_method = "hybrid_chunker_pagesplit"
-                    # v2.10 Phase 4: same subtitle-continuation
-                    # promotion as the single-page emit. The
-                    # parent_heading for the cross-page branch is
-                    # not tracked in the local breadcrumb (it uses
-                    # the doc-name root only), so use
-                    # `self._last_hybrid_heading` carry-forward
-                    # state as the parent-heading proxy — the
-                    # heading active when this DocChunk was emitted.
-                    _carryover_heading = getattr(self, "_last_hybrid_heading", None)
-                    if _looks_like_subtitle_continuation(
-                        _page_text, _page_chunk_type, _carryover_heading
-                    ):
-                        _page_chunk_type = ChunkType.HEADING
-                    _page_seen2 = _seen_per_page.setdefault(_ppage, set())
-                    if _page_text in _page_seen2:
-                        _hybrid_dedup_skipped += 1
-                        continue
-                    _page_seen2.add(_page_text)
-                    _ppage_bbox = (
-                        [_bbox_l, _bbox_t, _bbox_r, _bbox_b]
-                        if _have_bbox and _bbox_r > _bbox_l and _bbox_b > _bbox_t
-                        else None
-                    )
-                    # v2.17 (Item #9 safety-valve reopen): extend
-                    # `partial_code` coverage to the HybridChunker
-                    # cross-page split case. Charter §3.2 notes the
-                    # in-block partial_code case already emits at
-                    # `_chunk_code_by_lines` line ~5002; the cross-page
-                    # case was inert because HybridChunker cannot emit
-                    # cross-page state from the DOM. We have that state
-                    # right here: `len(per_page_text) > 1` IS the
-                    # cross-page condition for this DocChunk, and
-                    # `_page_chunk_type == ChunkType.CODE` is the
-                    # CODE-modality gate. Setting partial_code=True
-                    # activates the retrieval-side adjacency fetch
-                    # (retrieval/pipeline.py::_apply_partial_code_
-                    # adjacency) that stitches sibling halves back at
-                    # query time. Acceptance: Fluent_Python validation
-                    # cross-span queries (Q01/Q04/Q06/Q09 — imports +
-                    # decorator + function spans) recover from 0% PASS.
-                    _is_cross_page_code = (
-                        _page_chunk_type == ChunkType.CODE
-                        and len(per_page_text) > 1
-                    )
-                    # Charter §3.2 Phase A step 4: cross-page split
-                    # emission flows through UIR — build a UIRChunk for
-                    # this page-slice, then emit via from_uir.
-                    _structural_flags: set = set()
-                    if _is_cross_page_code:
-                        # v2.17 partial_code cross-page activation is the
-                        # PARTIAL_CODE_CROSS_PAGE structural flag in v3.0.
-                        from .universal.intermediate import StructuralFlag as _SF
-                        _structural_flags.add(_SF.PARTIAL_CODE_CROSS_PAGE)
-                    _split_uir = UIRChunk(
-                        modality=Modality.TEXT,
-                        content=_page_text,
-                        locator=UIRLocator(
-                            type=UIRLocatorType.BBOX,
-                            bbox=_ppage_bbox or [0, 0, COORD_SCALE, COORD_SCALE],
-                            page_number=_ppage,
-                            coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
-                        ),
-                        confidence=UIRConfidenceBreakdown(),
-                        extraction_method=_emit_method,
-                        extraction_engine_version="docling-2.86.0",
-                        structural_flags=_structural_flags,
-                    )
-                    _split_breadcrumb = [
-                        Path(source_file).stem.replace("_", " ") if source_file else "Document",
-                        f"Page {_ppage}",
-                    ]
-                    _split_chunk = IngestionChunk.from_uir(
-                        _split_uir,
-                        doc_id=doc_hash,
-                        source_file=source_file,
-                        file_type=file_type,
-                        position=self._next_chunk_position(),
-                        page_width=int(_pw),
-                        page_height=int(_ph),
-                        chunk_type=_page_chunk_type,
-                        breadcrumb_path=_split_breadcrumb,
-                        **self._intelligence_metadata,
-                    )
-                    _split_chunk.metadata.refined_content = _page_text
-                    # v2.16 literal: cross-page split chunks carry
-                    # hierarchy.level=2 explicitly (auto-compute from
-                    # 2-element breadcrumb would also give 2; restored
-                    # explicitly for parity with v2.16).
-                    _split_chunk.metadata.hierarchy.level = 2
-                    # `partial_code` v2.16 metadata field is the
-                    # retrieval-side signal; from_uir already maps
-                    # PARTIAL_CODE_* StructuralFlags onto it.
-                    chunks.append(_split_chunk)
-                # Skip the original cross-page chunk; we've emitted
-                # per-page slices above.
-                continue
-
-            if dc.meta and dc.meta.doc_items:
-                first_item = dc.meta.doc_items[0]
-                if hasattr(first_item, "prov") and first_item.prov:
-                    prov = first_item.prov[0] if isinstance(first_item.prov, list) else first_item.prov
-                    page_no = (getattr(prov, "page_no", 1) or 1) + page_offset
-                    prov_bbox = getattr(prov, "bbox", None)
-                    if prov_bbox:
-                        # Convert Docling bbox to normalized [0, 1000] coords
-                        pw, ph = page_dims.get(page_no, (612.0, 792.0))
-                        page_w, page_h = pw, ph
-                        x0 = int(float(getattr(prov_bbox, "l", 0)) / pw * COORD_SCALE)
-                        y0 = int(float(getattr(prov_bbox, "t", 0)) / ph * COORD_SCALE)
-                        x1 = int(float(getattr(prov_bbox, "r", pw)) / pw * COORD_SCALE)
-                        y1 = int(float(getattr(prov_bbox, "b", ph)) / ph * COORD_SCALE)
-                        bbox = [
-                            max(0, min(COORD_SCALE, x0)),
-                            max(0, min(COORD_SCALE, min(y0, y1))),
-                            max(0, min(COORD_SCALE, x1)),
-                            max(0, min(COORD_SCALE, max(y0, y1))),
-                        ]
-
-            # v2.9 hybrid_chunker content dedup: drop byte-equal text
-            # bodies on the same page. Tables with many cells trigger
-            # Docling to yield the same enclosing-text DocChunk per cell;
-            # this collapses Combat p66's 77 text emissions to ~4 unique
-            # bodies as expected.
-            _norm_text = text.strip()
-            _page_seen = _seen_per_page.setdefault(page_no, set())
-            if _norm_text in _page_seen:
-                _hybrid_dedup_skipped += 1
-                continue
-            _page_seen.add(_norm_text)
-
-            # Extract headings from HybridChunker metadata, filtered through
-            # our heading validator (rejects credit lines, copyright, TOC fill)
-            from .state.context_state import is_valid_heading
-            headings = []
+            # Heading carry-forward state lives at the caller. The bridge
+            # carries no heading info on cross-page splits (v2.16 used the
+            # doc-name root only); single-page emissions inherit
+            # self._last_hybrid_heading when no explicit heading is present.
+            headings: List[str] = []
             if dc.meta and dc.meta.headings:
                 for h in dc.meta.headings:
                     h_text = h if isinstance(h, str) else getattr(h, "text", str(h))
                     if is_valid_heading(h_text):
                         headings.append(h_text)
-
-            # Build hierarchy
-            # Use cleaned source name (no extension, spaces instead of underscores)
-            _clean_name = Path(source_file).stem.replace("_", " ") if source_file else "Document"
-            breadcrumb = [_clean_name]
-            if headings:
-                breadcrumb.extend(headings)
-                # Update running state so next chunk without headings inherits
+            if headings and not is_cross_page:
                 self._last_hybrid_heading = headings[-1]
-            elif hasattr(self, "_last_hybrid_heading") and self._last_hybrid_heading:
-                # No heading from HybridChunker — carry forward the last known one.
-                # This preserves heading context across batch boundaries and chunks
-                # where Docling's tree didn't assign a section header.
-                breadcrumb.append(self._last_hybrid_heading)
-                headings = [self._last_hybrid_heading]
-            breadcrumb.append(f"Page {page_no}")
 
-            parent_heading = headings[-1] if headings else None
-
-            hierarchy = HierarchyMetadata(
-                parent_heading=parent_heading,
-                breadcrumb_path=breadcrumb,
-                level=min(len(breadcrumb), 5),
+            _clean_name = (
+                Path(source_file).stem.replace("_", " ") if source_file else "Document"
             )
 
-            # Determine chunk type
-            chunk_type = ChunkType.PARAGRAPH
-            label = ""
-            if dc.meta and dc.meta.doc_items:
-                label = getattr(dc.meta.doc_items[0], "label", "")
-            if label == "code":
-                chunk_type = ChunkType.CODE
-            elif label == "list_item":
-                chunk_type = ChunkType.LIST_ITEM
-            elif "heading" in label or "title" in label:
-                chunk_type = ChunkType.HEADING
-            # v2.10 Phase 4: HybridChunker slices multi-page titles
-            # across pages and Docling labels the trailing slice
-            # ``label=text`` (so we land here as PARAGRAPH). The
-            # trailing slice — e.g. a book subtitle that lives on a
-            # different page from the title head — is structurally a
-            # heading, not retrieval-noise micro-prose. Promote when
-            # the universal structural signature matches.
-            if _looks_like_subtitle_continuation(text.strip(), chunk_type, parent_heading):
-                chunk_type = ChunkType.HEADING
+            for _uir, _chunk_type in uir_pairs:
+                _page_no = _uir.locator.page_number
+                _page_w, _page_h = page_dims.get(_page_no, (612.0, 792.0))
 
-            # Create chunk ID
-            chunk_id = self._generate_chunk_id(doc_hash, page_no, i)
+                # Dedup at the page level (UIR content, not DocChunk text).
+                _page_seen = _seen_per_page.setdefault(_page_no, set())
+                if _uir.content in _page_seen:
+                    _hybrid_dedup_skipped += 1
+                    continue
+                _page_seen.add(_uir.content)
 
-            # Semantic context (prev/next snippets)
-            prev_snippet = chunks[-1].content[-CONTEXT_SNIPPET_LENGTH:] if chunks else None
+                if is_cross_page:
+                    # v2.16 literal: cross-page split breadcrumb is doc-name
+                    # + "Page N" only. No headings — heading inheritance
+                    # would attribute the wrong heading to fragments.
+                    _breadcrumb = [_clean_name, f"Page {_page_no}"]
+                    _parent_heading = None
+                    _level = 2
+                else:
+                    _bc = [_clean_name]
+                    if headings:
+                        _bc.extend(headings)
+                    elif (
+                        hasattr(self, "_last_hybrid_heading")
+                        and self._last_hybrid_heading
+                    ):
+                        _bc.append(self._last_hybrid_heading)
+                    _bc.append(f"Page {_page_no}")
+                    _breadcrumb = _bc
+                    _parent_heading = (
+                        headings[-1] if headings else self._last_hybrid_heading
+                    )
+                    _level = min(len(_breadcrumb), 5)
 
-            # Charter §3.2 Phase A step 4: single-page DocChunk emission
-            # flows through UIR. Build a UIRChunk for the page-slice, then
-            # emit via IngestionChunk.from_uir. Semantic-context prev_text
-            # threads through the from_uir kwarg.
-            _stripped = text.strip()
-            _single_uir = UIRChunk(
-                modality=Modality.TEXT,
-                content=_stripped,
-                locator=UIRLocator(
-                    type=UIRLocatorType.BBOX,
-                    bbox=bbox or [0, 0, COORD_SCALE, COORD_SCALE],
-                    page_number=page_no,
-                    coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
-                ),
-                confidence=UIRConfidenceBreakdown(),
-                extraction_method="hybrid_chunker",
-                extraction_engine_version="docling-2.86.0",
-                parent_heading=parent_heading,
-            )
-            chunk = IngestionChunk.from_uir(
-                _single_uir,
-                doc_id=doc_hash,
-                source_file=source_file,
-                file_type=file_type,
-                position=self._next_chunk_position(),
-                page_width=int(page_w),
-                page_height=int(page_h),
-                chunk_type=chunk_type,
-                prev_text=prev_snippet,
-                breadcrumb_path=breadcrumb,
-                **self._intelligence_metadata,
-            )
-            # v2.16 invariants that from_uir doesn't auto-populate:
-            chunk.metadata.refined_content = _stripped
-            # Hierarchy level was: min(len(breadcrumb), 5). from_uir's
-            # auto-compute via HierarchyMetadata.sync_level_with_breadcrumbs
-            # produces the same value (also min(len, 5)), so no override
-            # is needed here — but assert defensively in case the
-            # breadcrumb is empty (cannot happen in this branch; _clean_name
-            # is always appended).
-            chunk.metadata.hierarchy.level = min(len(breadcrumb), 5)
-            # Store the DocChunk reference for post-refiner contextualization
-            chunk._dc_ref = dc  # type: ignore[attr-defined]
+                # Stamp parent_heading onto the UIR for from_uir to consume.
+                _uir_for_emit = UIRChunk(
+                    modality=_uir.modality,
+                    content=_uir.content,
+                    locator=_uir.locator,
+                    confidence=_uir.confidence,
+                    extraction_method=_uir.extraction_method,
+                    extraction_engine_version=_uir.extraction_engine_version,
+                    structural_flags=set(_uir.structural_flags),
+                    parent_heading=_parent_heading,
+                )
 
-            chunks.append(chunk)
+                _prev_snippet = (
+                    chunks[-1].content[-CONTEXT_SNIPPET_LENGTH:] if chunks else None
+                )
+
+                chunk = IngestionChunk.from_uir(
+                    _uir_for_emit,
+                    doc_id=doc_hash,
+                    source_file=source_file,
+                    file_type=file_type,
+                    position=self._next_chunk_position(),
+                    page_width=int(_page_w),
+                    page_height=int(_page_h),
+                    chunk_type=_chunk_type,
+                    prev_text=_prev_snippet if not is_cross_page else None,
+                    breadcrumb_path=_breadcrumb,
+                    **self._intelligence_metadata,
+                )
+                chunk.metadata.refined_content = _uir.content
+                chunk.metadata.hierarchy.level = _level
+                # Post-refiner contextualization needs the DocChunk reference
+                # (Docling-side state); kept on single-page emissions only,
+                # matching v2.16 (cross-page splits did not preserve _dc_ref).
+                if not is_cross_page:
+                    chunk._dc_ref = dc  # type: ignore[attr-defined]
+                chunks.append(chunk)
 
         if _hybrid_dedup_skipped:
             logger.info(
