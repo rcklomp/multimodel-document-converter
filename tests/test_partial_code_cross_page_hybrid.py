@@ -157,23 +157,37 @@ def test_create_text_chunk_threads_partial_code_through_metadata():
 def test_emit_site_carries_v2_17_predicate():
     """Source-level sanity that the processor.py emit branch still
     carries the v2.17 predicate. If a future refactor removes the
-    `partial_code` kwarg from the cross-page emit's `create_text_chunk`
-    call, this test fails loudly — the retrieval-side adjacency-fetch
-    would silently go inert again.
+    `_is_cross_page_code` predicate from the cross-page emit branch,
+    this test fails loudly — the retrieval-side adjacency-fetch would
+    silently go inert again.
+
+    Updated 2026-05-27 (v3.0 Phase A step 4): the wiring migrated from
+    a `partial_code=True if _is_cross_page_code else None` kwarg on
+    `create_text_chunk` to `StructuralFlag.PARTIAL_CODE_CROSS_PAGE`
+    on the UIRChunk emitted through `IngestionChunk.from_uir`. The
+    `from_uir` bridge maps PARTIAL_CODE_IN_BLOCK / PARTIAL_CODE_CROSS_PAGE
+    flags onto `metadata.partial_code=True`, so the
+    end-to-end behavior is preserved — the OTHER tests in this file
+    verify the metadata field still arrives populated on emitted chunks.
     """
     from pathlib import Path
     src = Path(__file__).resolve().parents[1] / "src" / "mmrag_v2" / "processor.py"
     text = src.read_text(encoding="utf-8")
-    # The predicate variable name + the kwarg pass-through must both
-    # be present in the cross-page emit branch.
+    # The predicate variable name must still be present in the cross-page
+    # emit branch:
     assert "_is_cross_page_code" in text, (
         "v2.17 partial_code cross-page predicate variable missing from "
         "processor.py; the retrieval adjacency-fetch is at risk of going "
         "inert on the HybridChunker emit path. See "
         "docs/ARCHITECTURE_V3_DRAFT_0.5.md §3.2 partial_code distinction."
     )
-    assert "partial_code=True if _is_cross_page_code else None" in text, (
-        "Cross-page emit-site no longer passes `partial_code=` to "
-        "create_text_chunk; HybridChunker cross-page CODE splits will not "
-        "carry the flag and adjacency-fetch will not fire on them."
+    # The v3.0 wiring: predicate guards the addition of
+    # PARTIAL_CODE_CROSS_PAGE to the UIRChunk's structural_flags set.
+    # `from_uir` then maps the flag onto chunk.metadata.partial_code=True
+    # so the Qdrant payload filter `match: {value: True}` continues to hit.
+    assert "PARTIAL_CODE_CROSS_PAGE" in text, (
+        "Cross-page emit-site no longer wires the v3.0 "
+        "StructuralFlag.PARTIAL_CODE_CROSS_PAGE; HybridChunker cross-page "
+        "CODE splits will not carry the flag and adjacency-fetch will not "
+        "fire on them. See ARCHITECTURE_V3_DRAFT_0.5.md §3.2 step 4."
     )

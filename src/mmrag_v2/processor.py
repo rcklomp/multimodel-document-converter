@@ -3785,30 +3785,54 @@ class V2DocumentProcessor:
                         _page_chunk_type == ChunkType.CODE
                         and len(per_page_text) > 1
                     )
-                    _split_chunk = create_text_chunk(
-                        doc_id=doc_hash,
+                    # Charter §3.2 Phase A step 4: cross-page split
+                    # emission flows through UIR — build a UIRChunk for
+                    # this page-slice, then emit via from_uir.
+                    _structural_flags: set = set()
+                    if _is_cross_page_code:
+                        # v2.17 partial_code cross-page activation is the
+                        # PARTIAL_CODE_CROSS_PAGE structural flag in v3.0.
+                        from .universal.intermediate import StructuralFlag as _SF
+                        _structural_flags.add(_SF.PARTIAL_CODE_CROSS_PAGE)
+                    _split_uir = UIRChunk(
+                        modality=Modality.TEXT,
                         content=_page_text,
+                        locator=UIRLocator(
+                            type=UIRLocatorType.BBOX,
+                            bbox=_ppage_bbox or [0, 0, COORD_SCALE, COORD_SCALE],
+                            page_number=_ppage,
+                            coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
+                        ),
+                        confidence=UIRConfidenceBreakdown(),
+                        extraction_method=_emit_method,
+                        extraction_engine_version="docling-2.86.0",
+                        structural_flags=_structural_flags,
+                    )
+                    _split_breadcrumb = [
+                        Path(source_file).stem.replace("_", " ") if source_file else "Document",
+                        f"Page {_ppage}",
+                    ]
+                    _split_chunk = IngestionChunk.from_uir(
+                        _split_uir,
+                        doc_id=doc_hash,
                         source_file=source_file,
                         file_type=file_type,
-                        page_number=_ppage,
-                        bbox=_ppage_bbox or [0, 0, COORD_SCALE, COORD_SCALE],
-                        hierarchy=HierarchyMetadata(
-                            parent_heading=None,
-                            breadcrumb_path=[
-                                Path(source_file).stem.replace("_", " ") if source_file else "Document",
-                                f"Page {_ppage}",
-                            ],
-                            level=2,
-                        ),
-                        chunk_type=_page_chunk_type,
+                        position=self._next_chunk_position(),
                         page_width=int(_pw),
                         page_height=int(_ph),
-                        extraction_method=_emit_method,
-                        position=self._next_chunk_position(),
-                        partial_code=True if _is_cross_page_code else None,
+                        chunk_type=_page_chunk_type,
+                        breadcrumb_path=_split_breadcrumb,
                         **self._intelligence_metadata,
                     )
                     _split_chunk.metadata.refined_content = _page_text
+                    # v2.16 literal: cross-page split chunks carry
+                    # hierarchy.level=2 explicitly (auto-compute from
+                    # 2-element breadcrumb would also give 2; restored
+                    # explicitly for parity with v2.16).
+                    _split_chunk.metadata.hierarchy.level = 2
+                    # `partial_code` v2.16 metadata field is the
+                    # retrieval-side signal; from_uir already maps
+                    # PARTIAL_CODE_* StructuralFlags onto it.
                     chunks.append(_split_chunk)
                 # Skip the original cross-page chunk; we've emitted
                 # per-page slices above.
@@ -3907,30 +3931,48 @@ class V2DocumentProcessor:
 
             # Semantic context (prev/next snippets)
             prev_snippet = chunks[-1].content[-CONTEXT_SNIPPET_LENGTH:] if chunks else None
-            semantic_context = SemanticContext(
-                prev_text_snippet=prev_snippet,
-                next_text_snippet=None,  # filled by lookahead later
-                parent_heading=parent_heading,
-                breadcrumb_path=breadcrumb,
-            )
 
-            chunk = create_text_chunk(
+            # Charter §3.2 Phase A step 4: single-page DocChunk emission
+            # flows through UIR. Build a UIRChunk for the page-slice, then
+            # emit via IngestionChunk.from_uir. Semantic-context prev_text
+            # threads through the from_uir kwarg.
+            _stripped = text.strip()
+            _single_uir = UIRChunk(
+                modality=Modality.TEXT,
+                content=_stripped,
+                locator=UIRLocator(
+                    type=UIRLocatorType.BBOX,
+                    bbox=bbox or [0, 0, COORD_SCALE, COORD_SCALE],
+                    page_number=page_no,
+                    coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
+                ),
+                confidence=UIRConfidenceBreakdown(),
+                extraction_method="hybrid_chunker",
+                extraction_engine_version="docling-2.86.0",
+                parent_heading=parent_heading,
+            )
+            chunk = IngestionChunk.from_uir(
+                _single_uir,
                 doc_id=doc_hash,
-                content=text.strip(),
                 source_file=source_file,
                 file_type=file_type,
-                page_number=page_no,
-                bbox=bbox or [0, 0, COORD_SCALE, COORD_SCALE],
-                hierarchy=hierarchy,
-                chunk_type=chunk_type,
+                position=self._next_chunk_position(),
                 page_width=int(page_w),
                 page_height=int(page_h),
-                extraction_method="hybrid_chunker",
-                position=self._next_chunk_position(),
+                chunk_type=chunk_type,
+                prev_text=prev_snippet,
+                breadcrumb_path=breadcrumb,
                 **self._intelligence_metadata,
             )
-            chunk.semantic_context = semantic_context
-            chunk.metadata.refined_content = text.strip()
+            # v2.16 invariants that from_uir doesn't auto-populate:
+            chunk.metadata.refined_content = _stripped
+            # Hierarchy level was: min(len(breadcrumb), 5). from_uir's
+            # auto-compute via HierarchyMetadata.sync_level_with_breadcrumbs
+            # produces the same value (also min(len, 5)), so no override
+            # is needed here — but assert defensively in case the
+            # breadcrumb is empty (cannot happen in this branch; _clean_name
+            # is always appended).
+            chunk.metadata.hierarchy.level = min(len(breadcrumb), 5)
             # Store the DocChunk reference for post-refiner contextualization
             chunk._dc_ref = dc  # type: ignore[attr-defined]
 
