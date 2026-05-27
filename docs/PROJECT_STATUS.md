@@ -1,8 +1,65 @@
 # Project Status
 
-Last updated: 2026-05-26
+Last updated: 2026-05-27
 
 Purpose: fast orientation for a new coding session. Read this before deeper project docs.
+
+## v3.0 Phase A native UIR refactor — IN PROGRESS (autonomous, 2026-05-27)
+
+**Mandate:** V3 native-UIR override (no shim, no scope renegotiation,
+micro-commit if context-bound). Phase A micro-sequence per Charter §3.2
+executed sequentially. The shim-variant commit `89076e4`
+(`v3.0 Phase A: UIR-shim ships A2/A4/A5/A6/A8`) is now PRECEDED by the
+native-UIR work below — it is no longer the active Phase A approach.
+
+### Phase A micro-sequence — landed (steps 1-4)
+
+| Step | Charter target | Status | Commit |
+|---|---|---|---|
+| 1 | `ingestion_schema.py`: IngestionChunk consumes UIR | ✓ COMPLETE | `c770f8a` |
+| 2 | `processor.py::_emit_dense_index_page_chunks`: UIR-native | ✓ COMPLETE | `28de315` |
+| 3 | `processor.py::_emit_section_header_only_page_chunks`: UIR-native | ✓ COMPLETE | `ba6c3b4` |
+| 4 | `processor.py::_process_text_with_hybrid_chunker`: emit-boundary UIR-native | ✓ COMPLETE (emit boundary); INPUT-boundary decoupling rebooked | `bfef1d1` |
+| 5 | `batch_processor.py`: reconcile headings, merge, spatial refiner over UIR | NOT STARTED | — |
+
+### What's landed (cumulative)
+
+1. **Modality unification (C14, Charter §3.2):** `schema.Modality` is now a re-export of `universal.intermediate.Modality` (the 5-value vocabulary TEXT/IMAGE/TABLE/CODE/FORM). UIR Modality widened to `(str, Enum)`. `CHUNKTYPE_TO_MODALITY` + `MODALITY_TO_DEFAULT_CHUNKTYPE` maps published (ChunkType narrows one-direction to Modality; no two-way shim).
+2. **v3.0 native emission boundary:** `IngestionChunk.from_uir(uir, *, doc_id, source_file, ...)` is the v3.0 emission API. `IngestionChunk.to_uir()` is the reverse for the identity-half gate.
+3. **Three module-level Docling→UIR bridge helpers in `processor.py`:**
+   - `_union_docling_item_bboxes_for_uir(items, page_w, page_h)` — callable-without-self bbox union.
+   - `_dense_page_to_uir_chunk(doc, raw_page, source_text_only_pages, pdf_path, page_w, page_h)` — encapsulates the three Docling dense-index extraction modes (DocumentIndex grid, generic items, source-PDF fallback).
+   - `_section_header_page_to_uir_chunk(items, page_number, page_w, page_h)` — encapsulates the section_header/title label check + heading text extraction.
+4. **`_process_text_with_hybrid_chunker` emission sites both flow through UIR.** v2.17 partial_code cross-page wiring migrated to `StructuralFlag.PARTIAL_CODE_CROSS_PAGE` on UIRChunk; `from_uir` maps it back to `metadata.partial_code=True`. Source-level guard test (`test_emit_site_carries_v2_17_predicate`) updated to track the v3.0 wiring.
+5. **+37 new bridge tests** (`test_v3_ingestion_chunk_from_uir.py` 16, `test_v3_phase_a_step2_dense_page_uir.py` 12, `test_v3_phase_a_step3_section_header_uir.py` 9). Full suite: **1376 passed / 17 skipped / 0 failed** (baseline 1306).
+
+### Resume point — next session
+
+**Charter §3.2 micro-sequence step 5: `batch_processor.py` reconciliation paths over UIR.**
+
+The 9 emission sites that need UIR-from_uir conversion in `src/mmrag_v2/batch_processor.py`:
+
+| Site | Line | Branch |
+|---|---|---|
+| 1 | 1735 | `fallback_chunk = create_text_chunk(`  |
+| 2 | 5466 | `chunk = create_image_chunk(` |
+| 3 | 8051 | `new_chunk = create_text_chunk(` |
+| 4 | 9015 | `recovery_chunk = create_text_chunk(` (recovery path 1) |
+| 5 | 9094 | `recovery_chunk = create_text_chunk(` (recovery path 2) |
+| 6 | 9162 | `recovery_chunk = create_text_chunk(` (recovery path 3) |
+| 7 | 9254 | `recovery_chunk = create_text_chunk(` (recovery path 4) |
+| 8 | 9984 | `new_chunk = create_text_chunk(` |
+| 9 | 10372 | `new_chunk = create_text_chunk(` |
+
+Per-site pattern (proven over steps 2-4): build `UIRChunk(modality=…, content=…, locator=UIRLocator(…), confidence=UIRConfidenceBreakdown(…), extraction_method=…, extraction_engine_version="docling-2.86.0", …)` then `IngestionChunk.from_uir(uir, doc_id=…, source_file=…, file_type=…, position=…, chunk_type=…, breadcrumb_path=…, **intelligence_md)`. Restore v2.16 invariants post-`from_uir` (`hierarchy.level` literal value, `refined_content`, `search_priority`, modality-specific defaults).
+
+**Residual from step 4:** `_process_text_with_hybrid_chunker`'s INPUT boundary (line ~3560 `chunker.chunk(doc)` + the DocChunk iteration loop reading `dc.meta.doc_items / dc.text / dc.meta.headings`) still consumes `DoclingDocument`. The full Charter §3.2 decoupling at the chunker INPUT requires extracting a per-DocChunk → UIRChunk adapter, then changing the loop to iterate UIRChunks. This is the bigger half of step 4 and is a natural follow-up after step 5.
+
+### Reversibility
+
+`git revert bfef1d1 ba6c3b4 28de315 c770f8a` restores the v3.0 foundation-only state (pre-Phase-A-native-refactor). The earlier shim commits `89076e4 d853559 f5fef3f` are untouched and remain in the branch history; they no longer represent the active Phase A approach but they did not modify v2.16 production paths so the v2.16 baseline is still reachable via tag `v2.16.0` (`53726ec`).
+
+---
 
 ## v3.0 Foundation Session — landed 2026-05-26 (autonomous)
 
