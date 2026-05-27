@@ -20,7 +20,7 @@ native-UIR work below — it is no longer the active Phase A approach.
 | 2 | `processor.py::_emit_dense_index_page_chunks`: UIR-native | ✓ COMPLETE | `28de315` |
 | 3 | `processor.py::_emit_section_header_only_page_chunks`: UIR-native | ✓ COMPLETE | `ba6c3b4` |
 | 4 | `processor.py::_process_text_with_hybrid_chunker`: emit-boundary UIR-native | ✓ COMPLETE (emit boundary); INPUT-boundary decoupling rebooked | `bfef1d1` |
-| 5 | `batch_processor.py`: reconcile headings, merge, spatial refiner over UIR | NOT STARTED | — |
+| 5 | `batch_processor.py`: reconcile headings, merge, spatial refiner over UIR | PARTIAL (3 of 9 sites done) | (this commit) |
 
 ### What's landed (cumulative)
 
@@ -37,21 +37,31 @@ native-UIR work below — it is no longer the active Phase A approach.
 
 **Charter §3.2 micro-sequence step 5: `batch_processor.py` reconciliation paths over UIR.**
 
-The 9 emission sites that need UIR-from_uir conversion in `src/mmrag_v2/batch_processor.py`:
+Step 5 is PARTIALLY landed — 3 of 9 emission sites converted. The
+remaining 6 need the same UIR-from_uir pattern applied.
 
-| Site | Line | Branch |
+**Done (this session):**
+| Site | Approx line (post-edit) | Branch |
 |---|---|---|
-| 1 | 1735 | `fallback_chunk = create_text_chunk(`  |
-| 2 | 5466 | `chunk = create_image_chunk(` |
-| 3 | 8051 | `new_chunk = create_text_chunk(` |
-| 4 | 9015 | `recovery_chunk = create_text_chunk(` (recovery path 1) |
-| 5 | 9094 | `recovery_chunk = create_text_chunk(` (recovery path 2) |
-| 6 | 9162 | `recovery_chunk = create_text_chunk(` (recovery path 3) |
-| 7 | 9254 | `recovery_chunk = create_text_chunk(` (recovery path 4) |
-| 8 | 9984 | `new_chunk = create_text_chunk(` |
-| 9 | 10372 | `new_chunk = create_text_chunk(` |
+| 1 | ~1750 | DIGITAL-TEXT-FALLBACK (pypdfium2 native-text fallback) — FLOW_OFFSET locator |
+| 2 | ~5495 | pymupdf image emit — BBOX locator; AssetReference width/height set post-construction |
+| 3 | ~8100 | oversize-split (chunks longer than max_chars get split into Part N/N) — locator inherits from original chunk; `chunk_id` suffix `_oN` overridden post-construction |
 
-Per-site pattern (proven over steps 2-4): build `UIRChunk(modality=…, content=…, locator=UIRLocator(…), confidence=UIRConfidenceBreakdown(…), extraction_method=…, extraction_engine_version="docling-2.86.0", …)` then `IngestionChunk.from_uir(uir, doc_id=…, source_file=…, file_type=…, position=…, chunk_type=…, breadcrumb_path=…, **intelligence_md)`. Restore v2.16 invariants post-`from_uir` (`hierarchy.level` literal value, `refined_content`, `search_priority`, modality-specific defaults).
+**To do (next session, mechanical):**
+| Site | Approx line | Branch |
+|---|---|---|
+| 4 | ~9114 | recovery_frontpage (front-page low-coverage rescue; per-block bbox; `_apply_toc_recovery_policy()` callback after construction) |
+| 5 | ~9094 second site | second recovery branch (verify by grep — line numbers shifted from earlier edits) |
+| 6 | ~9162 | third recovery branch |
+| 7 | ~9254 | fourth recovery branch |
+| 8 | ~9984 | reconciliation path (verify by grep) |
+| 9 | ~10372 | final reconciliation path |
+
+After all 9 sites land, run `grep "create_text_chunk\|create_image_chunk\|create_table_chunk" src/mmrag_v2/batch_processor.py` to confirm only the import line at lines 67-69 remains. Then run the full test suite — 1376 should rise as new UIR bridge tests for the recovery paths land.
+
+Per-site pattern (proven over steps 2-4 + sites 1-3): build `UIRChunk(modality=…, content=…, locator=UIRLocator(…), confidence=UIRConfidenceBreakdown(…), extraction_method=…, extraction_engine_version="docling-2.86.0" or path-specific, …)` then `IngestionChunk.from_uir(uir, doc_id=…, source_file=…, file_type=…, position=…, chunk_type=…, breadcrumb_path=…, **intelligence_md)`. Restore v2.16 invariants post-`from_uir`: `metadata.content_classification` (recovery sites use `self._classify_recovery_text_content`), `hierarchy.level` literal value, `refined_content` (text sites only), `search_priority` (modality-specific), and modality-specific extras like `AssetReference.width_px`/`height_px` for IMAGE.
+
+For the recovery sites, the post-construction callback `_apply_toc_recovery_policy(recovery_chunk, toc_like_page)` must continue to run AFTER `from_uir` — it sets retrieval-side metadata that's independent of construction path.
 
 **Residual from step 4:** `_process_text_with_hybrid_chunker`'s INPUT boundary (line ~3560 `chunker.chunk(doc)` + the DocChunk iteration loop reading `dc.meta.doc_items / dc.text / dc.meta.headings`) still consumes `DoclingDocument`. The full Charter §3.2 decoupling at the chunker INPUT requires extracting a per-DocChunk → UIRChunk adapter, then changing the loop to iterate UIRChunks. This is the bigger half of step 4 and is a natural follow-up after step 5.
 

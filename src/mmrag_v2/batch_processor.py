@@ -83,6 +83,16 @@ from .utils.image_hash_registry import (
 from .utils.coordinate_normalization import ensure_normalized
 from .engines.docling_adapter import DoclingPdfAdapter
 from .engines.pdf_plan import PdfConversionPlan, build_pdf_conversion_plan
+# V3.0 UIR contract (Charter §3.2 Phase A step 5): reconciliation paths
+# emit IngestionChunks via IngestionChunk.from_uir(UIRChunk(...)). Aliases
+# avoid clash with the Pydantic v2.16 names imported above.
+from .universal.intermediate import (
+    ConfidenceBreakdown as UIRConfidenceBreakdown,
+    CoordinateFrame as UIRCoordinateFrame,
+    Locator as UIRLocator,
+    LocatorType as UIRLocatorType,
+    UIRChunk,
+)
 from .vision.vision_manager import VisionManager, create_vision_manager
 from .vision.vision_prompts import validate_vlm_response
 from .validators.token_validator import (
@@ -1727,23 +1737,41 @@ class BatchProcessor:
                                     if part_total > 1:
                                         breadcrumb.append(f"[Part {idx + 1}/{part_total}]")
 
-                                    hierarchy = HierarchyMetadata(
-                                        parent_heading=None,
-                                        breadcrumb_path=breadcrumb,
-                                        level=len(breadcrumb),
-                                    )
-                                    fallback_chunk = create_text_chunk(
-                                        doc_id=self._doc_hash or "unknown",
+                                    # Charter §3.2 Phase A step 5 site 1 (DIGITAL-
+                                    # TEXT-FALLBACK): emit via UIR. No bbox is
+                                    # available from the pypdfium2 fallback path,
+                                    # so the locator is FLOW_OFFSET (page-anchored,
+                                    # no spatial). content_classification is set
+                                    # post-construction (not yet a from_uir kwarg).
+                                    _fallback_uir = UIRChunk(
+                                        modality=Modality.TEXT,
                                         content=part_text,
+                                        locator=UIRLocator(
+                                            type=UIRLocatorType.FLOW_OFFSET,
+                                            page_number=actual_page_no,
+                                            coordinate_frame=UIRCoordinateFrame.UNKNOWN,
+                                            path=f"page:{actual_page_no}:digital_text_fallback:{idx}",
+                                        ),
+                                        confidence=UIRConfidenceBreakdown(),
+                                        extraction_method="digital_text_layer_fallback",
+                                        extraction_engine_version="pypdfium2-fallback",
+                                    )
+                                    fallback_chunk = IngestionChunk.from_uir(
+                                        _fallback_uir,
+                                        doc_id=self._doc_hash or "unknown",
                                         source_file=source_file,
                                         file_type=FileType.PDF,
-                                        page_number=actual_page_no,
-                                        hierarchy=hierarchy,
-                                        extraction_method="digital_text_layer_fallback",
-                                        content_classification=self._classify_text_content(part_text),
                                         position=self._next_chunk_position(),
+                                        breadcrumb_path=breadcrumb,
                                         **self._intelligence_metadata,
                                     )
+                                    fallback_chunk.metadata.content_classification = (
+                                        self._classify_text_content(part_text)
+                                    )
+                                    # v2.16 literal: hierarchy.level = len(breadcrumb)
+                                    # (uncapped; from_uir auto-caps at 5 but breadcrumb
+                                    # is always ≤4 here, so the values agree).
+                                    fallback_chunk.metadata.hierarchy.level = len(breadcrumb)
                                     text_fallback_chunks.append(fallback_chunk)
 
                                 page_chunks = text_fallback_chunks
@@ -5463,17 +5491,30 @@ class BatchProcessor:
                 else:
                     bbox = [0, 0, COORD_SCALE, COORD_SCALE]
 
-                chunk = create_image_chunk(
-                    doc_id=doc_hash,
+                # Charter §3.2 Phase A step 5 site 2 (pymupdf image emit):
+                # build UIRChunk with IMAGE modality + BBOX locator, emit via
+                # from_uir, then post-construction enrich AssetReference with
+                # width/height (from_uir only sets file_path + mime_type).
+                _image_uir = UIRChunk(
+                    modality=Modality.IMAGE,
                     content=f"[Embedded image on page {actual_page}]",
+                    locator=UIRLocator(
+                        type=UIRLocatorType.BBOX,
+                        bbox=bbox,
+                        page_number=actual_page,
+                        coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
+                    ),
+                    confidence=UIRConfidenceBreakdown(),
+                    extraction_method="pymupdf",
+                    extraction_engine_version="pymupdf",
+                    asset_ref=asset_path,
+                )
+                chunk = IngestionChunk.from_uir(
+                    _image_uir,
+                    doc_id=doc_hash,
                     source_file=source_file,
                     file_type=FileType.PDF,
-                    page_number=actual_page,
-                    asset_path=asset_path,
-                    bbox=bbox,
-                    width_px=img_w,
-                    height_px=img_h,
-                    extraction_method="pymupdf",
+                    position=self._next_chunk_position(),
                     page_width=int(page_w),
                     page_height=int(page_h),
                     profile_type=intel.get("profile_type"),
@@ -5482,8 +5523,11 @@ class BatchProcessor:
                     confidence_threshold=intel.get("confidence_threshold"),
                     document_domain=intel.get("document_domain"),
                     document_modality=intel.get("document_modality"),
-                    position=self._next_chunk_position(),
                 )
+                # v2.16 invariant: image AssetReference carries pixel dimensions.
+                if chunk.asset_ref is not None:
+                    chunk.asset_ref.width_px = img_w
+                    chunk.asset_ref.height_px = img_h
                 chunks.append(chunk)
 
                 logger.debug(
@@ -8034,38 +8078,93 @@ class BatchProcessor:
                     out.append(ch)
                     continue
                 try:
-                    new_h = HierarchyMetadata(
+                    # Charter §3.2 Phase A step 5 site 3 (oversize-split):
+                    # build a UIRChunk that inherits the original chunk's
+                    # locator + extraction_method, then emit via from_uir.
+                    # The new chunk_id is overridden post-construction to
+                    # the v2.16-stable "_oN" suffix so the join key against
+                    # any retrieval-side stash stays preserved.
+                    _orig_bbox = (
+                        ch.metadata.spatial.bbox
+                        if ch.metadata.spatial and ch.metadata.spatial.bbox
+                        else None
+                    )
+                    _orig_pw = (
+                        ch.metadata.spatial.page_width
+                        if ch.metadata.spatial
+                        else None
+                    )
+                    _orig_ph = (
+                        ch.metadata.spatial.page_height
+                        if ch.metadata.spatial
+                        else None
+                    )
+                    _orig_breadcrumb = (
+                        list(ch.metadata.hierarchy.breadcrumb_path)
+                        if ch.metadata.hierarchy
+                        else []
+                    )
+                    _new_breadcrumb = _orig_breadcrumb + [
+                        f"[Oversize Split {idx+1}/{len(parts)}]"
+                    ]
+                    _new_level = (
+                        (ch.metadata.hierarchy.level or 2) + 1
+                        if ch.metadata and ch.metadata.hierarchy
+                        else 3
+                    )
+                    if _orig_bbox:
+                        _ov_locator = UIRLocator(
+                            type=UIRLocatorType.BBOX,
+                            bbox=list(_orig_bbox),
+                            page_number=ch.metadata.page_number,
+                            coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
+                        )
+                    else:
+                        _ov_locator = UIRLocator(
+                            type=UIRLocatorType.FLOW_OFFSET,
+                            page_number=ch.metadata.page_number,
+                            coordinate_frame=UIRCoordinateFrame.UNKNOWN,
+                            path=f"page:{ch.metadata.page_number}:oversize:{idx+1}",
+                        )
+                    _ov_uir = UIRChunk(
+                        modality=Modality.TEXT,
+                        content=sub,
+                        locator=_ov_locator,
+                        confidence=UIRConfidenceBreakdown(),
+                        extraction_method=ch.metadata.extraction_method,
+                        extraction_engine_version="docling-2.86.0",
                         parent_heading=(
-                            ch.metadata.hierarchy.parent_heading if ch.metadata.hierarchy else None
-                        ),
-                        breadcrumb_path=(
-                            (ch.metadata.hierarchy.breadcrumb_path if ch.metadata.hierarchy else [])
-                            + [f"[Oversize Split {idx+1}/{len(parts)}]"]
-                        ),
-                        level=(
-                            (ch.metadata.hierarchy.level or 2) + 1
-                            if ch.metadata and ch.metadata.hierarchy
-                            else 3
+                            ch.metadata.hierarchy.parent_heading
+                            if ch.metadata.hierarchy
+                            else None
                         ),
                     )
-                    new_chunk = create_text_chunk(
+                    new_chunk = IngestionChunk.from_uir(
+                        _ov_uir,
                         doc_id=ch.doc_id,
-                        content=sub,
                         source_file=ch.metadata.source_file,
                         file_type=ch.metadata.file_type,
-                        page_number=ch.metadata.page_number,
-                        hierarchy=new_h,
-                        chunk_type=sub_chunk_type,
-                        bbox=(ch.metadata.spatial.bbox if ch.metadata.spatial else None),
-                        page_width=(ch.metadata.spatial.page_width if ch.metadata.spatial else None),
-                        page_height=(ch.metadata.spatial.page_height if ch.metadata.spatial else None),
-                        extraction_method=ch.metadata.extraction_method,
-                        prev_text=(ch.semantic_context.prev_text_snippet if ch.semantic_context else None),
-                        next_text=(ch.semantic_context.next_text_snippet if ch.semantic_context else None),
-                        content_classification=sub_content_classification,
                         position=self._next_chunk_position(),
+                        page_width=_orig_pw,
+                        page_height=_orig_ph,
+                        chunk_type=sub_chunk_type,
+                        prev_text=(
+                            ch.semantic_context.prev_text_snippet
+                            if ch.semantic_context
+                            else None
+                        ),
+                        next_text=(
+                            ch.semantic_context.next_text_snippet
+                            if ch.semantic_context
+                            else None
+                        ),
+                        breadcrumb_path=_new_breadcrumb,
                         **{k: v for k, v in self._intelligence_metadata.items() if v is not None},
                     )
+                    new_chunk.metadata.content_classification = sub_content_classification
+                    new_chunk.metadata.hierarchy.level = _new_level
+                    # v2.16 stable chunk_id suffix preserved (retrieval-side
+                    # adjacency depends on this).
                     new_chunk.chunk_id = f"{ch.chunk_id}_o{idx+1}"
                     out.append(new_chunk)
                 except Exception:
