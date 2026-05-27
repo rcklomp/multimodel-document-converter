@@ -38,7 +38,7 @@ RENDER_DPI_MAX = 600
 DEFAULT_RENDER_DPI = 200
 
 
-@dataclass
+@dataclass(frozen=True)
 class ConversionPlan:
     """Format-agnostic extraction plan. Charter §3.2.
 

@@ -229,12 +229,40 @@ In rough priority order (the Charter governs):
 
    Pure CPU + file I/O. No GPU, no omlx, no Qdrant. Wall time <1s.
 
-1e. **NEXT executable step — Phase A task A1.** Refactor
-   `engines/pdf_plan.py::PdfConversionPlan` to inherit from the
-   foundation-shipped `universal/conversion_plan.py::ConversionPlan`
-   parent. Existing tests must pass without modification (Charter A1
-   acceptance). No re-extraction work yet — A2 is the chunker /
-   serializer rewrite that follows.
+1e. **Charter Phase A task A1 — ✅ COMPLETE 2026-05-27, VERDICT PASS.**
+   `engines/pdf_plan.py::PdfConversionPlan` now inherits from
+   `universal/conversion_plan.py::ConversionPlan` (Charter §3.2 parent).
+   Parent is `@dataclass(frozen=True)` to match child frozen contract.
+   PDF-flavored defaults satisfy parent validation for v2.16 callers
+   (no kwargs construction stays valid): `source_path=""`,
+   `file_type="pdf"`, `doc_id="pending"`, `extraction_strategy="digital_native"`;
+   `profile_type` and `reading_order_strategy` overrides preserve
+   existing defaults + the latter's `Literal` type narrowing.
+   `__post_init__` chains to `super().__post_init__()` so render_dpi range
+   `[72, 600]`, batch_size ≥1, and file_type/doc_id non-empty checks fire
+   on every PDF plan construction. The "pending" sentinel on `doc_id` is
+   the observable signal that the v3 contract has not been populated by
+   the caller (legacy v2.16 paths); v3 callers MUST pass an explicit
+   `doc_id`. **Charter A1 acceptance verified:** test suite 1306 → 1310
+   passed (+4 from intervening main commits, NOT from A1 — A1 added zero
+   tests), 17 skipped (unchanged), 0 failed.
+   Touched files: `src/mmrag_v2/universal/conversion_plan.py` (one-line
+   frozen=True), `src/mmrag_v2/engines/pdf_plan.py` (import + class
+   header + 4 parent-field overrides + super-call in `__post_init__`).
+
+1f. **NEXT executable step — Phase A task A2.** Chunker / mapper /
+   serializer rewrite to consume the v3 UIR contract end-to-end
+   (`mmrag_v2.universal.intermediate.UIRChunk` as the chunker output
+   type; `Modality` / `Locator` / `ConfidenceBreakdown` populated at the
+   mapper boundary). This is the load-bearing Phase A refactor and is
+   gated by the A0 scope-negotiation outcome (Charter §Phase A protocol
+   — A0 PASSed at identity-ratio 1.0000, so the full UIR refactor is
+   committed to rather than the UIR-shim fallback). Touch sites:
+   `src/mmrag_v2/universal/v2x_to_v3_mapper.py` (already foundation-
+   shipped — extend to populate the v3 fields), `src/mmrag_v2/processor.py`
+   HybridChunker call site, `src/mmrag_v2/batch_processor.py`
+   reconciliation paths. Verify each commit against
+   `python -m mmrag_v2.v3_identity_gate --baseline ... --candidate ...`.
 2. **Charter Phase A task A0** — per-doc spike on `ATZ_Elektronik_German`
    using the V3 UIR types. Convert one doc through the
    (foundation-shipped) ConversionPlan + ConfidenceBreakdown +

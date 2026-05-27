@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Literal, Tuple
 
 from ..schema.ingestion_schema import CHUNK_FACTORY_METADATA_KEYS
+from ..universal.conversion_plan import ConversionPlan
 
 
 INTELLIGENCE_METADATA_KEYS = (
@@ -32,8 +33,21 @@ _VALID_READING_ORDER_STRATEGIES = frozenset(
 
 
 @dataclass(frozen=True)
-class PdfConversionPlan:
+class PdfConversionPlan(ConversionPlan):
     """Single source of truth for PDF extraction policy.
+
+    v3.0 Phase A task A1 (2026-05-27): now inherits from
+    `universal/conversion_plan.py::ConversionPlan` per Charter §3.2. The
+    parent contract carries the format-agnostic v3 fields (source_path,
+    file_type, doc_id, extraction_strategy, render_dpi, engine_options,
+    etc.); this subclass carries the PDF / Docling-specific policy fields
+    (extraction_route, hybrid_chunker_enabled, picture deny lists, ...).
+
+    All parent required fields are given PDF-flavored defaults so v2.16
+    callers (which never set source_path/doc_id on the plan) continue to
+    construct PdfConversionPlan() with their existing kwargs. v3 callers
+    MUST explicitly pass source_path + doc_id; the "pending" sentinel on
+    doc_id is the signal that the v3 contract has not yet been populated.
 
     Policy fields (Milestone 2: Plan Control Plane):
 
@@ -52,6 +66,19 @@ class PdfConversionPlan:
     - drop_blank_assets: legacy @property derived from asset_validation_policy.
     - quarantine_corrupted_chunks: legacy @property derived from recovery policy.
     """
+
+    # --- Parent ConversionPlan required-field overrides (v3 Charter §3.2) ---
+    # These re-declarations give the parent's required fields PDF-flavored
+    # defaults so that v2.16 callers (no kwargs) continue to construct
+    # cleanly. The "pending" sentinel on doc_id signals to v3 consumers
+    # that the legacy construction path did not populate the v3 contract.
+    source_path: str = ""
+    file_type: str = "pdf"
+    doc_id: str = "pending"
+    extraction_strategy: str = "digital_native"
+    # profile_type and reading_order_strategy are also parent fields;
+    # the subclass re-declarations below preserve their existing defaults
+    # and (for reading_order_strategy) narrow the type to Literal.
 
     images_scale: float = 2.0
     generate_page_images: bool = True
@@ -125,6 +152,10 @@ class PdfConversionPlan:
     extra_metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        # v3 parent validates render_dpi range, batch_size >=1, and that
+        # file_type / doc_id are non-empty (Charter §3.2). The PDF-flavored
+        # defaults above satisfy parent validation.
+        super().__post_init__()
         if self.asset_validation_policy not in _VALID_ASSET_POLICIES:
             raise ValueError(
                 f"asset_validation_policy must be one of {sorted(_VALID_ASSET_POLICIES)}, "
