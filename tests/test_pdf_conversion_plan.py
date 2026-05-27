@@ -258,12 +258,47 @@ def test_adapter_ocr_disabled(monkeypatch):
     assert FakeEasyOcrOptions.created == 0
 
 
-def test_adapter_ocr_enabled_uses_easyocr(monkeypatch):
+def test_adapter_ocr_engine_dispatches_to_requested_class(monkeypatch):
+    """v2.17 Item #9 reopen — REQUIREMENT CHANGE (2026-05-27).
+
+    PRIOR behavior pinned by this test until v2.17 (see git blame for the
+    original `test_adapter_ocr_enabled_uses_easyocr`): the adapter
+    silently used EasyOcrOptions REGARDLESS of `plan.ocr_engine`. The
+    historical reason was "preserve existing call-site behavior" (adapter
+    docstring 96–98 pre-v2.17), but the CLI continued to advertise
+    `--ocr-engine {tesseract|easyocr|doctr}` as a working choice. The
+    mismatch was diagnosed as a root cause of the Earthship multi-column
+    OCR damage not improving despite v2.13 Phase 2 force_full_page_ocr:
+    EasyOCR mis-handles 2-column scanned pages where Apple Vision or
+    Tesseract produce coherent layouts. The dispatch fix in
+    `engines/docling_adapter.py::_build_ocr_options` makes the CLI flag
+    take effect.
+
+    NEW contract this test pins:
+      - `ocr_engine="easyocr"` → EasyOcrOptions
+      - `ocr_engine="tesseract"` → TesseractCliOcrOptions
+      - `ocr_engine="ocrmac"`   → OcrMacOptions
+      - `ocr_engine="bogus"`    → falls back to EasyOcrOptions + warns
+
+    See `tests/test_docling_adapter_ocr_dispatch.py` for the full
+    truth-table coverage; this test just pins that the integration path
+    (full `get_converter()` call → `options.ocr_options`) carries the
+    dispatched class through.
+    """
     _patch_docling_classes(monkeypatch)
     DoclingPdfAdapter(_digital_plan(enable_ocr=True, ocr_engine="tesseract")).get_converter()
 
     assert FakePdfPipelineOptions.latest.do_ocr is True
-    assert isinstance(FakePdfPipelineOptions.latest.ocr_options, FakeEasyOcrOptions)
+    # v2.17: tesseract request must produce TesseractCliOcrOptions, NOT
+    # the patched FakeEasyOcrOptions (which would mean the silent
+    # fallback bug is back).
+    assert FakePdfPipelineOptions.latest.ocr_options.__class__.__name__ == (
+        "TesseractCliOcrOptions"
+    ), (
+        "v2.17 Item #9 dispatch regression: ocr_engine='tesseract' must "
+        "instantiate TesseractCliOcrOptions, not EasyOcr. Check "
+        "engines/docling_adapter.py::_build_ocr_options."
+    )
 
 
 def test_adapter_code_enrichment_on(monkeypatch):

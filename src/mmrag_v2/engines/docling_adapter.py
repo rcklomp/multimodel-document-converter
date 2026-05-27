@@ -39,6 +39,79 @@ class DoclingPdfAdapter:
             PdfFormatOption,
         )
 
+    def _build_ocr_options(self, easyocr_cls: Any) -> Any:
+        """Dispatch on `plan.ocr_engine` to the correct Docling OcrOptions class.
+
+        v2.17 Item #9 reopen — Earthship multi-column OCR damage diagnostic:
+        the v2.13 Phase 2 force_full_page_ocr fix improved chunk count but
+        layout damage persisted on multi-column scanned pages because the
+        adapter hardcoded EasyOcrOptions regardless of `plan.ocr_engine`.
+        The CLI's `--ocr-engine {tesseract|easyocr|doctr|ocrmac}` flag
+        was silently ignored. This dispatch restores the contract.
+
+        `easyocr_cls` is the EasyOcrOptions class from
+        `_load_docling_classes()` — kept as injected dependency so test
+        patching of the loader still substitutes a recording fake when
+        the engine resolves to easyocr.
+
+        Engine selection (each non-default clause guarded by
+        import-availability so an engine missing its system dep falls back
+        to EasyOcr rather than crashing the adapter at construction):
+
+        - "ocrmac"   — macOS Vision framework (Apple Silicon native; better
+                       multi-column layout handling than EasyOCR on the
+                       Earthship corpus per spike). NEW in v2.17.
+        - "tesseract" — TesseractCliOcrOptions (system tesseract binary).
+        - "doctr"    — RapidOcrOptions when available (DocTR's modern
+                       interface in Docling 2.86 maps via Rapid).
+        - default / "easyocr" — EasyOcrOptions (unchanged behavior;
+                                uses the injected `easyocr_cls`).
+        """
+        engine = (getattr(self.plan, "ocr_engine", "") or "easyocr").strip().lower()
+        if engine in {"", "easyocr"}:
+            return easyocr_cls()
+        if engine == "ocrmac":
+            try:
+                from docling.datamodel.pipeline_options import OcrMacOptions
+                logger.info("[DOCLING-ADAPTER] OCR engine=ocrmac (Apple Vision)")
+                return OcrMacOptions()
+            except ImportError as exc:
+                logger.warning(
+                    "[DOCLING-ADAPTER] ocrmac requested but OcrMacOptions "
+                    "unavailable (%s); falling back to EasyOcr", exc,
+                )
+                return easyocr_cls()
+        if engine == "tesseract":
+            try:
+                from docling.datamodel.pipeline_options import (
+                    TesseractCliOcrOptions,
+                )
+                logger.info("[DOCLING-ADAPTER] OCR engine=tesseract (CLI)")
+                return TesseractCliOcrOptions()
+            except ImportError as exc:
+                logger.warning(
+                    "[DOCLING-ADAPTER] tesseract requested but "
+                    "TesseractCliOcrOptions unavailable (%s); "
+                    "falling back to EasyOcr", exc,
+                )
+                return easyocr_cls()
+        if engine == "doctr":
+            try:
+                from docling.datamodel.pipeline_options import RapidOcrOptions
+                logger.info("[DOCLING-ADAPTER] OCR engine=doctr (via Rapid)")
+                return RapidOcrOptions()
+            except ImportError as exc:
+                logger.warning(
+                    "[DOCLING-ADAPTER] doctr requested but RapidOcrOptions "
+                    "unavailable (%s); falling back to EasyOcr", exc,
+                )
+                return easyocr_cls()
+        logger.warning(
+            "[DOCLING-ADAPTER] Unknown ocr_engine=%r; falling back to EasyOcr",
+            engine,
+        )
+        return easyocr_cls()
+
     def get_converter(self) -> Any:
         """Return a cached Docling DocumentConverter."""
         if self._converter is not None:
@@ -93,9 +166,15 @@ class DoclingPdfAdapter:
 
         options.do_ocr = self.plan.do_ocr
         if self.plan.do_ocr:
-            # Existing call sites always fell back to EasyOcrOptions regardless
-            # of the CLI engine string. Preserve that behavior in the adapter.
-            ocr_options = EasyOcrOptions()
+            # v2.17 Item #9 reopen: dispatch on plan.ocr_engine so the CLI's
+            # advertised --ocr-engine choice actually takes effect. The
+            # historical hardcode to EasyOcrOptions was the silent root cause
+            # of the Earthship multi-column OCR layout damage not improving
+            # despite v2.13 Phase 2 force_full_page_ocr — full-page OCR with
+            # EasyOCR still mis-handles 2-column scanned pages where
+            # Apple Vision (ocrmac) or Tesseract produce coherent layouts.
+            # Default of plan.ocr_engine="easyocr" preserves backward compat.
+            ocr_options = self._build_ocr_options(EasyOcrOptions)
             # Phase 4: raise the bitmap-area threshold so photographic cover
             # pages on born-digital documents are not OCR'd into garbage.
             if hasattr(ocr_options, "bitmap_area_threshold"):

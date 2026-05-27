@@ -134,11 +134,18 @@ class VisionProviderType(str, Enum):
 
 
 class OCREngine(str, Enum):
-    """Available OCR engines."""
+    """Available OCR engines.
+
+    v2.17 Item #9 reopen: `ocrmac` added (macOS Vision framework, Apple
+    Silicon native). Spike on Earthship multi-column scanned pages suggests
+    ocrmac handles 2-column layout better than EasyOCR; verify per-doc
+    before promoting to default.
+    """
 
     TESSERACT = "tesseract"
     EASYOCR = "easyocr"
     DOCTR = "doctr"
+    OCRMAC = "ocrmac"
 
 
 class OCRMode(str, Enum):

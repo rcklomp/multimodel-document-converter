@@ -3610,6 +3610,27 @@ class V2DocumentProcessor:
                         if _have_bbox and _bbox_r > _bbox_l and _bbox_b > _bbox_t
                         else None
                     )
+                    # v2.17 (Item #9 safety-valve reopen): extend
+                    # `partial_code` coverage to the HybridChunker
+                    # cross-page split case. Charter §3.2 notes the
+                    # in-block partial_code case already emits at
+                    # `_chunk_code_by_lines` line ~5002; the cross-page
+                    # case was inert because HybridChunker cannot emit
+                    # cross-page state from the DOM. We have that state
+                    # right here: `len(per_page_text) > 1` IS the
+                    # cross-page condition for this DocChunk, and
+                    # `_page_chunk_type == ChunkType.CODE` is the
+                    # CODE-modality gate. Setting partial_code=True
+                    # activates the retrieval-side adjacency fetch
+                    # (retrieval/pipeline.py::_apply_partial_code_
+                    # adjacency) that stitches sibling halves back at
+                    # query time. Acceptance: Fluent_Python validation
+                    # cross-span queries (Q01/Q04/Q06/Q09 — imports +
+                    # decorator + function spans) recover from 0% PASS.
+                    _is_cross_page_code = (
+                        _page_chunk_type == ChunkType.CODE
+                        and len(per_page_text) > 1
+                    )
                     _split_chunk = create_text_chunk(
                         doc_id=doc_hash,
                         content=_page_text,
@@ -3630,6 +3651,7 @@ class V2DocumentProcessor:
                         page_height=int(_ph),
                         extraction_method=_emit_method,
                         position=self._next_chunk_position(),
+                        partial_code=True if _is_cross_page_code else None,
                         **self._intelligence_metadata,
                     )
                     _split_chunk.metadata.refined_content = _page_text
