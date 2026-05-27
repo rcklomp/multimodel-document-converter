@@ -71,6 +71,19 @@ from .schema.ingestion_schema import (
 )
 from .engines.docling_adapter import DoclingPdfAdapter
 from .engines.pdf_plan import PdfConversionPlan, build_pdf_conversion_plan
+# V3.0 UIR contract (Charter §3.2 Phase A step 2+): chunker call sites consume
+# UIR types rather than DoclingDocument layout classes. Each method's
+# Docling-side boundary is captured by a module-level `_*_to_uir_*` helper
+# (located alongside the existing _docling_* helpers); the method body then
+# operates on UIR-typed inputs and emits IngestionChunks via
+# IngestionChunk.from_uir.
+from .universal.intermediate import (
+    ConfidenceBreakdown as UIRConfidenceBreakdown,
+    CoordinateFrame as UIRCoordinateFrame,
+    Locator as UIRLocator,
+    LocatorType as UIRLocatorType,
+    UIRChunk,
+)
 from .version import __schema_version__ as SCHEMA_VERSION
 from .state.context_state import ContextStateV2, create_context_state, is_valid_heading
 from .state.magazine_section_detector import (
@@ -450,6 +463,102 @@ def _docling_document_index_lines(item: Any) -> List[str]:
             return lines
     text = _docling_item_text(item)
     return [text] if text else []
+
+
+def _union_docling_item_bboxes_for_uir(
+    items: List[Any], page_w: float, page_h: float
+) -> List[int]:
+    """Module-level twin of `V2DocumentProcessor._union_docling_item_bboxes`.
+
+    Used by Phase A UIR-native bridge helpers (Charter §3.2 step 2+) so the
+    boundary code can be invoked without a processor instance. Behavior is
+    identical to the method: returns the union bbox in normalized 0-1000
+    integer coordinates, or `[0, 0, 1000, 1000]` when no item has a usable
+    `prov[].bbox`.
+    """
+    left, top, right, bottom = COORD_SCALE, COORD_SCALE, 0, 0
+    have_bbox = False
+    for item in items:
+        prov = getattr(item, "prov", None)
+        if not prov:
+            continue
+        first = prov[0] if isinstance(prov, list) else prov
+        bbox = getattr(first, "bbox", None)
+        if not bbox:
+            continue
+        x0 = int(float(getattr(bbox, "l", 0)) / page_w * COORD_SCALE)
+        y0 = int(float(getattr(bbox, "t", 0)) / page_h * COORD_SCALE)
+        x1 = int(float(getattr(bbox, "r", page_w)) / page_w * COORD_SCALE)
+        y1 = int(float(getattr(bbox, "b", page_h)) / page_h * COORD_SCALE)
+        left = min(left, max(0, min(COORD_SCALE, x0)))
+        top = min(top, max(0, min(COORD_SCALE, min(y0, y1))))
+        right = max(right, max(0, min(COORD_SCALE, x1)))
+        bottom = max(bottom, max(0, min(COORD_SCALE, max(y0, y1))))
+        have_bbox = True
+    if have_bbox and right > left and bottom > top:
+        return [left, top, right, bottom]
+    return [0, 0, COORD_SCALE, COORD_SCALE]
+
+
+def _dense_page_to_uir_chunk(
+    doc: Any,
+    raw_page: int,
+    source_text_only_pages: set[int],
+    pdf_path: Optional[Path],
+    page_w: float,
+    page_h: float,
+) -> Optional[UIRChunk]:
+    """Phase A step 2 boundary: Docling dense-index page slice → UIRChunk.
+
+    Charter §3.2: this is the single Docling-coupled boundary for the
+    dense-index emission path. After this helper returns, the chunker
+    method (`_emit_dense_index_page_chunks`) operates on UIR types only.
+
+    Returns the page-level UIRChunk (text content joined, union bbox,
+    PDF_PAGE_PORTRAIT coordinate frame) or None when the page has no
+    extractable content. `extraction_method` distinguishes the
+    source-PDF fallback from the standard Docling path.
+    """
+    if raw_page in source_text_only_pages:
+        items = _docling_text_items_for_page(doc, raw_page)
+        lines = _extract_pdf_page_lines(pdf_path, raw_page)
+        method = "hybrid_chunker_pageskip_source_pdf"
+    else:
+        index_items = _docling_document_index_items_for_page(doc, raw_page)
+        if index_items:
+            items = index_items
+            lines = [
+                line
+                for item in index_items
+                for line in _docling_document_index_lines(item)
+            ]
+        else:
+            items = _docling_text_items_for_page(doc, raw_page)
+            lines = [
+                _docling_item_text(item)
+                for item in items
+                if _docling_item_text(item)
+            ]
+        method = "hybrid_chunker_pageskip"
+
+    text = _sanitize_toc_index_text("\n".join(lines))
+    if not text:
+        return None
+
+    bbox = _union_docling_item_bboxes_for_uir(items, page_w, page_h)
+    return UIRChunk(
+        modality=Modality.TEXT,
+        content=text,
+        locator=UIRLocator(
+            type=UIRLocatorType.BBOX,
+            bbox=bbox,
+            page_number=raw_page,
+            coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
+        ),
+        confidence=UIRConfidenceBreakdown(),
+        extraction_method=method,
+        extraction_engine_version="docling-2.86.0",
+    )
 
 
 def _classify_dense_index_pages(doc: Any) -> set[int]:
@@ -3863,87 +3972,87 @@ class V2DocumentProcessor:
         pdf_path: Optional[Path] = None,
         source_text_only_pages: Optional[set[int]] = None,
     ) -> List["IngestionChunk"]:
+        """Emit IngestionChunks for dense TOC/index pages (UIR-native).
+
+        Charter §3.2 Phase A step 2: the Docling boundary is encapsulated
+        in `_dense_page_to_uir_chunk` (one call per page). Everything after
+        the bridge call operates on UIR types — chunk-splitting, breadcrumb
+        synthesis, and emission via `IngestionChunk.from_uir`.
+
+        Behavior parity with v2.16:
+          * `extraction_method` carried verbatim from the bridge
+            (`hybrid_chunker_pageskip` or `hybrid_chunker_pageskip_source_pdf`).
+          * `chunk_type=ChunkType.LIST_ITEM` on every emitted chunk.
+          * `parent_heading` = "Contents" when first line starts with
+            "contents", else "Index".
+          * `refined_content` mirrors `content` (v2.16 invariant).
+          * `search_priority` = "low".
+        """
         chunks: List[IngestionChunk] = []
         source_text_only_pages = source_text_only_pages or set()
 
         clean_name = Path(source_file).stem.replace("_", " ") if source_file else "Document"
+        intelligence_md = self._intelligence_metadata
         for raw_page in sorted(dense_pages):
-            if raw_page in source_text_only_pages:
-                # Source-PDF fallback: Docling's layout extraction silently
-                # truncates or visibly corrupts these pages; pypdfium2 yields
-                # clean text. We still need item bboxes for spatial metadata,
-                # so collect any text items the layout did emit on this page.
-                items = _docling_text_items_for_page(doc, raw_page)
-                lines = _extract_pdf_page_lines(pdf_path, raw_page)
-            else:
-                index_items = _docling_document_index_items_for_page(doc, raw_page)
-                if index_items:
-                    items = index_items
-                    lines = [
-                        line
-                        for item in index_items
-                        for line in _docling_document_index_lines(item)
-                    ]
-                else:
-                    items = _docling_text_items_for_page(doc, raw_page)
-                    lines = [
-                        _docling_item_text(item)
-                        for item in items
-                        if _docling_item_text(item)
-                    ]
-            text = _sanitize_toc_index_text("\n".join(lines))
-            if not text:
-                continue
             out_page = raw_page + page_offset
             page_w, page_h = page_dims.get(out_page, page_dims.get(raw_page, (612.0, 792.0)))
-            bbox = self._union_docling_item_bboxes(items, page_w, page_h)
-            title = "Index"
-            first_line = lines[0].strip().lower() if lines else ""
-            if "contents" in first_line:
-                title = "Contents"
-            hierarchy = HierarchyMetadata(
-                parent_heading=title,
-                breadcrumb_path=[clean_name, title, f"Page {out_page}"],
-                level=3,
+
+            # --- Docling boundary: convert page slice to UIR (one call) ---
+            page_uir = _dense_page_to_uir_chunk(
+                doc=doc,
+                raw_page=raw_page,
+                source_text_only_pages=source_text_only_pages,
+                pdf_path=pdf_path,
+                page_w=page_w,
+                page_h=page_h,
             )
-            parts = self._split_dense_index_text(text, max_chars=6000)
-            extraction_method = (
-                "hybrid_chunker_pageskip_source_pdf"
-                if raw_page in source_text_only_pages
-                else "hybrid_chunker_pageskip"
-            )
+            if page_uir is None:
+                continue
+
+            # --- UIR-native logic from here on ---
+            first_line = page_uir.content.splitlines()[0].strip().lower() if page_uir.content else ""
+            title = "Contents" if "contents" in first_line else "Index"
+            parts = self._split_dense_index_text(page_uir.content, max_chars=6000)
+
             for idx, part in enumerate(parts):
-                breadcrumb = list(hierarchy.breadcrumb_path)
+                breadcrumb = [clean_name, title, f"Page {out_page}"]
                 if len(parts) > 1:
                     breadcrumb.append(f"Part {idx + 1}")
-                part_hierarchy = HierarchyMetadata(
-                    parent_heading=hierarchy.parent_heading,
-                    breadcrumb_path=breadcrumb,
-                    level=min(len(breadcrumb), 5),
-                )
-                chunk = create_text_chunk(
-                    doc_id=doc_hash,
+
+                # Each part is a child UIRChunk derived from the page UIR.
+                # locator.page_number carries the page_offset already applied;
+                # locator.bbox is inherited from the page-level union.
+                part_uir = UIRChunk(
+                    modality=Modality.TEXT,
                     content=part,
+                    locator=UIRLocator(
+                        type=UIRLocatorType.BBOX,
+                        bbox=list(page_uir.locator.bbox) if page_uir.locator.bbox else [0, 0, COORD_SCALE, COORD_SCALE],
+                        page_number=out_page,
+                        coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
+                    ),
+                    confidence=page_uir.confidence,
+                    extraction_method=page_uir.extraction_method,
+                    extraction_engine_version=page_uir.extraction_engine_version,
+                    parent_heading=title,
+                )
+
+                chunk = IngestionChunk.from_uir(
+                    part_uir,
+                    doc_id=doc_hash,
                     source_file=source_file,
                     file_type=file_type,
-                    page_number=out_page,
-                    bbox=bbox,
-                    hierarchy=part_hierarchy,
-                    chunk_type=ChunkType.LIST_ITEM,
+                    position=self._next_chunk_position(),
                     page_width=int(page_w),
                     page_height=int(page_h),
-                    extraction_method=extraction_method,
-                    position=self._next_chunk_position(),
-                    **self._intelligence_metadata,
+                    chunk_type=ChunkType.LIST_ITEM,
+                    breadcrumb_path=breadcrumb,
+                    **intelligence_md,
                 )
+
+                # v2.16 invariants that from_uir doesn't auto-populate:
                 chunk.metadata.refined_content = part
                 chunk.metadata.search_priority = "low"
-                chunk.semantic_context = SemanticContext(
-                    prev_text_snippet=None,
-                    next_text_snippet=None,
-                    parent_heading=part_hierarchy.parent_heading,
-                    breadcrumb_path=part_hierarchy.breadcrumb_path,
-                )
                 chunks.append(chunk)
         return chunks
 
