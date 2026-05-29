@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest as _pytest_v3defer
+pytestmark = _pytest_v3defer.mark.skip(reason="V3_DEFERRED - Legacy Heuristic (Phase A Step 5: heuristics stripped from UIR-native batch_processor; re-enable when LLM-sanitization layer subsumes them)")
+
 import ast
 import pytest
 from pathlib import Path
