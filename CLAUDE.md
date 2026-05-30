@@ -13,7 +13,7 @@ This file provides guidance to Claude Code when working with this repository.
 7. `docs/TESTING.md` — test conventions.
 8. `docs/QUALITY_GATES.md` — gate definitions.
 9. `docs/ARCHITECTURE.md` — v2.X pipeline architecture (production baseline being evolved).
-10. `docs/REPO_INTEGRITY.md` — "Committed-Truth" convention: mechanical repo-integrity guards (`tests/test_repo_integrity.py`) + the one written gate rule (assert outcomes, not proxies).
+10. **Committed-Truth convention** — repo-integrity guards in `tests/test_repo_integrity.py` (its docstring documents G1–G6 + author conventions); the contract is AGENTS.md `AGENT-INTEGRITY-01` (assert outcomes, not proxies).
 
 All v2.14–v2.16 history, telemetry, calibration reports, and legacy
 quality snapshots are quarantined in `docs/.archive/` and blocked by

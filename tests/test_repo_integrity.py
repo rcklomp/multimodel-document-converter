@@ -1,7 +1,7 @@
 """Repo-integrity guards — preventive convention for the 2026-05-30 failure class.
 
-This is the mechanical half of the "Committed-Truth" convention (see
-``docs/REPO_INTEGRITY.md``). Each test below pins one *mechanically checkable*
+This is the mechanical half of the "Committed-Truth" convention; the contract
+lives in AGENTS.md as **AGENT-INTEGRITY-01**. Each test below pins one *mechanically checkable*
 invariant whose violation was observed in production this week. The guards run
 in the always-on hosted CI job (no corpus / no GPU / no network) so a clean
 clone of HEAD is proven sound before any heavy job spends time or VLM credits.
@@ -33,6 +33,31 @@ Invariants and the failure each prevents:
                              listed in ``docs/V3_DEFERRED_TESTS.md`` → behavioral
                              coverage can't silently rot off the books (#5 stale
                              status + #7 hollow-green via skipped tests).
+
+Conventions authors must follow to satisfy the guards
+------------------------------------------------------
+- **Forward references** (a path that doesn't exist yet, e.g. a planned script)
+  must be annotated *on the same line* with one of: ``NOT YET BUILT``, ``not yet``,
+  ``(planned)``, ``to be built``. G5 then treats it as intentional, not dangling.
+- **Superseding** a Layer-0 statement: place a literal ``SUPERSEDED <date/why> by``
+  marker followed by the winning doc's path in backticks *at the conflicting
+  content itself* (not only as a global "X supersedes Y" rule elsewhere). G3
+  enforces the named target exists; applying it at the conflict site is what
+  actually stops the next agent re-deriving the conflict. Live example: the
+  Step-5 callout in ``docs/ARCHITECTURE_V3_DRAFT_0.5.md``.
+- **Deferring a test**: mark the whole module
+  ``pytestmark = pytest.mark.skip(reason="V3_DEFERRED - ...")`` *and* add a line
+  to ``docs/V3_DEFERRED_TESTS.md``. Use ``skipif`` (not ``skip``) for runtime
+  absence (corpus/GPU/network) — those are legitimate and are NOT flagged.
+- **G1 scope** is precisely "what breaks ``import <module>``": module-level,
+  non-``try``-guarded imports. Lazy/function-local and ``try/except``-guarded
+  optional imports (the fail-graceful sibling-engine pattern) are not flagged.
+
+The one non-mechanizable rule (AGENT-INTEGRITY-01): **gates must assert OUTCOMES,
+not PROXIES** — verify the content the pipeline must produce, never a cheaper
+correlated signal (the FP8 "1.73x speedup on blank-page garbage" trap;
+``docs/paper/FINDINGS_LOG.md`` F4). G4 + G6 mechanize the adjacent failure (a gate
+skipped or deleted); choosing to assert the right thing stays human judgment.
 """
 
 from __future__ import annotations
@@ -63,7 +88,6 @@ CANONICAL_GOVERNANCE_DOCS = (
     "docs/QUALITY_GATES.md",
     "docs/TESTING.md",
     "docs/V3_DEFERRED_TESTS.md",
-    "docs/REPO_INTEGRITY.md",
 )
 
 
