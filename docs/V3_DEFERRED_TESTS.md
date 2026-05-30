@@ -25,8 +25,10 @@ The following gate / contract is therefore deferred to Phase C
 (Vision-Native Extraction), where a VLM operating on rendered page
 images replaces the Docling+OCR cascade as the primary engine:
 
-- `scripts/run_identity_gate.py` (aggregate < 5% threshold) — frozen
-  at 100.00% pending Phase C. Triple root cause:
+- Identity Gate (`scripts/run_identity_gate.py`, NOT YET BUILT — the
+  V3 EXECUTION MANDATE §2.3 names it as a Definition-of-Done step; it
+  must be written before that gate can run) — aggregate < 5% threshold,
+  frozen at 100.00% pending Phase C. Triple root cause:
   1. **EasyOCR/Docling SIGSEGV** on Apple Silicon during CRAFT
      detector setup (validated 2026-05-29 with
      `EasyOcrOptions(use_gpu=False)` + `AcceleratorOptions(CPU)` +
@@ -111,7 +113,7 @@ VLM-native output rather than v2.16 HybridChunker output).
 - `tests/test_v3_uir_contract.py` — depends on v2 dual-vocabulary UIR contract (Modality enum, UIRChunk dataclass) replaced by v3 simpler IngestionChunk in v3
 - `tests/test_v3_phase_a_step2_dense_page_uir.py` — depends on heuristic dense_index_detection deferred to LLM sanitization
 - `tests/test_v3_phase_a_step3_section_header_uir.py` — depends on heuristic ocr_heading_override deferred to LLM sanitization
-- `tests/test_v3_identity_gate_and_fusion.py` — covered by v3-native scripts/run_identity_gate.py in task 8.4
+- `tests/test_v3_identity_gate_and_fusion.py` — covered by the v3-native Identity Gate (`scripts/run_identity_gate.py`, not yet built; see top of this file) in task 8.4
 - `tests/test_export_integrity.py` — depends on v2.16 IngestionMetadata + nested-metadata schema (v3 schema is flatter)
 - `tests/test_ingestion_metadata.py` — depends on v2.16 IngestionMetadata object_type sentinel (v3 emits chunks only, no per-doc metadata record)
 - `tests/test_chunker_guard.py` — depends on v2.16 HybridChunker invariants (v3 chunker is UIR-native)
