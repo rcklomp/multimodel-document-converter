@@ -60,7 +60,14 @@ jobs:
       - name: Import smoke (no corpus required)
         run: |
           pip install -e ".[dev]"
-          python -c "from mmrag_v2 import V2DocumentProcessor; print('import OK')"
+          python -c "from mmrag_v2 import V2DocumentProcessor; print('v2 import OK')"
+          # Guards the HEAD-runnable invariant: batch_processor delegates extraction
+          # to the V3 engine + UIR chunker, so these MUST import. Catches the
+          # 2026-05-30 class of bug where committed code referenced untracked modules.
+          python -c "import mmrag_v2.batch_processor; from mmrag_v3.processor import extract; from mmrag_v2.chunking.uir_chunker import chunk_universal_document; print('v3 import OK')"
+
+      - name: V3 security firewall (AST gate, no corpus required)
+        run: pytest tests/test_v3_security.py -q
 
   # ── Full validation — self-hosted runner only ──
   # Needs Qdrant + corpus + Dashscope key. Skipped on GitHub-hosted.
