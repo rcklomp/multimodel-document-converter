@@ -121,7 +121,7 @@ which v2.X is currently shipping.
 ### Open items + next-cycle plan
 
 Per-cycle priority TODOs live in `docs/PROJECT_STATUS.md` under
-"Other Carry-Forwards" and in the latest `docs/PLAN_V2.X.md`
+"Other Carry-Forwards" and in the latest `docs/PLAN_V2.*` plan doc's
 disposition sections — they shift every cycle and are not stable
 contracts. Don't duplicate that state here; it goes stale by next
 cycle-open.
