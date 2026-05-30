@@ -17,6 +17,35 @@ ETL on Heterogeneous Local Hardware: throughput is a memory-bandwidth problem."*
 
 ---
 
+## 2026-05-29 — V3 vs V2.16: the core retrieval result (why V3 works)  `[Results]`
+
+Head-to-head synthetic soak, the **11 canonical docs sampled in both** runs, same
+embedder/reranker/seed; judge = GX10 Qwen2.5-14B-FP8. (Per-doc full tables in the
+committed `V3_OVERNIGHT_REPORT.md`.)
+
+| Axis | V3 | V2.16 | Δ |
+|---|--:|--:|--:|
+| Recall@1 (chunk) | **77.3%** | 54.5% | **+22.8 pp** |
+| Recall@5 (chunk) | **95.5%** | 63.6% | **+31.9 pp** |
+| Recall@5 (doc) | **100.0%** | 86.4% | +13.6 pp |
+| Relevance | **84.1%** | 72.7% | +11.4 pp |
+| Format (judge-TRUSTWORTHY axis) | **97.7%** | 95.5% | +2.2 pp |
+| Faithfulness | **84.1%** | 61.4% | **+22.7 pp** |
+
+V3 wins every axis. Headline: **R@5(chunk) +31.9 pp** and **Faithfulness +22.7 pp**
+— V3 chunks are both easier to retrieve *and* more answer-providing. Decisive
+per-doc wins where V2.16's Docling extraction collapsed: Combat_Aircraft (magazine),
+PCWorld, Hybrid_electric_vehicles, HarryPotter (prose), and Kimothi_RAG_Guide
+(V2.16 missed the doc entirely). This is the result that justified the VLM-native bet.
+
+**Honest caveats (must accompany the numbers in the paper):** (1) the GX10
+14B-FP8 judge is calibration-TRUSTWORTHY only on the **Format** axis — read
+relevance/faithfulness as *directional*; (2) narrow sample (V3 covered 12 docs /
+24 queries vs V2.16's 36 / 72, because the budget-limited extraction run couldn't
+cover the long tail); (3) V3 chunk counts differ widely from V2.16 (±50% on some
+docs) — "fewer chunks" was often *denser/better* (forms), not worse. The result is
+strong and directionally robust, but not a large-N significance claim.
+
 ## 2026-05-30 — Local VLM extraction throughput: the binding constraint is memory bandwidth  `[Method][Results][Lessons]`
 
 **Context.** V3 is vision-native (a VLM transcribes rendered page images instead
@@ -252,13 +281,8 @@ exhausted** (HyDE/query-rewrite/omlx-deficit) → bet on **visual retrieval (Col
 
 *Covered above as of 2026-05-30:* V1→V2 lineage · V2 metrics trajectory · V2
 dead-ends · judge calibration · V3 draft evolution + ColPali pivot + Phase A
-spikes. Still to do:
-
-- **V3 vision-native vs V2.16 Docling — retrieval quality result.** Head-to-head
-  synthetic soak (11 canonical docs in both, GX10 Qwen2.5-14B-FP8 judge):
-  Recall@1 +22.8 pp, **Recall@5(chunk) +31.9 pp**, **Faithfulness +22.7 pp**,
-  Relevance +11.4 pp. The core "why V3 works" result — pull the full per-doc
-  tables from `docs/V3_OVERNIGHT_REPORT.md`.
+spikes · **V3-vs-V2.16 core result** (2026-05-29 entry; per-doc tables in the
+committed `V3_OVERNIGHT_REPORT.md`). Still to do:
 - **Identity Gate finding** — V2.16 Docling silently dropped ~80% of spreadsheet
   rows (CarOK); V3 VLM-native rebaselined to full extraction. Structural Form_0013
   comparison (logo description vs placeholder; table as row-level chunks).
