@@ -76,7 +76,7 @@ DISK_HEADROOM_FLOOR_GB = float(
 # v2.15 Phase 3 [F] — document-class telemetry sink. Soak harness
 # writes one JSON line per query into this rolling log; analyzed
 # by scripts/analyze_doc_class_telemetry.py at cycle-open per
-# docs/CYCLE_OPEN_CHECKLIST.md. Override via env var for test/CI
+# [DEPRECATED: See V3_EXECUTION_MANDATE.md]. Override via env var for test/CI
 # runs that shouldn't pollute the production rolling log.
 TELEMETRY_LOG_PATH = Path(
     os.environ.get(
@@ -748,12 +748,27 @@ Score on three axes, each 0/1/2:
 Return ONLY: {{"relevance": <0-2>, "format": <0-2>, "faithfulness": <0-2>, "rationale": "<one sentence>"}}"""
 
 
-def stage_judge(work_path: Path, api_key: str) -> None:
+def stage_judge(
+    work_path: Path,
+    api_key: str,
+    *,
+    judge_provider: str = "dashscope",
+    judge_url: str = VLLM_GEN_DEFAULT_URL,
+    judge_model: str | None = None,
+) -> None:
     _check_disk_headroom(work_path)
     rows = _read_work(work_path)
     if not rows:
         print("  judge: no work file", file=sys.stderr)
         return
+    if judge_model is None:
+        judge_model = (
+            VLLM_GEN_DEFAULT_MODEL if judge_provider == "vllm" else JUDGE_MODEL
+        )
+    print(
+        f"  judge: provider={judge_provider} model={judge_model}"
+        + (f" url={judge_url}" if judge_provider == "vllm" else "")
+    )
     queries_total = sum(len(r.get("queries") or []) for r in rows)
     queries_done = sum(
         1 for r in rows for q in (r.get("queries") or [])
@@ -772,20 +787,26 @@ def stage_judge(work_path: Path, api_key: str) -> None:
                 continue
             top1 = top[0]
             content = top1.get("content") or ""
-            result = _call_dashscope(
-                api_key, JUDGE_MODEL,
-                messages=[
-                    {"role": "system", "content": JUDGE_SYSTEM},
-                    {"role": "user", "content": JUDGE_USER_TEMPLATE.format(
-                        query=q["query_text"],
-                        gold=r["gold_content"][:1500],
-                        source_file=top1.get("source_file") or "",
-                        page=top1.get("page_number"),
-                        retrieved=content[:1500],
-                    )},
-                ],
-                temperature=0.0, max_tokens=200,
-            )
+            messages = [
+                {"role": "system", "content": JUDGE_SYSTEM},
+                {"role": "user", "content": JUDGE_USER_TEMPLATE.format(
+                    query=q["query_text"],
+                    gold=r["gold_content"][:1500],
+                    source_file=top1.get("source_file") or "",
+                    page=top1.get("page_number"),
+                    retrieved=content[:1500],
+                )},
+            ]
+            if judge_provider == "vllm":
+                result = _call_vllm(
+                    judge_url, judge_model, messages,
+                    temperature=0.0, max_tokens=200,
+                )
+            else:
+                result = _call_dashscope(
+                    api_key, judge_model, messages=messages,
+                    temperature=0.0, max_tokens=200,
+                )
             parsed = _extract_json(result or "", "object") if result else None
             if not isinstance(parsed, dict) or "relevance" not in parsed:
                 print(f"    ! judge parse failed for {q['query_id']}; skipping", file=sys.stderr)
@@ -811,7 +832,9 @@ def stage_judge(work_path: Path, api_key: str) -> None:
 def stage_report(work_path: Path, report_path: Path,
                  collection: str, provider: str, embed_model: str,
                  *, gen_provider: str = "dashscope",
-                 gen_model: str | None = None) -> None:
+                 gen_model: str | None = None,
+                 judge_provider: str = "dashscope",
+                 judge_model: str | None = None) -> None:
     rows = _read_work(work_path)
     if not rows:
         print("  report: no work file", file=sys.stderr)
@@ -901,7 +924,14 @@ def stage_report(work_path: Path, report_path: Path,
         f"Dashscope `{resolved_gen_model}`" if gen_provider == "dashscope"
         else f"local vLLM `{resolved_gen_model}` (Phase 4c)"
     )
-    lines.append(f"> Judge: Dashscope `{JUDGE_MODEL}`. Generator: {gen_desc}. Embedder: `{embed_model}` (provider={provider}). Collection: `{collection}`. Reranker: {rerank_desc}.")
+    resolved_judge_model = judge_model or (
+        VLLM_GEN_DEFAULT_MODEL if judge_provider == "vllm" else JUDGE_MODEL
+    )
+    judge_desc = (
+        f"Dashscope `{resolved_judge_model}`" if judge_provider == "dashscope"
+        else f"local vLLM `{resolved_judge_model}` (GX10)"
+    )
+    lines.append(f"> Judge: {judge_desc}. Generator: {gen_desc}. Embedder: `{embed_model}` (provider={provider}). Collection: `{collection}`. Reranker: {rerank_desc}.")
     lines.append("> No QA threshold; this snapshot is informational.")
     lines.append("")
     lines.append("## 1. Corpus summary")
@@ -958,7 +988,7 @@ def stage_report(work_path: Path, report_path: Path,
     lines.append(f"- Sampled {n_chunks} text chunks (≥ {MIN_CHUNK_CHARS} chars, ≤ {int(MAX_CODE_RATIO*100)}% code-like lines, no advertisement keywords). Stratified across the 34-doc canonical corpus.")
     lines.append(f"- Each chunk → 2 queries generated by {gen_desc} (temperature 0.3).")
     lines.append(f"- Each query → top-{TOP_K} retrieved from `{collection}` via `{provider}` provider, model `{embed_model}`.")
-    lines.append(f"- Each top-1 chunk → graded by `{JUDGE_MODEL}` (temperature 0.0) on relevance / format / faithfulness, each 0-2.")
+    lines.append(f"- Each top-1 chunk → graded by `{resolved_judge_model}` (temperature 0.0) on relevance / format / faithfulness, each 0-2.")
     lines.append("- Gold passage is shown to the judge for context; the judge is instructed NOT to penalize a different-chunk same-document retrieval.")
     lines.append("")
     lines.append("## 6. Revision log")
@@ -1048,7 +1078,28 @@ def main() -> int:
     parser.add_argument("--gen-model", default=None,
                         help="Override generation model id. Default: qwen-max for dashscope, "
                              f"{VLLM_GEN_DEFAULT_MODEL} for vllm.")
+    parser.add_argument("--judge-provider", choices=["dashscope", "vllm"],
+                        default="dashscope",
+                        help="LLM-as-a-Judge provider for relevance/format/faithfulness. "
+                             "'dashscope' (default) uses cloud qwen-max. 'vllm' uses the local "
+                             "GX10 endpoint ($0). Phase 0 calibration applies to vllm "
+                             f"(current model: {VLLM_GEN_DEFAULT_MODEL}).")
+    parser.add_argument("--judge-url", default=VLLM_GEN_DEFAULT_URL,
+                        help=f"Override vLLM judge URL (default: {VLLM_GEN_DEFAULT_URL}). "
+                             "Only used when --judge-provider=vllm.")
+    parser.add_argument("--judge-model", default=None,
+                        help="Override judge model id. Default: qwen-max for dashscope, "
+                             f"{VLLM_GEN_DEFAULT_MODEL} for vllm.")
+    parser.add_argument("--docs-root", type=Path, default=None,
+                        help="Override the per-doc baseline root (default: "
+                             "REPO_ROOT/output). Sample stage looks for "
+                             "<docs-root>/<canonical_name>/ingestion.jsonl. "
+                             "Set to output/v3_canonical/ for the V3 soak.")
     args = parser.parse_args()
+    if args.docs_root is not None:
+        global DOCS_ROOT
+        DOCS_ROOT = args.docs_root.resolve()
+        print(f"  docs-root override: {DOCS_ROOT}")
 
     work_path = Path(args.work_path)
     report_path = Path(args.report_path)
@@ -1058,7 +1109,10 @@ def main() -> int:
     generate_needs_key = (
         args.stage in ("generate", "all") and args.gen_provider == "dashscope"
     )
-    needs_key = generate_needs_key or args.stage in ("judge", "all") or (
+    judge_needs_key = (
+        args.stage in ("judge", "all") and args.judge_provider == "dashscope"
+    )
+    needs_key = generate_needs_key or judge_needs_key or (
         args.stage in ("retrieve", "all") and args.provider == "dashscope"
     )
     if needs_key and not api_key:
@@ -1129,13 +1183,20 @@ def main() -> int:
         )
     if args.stage in ("judge", "all"):
         print("[stage] judge")
-        stage_judge(work_path, api_key)
+        stage_judge(
+            work_path, api_key,
+            judge_provider=args.judge_provider,
+            judge_url=args.judge_url,
+            judge_model=args.judge_model,
+        )
     if args.stage in ("report", "all"):
         print("[stage] report")
         stage_report(work_path, report_path,
                      args.collection, args.provider, args.embed_model,
                      gen_provider=args.gen_provider,
-                     gen_model=args.gen_model)
+                     gen_model=args.gen_model,
+                     judge_provider=args.judge_provider,
+                     judge_model=args.judge_model)
     return 0
 
 

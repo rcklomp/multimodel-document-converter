@@ -4,6 +4,78 @@ All notable changes to this project will be documented in this file. Current beh
 
 > **Versioning note:** Historical entries before the `v2.4.x` line used an internal `v18.x` milestone scheme during rapid iteration and test/fix cycles. Only stable or decision-worthy checkpoints were recorded, so intermediate builds are intentionally omitted. From `v2.4` onward, entries follow the current public semantic line.
 
+## [v3.0.0-phase-c] — 2026-05-29 (vision-native extraction shipped)
+
+### Headline
+
+Phase C engine layer is live under `src/mmrag_v3/`. The default
+route is the `HybridEngine` cost-optimizer: per-page pre-flight
+sends pages with images / tables / non-trivial drawings to the
+VLM-native engine and pure-prose pages to the fast Docling
+adapter. Single unified `UniversalDocument` per source.
+
+### New components
+
+- `src/mmrag_v3/engines/vlm_native.py` — `VlmNativeEngine`
+  (renders pages via PyMuPDF, ships them to a VLM under a strict
+  UIR JSON schema prompt, deserializes the response).
+- `src/mmrag_v3/engines/vlm_provider.py` — OpenAI-compatible
+  multimodal chat client with bounded `max_completion_tokens`
+  (4096) and OpenRouter attribution headers.
+- `src/mmrag_v3/engines/docling_fast.py` — fast Docling adapter
+  (CPU, OCR off, TableFormer FAST). Sole `docling` import
+  boundary in the V3 namespace.
+- `src/mmrag_v3/engines/router.py` — `HybridEngine` cost-optimizer
+  (per-page pre-flight + per-page graceful fallback to Docling on
+  single-page VLM failure).
+- `src/mmrag_v3/processor.py` — Phase C orchestrator. Defaults to
+  HybridEngine; `USE_VLM_ENGINE=1` / `USE_DOCLING_FAST=1` force a
+  single engine.
+- `scripts/rebaseline_v3.py` — promotes V3 chunker output to the
+  baseline JSONL, preserving the legacy file as
+  `<path>.v2_baseline.bak` on first run.
+- `tests/test_v3_security.py` — 13-test AST firewall: vision/glue
+  files banned from `docling*` and v2.x legacy imports; the
+  `docling_fast.py` boundary file may import docling.
+
+### Identity Gate
+
+CarOK_voorraadtelling rebaselined: 443 V3 chunks, raw delta
+**0.00%** against the rebaselined file. v2.16 baseline (81 chunks
+— silently dropped ~80% of spreadsheet rows) preserved at
+`output/CarOK_voorraadtelling/ingestion.jsonl.v2_baseline.bak`.
+
+### Active provider
+
+Default VLM = OpenRouter `qwen/qwen3-vl-8b-instruct` (via
+`OPENROUTER_API_KEY`). The local omlx-server now hosts the
+embedder + reranker only (the VLM model has been unloaded). All
+`VLM_NATIVE_*` env vars still override.
+
+### Notable architectural decisions
+
+All recorded in `docs/DECISIONS.md` under "v3.0 Phase C —
+Vision-Native Extraction":
+
+1. Two-tree V3 namespace, translated at the subprocess boundary.
+2. VLM not trusted for coordinate math — adapter projects bboxes
+   to [0, 1000] deterministically.
+3. VLM `page_number` field is always overridden (VLM has no batch
+   context; returns 1 for every page).
+4. Table-row chunks get deterministically-interpolated vertical
+   bboxes (no whole-table inheritance per row).
+5. HybridEngine runs the VLM phase before the Docling phase
+   (TableFormer process mutations break later HTTP calls).
+6. `max_completion_tokens=4096` cap on every VLM request (server
+   OOM avoidance).
+7. Per-page VLM failure falls back to Docling rather than aborting
+   the document.
+8. OpenRouter is the default VLM provider.
+9. AST firewall has two policy classes (vision/glue vs docling
+   boundary).
+10. v2.16 baselines preserved as `.v2_baseline.bak` before V3
+    overwrite.
+
 ## [v2.16.0] — 2026-05-25 (convergence release — FEATURE-COMPLETE FOR v2.X)
 
 **FEATURE-COMPLETE FOR v2.X PROJECT.** Post-tag: only bug-fix patches
@@ -55,7 +127,7 @@ Nonzero exit code if any class drops below `target_pass_rate` for
 cycle-open / CI gating. v2.15.0 baseline captured at
 [`docs/archive/misc/VALIDATION_REPORT_2026-05-25_v2.15.0_baseline.md`](docs/archive/misc/VALIDATION_REPORT_2026-05-25_v2.15.0_baseline.md).
 
-CYCLE_OPEN_CHECKLIST.md gains §5 — 2-minute `personal_importance`
+[DEPRECATED: See V3_EXECUTION_MANDATE.md] gains §5 — 2-minute `personal_importance`
 review at every cycle-open.
 
 ### Phase 3 — partial_code adjacency fetch (SHIPPED, inert on current corpus)

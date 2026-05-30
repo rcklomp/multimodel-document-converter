@@ -37,7 +37,7 @@ __schema_version__ = "2.7.0"
 # v2.16 Phase 1 added the `personal_importance` decision-mechanism
 # overlay on the documented-limitation registry — HIGH forces Option
 # A regardless of telemetry. The cycle-open checklist gained a
-# 2-minute review item (`docs/CYCLE_OPEN_CHECKLIST.md` §5).
+# 2-minute review item in the v2.X cycle-open checklist (archived).
 #
 # Post-v2.16.0 governance: only bug-fix patches (v2.16.x) accepted.
 # New features = re-charter as v3.0. v2.17 fires only on §7 trigger
@@ -52,7 +52,7 @@ __schema_version__ = "2.7.0"
 #                           build_telemetry_record) + dated TELEMETRY
 #                           _REPORT analyzer + soak-harness write
 #                           hook + USER_ISSUES.md append-only table +
-#                           CYCLE_OPEN_CHECKLIST.md + Phase N DoD
+#                           v2.X cycle-open checklist (archived) + Phase N DoD
 #                           gate (verify_phase2_teardown.py;
 #                           vacuously satisfied under F). DECISIONS
 #                           .md "v2.15 Documented-Limitation
@@ -62,7 +62,7 @@ __schema_version__ = "2.7.0"
 #   Phase 6 [U] (cal-fresh) FP8-14B Phase 0 calibration verified
 #                           fresh through 2026-06-22; no re-cal
 #                           needed. T-72h pre-tag checkpoint armed
-#                           via CYCLE_OPEN_CHECKLIST.md cycle_slip.log.
+#                           via the v2.X cycle-open checklist's cycle_slip.log (archived).
 #   Phase N (close-out)     Engine bump 2.14.0 → 2.15.0; AFTER
 #                           snapshot; tag.
 #
@@ -89,8 +89,8 @@ __schema_version__ = "2.7.0"
 #                                          Phase 3 telemetry
 #   Phase 4 [A] (Docling config tuning)   — carry-fwd 6.1 re-eval
 #                                          trigger (Docling ≥2.87
-#                                          OR 90d) in CYCLE_OPEN
-#                                          _CHECKLIST.md
+#                                          OR 90d) in the v2.X
+#                                          cycle-open checklist (archived)
 #   Phase 5 [E] (retrieval investments)   — v2.16 contingent on
 #                                          F→E telemetry escalation
 #

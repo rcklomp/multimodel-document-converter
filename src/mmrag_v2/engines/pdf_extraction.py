@@ -828,46 +828,32 @@ def doc_chunk_to_uir_chunks(
 
 
 # ============================================================================
-# HybridChunker invocation (the only entry that touches the chunker class)
+# V3.0 UIR-native chunker bridge (replaces HybridChunker invocation)
 # ============================================================================
+# Charter §3.2: The UIR-native chunker at src/mmrag_v2/chunking/uir_chunker.py
+# is the SOLE chunker for V3.0+. This module no longer instantiates Docling's
+# HybridChunker or touches DocChunk types. Dense-page classification and
+# item-level UIR producers are retained for the UIR-native chunker to consume
+# during the element→UIRChunk→IngestionChunk pipeline.
 
 
-@dataclass
-class TextChunkerInvocationResult:
-    """Output of `invoke_text_chunker` — keeps the raw chunker output until
-    the iteration code converts it to UIR. processor.py never inspects
-    this; it iterates the engine's UIR stream instead."""
-
-    doc_chunks: List[Any]
-    dense_index_pages: set
-    source_back_index_pages: set
-
-
-def invoke_text_chunker(
+def document_pages_to_uir_elements(
     doc: Any,
     page_offset: int,
     page_dims: Dict[int, Tuple[float, float]],
     pdf_path: Optional[Path],
-    suppress_layout_label_text: bool,
-    timeout_seconds: int = 120,
-) -> TextChunkerInvocationResult:
-    """Run HybridChunker on the parsed document.
+) -> Tuple[List[UIRChunk], set[int], set[int]]:
+    """V3.0: Produce UIRChunk elements from DoclingDocument items per page.
 
-    Returns the raw DocChunks alongside the dense-index page sets so the
-    caller can iterate them through `doc_chunk_to_uir_chunks` and route
-    dense pages around the chunker. processor.py wraps the iteration
-    behind `iter_text_uir_stream` below; this function exists as a
-    separate entry point so the heading-iteration code can still consult
-    `dc.meta.headings` per DocChunk (the iteration-local state that lives
-    in processor.py).
+    Replaces invoke_text_chunker(). Instead of running Docling's
+    HybridChunker, this iterates the DoclingDocument's items page-by-page
+    and emits UIRChunk elements that the UIR-native chunker
+    (chunking/uir_chunker.py) will group.
+
+    Returns:
+        (uir_elements, dense_index_pages, source_back_index_pages)
     """
-    from docling_core.transforms.chunker import HybridChunker
-    import signal
-
-    chunker_kwargs: Dict[str, Any] = {
-        "tokenizer": "sentence-transformers/all-MiniLM-L6-v2",
-        "max_tokens": 350,
-    }
+    elements: List[UIRChunk] = []
     dense_index_pages = classify_dense_index_pages(doc)
     total_pages = len(page_dims) if page_dims else 0
     source_back_index_pages = classify_dense_back_index_pages_by_source(
@@ -877,80 +863,61 @@ def invoke_text_chunker(
     )
     if source_back_index_pages:
         logger.info(
-            "[HYBRID-CHUNKER] Source-PDF back-index detection added page(s): %s",
+            "[UIR-CHUNKER] Source-PDF back-index detection added page(s): %s",
             sorted((page + page_offset) for page in source_back_index_pages),
         )
         dense_index_pages = dense_index_pages | source_back_index_pages
-    if dense_index_pages:
-        logger.info(
-            "[HYBRID-CHUNKER] Routing dense TOC/index page(s) around HybridChunker: %s",
-            sorted((page + page_offset) for page in dense_index_pages),
-        )
-    if suppress_layout_label_text or dense_index_pages:
-        from .docling_serializers import MmragChunkingSerializerProvider
-        chunker_kwargs["serializer_provider"] = MmragChunkingSerializerProvider(
-            skip_pages=dense_index_pages
-        )
-    chunker = HybridChunker(**chunker_kwargs)
 
-    def _chunker_alarm(_signum, _frame):
-        raise TimeoutError("HybridChunker exceeded per-batch time limit")
+    # Iterate DoclingDocument items and produce UIRChunk elements
+    for it, _level in doc.iterate_items():
+        page_no = item_page_no(it)
+        if page_no is None:
+            continue
+        out_page = page_no + page_offset
+        if out_page in dense_index_pages:
+            continue
 
-    old_handler = signal.signal(signal.SIGALRM, _chunker_alarm)
-    try:
-        signal.alarm(timeout_seconds)
-        doc_chunks = list(chunker.chunk(doc))
-        signal.alarm(0)
-    except TimeoutError:
-        signal.alarm(0)
-        logger.error(
-            "[HYBRID-CHUNKER-GUARD] Per-batch timeout fired despite pre-flight "
-            "dense-page routing — investigate which page slipped the classifier. "
-            "Falling back to element-by-element chunking."
-        )
-        raise
-    finally:
-        signal.signal(signal.SIGALRM, old_handler)
+        label_str = item_label(it)
+        text = item_text(it)
+        if not text:
+            # Empty items are skipped (same as v2.16 HybridChunker behavior)
+            continue
 
-    if dense_index_pages:
-        leaked_pages: set[int] = set()
-        kept_doc_chunks = []
-        for dc in doc_chunks:
-            pages = set()
-            if dc.meta and dc.meta.doc_items:
-                for _it in dc.meta.doc_items:
-                    _p = item_page_no(_it)
-                    if _p is not None:
-                        pages.add(_p)
-            leak = pages & dense_index_pages
-            if leak:
-                leaked_pages.update(leak)
-                continue
-            kept_doc_chunks.append(dc)
-        if leaked_pages:
-            logger.error(
-                "[HYBRID-CHUNKER] Serializer skip leaked dense page item(s) "
-                "from page(s) %s; dropping affected DocChunk(s)",
-                sorted((page + page_offset) for page in leaked_pages),
-            )
-        doc_chunks = kept_doc_chunks
+        pw, ph = page_dims.get(out_page, (612.0, 792.0))
+        bbox = union_item_bboxes_for_uir([it], pw, ph)
 
-    return TextChunkerInvocationResult(
-        doc_chunks=doc_chunks,
-        dense_index_pages=dense_index_pages,
-        source_back_index_pages=source_back_index_pages,
-    )
+        # Map item label to Modality
+        if label_str in {"code", "code_block", "codeblock"}:
+            modality = Modality.CODE
+        elif label_str in {"table", "table_cell", "tablecell", "tabular"}:
+            modality = Modality.TABLE
+        elif label_str in {"image", "figure", "picture", "pic", "img"}:
+            modality = Modality.IMAGE
+        else:
+            modality = Modality.TEXT
+
+        elements.append(UIRChunk(
+            modality=modality,
+            content=text.strip(),
+            locator=UIRLocator(
+                type=UIRLocatorType.BBOX,
+                bbox=bbox,
+                page_number=out_page,
+                coordinate_frame=UIRCoordinateFrame.PDF_PAGE_PORTRAIT,
+            ),
+            confidence=UIRConfidenceBreakdown(),
+            extraction_method=EXTRACTION_METHOD_NATIVE,
+            extraction_engine_version=EXTRACTION_ENGINE_VERSION,
+        ))
+
+    return elements, dense_index_pages, source_back_index_pages
 
 
 def doc_chunk_validated_headings(dc: Any) -> List[str]:
     """Extract validated headings from a DocChunk's metadata.
-
-    Filters through the heading validator that rejects credit lines,
-    copyright, TOC fill. Returns the heading-text list (in order); the
-    iteration-local caller picks the last one for heading carry-forward.
+    Retained for backward-compat during Phase A transition.
     """
     from ..state.context_state import is_valid_heading
-
     headings: List[str] = []
     if dc.meta and dc.meta.headings:
         for h in dc.meta.headings:
@@ -961,7 +928,9 @@ def doc_chunk_validated_headings(dc: Any) -> List[str]:
 
 
 def doc_chunk_first_label(dc: Any) -> str:
-    """Read the first doc-item's raw label string from a DocChunk."""
+    """Read the first doc-item's raw label string from a DocChunk.
+    Retained for backward-compat during Phase A transition.
+    """
     if dc.meta and dc.meta.doc_items:
         label = getattr(dc.meta.doc_items[0], "label", "")
         value = getattr(label, "value", label)
