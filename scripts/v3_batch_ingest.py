@@ -377,11 +377,23 @@ def main(argv: Optional[List[str]] = None) -> int:
                 var,
             )
 
-    # Wire v3_execution_root chunker onto sys.path.
+    # BROKEN as of 2026-05-30: v3_execution_root was retired (sandbox removed).
+    # TODO(repoint): this script must move off the sandbox chunker onto the
+    # production one. The change is NOT a drop-in — it touches the output format:
+    #   1. drop `_translate_v2_to_v3` (the v2->v3-shape translation, ~lines 81-178)
+    #      and the `from mmrag_v3.universal.document import ...` it uses;
+    #   2. chunk the v2 UniversalDocument directly:
+    #        from mmrag_v2.chunking.uir_chunker import chunk_universal_document
+    #        uir_chunks = chunk_universal_document(v2_doc, profile_type=...)
+    #   3. fix serialization: uir_chunks are mmrag_v2 UIRChunk *dataclasses*
+    #      (no .model_dump_json); emit JSONL via IngestionChunk.from_uir(...).
+    #      model_dump_json() to keep the shape v3_to_v2_jsonl.py expects.
+    # Validate offline (USE_DOCLING_FAST=1 on a 1-page doc) THEN through the full
+    # soak. Sandbox recoverable from ~/mmrag_v3_execution_root_backup_2026-05-30.tar.gz.
     v3_src = REPO_ROOT / "v3_execution_root" / "src"
     if str(v3_src) not in sys.path:
         sys.path.insert(0, str(v3_src))
-    from mmrag_v3.chunking.chunker import chunk as chunk_document  # type: ignore
+    from mmrag_v3.chunking.chunker import chunk as chunk_document  # type: ignore  # noqa: E501 (see TODO above — sandbox retired)
 
     _, HybridEngine = _load_phase_c_modules()
     hybrid_engine = HybridEngine()
