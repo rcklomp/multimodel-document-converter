@@ -6,23 +6,14 @@
 
 ---
 
-## 🧭 0. HOW GUIDANCE WORKS (Principles-first, minimal constraints)
+## 🧭 0. HOW GUIDANCE WORKS (Binary constraint model)
 
-This project uses a 3-level guidance model to avoid “rule bloat”:
+A rule is either a strict constraint or it is deleted. There is no
+"soft" tier — every item in this document is non-negotiable.
 
-### Level 0 — Invariants (MUST)
-Non-negotiable constraints. If violated, the project breaks, drifts architecturally, or becomes unstable.
-**All Level 0 items live in this AGENTS.md** (single source of truth).
-
-### Level 1 — Guardrails (SHOULD)
-Strong defaults that prevent recurring regressions.
-Deviation is allowed if you:
-- document rationale + impact, and
-- keep changes small and testable.
-
-### Level 2 — Heuristics (MAY)
-Suggestions and patterns. Always optional.
-If a heuristic becomes critical (breakages recur), promote it through the evolution process.
+### Strict Constraints (MUST)
+If violated, the project breaks, drifts architecturally, or becomes unstable.
+**All constraints live in this AGENTS.md** (single source of truth).
 
 Companion docs:
 - `docs/DECISIONS.md` — records all architectural decisions and their rationale
@@ -37,9 +28,9 @@ Companion docs:
 4. **Resource Ceiling:** Target **≤8GB RAM** during runs; keep batch sizes ≤10 pages and call `gc.collect()` between batches.
 5. **AGENT-VAL-01 (Blind Test Validation):** A code change is only valid if the multi-profile smoke test (`smoke_multiprofile.sh`) yields `GATE_PASS` + `UNIVERSAL_PASS` across all document categories. At least one document per category must be a "blind test" document not used during the fix dev-loop. The technical-manual blind test document is `Greenhouse Design and Control by Pedro Ponce.pdf`. Any pass based on hardcoded filenames or word-lists is a system failure.
 6. **AGENT-SPATIAL-20:** Refinement logic must rely on a single `20-unit` vertical threshold. No profile-specific or heading-specific branches allowed.
-7. **AGENT-EVIDENCE-01:** No task/workstream may be marked complete unless its evidence is reproducible from tracked files or a tracked snapshot. Ignored `data/` and `output/` artifacts cannot be the sole evidence for completion. See `docs/AGENT_GOVERNANCE.md`.
-8. **AGENT-STATUS-01:** Project status documents must use explicit status scope: `implemented`, `validated-cloud`, `validated-local`, `blocked`, or `complete`. Do not use "complete" when local validation, durable fixtures, or required comparisons are still pending. See `docs/AGENT_GOVERNANCE.md`.
-9. **AGENT-DOCS-01:** Keep documentation minimal and indexed. Do not add new governance docs when an existing contract can be extended; obey the documentation budget in `docs/AGENT_GOVERNANCE.md`.
+7. **AGENT-EVIDENCE-01:** No task/workstream may be marked complete unless `docs/V3_EXECUTION_MANDATE.md`'s programmatic gates pass. Ignored `data/` and `output/` artifacts cannot be the sole evidence for completion.
+8. **AGENT-STATUS-01:** There is no "in-progress," "rebooked," or "implemented but not validated." A phase either passes the gates in `docs/V3_EXECUTION_MANDATE.md` or it has failed.
+9. **AGENT-DOCS-01:** Keep documentation minimal and indexed. Do not add new governance docs. `docs/V3_EXECUTION_MANDATE.md` is the single governance file.
 10. **AGENT-TEST-01 (Test Contract Integrity):** Negative tests, regression tests, and acceptance fixtures are executable requirements. Do not remove, loosen, rewrite, or reframe their core assertions to match the current implementation. If such a test fails, fix the implementation or stop and document why the requirement is wrong. Any expectation change requires explicit rationale and must make the contract clearer or stricter, not easier.
 
 **Numbering Note:** SRS IRON IDs remain canonical. Agent-local constraints use `AGENT-*` IDs to avoid collisions.
@@ -92,17 +83,14 @@ Companion docs:
    - `docs/README.md` (doc index + read-order)
    - The current canonical baseline named in `CLAUDE.md`'s Read
      First list and in `PROJECT_STATUS.md`'s headline section.
-     Prior-version baselines are kept for delta reproducibility;
-     the latest dated snapshot is canonical per the Canonicality
-     Rule in `docs/AGENT_GOVERNANCE.md`.
-   - The latest `docs/PLAN_V2.X.md` (closed cycle) + any
-     `docs/PLAN_V2.X+1.md` if a next-cycle plan exists.
+     Prior-version baselines are quarantined in `docs/.archive/`
+     and blocked by `.aiignore`; do not read or reference them.
 2. Use the three-layer documentation model:
-   - Layer 0 contracts: this file, `CLAUDE.md`, `docs/AGENT_GOVERNANCE.md`, `docs/DECISIONS.md`, `docs/QUALITY_GATES.md`, `docs/ARCHITECTURE.md`, SRS.
-   - Layer 1 current state: `docs/PROJECT_STATUS.md`, dated quality snapshots.
-   - Layer 2 execution: active/draft plan docs, `docs/TESTING.md`, run logs, archive.
-3. Cross-check nontrivial changes against `docs/ARCHITECTURE.md` for UIR compliance.
-4. Before marking a task complete or expanding docs, apply `docs/AGENT_GOVERNANCE.md`.
+   - Layer 0 contracts: this file, `CLAUDE.md`, `docs/V3_EXECUTION_MANDATE.md`, `docs/DECISIONS.md`, `docs/QUALITY_GATES.md`, `docs/ARCHITECTURE.md`, `docs/ARCHITECTURE_V3_DRAFT_0.5.md`, SRS.
+   - Layer 1 current state: `docs/PROJECT_STATUS.md`.
+   - Layer 2 execution: active plan docs, `docs/TESTING.md`, run logs.
+3. Cross-check nontrivial changes against `docs/ARCHITECTURE_V3_DRAFT_0.5.md` for V3 UIR compliance; `docs/ARCHITECTURE.md` is the v2.X production baseline being evolved.
+4. Before marking a task complete or expanding docs, apply `docs/V3_EXECUTION_MANDATE.md`.
 5. When finishing a task, update `docs/PROJECT_STATUS.md` (current state + recommended next step) and create/update a dated quality snapshot if quality numbers changed.
 
 ---
@@ -121,11 +109,12 @@ which v2.X is currently shipping.
 - PDF extraction pathway is determined by structural integrity pre-flight tests, not semantic profile. See `docs/DECISIONS.md` — "Structural Pathology over Semantic Profiling".
 - `IngestionMetadata` record is written as the first JSONL line (v2.6+); QA scripts must skip it.
 - VLM failure paths use differentiated sentinels (`[VLM_FAILED: response invalid]`, `[VLM_FAILED: call error]`, `[VLM_FAILED: parse error]`).
-- **Image extraction** uses Docling layout model for all document types. PyMuPDF `page.get_images()` was tested but reverted (unreliable for magazines/academic papers). See `docs/DECISIONS.md` — "Image Extraction Routing".
+- **Image extraction** uses Docling layout model for all document types *(legacy v2 path; the V3 default route is vision-native via `mmrag_v3.extract` — see V3 Phase C note below)*. PyMuPDF `page.get_images()` was tested but reverted (unreliable for magazines/academic papers). See `docs/DECISIONS.md` — "Image Extraction Routing".
 - **Encoding corruption** uses heal-over strategy: `CorruptionInterceptor` per-bbox OCR + quarantine of unrepairable chunks (Workstream C closed in v2.8). See `docs/DECISIONS.md` — "Heal-Over for Encoding Corruption".
 - **4 multimodal validation layers** (v2.7): CorruptionInterceptor, POS Boundary Logic, Vision-Gated Hierarchy, Content-Type Classification. See `docs/DECISIONS.md`.
-- **Adapter-invocation guard** (v2.8 Phase 2): `tests/test_pdf_conversion_plan.py::test_no_raw_converter_invocation_outside_adapter` blocks any `self._converter.convert(...)` outside the adapter; promotes the v2.7 §5 rule from construction-only to construction+invocation.
+- **Adapter-invocation guard** (v2.8 Phase 2 — **legacy v2 path; test currently deferred `V3_DEFERRED`**): `tests/test_pdf_conversion_plan.py::test_no_raw_converter_invocation_outside_adapter` blocked any `self._converter.convert(...)` outside the adapter. It is `@pytest.mark.skip`-ped because the V3 `BatchProcessor.process_pdf` path delegates extraction to `mmrag_v3.extract()` and constructs no converter; the V3 Docling boundary is `src/mmrag_v3/engines/docling_fast.py`, firewalled by `tests/test_v3_security.py` (V3 Phase C note below).
 - **Form acceptance class** (v2.8 Phase 5a): scanned forms / invoices route to a `FORM_AUDIT_PASS` lane that skips prose-calibrated `micro_non_label_ratio`. See `docs/QUALITY_GATES.md` "Form / Invoice Acceptance Class". This is a first-class acceptance variant, NOT a waiver per `AGENT-VAL-01`.
+- **V3 Phase C — vision-native extraction** (2026-05-29): Phase C engines live under `src/mmrag_v3/engines/`. The default route is `HybridEngine` (per-page pre-flight: tables, images, or `> VLM_DRAWINGS_THRESHOLD` drawings → VLM; else fast Docling). Single-page VLM failures fall back to Docling automatically. The VLM is not trusted for coordinate normalization or page-number assignment — the adapter projects bboxes to `[0,1000]` and stamps page numbers from its own index. All requests are capped at `max_completion_tokens=4096`. Default provider is OpenRouter (`qwen/qwen3-vl-8b-instruct`); override via `VLM_NATIVE_ENDPOINT` / `VLM_NATIVE_MODEL` / `VLM_NATIVE_API_KEY`. Engine-file imports are firewalled by `tests/test_v3_security.py` (vision/glue files banned from docling + v2 legacy; the docling-boundary file `docling_fast.py` may import docling but not v2 legacy). See `docs/DECISIONS.md` — "v3.0 Phase C — Vision-Native Extraction".
 
 **QA policy:** All profiles use the standard 10% token variance tolerance. See `docs/QUALITY_GATES.md`.
 
@@ -154,6 +143,8 @@ cycle-open.
 ## 📂 6. DIRECTORY AUTHORITY
 - `src/mmrag_v2/` … core pipeline, validators, profile logic.
 - `src/mmrag_v2/engines/` … format-specific extraction (Docling, etc.).
+- `src/mmrag_v3/` … V3 Phase C vision-native namespace (`engines/vlm_native.py`, `engines/vlm_provider.py`, `engines/docling_fast.py`, `engines/router.py`, `processor.py`). UIR contract types are imported from `mmrag_v2.universal.intermediate`.
+- `v3_execution_root/src/mmrag_v3/` … V3 Phase A sandbox (chunker, schema, sanitization, scripts). Separate `mmrag_v3` namespace; Phase C engine is loaded into the Identity-Gate subprocess by absolute file path under a private package alias.
 - `docs/` … SRS, architecture, audits (canonical references).
 
 **END OF AGENTS.md**

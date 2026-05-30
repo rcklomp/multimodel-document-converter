@@ -428,8 +428,8 @@ availability.
 - Local `NuMarkdown-8B-Thinking-mlx-8bits` at
   `http://10.0.10.246:8000/v1` is unreachable from off-network machines
   (project memory, confirmed 2026-05-04).
-- Per `docs/AGENT_GOVERNANCE.md` Completion Rule 4, the local VLM
-  comparison is **explicitly removed from v2.9 scope** — not pending.
+- Under the v2.9-era governance, the local VLM comparison was
+  **explicitly removed from v2.9 scope** — not pending.
 - Re-evaluate the local lane in v2.10 when network reachability returns.
 
 ## Drop-and-Recreate `mmrag_v2_8` Migration (v2.9 Phase 5c, 2026-05-04)
@@ -1215,7 +1215,7 @@ landed: `src/mmrag_v2/retrieval/documented_limitations.py`,
 `src/mmrag_v2/retrieval/telemetry.py`,
 `scripts/analyze_doc_class_telemetry.py`,
 `scripts/verify_phase2_teardown.py`,
-`docs/USER_ISSUES.md`, `docs/CYCLE_OPEN_CHECKLIST.md`, soak-harness
+`docs/USER_ISSUES.md` (v2.X, archived), [DEPRECATED: See V3_EXECUTION_MANDATE.md], soak-harness
 telemetry write path in `scripts/synthetic_soak.py`, 29 unit tests
 in `tests/test_doc_class_telemetry.py` +
 `tests/test_verify_phase2_teardown.py` (all green at promotion).
@@ -1456,7 +1456,7 @@ When v2.15 Phase 3 [F] code lands:
    - MIDDLE-BAND ESCALATION (≥3 cycles): NOT FIRED
    - v2.16 disposition: Option A treatment (extraction-lane investment)
    ```
-4. `docs/CYCLE_OPEN_CHECKLIST.md` ships in Phase N with a
+4. [DEPRECATED: See V3_EXECUTION_MANDATE.md] ships in Phase N with a
    "Run analyze_doc_class_telemetry.py" line item — this is
    the process that actually fires the triggers (per Round-4
    Finding 1).
@@ -1493,7 +1493,7 @@ arrived at F as the recommended path.
 - Phase 1 [U or E] — Targeted HyDE bridging for code + minority-
   language queries (5-doc narrow mini-soak; n=180)
 - Phase 3 [F] — Document-class query telemetry (analyzer +
-  `USER_ISSUES.md` + `CYCLE_OPEN_CHECKLIST.md` + verify-teardown
+  `USER_ISSUES.md` (archived) + [DEPRECATED: See V3_EXECUTION_MANDATE.md] + verify-teardown
   script)
 - Phase 6 [U] — Calibration freshness check (FP8-14B cal SHIPPED
   2026-05-23 PM; expires 2026-06-22; today 2026-05-24 → fresh,
@@ -1635,7 +1635,7 @@ following precedence:
 CarOK + Fluent_Python entered at **HIGH** (v2.14 P1 + P6 defect histories
 are load-bearing across multiple cycles). New entries default to **MED**.
 The overlay is reviewed at every cycle-open per
-`docs/CYCLE_OPEN_CHECKLIST.md` §5 (2-minute manual check).
+the v2.X cycle-open checklist (archived; 2-minute manual check).
 
 **Rationale:** v2.15's telemetry-as-sole-decision created a death spiral
 for HIGH-importance classes whose users abandon broken queries (zero
@@ -1880,7 +1880,7 @@ Per PLAN_V2.16.md §4. Each item's reopen path requires v3.0 re-charter
   v2.15; reopen triggers (3rd engine, cross-engine defect, ≥500 LOC
   test boilerplate, external integration request) all NOT FIRED in
   Phase 0 cycle-open review. The 7 new docs route through existing
-  PDF engine. CYCLE_OPEN_CHECKLIST.md §6 keeps the trigger check for
+  PDF engine. The v2.X cycle-open checklist (archived) kept the trigger check for
   v2.X.x patches but the carry-forward closes; multi-format expansion
   is v3.0-class.
 - **Item #14 (VLM swap to alternative model, 3a):** CLOSED. v2.14 P1
@@ -2043,3 +2043,109 @@ explicit defer-to-v2.17 direction); v2.17 closes the gap.
 **Implementation:** smoke matrix in `scripts/smoke_multiprofile.sh`
 unchanged for v2.16. v2.17 cycle owns the disposition (V3-aligned
 fix vs. matrix-scope reduction).
+
+
+## v3.0 Phase C — Vision-Native Extraction (2026-05-29)
+
+**Decision (umbrella):** Realize Charter §3.2's "VLM-native parsing
+as optional upgrade" as a first-class Phase C engine. The
+canonical structural baseline now comes from VLM extraction
+where Docling silently drops content (CarOK class).
+
+### 1. Two-tree V3 namespace, single translator boundary
+
+`src/mmrag_v3/` (project) hosts the Phase C engines; the
+pre-existing `v3_execution_root/src/mmrag_v3/` (sandbox) hosts
+the Phase A chunker / schema / sanitization stack. The two trees
+both name themselves `mmrag_v3` and cannot be imported in the same
+process via plain `sys.path`. The Identity-Gate subprocess loads
+the Phase C engine by absolute file path under a private package
+name (`_phase_c_engine`) and translates the v2-UIR
+`UniversalDocument` produced by the engine into the v3-UIR shape
+the chunker consumes. The translator is the only place that
+knows about both type families.
+
+### 2. VLM is not trusted for coordinate math
+
+The VLM is asked to emit bboxes in raw pixel coordinates of the
+rendered image. The adapter (`VlmNativeEngine._project_bbox_to_uir`)
+does the deterministic projection to integer `[0, 1000]` per
+REQ-COORD-01. A 7B-class VLM cannot reliably normalize itself
+via prompt engineering — this is offloaded to engine code.
+
+### 3. VLM `page_number` field is always overridden
+
+The VLM sees one rendered image per call and has no batch context;
+in practice it returns `"page_number": 1` for every page. The
+engine ignores the VLM's value and stamps the adapter's own page
+index. The historical contract `int(payload.get("page_number") or
+fallback)` was buggy because `1` is truthy.
+
+### 4. Table-row chunks get vertically interpolated bboxes
+
+`uir_chunker._emit_table_row_chunks` no longer blindly inherits the
+parent TABLE element's full-page bbox for every row. The parent's
+vertical extent is divided by row count; each row chunk receives
+its own `(x_min, interpolated_y_min, x_max, interpolated_y_max)`.
+Required for spatial precision on downstream RAG highlighting
+without re-asking the VLM per row.
+
+### 5. HybridEngine: VLM phase runs BEFORE Docling phase
+
+Running Docling first (TableFormer loads torch + multiprocessing
+workers) leaves the process in a state where outbound HTTP requests
+to omlx-server are dropped mid-stream (`"Response ended prematurely"`
+on the first VLM call). Inverting the order isolates the VLM
+network phase from Docling's process mutations.
+
+### 6. `max_completion_tokens=4096` cap on every VLM request
+
+omlx / vLLM servers OOM and close the connection when asked to
+generate unbounded JSON for dense pages. A fixed 4096-token
+output ceiling keeps server memory deterministic; large pages
+that need more must be tiled rather than asking the server to
+allocate without bound. Override via `VlmProviderConfig`.
+
+### 7. Single-page VLM failure → Docling fallback (router policy)
+
+A transport drop, empty content, or JSON parse error on one page
+must not abort the whole document. The router catches the
+exception, demotes that page to `docling_fallback`, and records
+the demotion (with exception type + message) in
+`last_routing_decisions`. The Docling phase then covers planned-
+prose pages **plus** demoted pages in a single Docling pass.
+
+### 8. OpenRouter is the default VLM provider
+
+`VlmProviderConfig.from_env()` defaults to
+`https://openrouter.ai/api/v1` with `qwen/qwen3-vl-8b-instruct`
+when `VLM_NATIVE_ENDPOINT` / `VLM_NATIVE_MODEL` are unset.
+`OPENROUTER_API_KEY` is the fallback API key. Reason: the local
+omlx-server hosts the embedder + reranker only — its VLM model
+is not durably loaded. OpenAI-compatible `HTTP-Referer` / `X-Title`
+attribution headers are attached automatically when the endpoint
+targets openrouter.ai.
+
+### 9. AST firewall — two policy classes for V3 engine files
+
+`tests/test_v3_security.py` distinguishes:
+
+- **Vision/glue files** (`vlm_native.py`, `vlm_provider.py`,
+  `router.py`): banned from importing `docling*` or any
+  `mmrag_v2.*` module outside the UIR contract
+  (`mmrag_v2.universal.*`).
+- **Docling-boundary files** (`docling_fast.py`): may import
+  `docling`, still banned from importing v2.x legacy extraction
+  modules.
+
+13 tests total; gate at every Phase C boundary.
+
+### 10. CarOK V2.16 baseline preserved before V3 overwrite
+
+`scripts/rebaseline_v3.py` copies the existing `ingestion.jsonl`
+to `ingestion.jsonl.v2_baseline.bak` on the first rebaseline run
+(idempotent: subsequent runs leave the backup alone). The v2.16
+record of where Docling silently dropped content is retained as
+empirical evidence. The V3 chunk shape supersedes it as the
+canonical baseline; the V3 Identity Gate is now structurally
+self-consistent (0.00% delta against the rebaselined file).
