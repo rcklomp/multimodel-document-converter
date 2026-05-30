@@ -1,0 +1,61 @@
+# .aiignore — Prevents AI agents from reading archived v2.X history
+# The V3 architecture mandate requires clean-break from all v2.14-v2.16,
+# Option F, and telemetry artifacts. These are quarantined permanently.
+
+# Archived v2.X and pre-V3 documents (21 loopholes source)
+docs/.archive/
+
+# Archived plans and decision records
+docs/archive/
+
+# Old telemetry, calibration, and validation reports
+docs/.archive/calibrations/
+docs/.archive/diagnostics/
+docs/.archive/misc/
+docs/.archive/plans/
+docs/.archive/quality_snapshots/
+docs/.archive/snapshots/
+docs/.archive/soaks/
+
+# v2.X quality snapshots and conversion profiles
+docs/.archive/QUALITY_SNAPSHOT_*
+docs/.archive/CONVERSION_PROFILES.md
+docs/.archive/CYCLE_OPEN_CHECKLIST.md
+docs/.archive/cycle_slip.log
+
+# V3 draft history (pre-0.5)
+docs/.archive/ARCHITECTURE_V3_DRAFT_0.*.md
+docs/.archive/ARCHITECTURE_V3_REVIEW_PROMPT.md
+docs/.archive/PLAN_V3.md
+
+# V3 spike and shim evidence (pre-native-UIR)
+docs/.archive/V3_C_PRESPIKE_REPORT.md
+docs/.archive/V3_C_SPIKE_*
+docs/.archive/V3_PHASE_A_*
+
+# Old plans (v2.10-v2.16, Option F)
+docs/.archive/plans/PLAN_V2.*.md
+docs/.archive/plans/PLAN_V2.1*.md
+docs/.archive/PLAN_V2.16_AUDIT_PROMPT.md
+
+# Telemetry and handoffs
+docs/.archive/misc/TELEMETRY_REPORT_*
+docs/.archive/misc/HANDOFF_*
+docs/.archive/misc/JUDGE_EVAL_*
+docs/.archive/misc/SMOKE_FAIL_*
+docs/.archive/misc/VALIDATION_REPORT_*
+docs/.archive/misc/CORPUS_EXPANSION_*
+
+# Old quality snapshots
+docs/.archive/snapshots/QUALITY_SNAPSHOT_*
+docs/.archive/quality_snapshots/
+docs/.archive/soaks/
+
+# Historical calibrations
+docs/.archive/calibrations/CALIBRATION_*
+
+# Archived v2.x tests
+tests/.archive_v2_*
+
+# V3 execution-root legacy archive (parallel quarantine to docs/.archive/)
+v3_execution_root/.legacy_archive/

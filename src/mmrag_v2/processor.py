@@ -138,8 +138,8 @@ from .engines.pdf_extraction import (
     doc_chunk_first_label as _doc_chunk_first_label,
     doc_chunk_to_uir_chunks as _engine_chunk_to_uir,
     doc_chunk_validated_headings as _doc_chunk_validated_headings,
+    document_pages_to_uir_elements as _document_pages_to_uir_elements,
     extract_pdf_page_lines as _extract_pdf_page_lines,
-    invoke_text_chunker as _invoke_text_chunker,
     item_label as _item_label,
     item_page_no as _item_page_no,
     item_prov_list as _item_prov_list,
@@ -2887,26 +2887,16 @@ class V2DocumentProcessor:
                     seeded,
                 )
 
-        # Engine boundary: run the sentence-aware text chunker + dense-
-        # index detection in one call. The engine returns the raw chunker
-        # output (`doc_chunks`) for iteration here, plus the
-        # dense_index_pages / source_back_index_pages sets the per-element
-        # emitter consults to skip table emission.
-        try:
-            invocation = _invoke_text_chunker(
+        # V3.0: Produce UIR elements from DoclingDocument, then group them
+        # via the UIR-native chunker. No HybridChunker instantiation.
+        _uir_elements, dense_index_pages, source_back_index_pages = (
+            _document_pages_to_uir_elements(
                 doc=doc,
                 page_offset=page_offset,
                 page_dims=page_dims,
                 pdf_path=pdf_path,
-                suppress_layout_label_text=getattr(
-                    self, "_suppress_layout_label_text", False
-                ),
-                timeout_seconds=120,
             )
-        except TimeoutError:
-            raise  # Let caller set _use_hybrid=False via its except block
-
-        dense_index_pages = invocation.dense_index_pages
+        )
         # Stash dense_index_pages so the per-element table/image emitter
         # downstream can skip emission on these pages. Use GLOBAL page
         # numbers because `_process_element_v2` checks against
@@ -2914,7 +2904,8 @@ class V2DocumentProcessor:
         self._dense_index_pages_skip_table = {
             page + page_offset for page in dense_index_pages
         }
-        doc_chunks = invocation.doc_chunks
+        # Use UIR elements as the "doc_chunks" iterable (UIRChunk list)
+        doc_chunks = _uir_elements
 
         # v2.9: keep DOCUMENT_INDEX (TOC) elements. Previously these
         # were filtered out as boilerplate, but TOC pages contain real

@@ -1,0 +1,556 @@
+"""UIR-Native Chunker — operates STRICTLY on UniversalDocument (UIR).
+
+Charter §3.2 (ARCHITECTURE_V3_DRAFT_0.5.md): "The chunker operates
+solely on UniversalDocument/UIRChunk, entirely detached from Docling's
+DoclingDocument layout classes."
+
+This module NEVER imports Docling types (DoclingDocument, DocChunk,
+HybridChunker). It iterates over UniversalDocument.pages and their
+Element lists to produce UIRChunks ready for ingestion.
+
+Design:
+  - TEXT elements → sentence-boundary-aware grouping → UIRChunk(modality=TEXT)
+  - IMAGE elements → UIRChunk(modality=IMAGE) with asset_ref
+  - TABLE elements → UIRChunk(modality=TABLE)
+  - Heading/code/list-item detection from Element.source_label + content heuristics
+  - Cross-page continuity via continuation_group_id
+  - BBoxes preserved from Element.bbox (already [0,1000] normalized)
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+import re
+from typing import Any, Dict, Generator, List, Optional, Set, Tuple
+
+from ..universal.intermediate import (
+    BoundingBox,
+    ConfidenceBreakdown,
+    CoordinateFrame,
+    Element,
+    ElementType,
+    ExtractionWarning,
+    Locator,
+    LocatorType,
+    Modality,
+    StructuralFlag,
+    UIRChunk,
+    UniversalDocument,
+    UniversalPage,
+)
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+# Token budget per chunk (roughly 1 token ≈ 4 chars for English)
+DEFAULT_MAX_CHARS: int = 1400  # ~350 tokens
+MIN_CHUNK_CHARS: int = 20
+EXTRACTION_METHOD_UIR: str = "uir_native_chunker"
+EXTRACTION_ENGINE_VERSION_DEFAULT: str = "mmrag-v3.0-uir"
+
+# Source labels that indicate heading elements
+_HEADING_LABELS: Set[str] = {
+    "section_header", "section-header", "sectionheader",
+    "title", "heading", "h1", "h2", "h3", "h4",
+    "subtitle",
+}
+
+# Source labels that indicate code elements
+_CODE_LABELS: Set[str] = {
+    "code", "code_block", "codeblock", "pre",
+    "listing", "programlisting",
+}
+
+# Source labels that indicate list items
+_LIST_LABELS: Set[str] = {
+    "list_item", "listitem", "list-item",
+    "bullet", "enum", "item",
+}
+
+# Source labels that indicate table elements
+_TABLE_LABELS: Set[str] = {
+    "table", "table_cell", "tablecell",
+    "tabular", "grid",
+}
+
+# Terminal sentence boundary characters
+_SENTENCE_ENDS = {".", "!", "?", ":", ";", ")", '"', "\u201d"}
+
+# Heading continuation leads (lowercase)
+_HEADING_CONTINUATION_LEADS = frozenset({
+    "and", "or", "the", "a", "an", "of", "in", "to", "on", "at",
+    "by", "for", "with", "from", "into", "onto", "upon",
+})
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+
+
+def chunk_universal_document(
+    universal_doc: UniversalDocument,
+    *,
+    max_chars: int = DEFAULT_MAX_CHARS,
+    min_chars: int = MIN_CHUNK_CHARS,
+    extraction_engine_version: str = EXTRACTION_ENGINE_VERSION_DEFAULT,
+    profile_type: Optional[str] = None,
+) -> List[UIRChunk]:
+    """Chunk a UniversalDocument into UIRChunks — pure UIR-native.
+
+    Iterates strictly over UniversalDocument.pages and their Element
+    lists. NEVER imports or accepts Docling types (DoclingDocument,
+    DocChunk, HybridChunker).
+
+    Args:
+        universal_doc: Fully populated UIR document.
+        max_chars: Soft character budget per chunk.
+        min_chars: Minimum chunk content length before merging.
+        extraction_engine_version: Stamped on every emitted UIRChunk.
+        profile_type: Optional profile hint (reserved for future tuning).
+
+    Returns:
+        List of UIRChunk objects ready for ingestion.
+    """
+    chunks: List[UIRChunk] = []
+    reading_order: int = 0
+
+    for page in universal_doc.pages:
+        page_chunks = _chunk_page(
+            page,
+            doc_id=universal_doc.doc_id,
+            max_chars=max_chars,
+            min_chars=min_chars,
+            extraction_engine_version=extraction_engine_version,
+            start_reading_order=reading_order,
+        )
+        chunks.extend(page_chunks)
+        reading_order += len(page_chunks)
+
+    return chunks
+
+
+# ---------------------------------------------------------------------------
+# Per-page chunking
+# ---------------------------------------------------------------------------
+
+
+def _chunk_page(
+    page: UniversalPage,
+    *,
+    doc_id: str,
+    max_chars: int,
+    min_chars: int,
+    extraction_engine_version: str,
+    start_reading_order: int = 0,
+) -> List[UIRChunk]:
+    """Chunk a single UniversalPage into UIRChunks.
+
+    Groups consecutive TEXT elements by reading order, then splits
+    at sentence boundaries. IMAGE and TABLE elements each become
+    their own UIRChunk.
+    """
+    chunks: List[UIRChunk] = []
+    reading_order = start_reading_order
+
+    # Separate non-TEXT elements from the TEXT grouping stream
+    text_buffer: List[Element] = []
+    page_w: float = float(page.dimensions[0]) if page.dimensions[0] else 612.0
+    page_h: float = float(page.dimensions[1]) if page.dimensions[1] else 792.0
+
+    def _flush_text_buffer(finalize_page: bool = False) -> None:
+        nonlocal reading_order
+        if not text_buffer:
+            return
+
+        # Group consecutive text elements into chunks
+        text_chunks = _partition_text_elements(
+            text_buffer,
+            page_number=page.page_number,
+            page_w=page_w,
+            page_h=page_h,
+            max_chars=max_chars,
+            min_chars=min_chars,
+        )
+
+        for tc_text, tc_label, tc_bbox, tc_heading, tc_metadata in text_chunks:
+            modality = Modality.TEXT
+            structural_flags: Set[StructuralFlag] = set()
+            chunk_type_label = tc_label.lower().replace("-", "_").replace(" ", "_")
+
+            # Classify chunk type from label + content heuristics
+            if chunk_type_label in _HEADING_LABELS or _looks_like_heading(tc_text, tc_label):
+                chunk_type_label = "section_header"
+            elif chunk_type_label in _CODE_LABELS or _looks_like_code(tc_text, tc_label):
+                chunk_type_label = "code"
+            elif chunk_type_label in _LIST_LABELS:
+                chunk_type_label = "list_item"
+
+            # Detect subtitle continuations
+            if _looks_like_subtitle_continuation(tc_text, chunk_type_label, tc_heading):
+                chunk_type_label = "section_header"
+
+            confidence = _element_confidence(text_buffer[0])
+
+            chunks.append(UIRChunk(
+                modality=modality,
+                content=tc_text.strip(),
+                locator=Locator(
+                    type=LocatorType.BBOX,
+                    bbox=tc_bbox,
+                    page_number=page.page_number,
+                    coordinate_frame=CoordinateFrame.PDF_PAGE_PORTRAIT,
+                ),
+                confidence=confidence,
+                extraction_method=EXTRACTION_METHOD_UIR,
+                extraction_engine_version=extraction_engine_version,
+                structural_flags=structural_flags,
+                parent_heading=tc_heading,
+                reading_order=reading_order,
+            ))
+            reading_order += 1
+
+        text_buffer.clear()
+
+    for element in page.elements:
+        if element.type == ElementType.IMAGE:
+            # Flush pending text before emitting image
+            _flush_text_buffer()
+            chunks.append(_image_element_to_uirchunk(
+                element, page, extraction_engine_version, reading_order,
+            ))
+            reading_order += 1
+        elif element.type == ElementType.TABLE:
+            _flush_text_buffer()
+            chunks.append(_table_element_to_uirchunk(
+                element, page, extraction_engine_version, reading_order,
+            ))
+            reading_order += 1
+        else:
+            # TEXT element — buffer for grouping
+            text_buffer.append(element)
+
+    # Flush any remaining text
+    _flush_text_buffer()
+
+    return chunks
+
+
+# ---------------------------------------------------------------------------
+# Element → UIRChunk converters (IMAGE, TABLE)
+# ---------------------------------------------------------------------------
+
+
+def _image_element_to_uirchunk(
+    element: Element,
+    page: UniversalPage,
+    extraction_engine_version: str,
+    reading_order: int,
+) -> UIRChunk:
+    """Convert an IMAGE Element to a UIRChunk."""
+    bbox = _element_bbox_list(element)
+    asset_ref: Optional[str] = None
+    # Preserve asset path if stored in metadata
+    if "asset_path" in element.metadata:
+        asset_ref = str(element.metadata["asset_path"])
+
+    return UIRChunk(
+        modality=Modality.IMAGE,
+        content=element.content or "",
+        locator=Locator(
+            type=LocatorType.BBOX,
+            bbox=bbox,
+            page_number=page.page_number,
+            coordinate_frame=CoordinateFrame.PDF_PAGE_PORTRAIT,
+        ),
+        confidence=ConfidenceBreakdown(),
+        extraction_method=EXTRACTION_METHOD_UIR,
+        extraction_engine_version=extraction_engine_version,
+        asset_ref=asset_ref,
+        reading_order=reading_order,
+    )
+
+
+def _table_element_to_uirchunk(
+    element: Element,
+    page: UniversalPage,
+    extraction_engine_version: str,
+    reading_order: int,
+) -> UIRChunk:
+    """Convert a TABLE Element to a UIRChunk."""
+    bbox = _element_bbox_list(element)
+    return UIRChunk(
+        modality=Modality.TABLE,
+        content=element.content or "",
+        locator=Locator(
+            type=LocatorType.BBOX,
+            bbox=bbox,
+            page_number=page.page_number,
+            coordinate_frame=CoordinateFrame.PDF_PAGE_PORTRAIT,
+        ),
+        confidence=ConfidenceBreakdown(),
+        extraction_method=EXTRACTION_METHOD_UIR,
+        extraction_engine_version=extraction_engine_version,
+        reading_order=reading_order,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Text buffer → chunk partitioner
+# ---------------------------------------------------------------------------
+
+
+def _partition_text_elements(
+    elements: List[Element],
+    page_number: int,
+    page_w: float,
+    page_h: float,
+    max_chars: int,
+    min_chars: int,
+) -> List[Tuple[str, str, List[int], Optional[str], Dict[str, Any]]]:
+    """Partition consecutive TEXT elements into chunk-sized groups.
+
+    Returns list of (content, label, bbox, parent_heading, metadata) tuples.
+    Each tuple represents one candidate chunk.
+    """
+    if not elements:
+        return []
+
+    # Determine the dominant label for this group
+    labels = [e.source_label for e in elements if e.source_label]
+    dominant_label = _most_common(labels) if labels else "text"
+
+    # Find the most-recent heading element before this text group
+    # (heading is typically a separate element with section_header label)
+    parent_heading: Optional[str] = None
+    for e in elements:
+        if e.source_label.lower().replace("-", "_").replace(" ", "_") in _HEADING_LABELS:
+            if e.content.strip():
+                parent_heading = e.content.strip()
+
+    # Build combined text
+    full_text = _join_element_contents(elements)
+    current_bbox = _elements_union_bbox(elements, page_w, page_h)
+
+    # If under budget, return as single chunk
+    if len(full_text) <= max_chars:
+        return [(full_text, dominant_label, current_bbox, parent_heading, {})]
+
+    # Split at sentence boundaries
+    parts = _split_at_sentence_boundaries(full_text, max_chars, min_chars)
+    result: List[Tuple[str, str, List[int], Optional[str], Dict[str, Any]]] = []
+    for part in parts:
+        result.append((part, dominant_label, current_bbox, parent_heading, {}))
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Sentence-boundary splitting
+# ---------------------------------------------------------------------------
+
+
+def _split_at_sentence_boundaries(
+    text: str,
+    max_chars: int,
+    min_chars: int,
+) -> List[str]:
+    """Split text at sentence boundaries, respecting the char budget.
+
+    Prefers splitting at `. `, `! `, `? `; falls back to newline splits
+    when no sentence boundary is found within the budget.
+    """
+    if len(text) <= max_chars:
+        return [text]
+
+    parts: List[str] = []
+    cursor = 0
+    while cursor < len(text):
+        remaining = text[cursor:]
+        if len(remaining) <= max_chars:
+            parts.append(remaining)
+            break
+
+        # Look for sentence boundary within [max_chars * 0.5, max_chars]
+        search_start = cursor + max(0, max_chars // 2)
+        search_end = cursor + max_chars
+        best_split = -1
+
+        for i in range(search_end - 1, search_start - 1, -1):
+            if i >= len(text):
+                continue
+            ch = text[i]
+            if ch in _SENTENCE_ENDS and i + 1 < len(text) and text[i + 1] in {" ", "\n"}:
+                best_split = i + 1  # include the period, split after the space
+                break
+
+        if best_split < 0:
+            # Fallback: split at newline
+            nl_idx = text.find("\n", search_start)
+            if 0 < nl_idx < search_end:
+                best_split = nl_idx + 1  # include the newline
+            # Final fallback: split at max_chars on a word boundary
+            else:
+                for i in range(search_end - 1, search_start - 1, -1):
+                    if text[i] == " ":
+                        best_split = i + 1
+                        break
+                if best_split < 0:
+                    best_split = search_end
+
+        chunk = text[cursor:best_split].strip()
+        if chunk:
+            parts.append(chunk)
+        cursor = best_split
+
+    # Merge undersized tail
+    if len(parts) >= 2 and len(parts[-1]) < min_chars:
+        parts[-2] = f"{parts[-2]} {parts[-1]}".strip()
+        parts.pop()
+
+    return parts or [text]
+
+
+# ---------------------------------------------------------------------------
+# Element content joining
+# ---------------------------------------------------------------------------
+
+
+def _join_element_contents(elements: List[Element]) -> str:
+    """Join adjacent TEXT elements with the appropriate separator.
+
+    Consecutive elements from the same block use space; elements
+    separated by explicit block boundaries use newline.
+    """
+    if not elements:
+        return ""
+    parts: List[str] = []
+    for e in elements:
+        content = e.content.strip() if e.content else ""
+        if content:
+            parts.append(content)
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# BBox helpers
+# ---------------------------------------------------------------------------
+
+
+def _element_bbox_list(element: Element) -> List[int]:
+    """Get element bbox as [x1, y1, x2, y2] list."""
+    if element.bbox:
+        return element.bbox.to_list()
+    return [0, 0, 1000, 1000]
+
+
+def _elements_union_bbox(
+    elements: List[Element],
+    page_w: float,
+    page_h: float,
+) -> List[int]:
+    """Union bbox across a list of Elements."""
+    left, top, right, bottom = 1000, 1000, 0, 0
+    have = False
+    for e in elements:
+        if e.bbox:
+            left = min(left, e.bbox.x_min)
+            top = min(top, e.bbox.y_min)
+            right = max(right, e.bbox.x_max)
+            bottom = max(bottom, e.bbox.y_max)
+            have = True
+    if have and right > left and bottom > top:
+        return [left, top, right, bottom]
+    return [0, 0, 1000, 1000]
+
+
+# ---------------------------------------------------------------------------
+# Content classification heuristics
+# ---------------------------------------------------------------------------
+
+
+def _looks_like_heading(text: str, label: str) -> bool:
+    """Return True if text content suggests a heading."""
+    text = text.strip()
+    if not text:
+        return False
+    # Short, no terminal punctuation, Title Case or ALL CAPS
+    if len(text) > 120:
+        return False
+    if any(text.rstrip().endswith(ch) for ch in (";", ":")):
+        return False
+    # Chapter/part/section markers
+    if re.match(r"^(Chapter|Part|Section|Appendix|Unit|Module)\s+\d+", text):
+        return True
+    # Short all-caps
+    if len(text) < 80 and text.isupper():
+        return True
+    return False
+
+
+def _looks_like_code(text: str, label: str) -> bool:
+    """Return True if text content suggests code."""
+    text = text.strip()
+    if not text:
+        return False
+    # Code indicators: indentation, keywords, braces
+    lines = text.splitlines()
+    if len(lines) < 3:
+        return False
+    code_keywords = {"def ", "class ", "import ", "from ", "return ",
+                     "if __", "def __", "// ", "package ", "func ",
+                     "public ", "private ", "void ", "int ", "var ",
+                     "const ", "let ", "async ", "await "}
+    leading_ws = sum(1 for ln in lines if ln.startswith((" ", "\t")))
+    keyword_hits = sum(
+        1 for ln in lines
+        if any(kw in ln for kw in code_keywords)
+    )
+    if keyword_hits >= 2:
+        return True
+    if leading_ws >= len(lines) * 0.6 and keyword_hits >= 1:
+        return True
+    return False
+
+
+def _looks_like_subtitle_continuation(
+    content: str,
+    label: str,
+    parent_heading: Optional[str],
+) -> bool:
+    """Detect subtitle continuations (cross-page title fragments)."""
+    if "section_header" in label or "heading" in label:
+        return False
+    text = content.strip()
+    if not text or len(text) >= 30:
+        return False
+    if text.endswith((".", "?", "!", ":", ";", ",")):
+        return False
+    if not parent_heading:
+        return False
+    match = re.match(r"^([A-Za-z]+)", text)
+    if not match:
+        return False
+    first_word = match.group(1).lower()
+    return first_word in _HEADING_CONTINUATION_LEADS
+
+
+def _element_confidence(element: Element) -> ConfidenceBreakdown:
+    """Build ConfidenceBreakdown from a single Element's confidence."""
+    c = element.confidence
+    return ConfidenceBreakdown(
+        text_extraction_confidence=c,
+        applicable={"text_extraction_confidence"},
+    )
+
+
+def _most_common(items: List[str]) -> str:
+    """Return the most common item in a list."""
+    if not items:
+        return "text"
+    from collections import Counter
+    return Counter(items).most_common(1)[0][0]

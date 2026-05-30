@@ -6,8 +6,8 @@ Single source of truth for Phase 3 telemetry. Read by:
     / middle-band / grace-period rules)
   - `synthetic_soak.py` (per-query telemetry write path; compares
     each query's reranked top-5 doc_ids against `class_names()`)
-  - `docs/CYCLE_OPEN_CHECKLIST.md` (cycle-open process reads the
-    analyzer report; trigger-fired classes are required-decision
+  - v2.X cycle-open process (archived; the analyzer report was read
+    at cycle-open and trigger-fired classes were required-decision
     items for that cycle's plan)
 
 Per DECISIONS.md "v2.15 Documented-Limitation Telemetry Threshold"
