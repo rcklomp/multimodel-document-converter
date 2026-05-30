@@ -75,8 +75,8 @@ jobs:
         # tracked code importing an untracked module imports fine in a dirty
         # working tree but ModuleNotFoundErrors in a clean clone. Also pins
         # governance-doc trackedness, precedence markers, live test-guard
-        # contracts, dangling paths, and skip-registration. See
-        # docs/REPO_INTEGRITY.md.
+        # contracts, dangling paths, and skip-registration. Contract:
+        # AGENTS.md AGENT-INTEGRITY-01 (+ this test's module docstring).
         run: pytest tests/test_repo_integrity.py -q
 
   # ── Full validation — self-hosted runner only ──
