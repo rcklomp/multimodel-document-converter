@@ -2054,6 +2054,13 @@ where Docling silently drops content (CarOK class).
 
 ### 1. Two-tree V3 namespace, single translator boundary
 
+> **SUPERSEDED 2026-05-30:** the `v3_execution_root/` sandbox tree was removed
+> (duplicate `mmrag_v3` namespace; not a production dependency). Only
+> `src/mmrag_v3/` remains. Durable artifacts salvaged to `docs/V3_DEFERRED_TESTS.md`
+> + `docs/paper/archive_extracts/`; backup at
+> `~/mmrag_v3_execution_root_backup_2026-05-30.tar.gz`. The two-tree design below
+> is historical.
+
 `src/mmrag_v3/` (project) hosts the Phase C engines; the
 pre-existing `v3_execution_root/src/mmrag_v3/` (sandbox) hosts
 the Phase A chunker / schema / sanitization stack. The two trees

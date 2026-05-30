@@ -138,11 +138,15 @@ log "=== PHASE 1: boot Qwen3-VL extraction model ==="
 boot_vlm
 
 log "=== PHASE 2: extract corpus through HybridEngine -> GX10 VLM ==="
+# NOTE (2026-05-30): v3_execution_root was removed; its chunker no longer on the path.
+# scripts/v3_batch_ingest.py still imports `mmrag_v3.chunking.chunker` from that
+# sandbox and MUST be repointed to src/mmrag_v2/chunking/uir_chunker before this
+# soak runs again. (Sandbox recoverable from ~/mmrag_v3_execution_root_backup_2026-05-30.tar.gz.)
 USE_VLM_ENGINE=1 \
 VLM_NATIVE_ENDPOINT="$ENDPOINT" \
 VLM_NATIVE_MODEL="$VLM_SERVED" \
 VLM_NATIVE_API_KEY="${VLM_NATIVE_API_KEY:-EMPTY}" \
-PYTHONPATH="$REPO_ROOT/v3_execution_root/src:$REPO_ROOT/src" \
+PYTHONPATH="$REPO_ROOT/src" \
   "$PY" scripts/v3_batch_ingest.py --data-dir "$DATA_DIR" --out-dir output/v3_baselines ${EXTRACT_FORCE} \
   2>&1 | tee -a "$LOG_DIR/extract.log"
 
