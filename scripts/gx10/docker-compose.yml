@@ -1,0 +1,70 @@
+# GX10 (NVIDIA GB10, 121 GiB UNIFIED CPU+GPU memory) — time-sliced model serving.
+#
+# Tier-2 robustness for MM-RAG V3: replaces ad-hoc `docker run --rm` + bash-trap
+# cleanup (which leaked ~100 GiB zombie containers on SIGKILL) with supervised,
+# logged, auto-restarting services that clean up deterministically via
+# `docker compose down`. Driven by scripts/v3_sequential_soak.sh.
+#
+# ONLY ONE SERVICE RUNS AT A TIME — both bind :8000 and the GB10 can't hold both
+# model footprints + KV caches at safe utilization. The orchestrator brings up
+# one, `down`s it, then brings up the other.
+#
+# *** UNIFIED-MEMORY RULE (do not "optimize" these upward) ***
+# There is NO separate VRAM. `--gpu-memory-utilization` reserves that fraction of
+# the SHARED 121 GiB pool, so high values (0.80-0.85) over-commit and crash with
+# `NVRM: Out of memory [NV_ERR_NO_MEMORY]` on activation spikes (esp. VLM image
+# encoding). Empirically validated safe: VLM 0.55 (+max-num-seqs 2), text 0.60.
+# See memory: reference-local-endpoints "GB10 UNIFIED MEMORY".
+
+x-common: &common
+  image: vllm/vllm-openai:v0.20.0-aarch64-cu130-ubuntu2404   # pinned aarch64 build (NOT :latest)
+  ports: ["8000:8000"]
+  gpus: all
+  shm_size: "16gb"
+  mem_limit: "115g"          # host-RAM runaway backstop ONLY; gpu-memory-utilization is the real control
+                             # (a cgroup mem limit may not bound GPU-driver allocs on UMA — don't rely on it)
+  restart: on-failure        # auto-recover transient crashes; NOT unless-stopped (avoid OOM crash-loops)
+  volumes:
+    - "/home/ronald/.cache/huggingface:/root/.cache/huggingface"
+  environment:
+    - "HF_HOME=/root/.cache/huggingface"
+  healthcheck:
+    # python3 is in the vllm image; curl may not be
+    test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/v1/models',timeout=3).status==200 else 1)"]
+    interval: 15s
+    timeout: 6s
+    retries: 60
+    start_period: 90s        # first boot may download weights
+  logging:
+    driver: json-file
+    options: {max-size: "50m", max-file: "3"}   # keep crash logs, cap disk
+
+services:
+  # Extraction — Qwen3-VL (BF16, full precision; quality-max, fits at 0.55)
+  qwen-vlm:
+    <<: *common
+    container_name: gx10-vllm-qwen3vl
+    command:
+      - "--model=Qwen/Qwen3-VL-8B-Instruct"
+      - "--served-model-name=Qwen3-VL-8B-Instruct"
+      - "--host=0.0.0.0"
+      - "--port=8000"
+      - "--gpu-memory-utilization=0.55"
+      - "--max-num-seqs=2"
+      - "--max-model-len=32768"   # >= magazine-page prompts (~16.9k tok). Do NOT lower to 16384 — it truncates them.
+      - "--trust-remote-code"
+
+  # Evaluation — Qwen2.5-14B-FP8 judge (+ short alias preserved)
+  qwen-judge:
+    <<: *common
+    container_name: gx10-vllm-14b-fp8
+    command:
+      - "--model=RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic"
+      - "--served-model-name"                              # nargs='+': two aliases follow
+      - "RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic"
+      - "qwen2.5-14b-fp8"
+      - "--host=0.0.0.0"
+      - "--port=8000"
+      - "--gpu-memory-utilization=0.60"
+      - "--max-model-len=32768"
+      - "--trust-remote-code"
