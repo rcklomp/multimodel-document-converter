@@ -69,6 +69,16 @@ jobs:
       - name: V3 security firewall (AST gate, no corpus required)
         run: pytest tests/test_v3_security.py -q
 
+      - name: Repo-integrity guards (committed-truth gate, no corpus required)
+        # Reasons about `git ls-files` (the COMMITTED tree), so it catches the
+        # 2026-05-30 failure class that the dev-env import-smoke above misses:
+        # tracked code importing an untracked module imports fine in a dirty
+        # working tree but ModuleNotFoundErrors in a clean clone. Also pins
+        # governance-doc trackedness, precedence markers, live test-guard
+        # contracts, dangling paths, and skip-registration. See
+        # docs/REPO_INTEGRITY.md.
+        run: pytest tests/test_repo_integrity.py -q
+
   # ── Full validation — self-hosted runner only ──
   # Needs Qdrant + corpus + Dashscope key. Skipped on GitHub-hosted.
   validate:

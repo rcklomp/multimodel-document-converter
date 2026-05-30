@@ -13,6 +13,7 @@ This file provides guidance to Claude Code when working with this repository.
 7. `docs/TESTING.md` — test conventions.
 8. `docs/QUALITY_GATES.md` — gate definitions.
 9. `docs/ARCHITECTURE.md` — v2.X pipeline architecture (production baseline being evolved).
+10. `docs/REPO_INTEGRITY.md` — "Committed-Truth" convention: mechanical repo-integrity guards (`tests/test_repo_integrity.py`) + the one written gate rule (assert outcomes, not proxies).
 
 All v2.14–v2.16 history, telemetry, calibration reports, and legacy
 quality snapshots are quarantined in `docs/.archive/` and blocked by
