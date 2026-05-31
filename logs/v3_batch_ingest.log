@@ -1,0 +1,1410 @@
+2026-05-29 10:12:31,553 [INFO] v3_batch_ingest: Starting V3 grand soak: 43 PDFs → /Users/ronald/Projects/MM-Converter-V2.4.1/output/v3_baselines
+2026-05-29 10:12:31,553 [INFO] v3_batch_ingest: [1/43] AIOS LLM Agent Operating System.pdf
+2026-05-29 10:20:08,586 [INFO] docling.datamodel.document: detected formats: [<InputFormat.PDF: 'pdf'>]
+2026-05-29 10:20:08,628 [INFO] docling.document_converter: Going to convert document batch...
+2026-05-29 10:20:08,630 [INFO] docling.document_converter: Initializing pipeline for StandardPdfPipeline with options hash c4c6ce1a26372d9e7054fbcbe6edc924
+2026-05-29 10:20:08,635 [INFO] docling.models.factories.base_factory: Loading plugin 'docling_defaults'
+2026-05-29 10:20:08,637 [INFO] docling.models.factories: Registered picture descriptions: ['picture_description_vlm_engine', 'vlm', 'api']
+2026-05-29 10:20:08,640 [INFO] docling.models.factories.base_factory: Loading plugin 'docling_defaults'
+2026-05-29 10:20:08,648 [INFO] docling.models.factories: Registered ocr engines: ['auto', 'easyocr', 'kserve_v2_ocr', 'ocrmac', 'rapidocr', 'tesserocr', 'tesseract']
+2026-05-29 10:20:08,651 [INFO] docling.models.factories.base_factory: Loading plugin 'docling_defaults'
+2026-05-29 10:20:08,654 [INFO] docling.models.factories: Registered layout engines: ['layout_object_detection', 'docling_layout_default', 'docling_experimental_table_crops_layout']
+2026-05-29 10:20:08,663 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 10:20:08,971 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-layout-heron/revision/main "HTTP/1.1 200 OK"
+Consider using the pymupdf_layout package for a greatly improved page layout analysis.
+Loading weights:   0%|          | 0/770 [00:00<?, ?it/s]Loading weights:  91%|█████████▏| 704/770 [00:00<00:00, 7037.31it/s]Loading weights: 100%|██████████| 770/770 [00:00<00:00, 7108.82it/s]
+2026-05-29 10:20:09,356 [INFO] docling.models.factories.base_factory: Loading plugin 'docling_defaults'
+2026-05-29 10:20:09,358 [INFO] docling.models.factories: Registered table structure engines: ['docling_tableformer', 'docling_tableformer_v2']
+2026-05-29 10:20:09,526 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-models/revision/v2.3.0 "HTTP/1.1 200 OK"
+2026-05-29 10:20:09,560 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 10:20:10,091 [INFO] docling.pipeline.base_pipeline: Processing document AIOS LLM Agent Operating System.pdf
+2026-05-29 10:20:31,113 [INFO] docling.document_converter: Finished converting document AIOS LLM Agent Operating System.pdf in 22.53 sec.
+2026-05-29 10:20:31,122 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=07a1232cccf4, source=AIOS LLM Agent Operating System.pdf, type=pdf, pages=35, digital=35, scanned=0, text_elements=355, image_elements=23, table_elements=7)
+2026-05-29 10:20:31,131 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=07a1232cccf4, source=AIOS LLM Agent Operating System.pdf, type=pdf, pages=35, digital=34, scanned=1, text_elements=326, image_elements=30, table_elements=7)
+2026-05-29 10:20:31,137 [INFO] v3_batch_ingest: OK AIOS LLM Agent Operating System.pdf | pages=35 chunks=177 vlm=25 docling=10 fallback=0 479.6s
+2026-05-29 10:20:31,138 [INFO] v3_batch_ingest: [2/43] A_comprehensive_review_on_hybrid_electri.pdf
+2026-05-29 10:23:52,238 [INFO] docling.datamodel.document: detected formats: [<InputFormat.PDF: 'pdf'>]
+2026-05-29 10:23:52,243 [INFO] docling.document_converter: Going to convert document batch...
+2026-05-29 10:23:52,244 [INFO] docling.document_converter: Initializing pipeline for StandardPdfPipeline with options hash c4c6ce1a26372d9e7054fbcbe6edc924
+2026-05-29 10:23:52,246 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 10:23:52,469 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-layout-heron/revision/main "HTTP/1.1 200 OK"
+Loading weights:   0%|          | 0/770 [00:00<?, ?it/s]Loading weights: 100%|██████████| 770/770 [00:00<00:00, 12250.79it/s]
+2026-05-29 10:23:52,844 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-models/revision/v2.3.0 "HTTP/1.1 200 OK"
+2026-05-29 10:23:52,850 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 10:23:53,363 [INFO] docling.pipeline.base_pipeline: Processing document A_comprehensive_review_on_hybrid_electri.pdf
+2026-05-29 10:24:16,394 [INFO] docling.document_converter: Finished converting document A_comprehensive_review_on_hybrid_electri.pdf in 24.16 sec.
+2026-05-29 10:24:16,405 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=1b6ba953d1f4, source=A_comprehensive_review_on_hybrid_electri.pdf, type=pdf, pages=31, digital=31, scanned=0, text_elements=594, image_elements=36, table_elements=11)
+2026-05-29 10:24:16,436 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=1b6ba953d1f4, source=A_comprehensive_review_on_hybrid_electri.pdf, type=pdf, pages=31, digital=30, scanned=1, text_elements=547, image_elements=32, table_elements=11)
+2026-05-29 10:24:16,444 [INFO] v3_batch_ingest: OK A_comprehensive_review_on_hybrid_electri.pdf | pages=31 chunks=204 vlm=7 docling=24 fallback=0 225.3s
+2026-05-29 10:24:16,445 [INFO] v3_batch_ingest: [3/43] Hybrid_electric_vehicles_and_their_challenges.pdf
+2026-05-29 10:31:48,997 [INFO] docling.datamodel.document: detected formats: [<InputFormat.PDF: 'pdf'>]
+2026-05-29 10:31:49,000 [INFO] docling.document_converter: Going to convert document batch...
+2026-05-29 10:31:49,000 [INFO] docling.document_converter: Initializing pipeline for StandardPdfPipeline with options hash c4c6ce1a26372d9e7054fbcbe6edc924
+2026-05-29 10:31:49,001 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 10:31:49,204 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-layout-heron/revision/main "HTTP/1.1 200 OK"
+Loading weights:   0%|          | 0/770 [00:00<?, ?it/s]Loading weights: 100%|██████████| 770/770 [00:00<00:00, 19519.36it/s]
+2026-05-29 10:31:49,576 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-models/revision/v2.3.0 "HTTP/1.1 200 OK"
+2026-05-29 10:31:49,581 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 10:31:50,123 [INFO] docling.pipeline.base_pipeline: Processing document Hybrid_electric_vehicles_and_their_challenges.pdf
+2026-05-29 10:32:08,436 [INFO] docling.document_converter: Finished converting document Hybrid_electric_vehicles_and_their_challenges.pdf in 19.44 sec.
+2026-05-29 10:32:08,441 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=2baf312fdd78, source=Hybrid_electric_vehicles_and_their_challenges.pdf, type=pdf, pages=16, digital=16, scanned=0, text_elements=319, image_elements=13, table_elements=5)
+2026-05-29 10:32:08,469 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=2baf312fdd78, source=Hybrid_electric_vehicles_and_their_challenges.pdf, type=pdf, pages=16, digital=12, scanned=4, text_elements=373, image_elements=15, table_elements=5)
+2026-05-29 10:32:08,475 [INFO] v3_batch_ingest: OK Hybrid_electric_vehicles_and_their_challenges.pdf | pages=16 chunks=162 vlm=9 docling=7 fallback=0 472.0s
+2026-05-29 10:32:08,476 [INFO] v3_batch_ingest: [4/43] IRJET_Modeling_of_Solar_PV_system_under.pdf
+2026-05-29 10:37:44,401 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=b670f5359e9c, source=IRJET_Modeling_of_Solar_PV_system_under.pdf, type=pdf, pages=7, digital=7, scanned=0, text_elements=121, image_elements=13, table_elements=2)
+2026-05-29 10:37:44,407 [INFO] v3_batch_ingest: OK IRJET_Modeling_of_Solar_PV_system_under.pdf | pages=7 chunks=65 vlm=7 docling=0 fallback=0 335.9s
+2026-05-29 10:37:44,408 [INFO] v3_batch_ingest: [5/43] Recent_Trends_in_Transportation_Technolo.pdf
+2026-05-29 10:39:22,939 [INFO] docling.datamodel.document: detected formats: [<InputFormat.PDF: 'pdf'>]
+2026-05-29 10:39:22,942 [INFO] docling.document_converter: Going to convert document batch...
+2026-05-29 10:39:22,942 [INFO] docling.document_converter: Initializing pipeline for StandardPdfPipeline with options hash c4c6ce1a26372d9e7054fbcbe6edc924
+2026-05-29 10:39:22,943 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 10:39:23,119 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-layout-heron/revision/main "HTTP/1.1 200 OK"
+Loading weights:   0%|          | 0/770 [00:00<?, ?it/s]Loading weights: 100%|██████████| 770/770 [00:00<00:00, 11938.01it/s]
+2026-05-29 10:39:23,523 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-models/revision/v2.3.0 "HTTP/1.1 200 OK"
+2026-05-29 10:39:23,528 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 10:39:24,256 [INFO] docling.pipeline.base_pipeline: Processing document Recent_Trends_in_Transportation_Technolo.pdf
+2026-05-29 10:39:27,219 [INFO] docling.document_converter: Finished converting document Recent_Trends_in_Transportation_Technolo.pdf in 4.28 sec.
+2026-05-29 10:39:27,221 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=fb04e9808444, source=Recent_Trends_in_Transportation_Technolo.pdf, type=pdf, pages=5, digital=5, scanned=0, text_elements=61, image_elements=6, table_elements=0)
+2026-05-29 10:39:27,236 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=fb04e9808444, source=Recent_Trends_in_Transportation_Technolo.pdf, type=pdf, pages=5, digital=4, scanned=1, text_elements=55, image_elements=4, table_elements=1)
+2026-05-29 10:39:27,237 [INFO] v3_batch_ingest: OK Recent_Trends_in_Transportation_Technolo.pdf | pages=5 chunks=25 vlm=4 docling=1 fallback=0 102.8s
+2026-05-29 10:39:27,238 [INFO] v3_batch_ingest: [6/43] 0013_140302111325_001.pdf
+2026-05-29 10:40:17,745 [WARNING] _phase_c_engine.router: VLM failed on page 1 (Unterminated string starting at: line 352 column 7 (char 9761)); falling back to docling
+2026-05-29 10:40:17,788 [INFO] docling.datamodel.document: detected formats: [<InputFormat.PDF: 'pdf'>]
+2026-05-29 10:40:17,789 [INFO] docling.document_converter: Going to convert document batch...
+2026-05-29 10:40:17,789 [INFO] docling.document_converter: Initializing pipeline for StandardPdfPipeline with options hash c4c6ce1a26372d9e7054fbcbe6edc924
+2026-05-29 10:40:17,790 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 10:40:17,943 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-layout-heron/revision/main "HTTP/1.1 200 OK"
+Loading weights:   0%|          | 0/770 [00:00<?, ?it/s]Loading weights: 100%|██████████| 770/770 [00:00<00:00, 14942.72it/s]
+2026-05-29 10:40:18,460 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-models/revision/v2.3.0 "HTTP/1.1 200 OK"
+2026-05-29 10:40:18,466 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 10:40:18,998 [INFO] docling.pipeline.base_pipeline: Processing document 0013_140302111325_001.pdf
+2026-05-29 10:40:20,215 [INFO] docling.document_converter: Finished converting document 0013_140302111325_001.pdf in 2.43 sec.
+2026-05-29 10:40:20,216 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=4273d8177dd7, source=0013_140302111325_001.pdf, type=pdf, pages=1, digital=1, scanned=0, text_elements=0, image_elements=2, table_elements=1)
+2026-05-29 10:40:20,229 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=4273d8177dd7, source=0013_140302111325_001.pdf, type=pdf, pages=1, digital=1, scanned=0, text_elements=0, image_elements=2, table_elements=1)
+2026-05-29 10:40:20,229 [INFO] v3_batch_ingest: OK 0013_140302111325_001.pdf | pages=1 chunks=2 vlm=0 docling=0 fallback=1 53.0s
+2026-05-29 10:40:20,230 [INFO] v3_batch_ingest: [7/43] betwistingsformulier_aankoop_niet_ontvangen.pdf
+2026-05-29 10:40:39,246 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=c33dc178a685, source=betwistingsformulier_aankoop_niet_ontvangen.pdf, type=pdf, pages=1, digital=0, scanned=1, text_elements=6, image_elements=2, table_elements=0)
+2026-05-29 10:40:39,248 [INFO] v3_batch_ingest: OK betwistingsformulier_aankoop_niet_ontvangen.pdf | pages=1 chunks=4 vlm=1 docling=0 fallback=0 19.0s
+2026-05-29 10:40:39,249 [INFO] v3_batch_ingest: [8/43] CarOK voorraadtelling 2021-04.pdf
+2026-05-29 10:41:31,973 [WARNING] _phase_c_engine.router: VLM failed on page 3 (Unterminated string starting at: line 9 column 18 (char 150)); falling back to docling
+/Users/ronald/miniforge3/envs/mmrag-v2/lib/python3.10/multiprocessing/resource_tracker.py:224: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+2026-05-29 10:41:58,436 [INFO] v3_batch_ingest: Starting V3 grand soak: 43 PDFs → /Users/ronald/Projects/MM-Converter-V2.4.1/output/v3_baselines
+2026-05-29 10:41:58,436 [INFO] v3_batch_ingest: [1/43] AIOS LLM Agent Operating System.pdf
+2026-05-29 10:41:58,437 [INFO] v3_batch_ingest: [2/43] A_comprehensive_review_on_hybrid_electri.pdf
+2026-05-29 10:41:58,438 [INFO] v3_batch_ingest: [3/43] Hybrid_electric_vehicles_and_their_challenges.pdf
+2026-05-29 10:41:58,438 [INFO] v3_batch_ingest: [4/43] IRJET_Modeling_of_Solar_PV_system_under.pdf
+2026-05-29 10:41:58,440 [INFO] v3_batch_ingest: [5/43] Recent_Trends_in_Transportation_Technolo.pdf
+2026-05-29 10:41:58,440 [INFO] v3_batch_ingest: [6/43] 0013_140302111325_001.pdf
+2026-05-29 10:42:14,324 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=4273d8177dd7, source=0013_140302111325_001.pdf, type=pdf, pages=1, digital=0, scanned=1, text_elements=17, image_elements=2, table_elements=1)
+2026-05-29 10:42:14,326 [INFO] v3_batch_ingest: OK 0013_140302111325_001.pdf | pages=1 chunks=11 vlm=1 docling=0 fallback=0 15.9s
+2026-05-29 10:42:14,328 [INFO] v3_batch_ingest: [7/43] betwistingsformulier_aankoop_niet_ontvangen.pdf
+2026-05-29 10:42:14,330 [INFO] v3_batch_ingest: [8/43] CarOK voorraadtelling 2021-04.pdf
+2026-05-29 10:42:31,499 [WARNING] _phase_c_engine.vlm_provider: VLM retryable status 503 (attempt 1/3)
+2026-05-29 10:46:01,724 [WARNING] _phase_c_engine.router: VLM failed on page 9 (Unterminated string starting at: line 9 column 18 (char 150)); falling back to docling
+2026-05-29 10:46:44,116 [INFO] docling.datamodel.document: detected formats: [<InputFormat.PDF: 'pdf'>]
+2026-05-29 10:46:44,150 [INFO] docling.document_converter: Going to convert document batch...
+2026-05-29 10:46:44,150 [INFO] docling.document_converter: Initializing pipeline for StandardPdfPipeline with options hash c4c6ce1a26372d9e7054fbcbe6edc924
+2026-05-29 10:46:44,154 [INFO] docling.models.factories.base_factory: Loading plugin 'docling_defaults'
+2026-05-29 10:46:44,156 [INFO] docling.models.factories: Registered picture descriptions: ['picture_description_vlm_engine', 'vlm', 'api']
+2026-05-29 10:46:44,159 [INFO] docling.models.factories.base_factory: Loading plugin 'docling_defaults'
+2026-05-29 10:46:44,167 [INFO] docling.models.factories: Registered ocr engines: ['auto', 'easyocr', 'kserve_v2_ocr', 'ocrmac', 'rapidocr', 'tesserocr', 'tesseract']
+2026-05-29 10:46:44,170 [INFO] docling.models.factories.base_factory: Loading plugin 'docling_defaults'
+2026-05-29 10:46:44,172 [INFO] docling.models.factories: Registered layout engines: ['layout_object_detection', 'docling_layout_default', 'docling_experimental_table_crops_layout']
+2026-05-29 10:46:44,181 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 10:46:44,439 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-layout-heron/revision/main "HTTP/1.1 200 OK"
+Consider using the pymupdf_layout package for a greatly improved page layout analysis.
+Loading weights:   0%|          | 0/770 [00:00<?, ?it/s]Loading weights: 100%|██████████| 770/770 [00:00<00:00, 7791.46it/s]
+2026-05-29 10:46:44,822 [INFO] docling.models.factories.base_factory: Loading plugin 'docling_defaults'
+2026-05-29 10:46:44,824 [INFO] docling.models.factories: Registered table structure engines: ['docling_tableformer', 'docling_tableformer_v2']
+2026-05-29 10:46:44,953 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-models/revision/v2.3.0 "HTTP/1.1 200 OK"
+2026-05-29 10:46:44,977 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 10:46:45,497 [INFO] docling.pipeline.base_pipeline: Processing document CarOK voorraadtelling 2021-04.pdf
+2026-05-29 10:47:09,501 [INFO] docling.document_converter: Finished converting document CarOK voorraadtelling 2021-04.pdf in 25.39 sec.
+2026-05-29 10:47:09,502 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=46d689134b24, source=CarOK voorraadtelling 2021-04.pdf, type=pdf, pages=12, digital=12, scanned=0, text_elements=0, image_elements=0, table_elements=12)
+2026-05-29 10:47:09,503 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=46d689134b24, source=CarOK voorraadtelling 2021-04.pdf, type=pdf, pages=12, digital=1, scanned=11, text_elements=0, image_elements=0, table_elements=12)
+2026-05-29 10:47:09,506 [INFO] v3_batch_ingest: OK CarOK voorraadtelling 2021-04.pdf | pages=12 chunks=346 vlm=11 docling=0 fallback=1 295.2s
+2026-05-29 10:47:09,507 [INFO] v3_batch_ingest: [9/43] HarryPotter_and_the_Sorcerers_Stone.pdf
+2026-05-29 10:56:54,398 [WARNING] _phase_c_engine.vlm_provider: VLM retryable status 429 (attempt 1/3)
+2026-05-29 11:02:53,160 [WARNING] _phase_c_engine.vlm_provider: VLM retryable status 429 (attempt 1/3)
+2026-05-29 11:15:19,722 [WARNING] _phase_c_engine.router: VLM failed on page 162 (Unterminated string starting at: line 16 column 18 (char 311)); falling back to docling
+2026-05-29 11:22:01,272 [WARNING] _phase_c_engine.router: VLM failed on page 197 (Unterminated string starting at: line 16 column 18 (char 308)); falling back to docling
+2026-05-29 11:38:48,466 [WARNING] _phase_c_engine.router: VLM failed on page 306 (Unterminated string starting at: line 16 column 18 (char 316)); falling back to docling
+2026-05-29 11:41:23,179 [INFO] docling.datamodel.document: detected formats: [<InputFormat.PDF: 'pdf'>]
+2026-05-29 11:41:23,196 [INFO] docling.document_converter: Going to convert document batch...
+2026-05-29 11:41:23,197 [INFO] docling.document_converter: Initializing pipeline for StandardPdfPipeline with options hash c4c6ce1a26372d9e7054fbcbe6edc924
+2026-05-29 11:41:23,198 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 11:41:23,417 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-layout-heron/revision/main "HTTP/1.1 200 OK"
+Loading weights:   0%|          | 0/770 [00:00<?, ?it/s]Loading weights:  94%|█████████▎| 721/770 [00:00<00:00, 7208.70it/s]Loading weights: 100%|██████████| 770/770 [00:00<00:00, 7302.46it/s]
+2026-05-29 11:41:24,117 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-models/revision/v2.3.0 "HTTP/1.1 200 OK"
+2026-05-29 11:41:24,122 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 11:41:24,618 [INFO] docling.pipeline.base_pipeline: Processing document HarryPotter_and_the_Sorcerers_Stone.pdf
+2026-05-29 11:43:54,477 [INFO] docling.document_converter: Finished converting document HarryPotter_and_the_Sorcerers_Stone.pdf in 151.30 sec.
+2026-05-29 11:43:54,762 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=f0a0beca0506, source=HarryPotter_and_the_Sorcerers_Stone.pdf, type=pdf, pages=327, digital=327, scanned=0, text_elements=3237, image_elements=35, table_elements=0)
+2026-05-29 11:43:54,828 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=f0a0beca0506, source=HarryPotter_and_the_Sorcerers_Stone.pdf, type=pdf, pages=327, digital=36, scanned=291, text_elements=1555, image_elements=34, table_elements=0)
+2026-05-29 11:43:54,857 [INFO] v3_batch_ingest: OK HarryPotter_and_the_Sorcerers_Stone.pdf | pages=327 chunks=586 vlm=317 docling=7 fallback=3 3405.3s
+2026-05-29 11:43:54,860 [INFO] v3_batch_ingest: [10/43] Combat Aircraft - August 2025 UK.pdf
+2026-05-29 11:46:31,155 [WARNING] _phase_c_engine.router: VLM failed on page 5 (Malformed VLM response shape: Expecting value: line 181 column 1 (char 990)); falling back to docling
+2026-05-29 12:10:48,701 [WARNING] _phase_c_engine.router: VLM failed on page 66 (Unterminated string starting at: line 16 column 18 (char 336)); falling back to docling
+2026-05-29 12:17:59,952 [WARNING] _phase_c_engine.router: VLM failed on page 84 (Unterminated string starting at: line 744 column 18 (char 20775)); falling back to docling
+2026-05-29 12:24:21,583 [WARNING] _phase_c_engine.router: VLM failed on page 100 (Expecting value: line 887 column 22 (char 21059)); falling back to docling
+2026-05-29 12:24:21,636 [INFO] docling.datamodel.document: detected formats: [<InputFormat.PDF: 'pdf'>]
+2026-05-29 12:24:21,661 [INFO] docling.document_converter: Going to convert document batch...
+2026-05-29 12:24:21,662 [INFO] docling.document_converter: Initializing pipeline for StandardPdfPipeline with options hash c4c6ce1a26372d9e7054fbcbe6edc924
+2026-05-29 12:24:21,663 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 12:24:21,916 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-layout-heron/revision/main "HTTP/1.1 200 OK"
+Loading weights:   0%|          | 0/770 [00:00<?, ?it/s]Loading weights: 100%|██████████| 770/770 [00:00<00:00, 11322.84it/s]
+2026-05-29 12:24:22,557 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-models/revision/v2.3.0 "HTTP/1.1 200 OK"
+2026-05-29 12:24:22,562 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 12:24:23,063 [INFO] docling.pipeline.base_pipeline: Processing document Combat Aircraft - August 2025 UK.pdf
+2026-05-29 12:26:01,332 [INFO] docling.document_converter: Finished converting document Combat Aircraft - August 2025 UK.pdf in 99.70 sec.
+2026-05-29 12:26:01,401 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=a4c2916a64c2, source=Combat Aircraft - August 2025 UK.pdf, type=pdf, pages=100, digital=100, scanned=0, text_elements=1032, image_elements=231, table_elements=13)
+2026-05-29 12:26:01,492 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=a4c2916a64c2, source=Combat Aircraft - August 2025 UK.pdf, type=pdf, pages=100, digital=64, scanned=36, text_elements=730, image_elements=242, table_elements=12)
+2026-05-29 12:26:01,510 [INFO] v3_batch_ingest: OK Combat Aircraft - August 2025 UK.pdf | pages=100 chunks=743 vlm=96 docling=0 fallback=4 2526.6s
+2026-05-29 12:26:01,512 [INFO] v3_batch_ingest: [11/43] PCWorld_July_2025_USA.pdf
+2026-05-29 13:02:43,837 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=ae1c6740af40, source=PCWorld_July_2025_USA.pdf, type=pdf, pages=108, digital=56, scanned=52, text_elements=832, image_elements=134, table_elements=1)
+2026-05-29 13:02:43,856 [INFO] v3_batch_ingest: OK PCWorld_July_2025_USA.pdf | pages=108 chunks=407 vlm=108 docling=0 fallback=0 2202.3s
+2026-05-29 13:02:43,858 [INFO] v3_batch_ingest: [12/43] ATZ.-.Das.Experimentalsicherheitsfahrzeug.ESF.2009.von.Mercedes.Benz.pdf
+2026-05-29 13:12:44,630 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=69da9d6386dd, source=ATZ.-.Das.Experimentalsicherheitsfahrzeug.ESF.2009.von.Mercedes.Benz.pdf, type=pdf, pages=9, digital=9, scanned=0, text_elements=71, image_elements=17, table_elements=0)
+2026-05-29 13:12:44,641 [INFO] v3_batch_ingest: OK ATZ.-.Das.Experimentalsicherheitsfahrzeug.ESF.2009.von.Mercedes.Benz.pdf | pages=9 chunks=55 vlm=9 docling=0 fallback=0 600.8s
+2026-05-29 13:12:44,644 [INFO] v3_batch_ingest: [13/43] ATZ.-.Design.und.Aerodynamik.bei.Nutzfahrzeugen.pdf
+2026-05-29 13:16:14,383 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=4d769821d663, source=ATZ.-.Design.und.Aerodynamik.bei.Nutzfahrzeugen.pdf, type=pdf, pages=6, digital=6, scanned=0, text_elements=47, image_elements=16, table_elements=0)
+2026-05-29 13:16:14,389 [INFO] v3_batch_ingest: OK ATZ.-.Design.und.Aerodynamik.bei.Nutzfahrzeugen.pdf | pages=6 chunks=42 vlm=6 docling=0 fallback=0 209.7s
+2026-05-29 13:16:14,390 [INFO] v3_batch_ingest: [14/43] Bevestigingsmiddelen.pdf
+2026-05-29 13:16:14,594 [INFO] docling.datamodel.document: detected formats: [<InputFormat.PDF: 'pdf'>]
+2026-05-29 13:16:14,595 [INFO] docling.document_converter: Going to convert document batch...
+2026-05-29 13:16:14,596 [INFO] docling.document_converter: Initializing pipeline for StandardPdfPipeline with options hash c4c6ce1a26372d9e7054fbcbe6edc924
+2026-05-29 13:16:14,597 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 13:16:14,846 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-layout-heron/revision/main "HTTP/1.1 200 OK"
+Loading weights:   0%|          | 0/770 [00:00<?, ?it/s]Loading weights: 100%|██████████| 770/770 [00:00<00:00, 11730.10it/s]
+2026-05-29 13:16:15,227 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-models/revision/v2.3.0 "HTTP/1.1 200 OK"
+2026-05-29 13:16:15,231 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 13:16:15,732 [INFO] docling.pipeline.base_pipeline: Processing document Bevestigingsmiddelen.pdf
+2026-05-29 13:16:17,135 [INFO] docling.document_converter: Finished converting document Bevestigingsmiddelen.pdf in 2.54 sec.
+2026-05-29 13:16:17,139 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=7899560a4b0f, source=Bevestigingsmiddelen.pdf, type=pdf, pages=2, digital=2, scanned=0, text_elements=382, image_elements=0, table_elements=0)
+2026-05-29 13:16:17,149 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=7899560a4b0f, source=Bevestigingsmiddelen.pdf, type=pdf, pages=2, digital=2, scanned=0, text_elements=382, image_elements=0, table_elements=0)
+2026-05-29 13:16:17,153 [INFO] v3_batch_ingest: OK Bevestigingsmiddelen.pdf | pages=2 chunks=5 vlm=0 docling=2 fallback=0 2.8s
+2026-05-29 13:16:17,154 [INFO] v3_batch_ingest: [15/43] Digitale-Fotografie - Das essentielle Handbuch Februar 2026.pdf
+2026-05-29 13:20:13,065 [WARNING] _phase_c_engine.router: VLM failed on page 7 (Malformed VLM response shape: 'choices'); falling back to docling
+2026-05-29 13:22:18,687 [WARNING] _phase_c_engine.router: VLM failed on page 15 (Malformed VLM response shape: 'choices'); falling back to docling
+2026-05-29 13:26:32,765 [WARNING] _phase_c_engine.router: VLM failed on page 27 (Malformed VLM response shape: 'choices'); falling back to docling
+2026-05-29 13:30:04,761 [WARNING] _phase_c_engine.router: VLM failed on page 38 (Malformed VLM response shape: 'choices'); falling back to docling
+2026-05-29 13:31:16,460 [WARNING] _phase_c_engine.router: VLM failed on page 41 (Malformed VLM response shape: 'choices'); falling back to docling
+2026-05-29 13:33:56,252 [WARNING] _phase_c_engine.router: VLM failed on page 43 (Malformed VLM response shape: 'choices'); falling back to docling
+2026-05-29 13:34:22,033 [WARNING] _phase_c_engine.router: VLM failed on page 44 (Malformed VLM response shape: 'choices'); falling back to docling
+2026-05-29 13:37:52,706 [WARNING] _phase_c_engine.router: VLM failed on page 58 (Malformed VLM response shape: 'choices'); falling back to docling
+2026-05-29 13:38:21,059 [WARNING] _phase_c_engine.router: VLM failed on page 60 (Malformed VLM response shape: 'choices'); falling back to docling
+2026-05-29 13:38:40,008 [WARNING] _phase_c_engine.router: VLM failed on page 61 (Malformed VLM response shape: 'choices'); falling back to docling
+2026-05-29 13:39:57,975 [WARNING] _phase_c_engine.router: VLM failed on page 64 (Malformed VLM response shape: Expecting value: line 199 column 1 (char 1089)); falling back to docling
+2026-05-29 13:42:26,074 [WARNING] _phase_c_engine.router: VLM failed on page 67 (Malformed VLM response shape: 'choices'); falling back to docling
+2026-05-29 13:42:41,582 [WARNING] _phase_c_engine.router: VLM failed on page 68 (VLM status 413: {"error":{"message":"Downloaded image content cannot exceed 30MB","code":413,"metadata":{"provider_name":null}},"user_id":"user_3E8Oea3H8QnKuBPRs1q2kHAn1pO"}); falling back to docling
+2026-05-29 13:45:15,590 [WARNING] _phase_c_engine.router: VLM failed on page 71 (Unterminated string starting at: line 828 column 18 (char 19579)); falling back to docling
+2026-05-29 13:51:58,753 [WARNING] _phase_c_engine.router: VLM failed on page 88 (Malformed VLM response shape: Expecting value: line 681 column 1 (char 3740)); falling back to docling
+2026-05-29 13:54:33,483 [WARNING] _phase_c_engine.router: VLM failed on page 94 (Malformed VLM response shape: 'choices'); falling back to docling
+2026-05-29 13:55:21,331 [WARNING] _phase_c_engine.router: VLM failed on page 97 (Malformed VLM response shape: 'choices'); falling back to docling
+2026-05-29 13:55:38,761 [WARNING] _phase_c_engine.router: VLM failed on page 98 (Malformed VLM response shape: 'choices'); falling back to docling
+2026-05-29 13:59:34,505 [WARNING] _phase_c_engine.router: VLM failed on page 105 (Unterminated string starting at: line 873 column 23 (char 21510)); falling back to docling
+2026-05-29 13:59:56,013 [WARNING] _phase_c_engine.router: VLM failed on page 106 (Malformed VLM response shape: 'choices'); falling back to docling
+2026-05-29 14:07:38,600 [WARNING] _phase_c_engine.router: VLM failed on page 125 (Malformed VLM response shape: Expecting value: line 165 column 1 (char 902)); falling back to docling
+2026-05-29 14:11:38,855 [WARNING] _phase_c_engine.router: VLM failed on page 133 (Malformed VLM response shape: 'choices'); falling back to docling
+2026-05-29 14:18:36,740 [WARNING] _phase_c_engine.router: VLM failed on page 142 (Unterminated string starting at: line 9 column 18 (char 149)); falling back to docling
+2026-05-29 14:19:19,646 [INFO] docling.datamodel.document: detected formats: [<InputFormat.PDF: 'pdf'>]
+2026-05-29 14:19:19,717 [INFO] docling.document_converter: Going to convert document batch...
+2026-05-29 14:19:19,718 [INFO] docling.document_converter: Initializing pipeline for StandardPdfPipeline with options hash c4c6ce1a26372d9e7054fbcbe6edc924
+2026-05-29 14:19:19,723 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 14:19:19,895 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-layout-heron/revision/main "HTTP/1.1 200 OK"
+Loading weights:   0%|          | 0/770 [00:00<?, ?it/s]Loading weights: 100%|██████████| 770/770 [00:00<00:00, 12058.18it/s]
+2026-05-29 14:19:20,572 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-models/revision/v2.3.0 "HTTP/1.1 200 OK"
+2026-05-29 14:19:20,581 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 14:19:21,109 [INFO] docling.pipeline.base_pipeline: Processing document Digitale-Fotografie - Das essentielle Handbuch Februar 2026.pdf
+2026-05-29 14:21:41,709 [INFO] docling.document_converter: Finished converting document Digitale-Fotografie - Das essentielle Handbuch Februar 2026.pdf in 142.08 sec.
+2026-05-29 14:21:41,888 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=326a71396153, source=Digitale-Fotografie - Das essentielle Handbuch Februar 2026.pdf, type=pdf, pages=144, digital=144, scanned=0, text_elements=0, image_elements=203, table_elements=0)
+2026-05-29 14:21:42,085 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=326a71396153, source=Digitale-Fotografie - Das essentielle Handbuch Februar 2026.pdf, type=pdf, pages=144, digital=64, scanned=80, text_elements=618, image_elements=252, table_elements=0)
+2026-05-29 14:21:42,101 [INFO] v3_batch_ingest: OK Digitale-Fotografie - Das essentielle Handbuch Februar 2026.pdf | pages=144 chunks=478 vlm=121 docling=0 fallback=23 3924.9s
+2026-05-29 14:21:42,103 [INFO] v3_batch_ingest: [16/43] Eliasz A. Zephyr RTOS Embedded C Programming. Using Embedded RTOS POSIX API 2024.pdf
+/Users/ronald/miniforge3/envs/mmrag-v2/lib/python3.10/multiprocessing/resource_tracker.py:224: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+2026-05-29 14:23:45,550 [INFO] v3_batch_ingest: skipping HarryPotter_and_the_Sorcerers_Stone.pdf (327 pages > --max-pages 300)
+2026-05-29 14:23:45,564 [INFO] v3_batch_ingest: skipping Eliasz A. Zephyr RTOS Embedded C Programming. Using Embedded RTOS POSIX API 2024.pdf (689 pages > --max-pages 300)
+2026-05-29 14:23:45,597 [INFO] v3_batch_ingest: skipping Grundlagen Fahrzeug- und Motorentechnik.pdf (511 pages > --max-pages 300)
+2026-05-29 14:23:45,630 [INFO] v3_batch_ingest: skipping Schwungradspeicher in der Fahrzeugtechnik.pdf (309 pages > --max-pages 300)
+2026-05-29 14:23:45,656 [INFO] v3_batch_ingest: skipping Adedeji A. GenAI on Google Cloud. Enterprise Generative AI Systems...Agents 2026.pdf (320 pages > --max-pages 300)
+2026-05-29 14:23:45,684 [INFO] v3_batch_ingest: skipping Bourne K. Unlocking Data with Generative AI and RAG 2024.pdf (346 pages > --max-pages 300)
+2026-05-29 14:23:45,700 [INFO] v3_batch_ingest: skipping Chaubal S. AI Projects in PyTorch. Hands-On Projects in Vision, Text,...2025.pdf (359 pages > --max-pages 300)
+2026-05-29 14:23:45,741 [INFO] v3_batch_ingest: skipping Cronin I. Building and Training Generative AI Models. A Practical Guide...2026.pdf (652 pages > --max-pages 300)
+2026-05-29 14:23:45,747 [INFO] v3_batch_ingest: skipping Devlin M. Building LLM Agents with RAG, Knowledge Graphs and Reflection...2025.pdf (365 pages > --max-pages 300)
+2026-05-29 14:23:45,796 [INFO] v3_batch_ingest: skipping Fluent Python Luciano Ramalho 2015.pdf (766 pages > --max-pages 300)
+2026-05-29 14:23:45,819 [INFO] v3_batch_ingest: skipping Greenhouse Design and Control by Pedro Ponce.pdf (378 pages > --max-pages 300)
+2026-05-29 14:23:45,840 [INFO] v3_batch_ingest: skipping Handbuch Entwicklungs- und Erziehungspsychologie.pdf (587 pages > --max-pages 300)
+2026-05-29 14:23:45,860 [INFO] v3_batch_ingest: skipping Handbuch der Wickeltechnik fur hocheffiziente Spulen und Mot.pdf (309 pages > --max-pages 300)
+2026-05-29 14:23:45,910 [INFO] v3_batch_ingest: skipping Hao B. Machine Learning Platform Engineering. Build...for ML and AI systems 2026.pdf (504 pages > --max-pages 300)
+2026-05-29 14:23:45,956 [INFO] v3_batch_ingest: skipping Nagasubramanian D. Agentic AI for Engineers.Architecting Goal-Driven System 2026.pdf (460 pages > --max-pages 300)
+2026-05-29 14:23:45,966 [INFO] v3_batch_ingest: skipping Programming ArcGIS with Python Cookbook.pdf (366 pages > --max-pages 300)
+2026-05-29 14:23:45,973 [INFO] v3_batch_ingest: skipping Python Cookbook  Everyone can cook delicious recipes with Python.pdf (477 pages > --max-pages 300)
+2026-05-29 14:23:46,034 [INFO] v3_batch_ingest: skipping Python Distilled David M. Beazley 2022.pdf (1411 pages > --max-pages 300)
+2026-05-29 14:23:46,114 [INFO] v3_batch_ingest: skipping Raieli S. Building AI Agents with LLMs, RAG, and Knowledge Graphs...2025.pdf (555 pages > --max-pages 300)
+2026-05-29 14:23:46,138 [INFO] v3_batch_ingest: Starting V3 grand soak: 24 PDFs → /Users/ronald/Projects/MM-Converter-V2.4.1/output/v3_baselines
+2026-05-29 14:23:46,138 [INFO] v3_batch_ingest: [1/24] AIOS LLM Agent Operating System.pdf
+2026-05-29 14:23:46,139 [INFO] v3_batch_ingest: [2/24] A_comprehensive_review_on_hybrid_electri.pdf
+2026-05-29 14:23:46,140 [INFO] v3_batch_ingest: [3/24] Hybrid_electric_vehicles_and_their_challenges.pdf
+2026-05-29 14:23:46,141 [INFO] v3_batch_ingest: [4/24] IRJET_Modeling_of_Solar_PV_system_under.pdf
+2026-05-29 14:23:46,142 [INFO] v3_batch_ingest: [5/24] Recent_Trends_in_Transportation_Technolo.pdf
+2026-05-29 14:23:46,143 [INFO] v3_batch_ingest: [6/24] 0013_140302111325_001.pdf
+2026-05-29 14:23:46,144 [INFO] v3_batch_ingest: [7/24] betwistingsformulier_aankoop_niet_ontvangen.pdf
+2026-05-29 14:23:46,144 [INFO] v3_batch_ingest: [8/24] CarOK voorraadtelling 2021-04.pdf
+2026-05-29 14:23:46,145 [INFO] v3_batch_ingest: [9/24] Combat Aircraft - August 2025 UK.pdf
+2026-05-29 14:23:46,146 [INFO] v3_batch_ingest: [10/24] PCWorld_July_2025_USA.pdf
+2026-05-29 14:23:46,148 [INFO] v3_batch_ingest: [11/24] ATZ.-.Das.Experimentalsicherheitsfahrzeug.ESF.2009.von.Mercedes.Benz.pdf
+2026-05-29 14:23:46,150 [INFO] v3_batch_ingest: [12/24] ATZ.-.Design.und.Aerodynamik.bei.Nutzfahrzeugen.pdf
+2026-05-29 14:23:46,152 [INFO] v3_batch_ingest: [13/24] Bevestigingsmiddelen.pdf
+2026-05-29 14:23:46,153 [INFO] v3_batch_ingest: [14/24] Digitale-Fotografie - Das essentielle Handbuch Februar 2026.pdf
+2026-05-29 14:23:46,156 [INFO] v3_batch_ingest: [15/24] A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf
+Consider using the pymupdf_layout package for a greatly improved page layout analysis.
+MuPDF error: syntax error: unknown keyword: 'ml'
+
+MuPDF error: syntax error: unknown keyword: '375.617.943401'
+
+MuPDF error: syntax error: unknown keyword: '518.4018h1'
+
+MuPDF error: syntax error: unknown keyword: '518.40.367c1'
+
+MuPDF error: syntax error: unknown keyword: '376..4018h1'
+
+MuPDF error: syntax error: unknown keyword: '0477518.4.091'
+
+MuPDF error: syntax error: unknown keyword: '518.18.401'
+
+MuPDF error: syntax error: unknown keyword: '367.4198.437'
+
+MuPDF error: syntax error: unknown keyword: '517.94R.401'
+
+MuPDF error: syntax error: unknown keyword: 'l518.4.091'
+
+MuPDF error: syntax error: unknown keyword: 'ml'
+
+MuPDF error: syntax error: unknown keyword: '375.617.943401'
+
+MuPDF error: syntax error: unknown keyword: '361.l'
+
+MuPDF error: syntax error: unknown keyword: 'ml'
+
+MuPDF error: syntax error: unknown keyword: '375.67c1'
+
+MuPDF error: syntax error: unknown keyword: 'ml'
+
+MuPDF error: syntax error: unknown keyword: '518.472.48'
+
+MuPDF error: syntax error: unknown keyword: '365.60777.825'
+
+MuPDF error: syntax error: unknown keyword: '518.4l'
+
+MuPDF error: syntax error: unknown keyword: '51l'
+
+MuPDF error: syntax error: unknown keyword: '51p.895'
+
+MuPDF error: syntax error: unknown keyword: '368.8404517.94.943'
+
+MuPDF error: syntax error: unknown keyword: '51p.895'
+
+MuPDF error: syntax error: unknown keyword: '368.8435112.48'
+
+MuPDF error: syntax error: unknown keyword: '368.8435112.483'
+
+MuPDF error: syntax error: unknown keyword: 'h943'
+
+MuPDF error: syntax error: unknown keyword: 'h9462.858'
+
+MuPDF error: syntax error: unknown keyword: 'ls483'
+
+MuPDF error: syntax error: unknown keyword: '6c05'
+
+MuPDF error: syntax error: unknown keyword: '6c05'
+
+MuPDF error: syntax error: unknown keyword: '5l'
+
+MuPDF error: syntax error: unknown keyword: '3624m'
+
+MuPDF error: syntax error: unknown keyword: '365.602m'
+
+MuPDF error: syntax error: unknown keyword: '368.814517.943'
+
+MuPDF error: syntax error: unknown keyword: '517.9t375.617401'
+
+MuPDF error: syntax error: unknown keyword: '1l'
+
+MuPDF error: syntax error: unknown keyword: '1l75.6436'
+
+MuPDF error: syntax error: unknown keyword: '1l743'
+
+MuPDF error: syntax error: unknown keyword: '374.6518.401'
+
+MuPDF error: syntax error: unknown keyword: '373.58.401'
+
+MuPDF error: syntax error: unknown keyword: 'l8.401'
+
+MuPDF error: syntax error: unknown keyword: '368.8404518.401'
+
+MuPDF error: syntax error: unknown keyword: '364.9964.6518.4019170.953'
+
+MuPDF error: syntax error: unknown keyword: 'l.401917713'
+
+MuPDF error: syntax error: unknown keyword: '379.9l'
+
+MuPDF error: syntax error: unknown keyword: '373.582h'
+
+MuPDF error: syntax error: unknown keyword: '56m'
+
+MuPDF error: syntax error: unknown keyword: '517.18.4014.483'
+
+MuPDF error: syntax error: unknown keyword: '375.2582h'
+
+MuPDF error: syntax error: unknown keyword: '518.409h82h'
+
+MuPDF error: syntax error: unknown keyword: '368h1'
+
+MuPDF error: syntax error: unknown keyword: 'l19170.953'
+
+MuPDF error: syntax error: unknown keyword: 'l.42411'
+
+MuPDF error: syntax error: unknown keyword: '517.94375.2582h'
+
+MuPDF error: syntax error: unknown keyword: '3h'
+
+MuPDF error: syntax error: unknown keyword: '.64394375.22721'
+
+MuPDF error: syntax error: unknown keyword: '3h'
+
+MuPDF error: syntax error: unknown keyword: '3h68h1'
+
+MuPDF error: syntax error: unknown keyword: '3h68h732.858'
+
+MuPDF error: syntax error: unknown keyword: '5l'
+
+MuPDF error: syntax error: unknown keyword: '3h68'
+
+MuPDF error: syntax error: unknown keyword: '517.8h1'
+
+MuPDF error: syntax error: unknown keyword: '0418.403.091'
+
+MuPDF error: syntax error: unknown keyword: 'll'
+
+MuPDF error: syntax error: unknown keyword: '517.218.40517.94336'
+
+MuPDF error: syntax error: unknown keyword: '568.81.401'
+
+MuPDF error: syntax error: unknown keyword: '366.5l'
+
+MuPDF error: syntax error: unknown keyword: 'h.401'
+
+MuPDF error: syntax error: unknown keyword: '518.40i801'
+
+MuPDF error: syntax error: unknown keyword: 'l5'
+
+MuPDF error: syntax error: unknown keyword: 'l5'
+
+MuPDF error: syntax error: unknown keyword: '518.40i8l'
+
+MuPDF error: syntax error: unknown keyword: '511l75.59l'
+
+MuPDF error: syntax error: unknown keyword: '518.7.943'
+
+MuPDF error: syntax error: unknown keyword: '517.770.95376.756'
+
+MuPDF error: syntax error: unknown keyword: '517.518.40131'
+
+MuPDF error: syntax error: unknown keyword: '517.918.401'
+
+MuPDF error: syntax error: unknown keyword: 'hh'
+
+MuPDF error: syntax error: unknown keyword: '382.70.9537369.272371.411'
+
+MuPDF error: syntax error: unknown keyword: '517.21l'
+
+MuPDF error: syntax error: unknown keyword: '382m'
+
+MuPDF error: syntax error: unknown keyword: '518.417.943'
+
+MuPDF error: syntax error: unknown keyword: '361.517.9437.943'
+
+MuPDF error: syntax error: unknown keyword: '373.04.618'
+
+MuPDF error: syntax error: unknown keyword: '.59l'
+
+MuPDF error: syntax error: unknown keyword: '370.9518.401'
+
+MuPDF error: syntax error: unknown keyword: '378.17.943'
+
+MuPDF error: syntax error: unknown keyword: '368.8372.18.401'
+
+MuPDF error: syntax error: unknown keyword: 'l4517.94761.70.9537369..618'
+
+MuPDF error: syntax error: syntax error in content stream
+
+MuPDF error: syntax error: unknown keyword: '568.8372.18.4518.40518.401'
+
+MuPDF error: syntax error: unknown keyword: '3769..6118.'
+
+MuPDF error: syntax error: syntax error in content stream
+
+MuPDF error: syntax error: unknown keyword: 'l07'
+
+MuPDF error: syntax error: unknown keyword: '518.4018.401'
+
+MuPDF error: syntax error: unknown keyword: '361.l'
+
+MuPDF error: syntax error: unknown keyword: '5h'
+
+MuPDF error: syntax error: unknown keyword: '3768.204c95'
+
+MuPDF error: syntax error: unknown keyword: '518368.63.928'
+
+MuPDF error: syntax error: syntax error in content stream
+
+MuPDF error: syntax error: unknown keyword: 'ml'
+
+MuPDF error: syntax error: unknown keyword: '375.617.943401'
+
+MuPDF error: syntax error: unknown keyword: '518.4018h1'
+
+MuPDF error: syntax error: unknown keyword: '518.40.367c1'
+
+MuPDF error: syntax error: unknown keyword: '376..4018h1'
+
+MuPDF error: syntax error: unknown keyword: '0477518.4.091'
+
+MuPDF error: syntax error: unknown keyword: '518.18.401'
+
+MuPDF error: syntax error: unknown keyword: '367.4198.437'
+
+MuPDF error: syntax error: unknown keyword: '517.94R.401'
+
+MuPDF error: syntax error: unknown keyword: 'l518.4.091'
+
+MuPDF error: syntax error: unknown keyword: 'ml'
+
+MuPDF error: syntax error: unknown keyword: '375.617.943401'
+
+MuPDF error: syntax error: unknown keyword: '361.l'
+
+MuPDF error: syntax error: unknown keyword: 'ml'
+
+MuPDF error: syntax error: unknown keyword: '375.67c1'
+
+MuPDF error: syntax error: unknown keyword: 'ml'
+
+MuPDF error: syntax error: unknown keyword: '518.472.48'
+
+MuPDF error: syntax error: unknown keyword: '365.60777.825'
+
+MuPDF error: syntax error: unknown keyword: '518.4l'
+
+MuPDF error: syntax error: unknown keyword: '51l'
+
+MuPDF error: syntax error: unknown keyword: '51p.895'
+
+MuPDF error: syntax error: unknown keyword: '368.8404517.94.943'
+
+MuPDF error: syntax error: unknown keyword: '51p.895'
+
+MuPDF error: syntax error: unknown keyword: '368.8435112.48'
+
+MuPDF error: syntax error: unknown keyword: '368.8435112.483'
+
+MuPDF error: syntax error: unknown keyword: 'h943'
+
+MuPDF error: syntax error: unknown keyword: 'h9462.858'
+
+MuPDF error: syntax error: unknown keyword: 'ls483'
+
+MuPDF error: syntax error: unknown keyword: '6c05'
+
+MuPDF error: syntax error: unknown keyword: '6c05'
+
+MuPDF error: syntax error: unknown keyword: '5l'
+
+MuPDF error: syntax error: unknown keyword: '3624m'
+
+MuPDF error: syntax error: unknown keyword: '365.602m'
+
+MuPDF error: syntax error: unknown keyword: '368.814517.943'
+
+MuPDF error: syntax error: unknown keyword: '517.9t375.617401'
+
+MuPDF error: syntax error: unknown keyword: '1l'
+
+MuPDF error: syntax error: unknown keyword: '1l75.6436'
+
+MuPDF error: syntax error: unknown keyword: '1l743'
+
+MuPDF error: syntax error: unknown keyword: '374.6518.401'
+
+MuPDF error: syntax error: unknown keyword: '373.58.401'
+
+MuPDF error: syntax error: unknown keyword: 'l8.401'
+
+MuPDF error: syntax error: unknown keyword: '368.8404518.401'
+
+MuPDF error: syntax error: unknown keyword: '364.9964.6518.4019170.953'
+
+MuPDF error: syntax error: unknown keyword: 'l.401917713'
+
+MuPDF error: syntax error: unknown keyword: '379.9l'
+
+MuPDF error: syntax error: unknown keyword: '373.582h'
+
+MuPDF error: syntax error: unknown keyword: '56m'
+
+MuPDF error: syntax error: unknown keyword: '517.18.4014.483'
+
+MuPDF error: syntax error: unknown keyword: '375.2582h'
+
+MuPDF error: syntax error: unknown keyword: '518.409h82h'
+
+MuPDF error: syntax error: unknown keyword: '368h1'
+
+MuPDF error: syntax error: unknown keyword: 'l19170.953'
+
+MuPDF error: syntax error: unknown keyword: 'l.42411'
+
+MuPDF error: syntax error: unknown keyword: '517.94375.2582h'
+
+MuPDF error: syntax error: unknown keyword: '3h'
+
+MuPDF error: syntax error: unknown keyword: '.64394375.22721'
+
+MuPDF error: syntax error: unknown keyword: '3h'
+
+MuPDF error: syntax error: unknown keyword: '3h68h1'
+
+MuPDF error: syntax error: unknown keyword: '3h68h732.858'
+
+MuPDF error: syntax error: unknown keyword: '5l'
+
+MuPDF error: syntax error: unknown keyword: '3h68'
+
+MuPDF error: syntax error: unknown keyword: '517.8h1'
+
+MuPDF error: syntax error: unknown keyword: '0418.403.091'
+
+MuPDF error: syntax error: unknown keyword: 'll'
+
+MuPDF error: syntax error: unknown keyword: '517.218.40517.94336'
+
+MuPDF error: syntax error: unknown keyword: '568.81.401'
+
+MuPDF error: syntax error: unknown keyword: '366.5l'
+
+MuPDF error: syntax error: unknown keyword: 'h.401'
+
+MuPDF error: syntax error: unknown keyword: '518.40i801'
+
+MuPDF error: syntax error: unknown keyword: 'l5'
+
+MuPDF error: syntax error: unknown keyword: 'l5'
+
+MuPDF error: syntax error: unknown keyword: '518.40i8l'
+
+MuPDF error: syntax error: unknown keyword: '511l75.59l'
+
+MuPDF error: syntax error: unknown keyword: '518.7.943'
+
+MuPDF error: syntax error: unknown keyword: '517.770.95376.756'
+
+MuPDF error: syntax error: unknown keyword: '517.518.40131'
+
+MuPDF error: syntax error: unknown keyword: '517.918.401'
+
+MuPDF error: syntax error: unknown keyword: 'hh'
+
+MuPDF error: syntax error: unknown keyword: '382.70.9537369.272371.411'
+
+MuPDF error: syntax error: unknown keyword: '517.21l'
+
+MuPDF error: syntax error: unknown keyword: '382m'
+
+MuPDF error: syntax error: unknown keyword: '518.417.943'
+
+MuPDF error: syntax error: unknown keyword: '361.517.9437.943'
+
+MuPDF error: syntax error: unknown keyword: '373.04.618'
+
+MuPDF error: syntax error: unknown keyword: '.59l'
+
+MuPDF error: syntax error: unknown keyword: '370.9518.401'
+
+MuPDF error: syntax error: unknown keyword: '378.17.943'
+
+MuPDF error: syntax error: unknown keyword: '368.8372.18.401'
+
+MuPDF error: syntax error: unknown keyword: 'l4517.94761.70.9537369..618'
+
+MuPDF error: syntax error: syntax error in content stream
+
+MuPDF error: syntax error: unknown keyword: '568.8372.18.4518.40518.401'
+
+MuPDF error: syntax error: unknown keyword: '3769..6118.'
+
+MuPDF error: syntax error: syntax error in content stream
+
+MuPDF error: syntax error: unknown keyword: 'l07'
+
+MuPDF error: syntax error: unknown keyword: '518.4018.401'
+
+MuPDF error: syntax error: unknown keyword: '361.l'
+
+MuPDF error: syntax error: unknown keyword: '5h'
+
+MuPDF error: syntax error: unknown keyword: '3768.204c95'
+
+MuPDF error: syntax error: unknown keyword: '518368.63.928'
+
+MuPDF error: syntax error: syntax error in content stream
+
+MuPDF error: syntax error: unknown keyword: 'ml'
+
+MuPDF error: syntax error: unknown keyword: '375.617.943401'
+
+MuPDF error: syntax error: unknown keyword: '518.4018h1'
+
+MuPDF error: syntax error: unknown keyword: '518.40.367c1'
+
+MuPDF error: syntax error: unknown keyword: '376..4018h1'
+
+MuPDF error: syntax error: unknown keyword: '0477518.4.091'
+
+MuPDF error: syntax error: unknown keyword: '518.18.401'
+
+MuPDF error: syntax error: unknown keyword: '367.4198.437'
+
+MuPDF error: syntax error: unknown keyword: '517.94R.401'
+
+MuPDF error: syntax error: unknown keyword: 'l518.4.091'
+
+MuPDF error: syntax error: unknown keyword: 'ml'
+
+MuPDF error: syntax error: unknown keyword: '375.617.943401'
+
+MuPDF error: syntax error: unknown keyword: '361.l'
+
+MuPDF error: syntax error: unknown keyword: 'ml'
+
+MuPDF error: syntax error: unknown keyword: '375.67c1'
+
+MuPDF error: syntax error: unknown keyword: 'ml'
+
+MuPDF error: syntax error: unknown keyword: '518.472.48'
+
+MuPDF error: syntax error: unknown keyword: '365.60777.825'
+
+MuPDF error: syntax error: unknown keyword: '518.4l'
+
+MuPDF error: syntax error: unknown keyword: '51l'
+
+MuPDF error: syntax error: unknown keyword: '51p.895'
+
+MuPDF error: syntax error: unknown keyword: '368.8404517.94.943'
+
+MuPDF error: syntax error: unknown keyword: '51p.895'
+
+MuPDF error: syntax error: unknown keyword: '368.8435112.48'
+
+MuPDF error: syntax error: unknown keyword: '368.8435112.483'
+
+MuPDF error: syntax error: unknown keyword: 'h943'
+
+MuPDF error: syntax error: unknown keyword: 'h9462.858'
+
+MuPDF error: syntax error: unknown keyword: 'ls483'
+
+MuPDF error: syntax error: unknown keyword: '6c05'
+
+MuPDF error: syntax error: unknown keyword: '6c05'
+
+MuPDF error: syntax error: unknown keyword: '5l'
+
+MuPDF error: syntax error: unknown keyword: '3624m'
+
+MuPDF error: syntax error: unknown keyword: '365.602m'
+
+MuPDF error: syntax error: unknown keyword: '368.814517.943'
+
+MuPDF error: syntax error: unknown keyword: '517.9t375.617401'
+
+MuPDF error: syntax error: unknown keyword: '1l'
+
+MuPDF error: syntax error: unknown keyword: '1l75.6436'
+
+MuPDF error: syntax error: unknown keyword: '1l743'
+
+MuPDF error: syntax error: unknown keyword: '374.6518.401'
+
+MuPDF error: syntax error: unknown keyword: '373.58.401'
+
+MuPDF error: syntax error: unknown keyword: 'l8.401'
+
+MuPDF error: syntax error: unknown keyword: '368.8404518.401'
+
+MuPDF error: syntax error: unknown keyword: '364.9964.6518.4019170.953'
+
+MuPDF error: syntax error: unknown keyword: 'l.401917713'
+
+MuPDF error: syntax error: unknown keyword: '379.9l'
+
+MuPDF error: syntax error: unknown keyword: '373.582h'
+
+MuPDF error: syntax error: unknown keyword: '56m'
+
+MuPDF error: syntax error: unknown keyword: '517.18.4014.483'
+
+MuPDF error: syntax error: unknown keyword: '375.2582h'
+
+MuPDF error: syntax error: unknown keyword: '518.409h82h'
+
+MuPDF error: syntax error: unknown keyword: '368h1'
+
+MuPDF error: syntax error: unknown keyword: 'l19170.953'
+
+MuPDF error: syntax error: unknown keyword: 'l.42411'
+
+MuPDF error: syntax error: unknown keyword: '517.94375.2582h'
+
+MuPDF error: syntax error: unknown keyword: '3h'
+
+MuPDF error: syntax error: unknown keyword: '.64394375.22721'
+
+MuPDF error: syntax error: unknown keyword: '3h'
+
+MuPDF error: syntax error: unknown keyword: '3h68h1'
+
+MuPDF error: syntax error: unknown keyword: '3h68h732.858'
+
+MuPDF error: syntax error: unknown keyword: '5l'
+
+MuPDF error: syntax error: unknown keyword: '3h68'
+
+MuPDF error: syntax error: unknown keyword: '517.8h1'
+
+MuPDF error: syntax error: unknown keyword: '0418.403.091'
+
+MuPDF error: syntax error: unknown keyword: 'll'
+
+MuPDF error: syntax error: unknown keyword: '517.218.40517.94336'
+
+MuPDF error: syntax error: unknown keyword: '568.81.401'
+
+MuPDF error: syntax error: unknown keyword: '366.5l'
+
+MuPDF error: syntax error: unknown keyword: 'h.401'
+
+MuPDF error: syntax error: unknown keyword: '518.40i801'
+
+MuPDF error: syntax error: unknown keyword: 'l5'
+
+MuPDF error: syntax error: unknown keyword: 'l5'
+
+MuPDF error: syntax error: unknown keyword: '518.40i8l'
+
+MuPDF error: syntax error: unknown keyword: '511l75.59l'
+
+MuPDF error: syntax error: unknown keyword: '518.7.943'
+
+MuPDF error: syntax error: unknown keyword: '517.770.95376.756'
+
+MuPDF error: syntax error: unknown keyword: '517.518.40131'
+
+MuPDF error: syntax error: unknown keyword: '517.918.401'
+
+MuPDF error: syntax error: unknown keyword: 'hh'
+
+MuPDF error: syntax error: unknown keyword: '382.70.9537369.272371.411'
+
+MuPDF error: syntax error: unknown keyword: '517.21l'
+
+MuPDF error: syntax error: unknown keyword: '382m'
+
+MuPDF error: syntax error: unknown keyword: '518.417.943'
+
+MuPDF error: syntax error: unknown keyword: '361.517.9437.943'
+
+MuPDF error: syntax error: unknown keyword: '373.04.618'
+
+MuPDF error: syntax error: unknown keyword: '.59l'
+
+MuPDF error: syntax error: unknown keyword: '370.9518.401'
+
+MuPDF error: syntax error: unknown keyword: '378.17.943'
+
+MuPDF error: syntax error: unknown keyword: '368.8372.18.401'
+
+MuPDF error: syntax error: unknown keyword: 'l4517.94761.70.9537369..618'
+
+MuPDF error: syntax error: syntax error in content stream
+
+MuPDF error: syntax error: unknown keyword: '568.8372.18.4518.40518.401'
+
+MuPDF error: syntax error: unknown keyword: '3769..6118.'
+
+MuPDF error: syntax error: syntax error in content stream
+
+MuPDF error: syntax error: unknown keyword: 'l07'
+
+MuPDF error: syntax error: unknown keyword: '518.4018.401'
+
+MuPDF error: syntax error: unknown keyword: '361.l'
+
+MuPDF error: syntax error: unknown keyword: '5h'
+
+MuPDF error: syntax error: unknown keyword: '3768.204c95'
+
+MuPDF error: syntax error: unknown keyword: '518368.63.928'
+
+MuPDF error: syntax error: syntax error in content stream
+
+MuPDF error: syntax error: expected object number
+
+2026-05-29 14:37:43,006 [WARNING] _phase_c_engine.router: VLM failed on page 119 (Unterminated string starting at: line 86 column 18 (char 2931)); falling back to docling
+2026-05-29 14:42:30,127 [WARNING] _phase_c_engine.router: VLM failed on page 193 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:30,474 [WARNING] _phase_c_engine.router: VLM failed on page 194 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:30,737 [WARNING] _phase_c_engine.router: VLM failed on page 195 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:31,075 [WARNING] _phase_c_engine.router: VLM failed on page 196 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:31,357 [WARNING] _phase_c_engine.router: VLM failed on page 198 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:31,606 [WARNING] _phase_c_engine.router: VLM failed on page 200 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:31,871 [WARNING] _phase_c_engine.router: VLM failed on page 201 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:32,118 [WARNING] _phase_c_engine.router: VLM failed on page 203 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:32,502 [WARNING] _phase_c_engine.router: VLM failed on page 204 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:32,730 [WARNING] _phase_c_engine.router: VLM failed on page 205 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:33,059 [WARNING] _phase_c_engine.router: VLM failed on page 206 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:33,301 [WARNING] _phase_c_engine.router: VLM failed on page 208 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:33,630 [WARNING] _phase_c_engine.router: VLM failed on page 209 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:33,896 [WARNING] _phase_c_engine.router: VLM failed on page 212 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:34,221 [WARNING] _phase_c_engine.router: VLM failed on page 213 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+MuPDF error: syntax error: unknown keyword: 'ml'
+
+MuPDF error: syntax error: unknown keyword: '375.617.943401'
+
+MuPDF error: syntax error: unknown keyword: '518.4018h1'
+
+MuPDF error: syntax error: unknown keyword: '518.40.367c1'
+
+MuPDF error: syntax error: unknown keyword: '376..4018h1'
+
+MuPDF error: syntax error: unknown keyword: '0477518.4.091'
+
+MuPDF error: syntax error: unknown keyword: '518.18.401'
+
+MuPDF error: syntax error: unknown keyword: '367.4198.437'
+
+MuPDF error: syntax error: unknown keyword: '517.94R.401'
+
+MuPDF error: syntax error: unknown keyword: 'l518.4.091'
+
+MuPDF error: syntax error: unknown keyword: 'ml'
+
+MuPDF error: syntax error: unknown keyword: '375.617.943401'
+
+MuPDF error: syntax error: unknown keyword: '361.l'
+
+MuPDF error: syntax error: unknown keyword: 'ml'
+
+MuPDF error: syntax error: unknown keyword: '375.67c1'
+
+MuPDF error: syntax error: unknown keyword: 'ml'
+
+MuPDF error: syntax error: unknown keyword: '518.472.48'
+
+MuPDF error: syntax error: unknown keyword: '365.60777.825'
+
+MuPDF error: syntax error: unknown keyword: '518.4l'
+
+MuPDF error: syntax error: unknown keyword: '51l'
+
+MuPDF error: syntax error: unknown keyword: '51p.895'
+
+MuPDF error: syntax error: unknown keyword: '368.8404517.94.943'
+
+MuPDF error: syntax error: unknown keyword: '51p.895'
+
+MuPDF error: syntax error: unknown keyword: '368.8435112.48'
+
+MuPDF error: syntax error: unknown keyword: '368.8435112.483'
+
+MuPDF error: syntax error: unknown keyword: 'h943'
+
+MuPDF error: syntax error: unknown keyword: 'h9462.858'
+
+MuPDF error: syntax error: unknown keyword: 'ls483'
+
+MuPDF error: syntax error: unknown keyword: '6c05'
+
+MuPDF error: syntax error: unknown keyword: '6c05'
+
+MuPDF error: syntax error: unknown keyword: '5l'
+
+MuPDF error: syntax error: unknown keyword: '3624m'
+
+MuPDF error: syntax error: unknown keyword: '365.602m'
+
+MuPDF error: syntax error: unknown keyword: '368.814517.943'
+
+MuPDF error: syntax error: unknown keyword: '517.9t375.617401'
+
+MuPDF error: syntax error: unknown keyword: '1l'
+
+MuPDF error: syntax error: unknown keyword: '1l75.6436'
+
+MuPDF error: syntax error: unknown keyword: '1l743'
+
+MuPDF error: syntax error: unknown keyword: '374.6518.401'
+
+MuPDF error: syntax error: unknown keyword: '373.58.401'
+
+MuPDF error: syntax error: unknown keyword: 'l8.401'
+
+MuPDF error: syntax error: unknown keyword: '368.8404518.401'
+
+MuPDF error: syntax error: unknown keyword: '364.9964.6518.4019170.953'
+
+MuPDF error: syntax error: unknown keyword: 'l.401917713'
+
+MuPDF error: syntax error: unknown keyword: '379.9l'
+
+MuPDF error: syntax error: unknown keyword: '373.582h'
+
+MuPDF error: syntax error: unknown keyword: '56m'
+
+MuPDF error: syntax error: unknown keyword: '517.18.4014.483'
+
+MuPDF error: syntax error: unknown keyword: '375.2582h'
+
+MuPDF error: syntax error: unknown keyword: '518.409h82h'
+
+MuPDF error: syntax error: unknown keyword: '368h1'
+
+MuPDF error: syntax error: unknown keyword: 'l19170.953'
+
+MuPDF error: syntax error: unknown keyword: 'l.42411'
+
+MuPDF error: syntax error: unknown keyword: '517.94375.2582h'
+
+MuPDF error: syntax error: unknown keyword: '3h'
+
+MuPDF error: syntax error: unknown keyword: '.64394375.22721'
+
+MuPDF error: syntax error: unknown keyword: '3h'
+
+MuPDF error: syntax error: unknown keyword: '3h68h1'
+
+MuPDF error: syntax error: unknown keyword: '3h68h732.858'
+
+MuPDF error: syntax error: unknown keyword: '5l'
+
+MuPDF error: syntax error: unknown keyword: '3h68'
+
+MuPDF error: syntax error: unknown keyword: '517.8h1'
+
+MuPDF error: syntax error: unknown keyword: '0418.403.091'
+
+MuPDF error: syntax error: unknown keyword: 'll'
+
+MuPDF error: syntax error: unknown keyword: '517.218.40517.94336'
+
+MuPDF error: syntax error: unknown keyword: '568.81.401'
+
+MuPDF error: syntax error: unknown keyword: '366.5l'
+
+MuPDF error: syntax error: unknown keyword: 'h.401'
+
+MuPDF error: syntax error: unknown keyword: '518.40i801'
+
+MuPDF error: syntax error: unknown keyword: 'l5'
+
+MuPDF error: syntax error: unknown keyword: 'l5'
+
+MuPDF error: syntax error: unknown keyword: '518.40i8l'
+
+MuPDF error: syntax error: unknown keyword: '511l75.59l'
+
+MuPDF error: syntax error: unknown keyword: '518.7.943'
+
+MuPDF error: syntax error: unknown keyword: '517.770.95376.756'
+
+MuPDF error: syntax error: unknown keyword: '517.518.40131'
+
+MuPDF error: syntax error: unknown keyword: '517.918.401'
+
+MuPDF error: syntax error: unknown keyword: 'hh'
+
+MuPDF error: syntax error: unknown keyword: '382.70.9537369.272371.411'
+
+MuPDF error: syntax error: unknown keyword: '517.21l'
+
+MuPDF error: syntax error: unknown keyword: '382m'
+
+MuPDF error: syntax error: unknown keyword: '518.417.943'
+
+MuPDF error: syntax error: unknown keyword: '361.517.9437.943'
+
+MuPDF error: syntax error: unknown keyword: '373.04.618'
+
+MuPDF error: syntax error: unknown keyword: '.59l'
+
+MuPDF error: syntax error: unknown keyword: '370.9518.401'
+
+MuPDF error: syntax error: unknown keyword: '378.17.943'
+
+MuPDF error: syntax error: unknown keyword: '368.8372.18.401'
+
+MuPDF error: syntax error: unknown keyword: 'l4517.94761.70.9537369..618'
+
+MuPDF error: syntax error: syntax error in content stream
+
+MuPDF error: syntax error: unknown keyword: '568.8372.18.4518.40518.401'
+
+MuPDF error: syntax error: unknown keyword: '3769..6118.'
+
+MuPDF error: syntax error: syntax error in content stream
+
+MuPDF error: syntax error: unknown keyword: 'l07'
+
+MuPDF error: syntax error: unknown keyword: '518.4018.401'
+
+MuPDF error: syntax error: unknown keyword: '361.l'
+
+MuPDF error: syntax error: unknown keyword: '5h'
+
+MuPDF error: syntax error: unknown keyword: '3768.204c95'
+
+MuPDF error: syntax error: unknown keyword: '518368.63.928'
+
+MuPDF error: syntax error: syntax error in content stream
+
+2026-05-29 14:42:34,455 [WARNING] _phase_c_engine.router: VLM failed on page 215 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:34,736 [WARNING] _phase_c_engine.router: VLM failed on page 222 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:34,963 [WARNING] _phase_c_engine.router: VLM failed on page 224 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:35,284 [WARNING] _phase_c_engine.router: VLM failed on page 226 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:35,536 [WARNING] _phase_c_engine.router: VLM failed on page 227 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:35,790 [WARNING] _phase_c_engine.router: VLM failed on page 228 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:36,009 [WARNING] _phase_c_engine.router: VLM failed on page 234 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:36,315 [WARNING] _phase_c_engine.router: VLM failed on page 237 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:36,554 [WARNING] _phase_c_engine.router: VLM failed on page 239 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:36,854 [WARNING] _phase_c_engine.router: VLM failed on page 243 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:37,091 [WARNING] _phase_c_engine.router: VLM failed on page 244 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:37,371 [WARNING] _phase_c_engine.router: VLM failed on page 257 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:37,741 [WARNING] _phase_c_engine.router: VLM failed on page 258 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:42:43,404 [INFO] docling.datamodel.document: detected formats: [<InputFormat.PDF: 'pdf'>]
+2026-05-29 14:42:43,476 [INFO] docling.document_converter: Going to convert document batch...
+2026-05-29 14:42:43,477 [INFO] docling.document_converter: Initializing pipeline for StandardPdfPipeline with options hash c4c6ce1a26372d9e7054fbcbe6edc924
+2026-05-29 14:42:43,481 [INFO] docling.models.factories.base_factory: Loading plugin 'docling_defaults'
+2026-05-29 14:42:43,483 [INFO] docling.models.factories: Registered picture descriptions: ['picture_description_vlm_engine', 'vlm', 'api']
+2026-05-29 14:42:43,486 [INFO] docling.models.factories.base_factory: Loading plugin 'docling_defaults'
+2026-05-29 14:42:43,494 [INFO] docling.models.factories: Registered ocr engines: ['auto', 'easyocr', 'kserve_v2_ocr', 'ocrmac', 'rapidocr', 'tesserocr', 'tesseract']
+2026-05-29 14:42:43,497 [INFO] docling.models.factories.base_factory: Loading plugin 'docling_defaults'
+2026-05-29 14:42:43,499 [INFO] docling.models.factories: Registered layout engines: ['layout_object_detection', 'docling_layout_default', 'docling_experimental_table_crops_layout']
+2026-05-29 14:42:43,508 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 14:42:43,691 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-layout-heron/revision/main "HTTP/1.1 200 OK"
+Loading weights:   0%|          | 0/770 [00:00<?, ?it/s]Loading weights: 100%|██████████| 770/770 [00:00<00:00, 7979.75it/s]
+2026-05-29 14:42:44,157 [INFO] docling.models.factories.base_factory: Loading plugin 'docling_defaults'
+2026-05-29 14:42:44,159 [INFO] docling.models.factories: Registered table structure engines: ['docling_tableformer', 'docling_tableformer_v2']
+2026-05-29 14:42:44,275 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-models/revision/v2.3.0 "HTTP/1.1 200 OK"
+2026-05-29 14:42:44,300 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 14:42:44,830 [INFO] docling.pipeline.base_pipeline: Processing document A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf
+2026-05-29 14:45:36,988 [INFO] docling.document_converter: Finished converting document A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf in 173.59 sec.
+2026-05-29 14:45:37,065 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=12c8aaab4fa1, source=A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf, type=pdf, pages=258, digital=258, scanned=0, text_elements=2097, image_elements=98, table_elements=22)
+2026-05-29 14:45:37,152 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=12c8aaab4fa1, source=A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf, type=pdf, pages=258, digital=226, scanned=32, text_elements=2234, image_elements=91, table_elements=23)
+2026-05-29 14:45:37,182 [INFO] v3_batch_ingest: OK A Simple Guide to Retrieval Augmented Generation Kimothi A. 2025.pdf | pages=258 chunks=744 vlm=71 docling=158 fallback=29 1311.0s
+2026-05-29 14:45:37,185 [INFO] v3_batch_ingest: [16/24] Ayeva K. Mastering Python Design Patterns...essential Python patterns...3ed 2024.pdf
+2026-05-29 14:46:01,161 [WARNING] _phase_c_engine.router: VLM failed on page 1 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:01,385 [WARNING] _phase_c_engine.router: VLM failed on page 2 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:01,678 [WARNING] _phase_c_engine.router: VLM failed on page 16 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:03,845 [WARNING] _phase_c_engine.router: VLM failed on page 17 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:04,068 [WARNING] _phase_c_engine.router: VLM failed on page 19 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:04,377 [WARNING] _phase_c_engine.router: VLM failed on page 25 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:04,599 [WARNING] _phase_c_engine.router: VLM failed on page 26 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:04,926 [WARNING] _phase_c_engine.router: VLM failed on page 27 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:05,198 [WARNING] _phase_c_engine.router: VLM failed on page 28 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:05,486 [WARNING] _phase_c_engine.router: VLM failed on page 29 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:05,702 [WARNING] _phase_c_engine.router: VLM failed on page 30 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:05,989 [WARNING] _phase_c_engine.router: VLM failed on page 32 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:06,217 [WARNING] _phase_c_engine.router: VLM failed on page 34 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:06,508 [WARNING] _phase_c_engine.router: VLM failed on page 35 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:06,736 [WARNING] _phase_c_engine.router: VLM failed on page 36 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:07,052 [WARNING] _phase_c_engine.router: VLM failed on page 38 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:07,257 [WARNING] _phase_c_engine.router: VLM failed on page 39 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:07,594 [WARNING] _phase_c_engine.router: VLM failed on page 43 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:07,805 [WARNING] _phase_c_engine.router: VLM failed on page 44 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:08,102 [WARNING] _phase_c_engine.router: VLM failed on page 45 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:08,343 [WARNING] _phase_c_engine.router: VLM failed on page 46 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:08,695 [WARNING] _phase_c_engine.router: VLM failed on page 47 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:08,914 [WARNING] _phase_c_engine.router: VLM failed on page 48 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:09,166 [WARNING] _phase_c_engine.router: VLM failed on page 49 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:09,397 [WARNING] _phase_c_engine.router: VLM failed on page 50 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:09,901 [WARNING] _phase_c_engine.router: VLM failed on page 51 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:10,192 [WARNING] _phase_c_engine.router: VLM failed on page 53 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:10,417 [WARNING] _phase_c_engine.router: VLM failed on page 54 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:10,716 [WARNING] _phase_c_engine.router: VLM failed on page 55 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:10,956 [WARNING] _phase_c_engine.router: VLM failed on page 56 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:11,251 [WARNING] _phase_c_engine.router: VLM failed on page 57 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:11,515 [WARNING] _phase_c_engine.router: VLM failed on page 64 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:11,782 [WARNING] _phase_c_engine.router: VLM failed on page 65 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:11,982 [WARNING] _phase_c_engine.router: VLM failed on page 66 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:12,286 [WARNING] _phase_c_engine.router: VLM failed on page 67 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:12,526 [WARNING] _phase_c_engine.router: VLM failed on page 68 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:12,849 [WARNING] _phase_c_engine.router: VLM failed on page 69 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:13,059 [WARNING] _phase_c_engine.router: VLM failed on page 70 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:13,359 [WARNING] _phase_c_engine.router: VLM failed on page 71 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:13,576 [WARNING] _phase_c_engine.router: VLM failed on page 74 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:13,875 [WARNING] _phase_c_engine.router: VLM failed on page 75 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:14,120 [WARNING] _phase_c_engine.router: VLM failed on page 76 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:14,458 [WARNING] _phase_c_engine.router: VLM failed on page 77 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:14,787 [WARNING] _phase_c_engine.router: VLM failed on page 79 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:15,005 [WARNING] _phase_c_engine.router: VLM failed on page 80 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:15,308 [WARNING] _phase_c_engine.router: VLM failed on page 81 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:15,527 [WARNING] _phase_c_engine.router: VLM failed on page 82 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:15,843 [WARNING] _phase_c_engine.router: VLM failed on page 83 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:16,082 [WARNING] _phase_c_engine.router: VLM failed on page 85 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:16,359 [WARNING] _phase_c_engine.router: VLM failed on page 86 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:16,782 [WARNING] _phase_c_engine.router: VLM failed on page 87 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:17,026 [WARNING] _phase_c_engine.router: VLM failed on page 88 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:17,271 [WARNING] _phase_c_engine.router: VLM failed on page 89 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:17,537 [WARNING] _phase_c_engine.router: VLM failed on page 90 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:17,765 [WARNING] _phase_c_engine.router: VLM failed on page 91 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:18,105 [WARNING] _phase_c_engine.router: VLM failed on page 93 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:18,337 [WARNING] _phase_c_engine.router: VLM failed on page 94 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:18,602 [WARNING] _phase_c_engine.router: VLM failed on page 98 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:18,889 [WARNING] _phase_c_engine.router: VLM failed on page 99 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:19,121 [WARNING] _phase_c_engine.router: VLM failed on page 100 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:19,321 [WARNING] _phase_c_engine.router: VLM failed on page 101 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:19,660 [WARNING] _phase_c_engine.router: VLM failed on page 104 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:19,891 [WARNING] _phase_c_engine.router: VLM failed on page 105 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:20,172 [WARNING] _phase_c_engine.router: VLM failed on page 106 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:20,410 [WARNING] _phase_c_engine.router: VLM failed on page 107 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:20,694 [WARNING] _phase_c_engine.router: VLM failed on page 110 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:20,937 [WARNING] _phase_c_engine.router: VLM failed on page 111 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:21,282 [WARNING] _phase_c_engine.router: VLM failed on page 113 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:21,499 [WARNING] _phase_c_engine.router: VLM failed on page 114 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:21,743 [WARNING] _phase_c_engine.router: VLM failed on page 115 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:21,954 [WARNING] _phase_c_engine.router: VLM failed on page 116 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:22,298 [WARNING] _phase_c_engine.router: VLM failed on page 119 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:22,538 [WARNING] _phase_c_engine.router: VLM failed on page 120 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:22,838 [WARNING] _phase_c_engine.router: VLM failed on page 121 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:23,068 [WARNING] _phase_c_engine.router: VLM failed on page 122 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:23,346 [WARNING] _phase_c_engine.router: VLM failed on page 124 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:23,704 [WARNING] _phase_c_engine.router: VLM failed on page 125 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:23,951 [WARNING] _phase_c_engine.router: VLM failed on page 126 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:24,226 [WARNING] _phase_c_engine.router: VLM failed on page 127 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:24,476 [WARNING] _phase_c_engine.router: VLM failed on page 128 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:24,749 [WARNING] _phase_c_engine.router: VLM failed on page 129 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:25,017 [WARNING] _phase_c_engine.router: VLM failed on page 130 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:25,307 [WARNING] _phase_c_engine.router: VLM failed on page 131 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:25,906 [WARNING] _phase_c_engine.router: VLM failed on page 132 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:26,606 [WARNING] _phase_c_engine.router: VLM failed on page 137 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:26,955 [WARNING] _phase_c_engine.router: VLM failed on page 139 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:27,207 [WARNING] _phase_c_engine.router: VLM failed on page 140 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:27,516 [WARNING] _phase_c_engine.router: VLM failed on page 141 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:27,756 [WARNING] _phase_c_engine.router: VLM failed on page 144 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:28,034 [WARNING] _phase_c_engine.router: VLM failed on page 145 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:28,276 [WARNING] _phase_c_engine.router: VLM failed on page 146 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:28,541 [WARNING] _phase_c_engine.router: VLM failed on page 149 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:28,783 [WARNING] _phase_c_engine.router: VLM failed on page 150 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:29,089 [WARNING] _phase_c_engine.router: VLM failed on page 151 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:29,304 [WARNING] _phase_c_engine.router: VLM failed on page 154 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:29,639 [WARNING] _phase_c_engine.router: VLM failed on page 155 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:29,844 [WARNING] _phase_c_engine.router: VLM failed on page 156 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:30,122 [WARNING] _phase_c_engine.router: VLM failed on page 157 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:30,353 [WARNING] _phase_c_engine.router: VLM failed on page 158 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:30,662 [WARNING] _phase_c_engine.router: VLM failed on page 161 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:30,913 [WARNING] _phase_c_engine.router: VLM failed on page 162 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:31,177 [WARNING] _phase_c_engine.router: VLM failed on page 165 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:32,614 [WARNING] _phase_c_engine.router: VLM failed on page 166 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:32,837 [WARNING] _phase_c_engine.router: VLM failed on page 167 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:33,137 [WARNING] _phase_c_engine.router: VLM failed on page 169 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:33,406 [WARNING] _phase_c_engine.router: VLM failed on page 170 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:33,723 [WARNING] _phase_c_engine.router: VLM failed on page 171 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:33,962 [WARNING] _phase_c_engine.router: VLM failed on page 172 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:34,279 [WARNING] _phase_c_engine.router: VLM failed on page 173 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:34,504 [WARNING] _phase_c_engine.router: VLM failed on page 174 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:34,841 [WARNING] _phase_c_engine.router: VLM failed on page 176 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:35,120 [WARNING] _phase_c_engine.router: VLM failed on page 177 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:35,371 [WARNING] _phase_c_engine.router: VLM failed on page 184 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:35,589 [WARNING] _phase_c_engine.router: VLM failed on page 187 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:35,895 [WARNING] _phase_c_engine.router: VLM failed on page 188 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:36,125 [WARNING] _phase_c_engine.router: VLM failed on page 189 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:36,452 [WARNING] _phase_c_engine.router: VLM failed on page 191 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:36,697 [WARNING] _phase_c_engine.router: VLM failed on page 192 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:36,964 [WARNING] _phase_c_engine.router: VLM failed on page 193 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:37,194 [WARNING] _phase_c_engine.router: VLM failed on page 194 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:37,471 [WARNING] _phase_c_engine.router: VLM failed on page 195 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:37,677 [WARNING] _phase_c_engine.router: VLM failed on page 196 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:38,001 [WARNING] _phase_c_engine.router: VLM failed on page 198 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:38,245 [WARNING] _phase_c_engine.router: VLM failed on page 201 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:38,520 [WARNING] _phase_c_engine.router: VLM failed on page 202 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:38,763 [WARNING] _phase_c_engine.router: VLM failed on page 203 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:39,036 [WARNING] _phase_c_engine.router: VLM failed on page 209 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:39,277 [WARNING] _phase_c_engine.router: VLM failed on page 211 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:39,570 [WARNING] _phase_c_engine.router: VLM failed on page 212 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:39,810 [WARNING] _phase_c_engine.router: VLM failed on page 216 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:40,104 [WARNING] _phase_c_engine.router: VLM failed on page 217 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:40,358 [WARNING] _phase_c_engine.router: VLM failed on page 220 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:40,610 [WARNING] _phase_c_engine.router: VLM failed on page 221 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:40,852 [WARNING] _phase_c_engine.router: VLM failed on page 222 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:41,146 [WARNING] _phase_c_engine.router: VLM failed on page 226 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:41,361 [WARNING] _phase_c_engine.router: VLM failed on page 227 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:41,657 [WARNING] _phase_c_engine.router: VLM failed on page 228 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:41,873 [WARNING] _phase_c_engine.router: VLM failed on page 229 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:42,190 [WARNING] _phase_c_engine.router: VLM failed on page 230 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:42,472 [WARNING] _phase_c_engine.router: VLM failed on page 231 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:42,714 [WARNING] _phase_c_engine.router: VLM failed on page 233 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:42,978 [WARNING] _phase_c_engine.router: VLM failed on page 235 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:43,245 [WARNING] _phase_c_engine.router: VLM failed on page 236 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:43,475 [WARNING] _phase_c_engine.router: VLM failed on page 237 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:43,768 [WARNING] _phase_c_engine.router: VLM failed on page 243 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:45,234 [WARNING] _phase_c_engine.router: VLM failed on page 244 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:45,495 [WARNING] _phase_c_engine.router: VLM failed on page 245 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:45,787 [WARNING] _phase_c_engine.router: VLM failed on page 247 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:46,026 [WARNING] _phase_c_engine.router: VLM failed on page 248 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:46,518 [WARNING] _phase_c_engine.router: VLM failed on page 249 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:46,892 [WARNING] _phase_c_engine.router: VLM failed on page 250 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:47,121 [WARNING] _phase_c_engine.router: VLM failed on page 256 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:47,466 [WARNING] _phase_c_engine.router: VLM failed on page 257 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:47,679 [WARNING] _phase_c_engine.router: VLM failed on page 259 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:47,945 [WARNING] _phase_c_engine.router: VLM failed on page 260 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:48,171 [WARNING] _phase_c_engine.router: VLM failed on page 261 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:48,486 [WARNING] _phase_c_engine.router: VLM failed on page 262 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:48,735 [WARNING] _phase_c_engine.router: VLM failed on page 263 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:49,008 [WARNING] _phase_c_engine.router: VLM failed on page 264 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:49,218 [WARNING] _phase_c_engine.router: VLM failed on page 267 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:49,506 [WARNING] _phase_c_engine.router: VLM failed on page 268 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:49,745 [WARNING] _phase_c_engine.router: VLM failed on page 269 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:50,060 [WARNING] _phase_c_engine.router: VLM failed on page 271 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:50,268 [WARNING] _phase_c_engine.router: VLM failed on page 272 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:50,595 [WARNING] _phase_c_engine.router: VLM failed on page 273 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:50,849 [WARNING] _phase_c_engine.router: VLM failed on page 274 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:51,125 [WARNING] _phase_c_engine.router: VLM failed on page 275 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:51,367 [WARNING] _phase_c_engine.router: VLM failed on page 276 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:51,629 [WARNING] _phase_c_engine.router: VLM failed on page 277 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:51,834 [WARNING] _phase_c_engine.router: VLM failed on page 278 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:52,164 [WARNING] _phase_c_engine.router: VLM failed on page 279 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:52,532 [WARNING] _phase_c_engine.router: VLM failed on page 280 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:52,751 [WARNING] _phase_c_engine.router: VLM failed on page 281 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:52,964 [WARNING] _phase_c_engine.router: VLM failed on page 292 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:53,243 [WARNING] _phase_c_engine.router: VLM failed on page 293 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:53,587 [WARNING] _phase_c_engine.router: VLM failed on page 294 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:53,776 [WARNING] _phase_c_engine.router: VLM failed on page 296 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:46:53,810 [INFO] docling.datamodel.document: detected formats: [<InputFormat.PDF: 'pdf'>]
+2026-05-29 14:46:53,822 [INFO] docling.document_converter: Going to convert document batch...
+2026-05-29 14:46:53,822 [INFO] docling.document_converter: Initializing pipeline for StandardPdfPipeline with options hash c4c6ce1a26372d9e7054fbcbe6edc924
+2026-05-29 14:46:53,823 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 14:46:53,986 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-layout-heron/revision/main "HTTP/1.1 200 OK"
+Loading weights:   0%|          | 0/770 [00:00<?, ?it/s]Loading weights: 100%|██████████| 770/770 [00:00<00:00, 12654.24it/s]
+2026-05-29 14:46:54,341 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-models/revision/v2.3.0 "HTTP/1.1 200 OK"
+2026-05-29 14:46:54,346 [INFO] docling.utils.accelerator_utils: Accelerator device: 'cpu'
+2026-05-29 14:46:54,847 [INFO] docling.pipeline.base_pipeline: Processing document Ayeva K. Mastering Python Design Patterns...essential Python patterns...3ed 2024.pdf
+2026-05-29 14:49:26,808 [INFO] docling.document_converter: Finished converting document Ayeva K. Mastering Python Design Patterns...essential Python patterns...3ed 2024.pdf in 153.01 sec.
+2026-05-29 14:49:26,850 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=289fd158f828, source=Ayeva K. Mastering Python Design Patterns...essential Python patterns...3ed 2024.pdf, type=pdf, pages=296, digital=296, scanned=0, text_elements=2801, image_elements=23, table_elements=1)
+2026-05-29 14:49:26,940 [INFO] mmrag_v2.universal.intermediate: Created UIR: UniversalDocument(doc_id=289fd158f828, source=Ayeva K. Mastering Python Design Patterns...essential Python patterns...3ed 2024.pdf, type=pdf, pages=296, digital=296, scanned=0, text_elements=2801, image_elements=23, table_elements=1)
+2026-05-29 14:49:26,969 [INFO] v3_batch_ingest: OK Ayeva K. Mastering Python Design Patterns...essential Python patterns...3ed 2024.pdf | pages=296 chunks=491 vlm=0 docling=119 fallback=177 229.8s
+2026-05-29 14:49:26,974 [INFO] v3_batch_ingest: [17/24] Building E-commerce Sites with Drupal Commerce.pdf
+2026-05-29 14:49:42,386 [WARNING] _phase_c_engine.router: VLM failed on page 1 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:42,613 [WARNING] _phase_c_engine.router: VLM failed on page 2 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:42,908 [WARNING] _phase_c_engine.router: VLM failed on page 4 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:43,148 [WARNING] _phase_c_engine.router: VLM failed on page 9 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:43,436 [WARNING] _phase_c_engine.router: VLM failed on page 16 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:43,694 [WARNING] _phase_c_engine.router: VLM failed on page 19 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:44,014 [WARNING] _phase_c_engine.router: VLM failed on page 20 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:44,292 [WARNING] _phase_c_engine.router: VLM failed on page 21 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:44,675 [WARNING] _phase_c_engine.router: VLM failed on page 22 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:45,008 [WARNING] _phase_c_engine.router: VLM failed on page 23 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:45,250 [WARNING] _phase_c_engine.router: VLM failed on page 24 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:45,579 [WARNING] _phase_c_engine.router: VLM failed on page 25 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:45,813 [WARNING] _phase_c_engine.router: VLM failed on page 26 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:46,126 [WARNING] _phase_c_engine.router: VLM failed on page 27 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:46,404 [WARNING] _phase_c_engine.router: VLM failed on page 28 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:46,730 [WARNING] _phase_c_engine.router: VLM failed on page 29 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:46,954 [WARNING] _phase_c_engine.router: VLM failed on page 30 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:47,254 [WARNING] _phase_c_engine.router: VLM failed on page 31 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:47,488 [WARNING] _phase_c_engine.router: VLM failed on page 33 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:47,773 [WARNING] _phase_c_engine.router: VLM failed on page 34 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:48,013 [WARNING] _phase_c_engine.router: VLM failed on page 35 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:48,311 [WARNING] _phase_c_engine.router: VLM failed on page 36 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:49,097 [WARNING] _phase_c_engine.router: VLM failed on page 37 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:49,350 [WARNING] _phase_c_engine.router: VLM failed on page 38 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:49,609 [WARNING] _phase_c_engine.router: VLM failed on page 39 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:49,863 [WARNING] _phase_c_engine.router: VLM failed on page 40 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:50,092 [WARNING] _phase_c_engine.router: VLM failed on page 41 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:50,390 [WARNING] _phase_c_engine.router: VLM failed on page 42 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:50,638 [WARNING] _phase_c_engine.router: VLM failed on page 43 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:50,928 [WARNING] _phase_c_engine.router: VLM failed on page 44 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:51,169 [WARNING] _phase_c_engine.router: VLM failed on page 45 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:51,435 [WARNING] _phase_c_engine.router: VLM failed on page 46 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:51,653 [WARNING] _phase_c_engine.router: VLM failed on page 47 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:52,017 [WARNING] _phase_c_engine.router: VLM failed on page 49 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:52,346 [WARNING] _phase_c_engine.router: VLM failed on page 50 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:52,575 [WARNING] _phase_c_engine.router: VLM failed on page 51 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:52,873 [WARNING] _phase_c_engine.router: VLM failed on page 52 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:53,079 [WARNING] _phase_c_engine.router: VLM failed on page 53 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:53,398 [WARNING] _phase_c_engine.router: VLM failed on page 54 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:53,720 [WARNING] _phase_c_engine.router: VLM failed on page 55 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:54,050 [WARNING] _phase_c_engine.router: VLM failed on page 56 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:54,285 [WARNING] _phase_c_engine.router: VLM failed on page 57 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:54,627 [WARNING] _phase_c_engine.router: VLM failed on page 58 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:54,972 [WARNING] _phase_c_engine.router: VLM failed on page 59 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:55,272 [WARNING] _phase_c_engine.router: VLM failed on page 60 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:55,588 [WARNING] _phase_c_engine.router: VLM failed on page 61 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:55,818 [WARNING] _phase_c_engine.router: VLM failed on page 62 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:56,190 [WARNING] _phase_c_engine.router: VLM failed on page 63 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:56,418 [WARNING] _phase_c_engine.router: VLM failed on page 64 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:56,679 [WARNING] _phase_c_engine.router: VLM failed on page 65 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:56,885 [WARNING] _phase_c_engine.router: VLM failed on page 66 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:57,212 [WARNING] _phase_c_engine.router: VLM failed on page 68 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:57,493 [WARNING] _phase_c_engine.router: VLM failed on page 69 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:57,736 [WARNING] _phase_c_engine.router: VLM failed on page 70 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:58,132 [WARNING] _phase_c_engine.router: VLM failed on page 73 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:58,378 [WARNING] _phase_c_engine.router: VLM failed on page 74 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:58,685 [WARNING] _phase_c_engine.router: VLM failed on page 75 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:58,897 [WARNING] _phase_c_engine.router: VLM failed on page 76 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:59,215 [WARNING] _phase_c_engine.router: VLM failed on page 77 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:59,459 [WARNING] _phase_c_engine.router: VLM failed on page 78 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:49:59,792 [WARNING] _phase_c_engine.router: VLM failed on page 79 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:00,038 [WARNING] _phase_c_engine.router: VLM failed on page 80 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:00,372 [WARNING] _phase_c_engine.router: VLM failed on page 81 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:00,634 [WARNING] _phase_c_engine.router: VLM failed on page 82 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:00,908 [WARNING] _phase_c_engine.router: VLM failed on page 83 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:01,164 [WARNING] _phase_c_engine.router: VLM failed on page 84 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:01,385 [WARNING] _phase_c_engine.router: VLM failed on page 85 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:01,610 [WARNING] _phase_c_engine.router: VLM failed on page 86 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:01,943 [WARNING] _phase_c_engine.router: VLM failed on page 87 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:02,570 [WARNING] _phase_c_engine.router: VLM failed on page 88 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:02,898 [WARNING] _phase_c_engine.router: VLM failed on page 89 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:03,121 [WARNING] _phase_c_engine.router: VLM failed on page 90 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:03,453 [WARNING] _phase_c_engine.router: VLM failed on page 91 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:03,681 [WARNING] _phase_c_engine.router: VLM failed on page 92 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:04,002 [WARNING] _phase_c_engine.router: VLM failed on page 95 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:04,257 [WARNING] _phase_c_engine.router: VLM failed on page 96 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:04,581 [WARNING] _phase_c_engine.router: VLM failed on page 97 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:04,826 [WARNING] _phase_c_engine.router: VLM failed on page 98 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:05,060 [WARNING] _phase_c_engine.router: VLM failed on page 99 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:05,301 [WARNING] _phase_c_engine.router: VLM failed on page 100 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:05,597 [WARNING] _phase_c_engine.router: VLM failed on page 101 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:05,857 [WARNING] _phase_c_engine.router: VLM failed on page 102 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:06,127 [WARNING] _phase_c_engine.router: VLM failed on page 103 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:06,370 [WARNING] _phase_c_engine.router: VLM failed on page 104 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:06,694 [WARNING] _phase_c_engine.router: VLM failed on page 105 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:06,935 [WARNING] _phase_c_engine.router: VLM failed on page 106 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:07,223 [WARNING] _phase_c_engine.router: VLM failed on page 107 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:07,550 [WARNING] _phase_c_engine.router: VLM failed on page 108 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:07,819 [WARNING] _phase_c_engine.router: VLM failed on page 109 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:08,149 [WARNING] _phase_c_engine.router: VLM failed on page 110 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:08,385 [WARNING] _phase_c_engine.router: VLM failed on page 111 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:08,733 [WARNING] _phase_c_engine.router: VLM failed on page 113 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:08,996 [WARNING] _phase_c_engine.router: VLM failed on page 114 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:09,312 [WARNING] _phase_c_engine.router: VLM failed on page 115 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:09,649 [WARNING] _phase_c_engine.router: VLM failed on page 116 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:09,909 [WARNING] _phase_c_engine.router: VLM failed on page 117 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:10,270 [WARNING] _phase_c_engine.router: VLM failed on page 118 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:10,510 [WARNING] _phase_c_engine.router: VLM failed on page 119 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:10,828 [WARNING] _phase_c_engine.router: VLM failed on page 120 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:11,118 [WARNING] _phase_c_engine.router: VLM failed on page 121 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:11,350 [WARNING] _phase_c_engine.router: VLM failed on page 122 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+2026-05-29 14:50:11,580 [WARNING] _phase_c_engine.router: VLM failed on page 123 (VLM status 403: {"error":{"message":"Budget limit exceeded (weekly limit). Contact your org admin.","code":403}}); falling back to docling
+/Users/ronald/miniforge3/envs/mmrag-v2/lib/python3.10/multiprocessing/resource_tracker.py:224: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

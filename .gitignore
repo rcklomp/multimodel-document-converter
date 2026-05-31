@@ -48,3 +48,6 @@ env/
 
 # Old documents
 docs/archive-do not use
+
+# Local pre-change backups of tracked files (redundant with git history)
+*.pre_p1_bak
