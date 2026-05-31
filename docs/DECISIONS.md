@@ -2156,3 +2156,72 @@ record of where Docling silently dropped content is retained as
 empirical evidence. The V3 chunk shape supersedes it as the
 canonical baseline; the V3 Identity Gate is now structurally
 self-consistent (0.00% delta against the rebaselined file).
+
+---
+
+## OCR-lane production-wiring pins retired (PLAN_V3.1 P2, 2026-05-31)
+
+**Decision:** Two structural-wiring assertions in
+`tests/test_ocr_path_heading_propagation.py` were DELETED-by-decision
+(MANDATE §3b) when the module was un-deferred:
+
+1. `test_ocr_lane_heading_mutation_path`'s `callers_attribute == 1` /
+   `callers_promote == 1` assertions (the production call-count of
+   `_attribute_ocr_chunk_heading` / `_promote_ocr_section_headers`,
+   which lived in the now-deleted `_process_page_layout_aware`). The
+   test was rewritten to keep its still-valid behavioural assertions
+   (the helpers exist and delegate through the central
+   `update_on_heading` validator) and is renamed
+   `test_ocr_lane_heading_helpers_delegate_to_central_validator`.
+2. `test_hybrid_chunker_lane_propagate_headings_call_count_unchanged`
+   (asserted `process_pdf` contains `_propagate_headings(` exactly
+   once) was removed entirely.
+
+**Rationale:** Both pinned the OCR/element-by-element + HybridChunker
+reconcile production WIRING that Phase A Step 5 (813b9ba) deleted when
+`batch_processor` was decoupled to the UIR-native chunker (1384 lines
+of legacy lane removed; the `_propagate_headings` finalize call was
+stripped). The wiring they assert no longer exists, so the assertions
+can never hold again — they are obsolete, not weakenable. The
+behaviour they were meant to protect (cross-page heading propagation +
+breadcrumb building) is RESTORED UIR-native in
+`uir_chunker._assign_headings` and is now pinned by 7 new positive
+contracts in the same file plus the qa HEADING gate. Removed behaviour:
+the requirement that heading propagation flow through specific
+OCR-lane / HybridChunker production call sites in `batch_processor`.
+
+**Note:** the three orphaned helper methods themselves
+(`_attribute_ocr_chunk_heading`, `_promote_ocr_section_headers`,
+`_propagate_headings`) remain in `batch_processor` as dead code; their
+restore-or-delete is owned by PLAN_V3.1 P3, out of P2 scope.
+
+---
+
+## Short-Document HEADING-Gate Skip (PLAN_V3.1 P2, 2026-05-31)
+
+**Decision:** `scripts/qa_conversion_audit.py` skips the prose-calibrated
+HEADING gate (>= 0.80 `parent_heading` coverage) for the
+`short_document` class — already inferred as `total_pages <= 5 AND
+heading_coverage < 0.10` — in addition to the existing `form` skip.
+The HEADING line prints `SKIP [short_document — no heading hierarchy]`
+and does not contribute to AUDIT_FAIL.
+
+**Rationale:** A short born-digital document with no detectable heading
+structure (parts list, single-table export, poster, 2-page leaflet;
+canonical example `data/raw/Bevestigingsmiddelen.pdf` — 2 pages, no PDF
+bookmarks, all-paragraph parts table) has no chapter hierarchy by
+nature, exactly like a scanned form. The >= 0.80 gate is meaningless
+there and fired spuriously (0/4 coverage -> HEADING FAIL) even though
+every chunk was correctly extracted. Per PLAN_V3.1 P2 / the prompt's
+explicit instruction, headings are NOT fabricated to clear the gate;
+the gate is corrected to not over-fire on a class where the metric does
+not apply.
+
+**Why this cannot mask a regression:** the skip precondition is
+*already-absent* heading structure (`< 0.10` coverage on `<= 5` pages).
+A genuinely structured document — any book, technical manual, or
+academic paper with a TOC — never enters this class (it has either
+more pages or detectable headings), so the gate continues to enforce
+>= 0.80 on every document where heading coverage is a meaningful
+quality signal. This is a gate-correctness fix, not a relaxation, and
+does not touch the form acceptance class (QUALITY_GATES.md).

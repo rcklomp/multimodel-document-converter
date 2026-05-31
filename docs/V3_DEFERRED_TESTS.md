@@ -21,15 +21,22 @@ with an owner + un-defer trigger. "Permanent" deferral is not a valid state.
   below. Listing passing tests as "deferred" is what made the deferral picture
   look like fiction; it has been removed.
 
-## The actual deferred surface (6 unconditionally-skipped modules)
+## The actual deferred surface (5 unconditionally-skipped modules)
 
 Each is module-skipped with `pytestmark = pytest.mark.skip(reason="V3_DEFERRED -
 ...")`. Disposition column follows MANDATE §3.
 
-- `tests/test_ocr_path_heading_propagation.py` - pins heading propagation across
-  the OCR/extraction path. **Disposition: RESTORE** (owner: PLAN_V3.1 P2;
-  un-defer trigger: the UIR-native TOC heading pass lands and qa HEADING gate
-  passes). NOT sanitization-dependent - heading hierarchy is TOC-driven.
+- `tests/test_ocr_path_heading_propagation.py` - **RESTORED 2026-05-31** (no
+  longer skipped, no longer deferred). The un-defer trigger fired: PLAN_V3.1 P2
+  landed the UIR-native TOC heading pass (`uir_chunker._assign_headings`, fed
+  the PyMuPDF TOC threaded from `batch_processor._toc_for_batch`) and the qa
+  HEADING gate now PASSES (academic doc with bookmarks: 68% -> 100% coverage).
+  The module's 68 behavioral contracts (is_valid_heading garbage rejection +
+  ContextStateV2 carry/attribution) are green, plus 7 new contracts pinning
+  `_assign_headings` directly. Two prior structural pins on the DELETED OCR/
+  layout-lane production wiring (`callers == 1`, `_propagate_headings(` once in
+  process_pdf) were DELETED-by-decision - see `docs/DECISIONS.md` "OCR-lane
+  production-wiring pins retired (PLAN_V3.1 P2)".
 - `tests/test_cross_chunk_semantic_stitching.py` - pins the mid-sentence /
   trailing-preposition merge. **Disposition: ADOPT-or-restore** - the underlying
   `_merge_mid_sentence_chunks` still executes on the V3 path (PROJECT_STATUS
