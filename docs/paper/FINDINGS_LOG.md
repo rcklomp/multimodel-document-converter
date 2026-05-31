@@ -131,6 +131,43 @@ driver 580, CUDA 13.3); `scripts/gx10/docker-compose.yml` + `scripts/v3_sequenti
 
 ---
 
+## 2026-05-31 — Inference-server choice for VLM extraction: cache architecture must match the workload  `[Method][Lessons]`
+
+Survey prompted by the Mac Mini's oMLX instability on large-context (≈17k-token)
+magazine pages: throughput collapsed 57→110→212→331 s/page with "SSD cache write
+queue full / Failed to save block to tiered cache".
+
+**Finding: it was an architectural mismatch, not a bug.** Every MLX VLM server
+sits on the *same* upstream kernels — Blaizzy's `mlx-vlm` (oMLX serves "other
+mlx-vlm models"; LM Studio uses "mlx-vlm vision add-ons"). What differs is the
+serving layer. **oMLX's headline feature — a two-tier hot-RAM/cold-SSD KV cache —
+is tuned for coding agents:** long, growing, *reused* prefixes, where restoring
+cached blocks turns 30–90 s TTFT into 1–3 s. Our extraction workload is the
+inverse: single-shot pages, one large image, **no shared prefix between pages**.
+The KV cache never hits → the SSD tier delivers zero benefit and, under RAM
+pressure, becomes an active liability (the write-queue thrash). VLM is bolted onto
+a text-first stack; the cache that *would* help — encoded vision-feature reuse —
+is mlx-vlm's, not oMLX's.
+
+**Decision:** for the extraction node, **mlx-vlm's own server is primary**
+(VLM-native upstream, Qwen3-VL lands there first, vision-feature cache fits the
+workload, continuous batching, no SSD-tier failure mode); **oMLX kept as A-B
+comparand** (128 GB on the M5 may neutralise the thrash — a hypothesis to probe,
+not a default). **LM Studio** is the better long-term *text-judge* host (mature,
+headless `llmster`, Apple-tuned for M5) but has **not** migrated Qwen3-VL to its
+unified vision engine (only Gemma 3 + Pixtral) — not a vision option today.
+Marketing-heavy "vllm-mlx/Rapid-MLX" repos (duplicate clones under different
+usernames, "400+ tok/s") down-weighted on credibility.
+
+**Method lesson (generalises):** pick a serving stack by whether its *caching
+strategy matches the access pattern*, not by headline tok/s. A coding-agent
+server and a batch-extraction server want opposite caches. And — per the FP8
+fraud — **let the probe arbitrate on real hardware**: run the same
+`vlm_profile_probe.py` against both servers on the page that actually thrashed,
+score on s/page **and** fidelity. Runbook updated: `scripts/m5_max_setup.md` §3/§5.
+
+---
+
 ## Predecessor lineage: V1 → V2 (the story before V3)  `[Motivation][Architecture]`
 
 Reconstructed 2026-05-30 from git tags/commit messages (all verifiable), README
