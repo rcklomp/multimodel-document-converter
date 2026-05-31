@@ -32,8 +32,9 @@ with an owner + un-defer trigger. "Permanent" deferral is not a valid state.
   `_merge_mid_sentence_chunks` + dedup) was DEFINED but never called by
   `process_pdf`, so those repairs ran on no document. Disposition: RE-WIRE (the
   user's call) - the bridge + the sibling `_apply_vision_aided_front_matter_detection`
-  were restored into `process_pdf` finalize (after `_apply_quality_filters`,
-  before the export sanitizer). All 9 tests green; full suite 1313/111/0, no
+  were restored into `process_pdf` finalize (after the VLM-table dedup step,
+  replacing the "STRIPPED" comment block that documented the Phase A removal).
+  All 9 tests green; full suite 1320 passed / 111 skipped / 0 failed, no
   regressions. See `docs/DECISIONS.md` "Phase A orphaned the final-boundary-repair
   bridge - RE-WIRED (PLAN_V3.1 P3)".
 

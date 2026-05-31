@@ -1882,12 +1882,18 @@ class BatchProcessor:
         # picked the prose chunk 29/30 times.
         all_chunks = self._apply_vlm_table_iou_dedup(all_chunks)
 
-        # V3.0 Phase A Step 5: legacy v2.16 reconciliation heuristics
-        # (boundary repairs, heading inference, vision-aided front-matter
-        # detection) are STRIPPED from the V3 UIR-native path per
-        # V3_EXECUTION_MANDATE.md §3 — deferred to the LLM-sanitization layer.
-        # The chunker emits well-formed UIR chunks directly; no post-hoc
-        # DoclingDocument-shaped reconciliation runs here.
+        # PLAN_V3.1 P3 (2026-06-01): RE-WIRE the final-boundary-repair bridge
+        # that Phase A orphaned. These helpers were left DEFINED but un-called
+        # by process_pdf, so hungry-operator / trailing-heading / mid-sentence
+        # boundary repairs and vision-aided front-matter demotion ran on NO
+        # document. They are UIR-shape-agnostic (operate on IngestionChunk text +
+        # metadata, not DoclingDocument), so re-introducing them is safe on the
+        # V3 path. Order: boundary repairs first, then front-matter demotion —
+        # both run AFTER per-batch heading assignment (uir_chunker._assign_headings)
+        # so front-matter demotion sees final headings. See DECISIONS.md
+        # "Phase A orphaned the final-boundary-repair bridge - RE-WIRED".
+        all_chunks = self._apply_final_boundary_repairs(all_chunks)
+        all_chunks = self._apply_vision_aided_front_matter_detection(all_chunks)
 
         # Selective OCR patching for encoding-corrupted chunks.
         # Keeps HybridChunker structure, replaces only the corrupted text spans.
