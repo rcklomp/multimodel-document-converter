@@ -1,6 +1,16 @@
 
 import pytest as _pytest_v3defer
-pytestmark = _pytest_v3defer.mark.skip(reason="V3_DEFERRED - Legacy Heuristic (Phase A Step 5: heuristics stripped from UIR-native batch_processor; re-enable when LLM-sanitization layer subsumes them)")
+# V3_DEFERRED - disposition pending P4 soak (PLAN_V3.1). Un-skipping this module
+# (2026-06-01) surfaced a Phase A REGRESSION, not test drift: 8/9 tests pass in
+# isolation, but `_apply_final_boundary_repairs` (the bridge that runs
+# `_merge_hungry_operators` + `_strip_trailing_headings` + the orphan-preposition
+# repairs) is DEFINED but NEVER CALLED by `process_pdf` - Phase A stripped its
+# wiring. So those repairs no longer run on any document. `_merge_mid_sentence_chunks`
+# is separately still live (via `_apply_quality_filters`). Decision: do NOT re-wire
+# or delete blind; defer the keep-vs-drop call to P4 soak evidence on whether
+# boundary-repair fragmentation actually hurts retrieval. See DECISIONS.md
+# "Phase A orphaned the final-boundary-repair bridge".
+pytestmark = _pytest_v3defer.mark.skip(reason="V3_DEFERRED - Phase A orphaned _apply_final_boundary_repairs bridge; keep-vs-drop deferred to P4 soak (DECISIONS.md)")
 import inspect
 
 from mmrag_v2.batch_processor import BatchProcessor
