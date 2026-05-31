@@ -1,6 +1,8 @@
 # PLAN_V3.1 - Pipeline Reconvergence
 
-Status: DRAFT (proposed 2026-05-31)
+Status: IN PROGRESS (proposed 2026-05-31). P0 anchored on main; P1 + P2 DONE and
+verified green on branch `v3.1-reconvergence` (commits 4099475, e947627), pending
+merge. P3-P5 remain.
 Owner: next coding session
 Supersedes: nothing; complements docs/PROJECT_STATUS.md "Phase B Technical Debt"
 
@@ -36,10 +38,13 @@ Consequences of the A/B split:
    regenerate baselines from the path that ships.
 3. Quality gates that used to pass (HEADING coverage, breadcrumb/contextual
    retrieval) regressed and were deferred, not fixed.
-4. 182 skipped tests, including the heading-propagation contract
-   (test_ocr_path_heading_propagation.py) and the committed-truth integrity
-   guard (test_repo_integrity.py). The gate wall that would catch regressions is
-   partly switched off.
+4. The real deferred surface is 6 unconditionally-skipped V3_DEFERRED modules
+   (the heading-propagation contract test_ocr_path_heading_propagation.py among
+   them) - NOT the "182 skipped" total, which is mostly legitimate runtime
+   skipif (corpus / GPU / network). test_repo_integrity.py is NOT skipped: it
+   RUNS GREEN and is the G6 enforcer that keeps the deferred set registered. The
+   gate that regressed is HEADING coverage; the deferred contracts are the
+   safety net to restore.
 
 Root cause in one sentence: V3 was declared done on the strength of a sandbox
 path while the shipping path was left partially wired, its gates deferred, and
@@ -64,11 +69,13 @@ budget-bound - it is LAN-local and free.
 | R2 | v3_batch_ingest.py / rebaseline_v3.py crash (sandbox import) | Repointed to CLI chunker or deleted |
 | R3 | HEADING coverage QA_FAIL on academic/prose (parent_heading not propagated) | qa_full_conversion HEADING PASS; test un-skipped |
 | R4 | breadcrumb_path empty -> contextual retrieval disabled (--no-contextual) | breadcrumb emitted; contextual retrieval re-enabled |
-| R5 | 182 skips incl. heading + repo-integrity contracts | Skips at documented minimum; each remaining skip has a DECISIONS.md rationale |
+| R5 | 6 unconditionally-skipped V3_DEFERRED modules (incl. heading); test_repo_integrity is GREEN, not skipped | Skips at documented minimum; each remaining skip restored or deleted-by-decision per MANDATE §3 |
 | R6 | Two Phase B heuristics still execute, tests deferred | Formally adopted or removed; tests un-skipped |
 | R7 | V3-vs-V2.16 numbers from sandbox path | Re-baselined through CLI; reproducible report |
 | R8 | No guard against path regression | Committed production-CLI smoke as pre-merge gate |
 | R9 | EPUB extraction unsupported (2 docs) | Backlog; documented, not blocking |
+| R10 | `chunk_universal_document` (V3 chunker ENTRY) has NO direct unit test - only exercised via test_v3_integration; a broken edit slipped past the entire `-k chunk` suite | Direct unit test added in P3 |
+| R11 | PyMuPDF TOC quality varies (incomplete / absent bookmarks / scanned docs) - heading fallback robustness | Precedence puts in-page headings first, TOC only third; no-TOC short docs handled via documented gate skip; confirm on real TOCs at scale in P4 soak |
 
 ## 4. Phased execution (each phase has a hard exit gate)
 
@@ -85,6 +92,10 @@ budget-bound - it is LAN-local and free.
   spanning all routing lanes.
 
 ### Phase 1 - Collapse to one path (1 day)  [R1, R2]
+STATUS: DONE on branch v3.1-reconvergence (commit 4099475) - v3_batch_ingest.py +
+rebaseline_v3.py repointed off the sandbox onto the production chunker; `grep -rn
+v3_execution_root scripts/` empty; runs offline emitting valid IngestionChunk
+JSONL. Pending merge.
 - Replace v3_batch_ingest.py and rebaseline_v3.py with thin wrappers over the
   production path (BatchProcessor / mmrag-v2 batch + uir_chunker +
   IngestionChunk.from_uir). No script may import a chunker the CLI does not use.
@@ -96,6 +107,12 @@ budget-bound - it is LAN-local and free.
   on a 1-page doc (assert via a diff test).
 
 ### Phase 2 - Fix HEADING coverage for real (1-2 days)  [R3, R4]
+STATUS: DONE on branch v3.1-reconvergence (commit e947627) - UIR-native TOC
+heading + breadcrumb propagation in uir_chunker._assign_headings; on an academic
+doc with bookmarks parent_heading 68%->100%, breadcrumb 0%->100%, HEADING gate
+FAIL->PASS; test_ocr_path_heading_propagation restored (+7 contracts); full suite
+1293/119/0. No Docling added to batch_processor. Pending merge.
+
 This is the "should have been fixed long ago" item. It is NOT hard - the inputs
 already exist.
 
@@ -115,6 +132,15 @@ fed the TOC), with this precedence per text chunk:
 Do it UIR-native; do NOT resurrect the deleted batch_processor methods (keeps
 AGENT-SPATIAL-20 and the engine-agnostic boundary intact).
 
+TOC-robustness note (R11): PyMuPDF TOC quality varies - some PDFs have no
+bookmarks (born-digital leaflets, parts lists), poor producers emit flat/partial
+trees, scanned docs have none. The precedence above de-risks this by design: an
+in-page heading always wins over the TOC, and carry-forward covers pages between
+TOC anchors. The genuine no-structure case (short born-digital doc, no bookmarks,
+no headings) is handled by the documented `short_document` HEADING-gate skip
+(DECISIONS.md), NOT by fabricating headings. Robustness on messy real-world TOCs
+is exercised at scale in the P4 soak, not asserted from one fixture.
+
 Bonus (R4): emitting breadcrumb_path lets contextual retrieval be re-enabled
 (drop --no-contextual in the indexer), recovering the contextual-embedding
 quality that the V3 index gave up.
@@ -126,22 +152,37 @@ fixed.
   docs (coverage >= profile threshold); test_ocr_path_heading_propagation.py
   runs GREEN (not skipped); breadcrumb_path populated on a sampled chunk.
 
-### Phase 3 - Restore the gate wall (1-2 days)  [R5, R6]
-- Walk the 7 V3_DEFERRED modules. For each: (a) restore behavior + re-enable, or
-  (b) if the behavior is intentionally gone, DELETE the test with a one-line
-  rationale in DECISIONS.md. No permanent silent skips.
-  - PRIORITY: test_repo_integrity.py first - the committed-truth G1-G6 guard
-    being off is a structural blind spot.
-  - test_ocr_path_heading_propagation.py - closed by Phase 2.
-  - test_cross_chunk_semantic_stitching.py, test_vision_aided_front_matter.py,
-    test_docling_postprocess_* , test_pdf_conversion_plan.py - decide
-    restore-vs-delete each.
-- Resolve R6: either formally ADOPT the two still-executing heuristics
-  (_apply_spatial_refiner vertical-proximity merger, _merge_mid_sentence_chunks)
-  as permanent and un-skip their tests, or remove them. "Phase B LLM-
-  sanitization" is a hypothesis, not a commitment - do not keep deferring to it.
-- EXIT GATE: skip count reduced to a documented minimum; every remaining skip
-  has a DECISIONS.md line; test_repo_integrity.py green.
+### Phase 3 - Restore the gate wall (1-2 days)  [R5, R6, R10]
+STATUS: not started. After P2 the deferred surface is 5 V3_DEFERRED modules (the
+heading module was restored in P2; 2 dead-code wiring assertions inside it were
+deleted-by-decision). test_repo_integrity.py is NOT a deferred test - it RUNS
+GREEN and is the G1-G6 enforcer that keeps the deferred set registered; keep it
+green, do not skip it.
+- Walk the 5 remaining V3_DEFERRED modules. For each: (a) restore behavior +
+  re-enable, or (b) DELETE the test with a DECISIONS.md entry recording the
+  dropped behavior (MANDATE §3b). No permanent silent skips:
+  - test_cross_chunk_semantic_stitching.py
+  - test_docling_postprocess_ocr_gating.py
+  - test_docling_postprocess_profile_integration.py
+  - test_vision_aided_front_matter.py
+  - test_pdf_conversion_plan.py
+- NEW (R10) - add the missing unit test for the V3 chunker ENTRY:
+  `chunk_universal_document` has NO direct unit test today; it is only exercised
+  end-to-end by test_v3_integration, which is how a broken edit (a kwarg the
+  callee did not accept) slipped past the entire `-k chunk` suite. Add a direct
+  test that feeds a small in-memory UniversalDocument fixture (TEXT + IMAGE +
+  TABLE elements across >=2 pages, with and without a TOC) and asserts: chunk
+  count + modality split, int [0,1000] bboxes, parent_heading precedence
+  (in-page > carry-forward > TOC), and breadcrumb_path. This is the unit-level
+  safety net the entry point lacks - it would have caught both the kwarg break
+  and any future signature drift.
+- Resolve R6: ADOPT (un-skip the test) or REMOVE the two still-executing
+  heuristics (_apply_spatial_refiner vertical-proximity merger,
+  _merge_mid_sentence_chunks). The "Phase B LLM-sanitization" basis is falsified
+  (MANDATE §3 / V3_DEFERRED_TESTS.md) - do not keep deferring to it.
+- EXIT GATE: deferred-module count reduced to a documented minimum; every
+  remaining skip restored or deleted-by-decision; chunk_universal_document has a
+  direct unit test; test_repo_integrity.py + full suite green.
 
 ### Phase 4 - Re-baseline and lock (1 day)  [R7]
 - With the CLI clean and gates green, and the GX10 judge now a standing service
@@ -152,6 +193,12 @@ fixed.
   with soak evidence (Recall@k on row-level queries), not assumption.
 - Retrieval validation: report Recall@1/@5 (judge-free) AND the GX10 judge axes,
   reading Format as the trustworthy axis per the calibration memo.
+- TOC robustness at scale (R11): the soak doc set spans varied TOC quality (rich
+  bookmarks, flat/partial, none, scanned). Spot-check heading/breadcrumb coverage
+  per doc-class; confirm the P2 precedence holds beyond the single P2 fixture and
+  that no-TOC docs land in the documented short_document class rather than
+  failing. Flag any class where coverage is low for a structured doc (= a real
+  regression, not a gate artifact).
 - EXIT GATE: a soak report reproducible from `mmrag-v2 ...` + the standing judge;
   PROJECT_STATUS reflects single-path reality and cites the new numbers.
 
@@ -183,6 +230,8 @@ guard encodes the now-correct expectations.
 | Re-baseline cost | Removed - M5 self-hosted VLM is LAN-local and free; GX10 judge now standing |
 | Granularity change churns the index | Decide once in P4 with soak evidence; freeze in DECISIONS.md |
 | Scope creep into "Phase B LLM-sanitization" | P1.1 forbids it - decide adopt-or-remove the heuristics, do not build a new layer to justify the defer |
+| TOC quality varies (incomplete / absent / scanned bookmarks) | Precedence puts in-page headings first, TOC only third; no-TOC short docs handled via documented gate skip; confirm at scale in P4 soak (R11) |
+| V3 chunker entry untested at unit level (broke silently once) | P3 adds a direct chunk_universal_document unit test (R10); the P5 smoke is the integration-level backstop |
 
 ## 7. Definition of done (the whole plan)
 
@@ -191,6 +240,8 @@ guard encodes the now-correct expectations.
   multi-profile smoke, HEADING gate included.
 - Skip count at documented minimum; test_repo_integrity.py and
   test_ocr_path_heading_propagation.py green.
+- chunk_universal_document has a direct unit test (no longer only reachable via
+  test_v3_integration).
 - A V3-vs-V2.16 soak report reproducible from the production CLI + standing GX10
   judge.
 - scripts/smoke_production.sh is the one-command pre-merge gate; CLAUDE.md
