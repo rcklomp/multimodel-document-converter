@@ -31,25 +31,40 @@ pip install -e ".[dev]"                      # gives the probe its deps (pymupdf
 ```
 
 ## 3. Serve Qwen3-VL on an OpenAI-compatible endpoint (:8000)
-The existing stack uses **omlx-server** (the Mac Mini at `10.0.10.246` runs it,
-and the omlx.ai benchmark used it). Install it the same way the Mac Mini did
-(omlx.ai ships pip/Homebrew + a DMG; use pip/Homebrew on a server node so
-structured-output works), then load both precisions and serve:
+**PRIMARY: `mlx-vlm` (Blaizzy) — its own server.** Decision 2026-05-31 after an
+inference-server survey (see `docs/paper/FINDINGS_LOG.md`): oMLX is tuned for
+*coding agents* — its headline two-tier hot-RAM/cold-SSD KV cache pays off only
+on long, **reused** prefixes. Our workload is the opposite (single-shot pages,
+one big image, no shared prefix), so that cache never hits and its SSD tier
+*thrashed* under the Mac Mini's RAM pressure ("SSD cache write queue full",
+throughput collapse 57→331 s/page). `mlx-vlm` is the VLM-native **upstream** that
+oMLX/LM Studio both build on — Qwen3-VL lands there first, and its cache is the
+*vision-feature* kind that actually fits us. It also removes the SSD-tier failure
+mode entirely. Leanest, most directly debuggable path.
 
 ```bash
 # Download both — 128 GB fits either trivially (8B 8-bit ≈ 8 GB, 4-bit ≈ 4 GB).
 huggingface-cli download mlx-community/Qwen3-VL-8B-Instruct-8bit
 huggingface-cli download mlx-community/Qwen3-VL-8B-Instruct-4bit
 
-# Serve on :8000 with an API key. ⚠️ CONFIRM the exact omlx load/serve invocation
-# from the Mac Mini (`ssh ronmeijer@10.0.10.246` ... it already runs this) — the
-# CLI flag names are the one thing this runbook can't verify blind.
-export MLX_API_KEY="<same key as Mac Mini>"
-# omlx serve ... --model mlx-community/Qwen3-VL-8B-Instruct-8bit --port 8000   # confirm flags
+export MLX_API_KEY="<any token — set so the probe's bearer header is exercised>"
+pip install mlx-vlm
+python -m mlx_vlm.server --model mlx-community/Qwen3-VL-8B-Instruct-8bit --port 8000
 ```
-**Alternative if omlx is awkward to reproduce:** `mlx-vlm` ships its own
-OpenAI-compatible server —
-`pip install mlx-vlm && python -m mlx_vlm.server --model mlx-community/Qwen3-VL-8B-Instruct-8bit --port 8000`.
+
+**FALLBACK / A-B comparand: oMLX** (the incumbent; the Mac Mini at `10.0.10.246`
+runs it). Worth keeping because 128 GB removes the RAM pressure that made its SSD
+tier thrash, so on the M5 it *may* be fine — but that's a hypothesis to test, not
+a default. Confirm the exact load/serve flags from the Mac Mini
+(`ssh ronmeijer@10.0.10.246` — it already runs this; CLI flag names are the one
+thing this runbook can't verify blind), then serve the same model on a different
+port and probe both (§4). **Do not silently reinstate oMLX as primary without the
+probe numbers — the survey already rejected it on architecture grounds.**
+
+**Text judge (separate concern):** LM Studio is the better long-term judge host
+(mature, headless `llmster`, Apple-tuned for M5) — but its unified MLX engine has
+**not** migrated Qwen3-VL vision yet (only Gemma 3 + Pixtral), so it is **not** a
+vision-extraction option today.
 
 Health: `curl -s -H "Authorization: Bearer $MLX_API_KEY" http://localhost:8000/v1/models`
 
@@ -75,7 +90,15 @@ The probe prints prefill, decode tok/s, s/page, and a fidelity verdict. Compare:
 |---|--:|--:|--:|---|
 | GX10 BF16 (rejected) | ~57 | 11.3 | ~132 | too slow |
 | M1 Max 8-bit (bench) | 162 | 15.1 | — | reference |
-| **M5 Max — measured** | ? | ? | ? | **fill in** |
+| **M5 Max + mlx-vlm (primary)** | ? | ? | ? | **fill in** |
+| **M5 Max + oMLX (A-B)** | ? | ? | ? | **fill in** |
+
+Run the **same probe against both servers** (mlx-vlm on :8000, oMLX on another
+port) on the large-context magazine page that thrashed the Mac Mini — that page
+is the real stability test, not the invoice. Pick the winner on s/page **and**
+the fidelity check, the way the FP8 fraud was caught. If oMLX matches mlx-vlm on
+the M5 (the 128 GB may neutralise its SSD-tier thrash), either is fine; if it
+regresses or stalls on the large page, mlx-vlm stands as primary.
 
 - **s/page is the decision number.** Canonical set ≈ 720 VLM pages → hours =
   720 × s-page / 3600. If ~35–50 s/page (extrapolated), that's ~7–10 h — an
