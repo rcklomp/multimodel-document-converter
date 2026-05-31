@@ -51,3 +51,8 @@ docs/archive-do not use
 
 # Local pre-change backups of tracked files (redundant with git history)
 *.pre_p1_bak
+
+# Session scratch / handover docs (network topology, ssh targets) — keep out of git
+HANDOVER_*.md
+SMOKE_*.md
+*OVERNIGHT_REPORT*.md
