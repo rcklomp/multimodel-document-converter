@@ -69,6 +69,27 @@ pip install mlx-vlm                          # pulls a recent transformers — f
 python -m mlx_vlm.server --model mlx-community/Qwen3-VL-8B-Instruct-8bit --port 8000
 ```
 
+### Operating the server — explicit load/unload (NOT a boot daemon)
+Once installed, drive it with `scripts/vlm_serve.sh` rather than the raw command.
+**Deliberately not a `launchd` LaunchAgent:** a KeepAlive/RunAtLoad agent would
+silently park ~9 GB of model in RAM at every login, and you'd only discover it
+under memory pressure. The wrapper instead loads the model **only when you ask**,
+detaches so it outlives your shell/SSH session (the M1 can keep hitting the
+endpoint), and `status` always prints the live RAM footprint so a resident model
+is never invisible.
+
+```bash
+./scripts/vlm_serve.sh start     # load (~9GB), detach, wait until /v1/models is ready
+./scripts/vlm_serve.sh status    # ● running  pid=…  RAM=9.5GB  model=…  + endpoint URL
+./scripts/vlm_serve.sh stop      # free the model from RAM
+./scripts/vlm_serve.sh restart
+```
+Reads the key from `~/.mlx_api_key`, binds `0.0.0.0:8000` (set `VLM_HOST=127.0.0.1`
+for loopback-only), logs to `~/Library/Logs/mlx-vlm.log`. Override target with
+`VLM_MODEL` / `VLM_PORT` / `VLM_HOST`. A browser chat client for this endpoint
+(uses the *server's* loaded model, not a second copy) ships at
+`scripts/m5_vlm_chat.html` — open it locally or `scp` it to the client box.
+
 **FALLBACK / A-B comparand: oMLX** (the incumbent; the Mac Mini at `10.0.10.246`
 runs it). Worth keeping because 128 GB removes the RAM pressure that made its SSD
 tier thrash, so on the M5 it *may* be fine — but that's a hypothesis to test, not
