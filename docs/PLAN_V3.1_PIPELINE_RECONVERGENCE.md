@@ -161,12 +161,22 @@ GREEN and is the G1-G6 enforcer that keeps the deferred set registered; keep it
 green, do not skip it.
 - Walk the 5 remaining V3_DEFERRED modules. For each: (a) restore behavior +
   re-enable, or (b) DELETE the test with a DECISIONS.md entry recording the
-  dropped behavior (MANDATE §3b). No permanent silent skips:
-  - test_cross_chunk_semantic_stitching.py
-  - test_docling_postprocess_ocr_gating.py
-  - test_docling_postprocess_profile_integration.py
-  - test_vision_aided_front_matter.py
-  - test_pdf_conversion_plan.py
+  dropped behavior (MANDATE §3b). No permanent silent skips. Dispositions
+  decided 2026-05-31:
+  - test_cross_chunk_semantic_stitching.py - **ADOPT (pending exec)**: guards
+    `_merge_mid_sentence_chunks`, which still executes live on the V3 path (R6).
+    Live code must be tested -> un-skip and fix to pass. This is the R6 call.
+  - test_vision_aided_front_matter.py - **INVESTIGATE**: guards
+    `_apply_vision_aided_front_matter_detection` + a `process_pdf` routing pin.
+    Determine whether that pass survived Phase A's strip; if stripped, DELETE-by-
+    decision like the P2 OCR-wiring pins; if live, ADOPT.
+  - test_docling_postprocess_ocr_gating.py / _profile_integration.py /
+    test_pdf_conversion_plan.py (78 tests) - **DELETE-on-retirement**: all guard
+    the legacy `V2DocumentProcessor` / `DoclingPdfAdapter` lane, not the V3
+    chunker. Deferred to the legacy-lane retirement phase (P6) per
+    `docs/DECISIONS.md` "Legacy V2DocumentProcessor / Docling lane — retirement
+    PLANNED". NOT adopted (lane is on a retirement path), NOT deleted yet (code
+    still ships for non-PDF + `--batch-size 0`).
 - NEW (R10) - add the missing unit test for the V3 chunker ENTRY:
   `chunk_universal_document` has NO direct unit test today; it is only exercised
   end-to-end by test_v3_integration, which is how a broken edit (a kwarg the
@@ -235,6 +245,27 @@ green, do not skip it.
 - CLAUDE.md: name this smoke as the mandatory pre-merge check for any change to
   the extraction path (batch_processor, uir_chunker, mmrag_v3 engines, from_uir).
 - EXIT GATE: one-command smoke; CLAUDE.md updated.
+
+### Phase 6 - Retire the legacy V2DocumentProcessor / Docling lane (own phase, NOT before)  [R5 cluster]
+Decided 2026-05-31 (`docs/DECISIONS.md` "Legacy V2DocumentProcessor / Docling
+lane — retirement PLANNED"). The non-batch `V2DocumentProcessor` +
+`DoclingPdfAdapter` / `PdfConversionPlan` path is the last thing standing between
+the project and a true single extraction path. It is deferred to its own phase
+because it has a hard prerequisite, not because it is optional.
+- BLOCKER (must clear first): the legacy lane is the SOLE extractor for all
+  non-PDF inputs (EPUB / HTML / DOCX / PPTX / XLSX) and for PDFs run with
+  `--batch-size 0`. V3 `extract()` (HybridEngine) is fitz-based, PDF-only. So P6
+  cannot start until either (a) V3-native non-PDF extractors emit
+  `UniversalDocument` for those formats, or (b) an explicit decision drops
+  non-PDF support.
+- On the cut: delete `V2DocumentProcessor`, `DoclingPdfAdapter`,
+  `PdfConversionPlan` and re-route the CLI's non-batch / non-PDF branches; then
+  the 3 legacy-path V3_DEFERRED modules (test_pdf_conversion_plan +
+  test_docling_postprocess_ocr_gating + _profile_integration, 78 tests) are
+  DELETED-by-decision WITH the code they guard.
+- EXIT GATE: `grep -rn "V2DocumentProcessor\|DoclingPdfAdapter" src/` empty;
+  the 3 legacy modules gone; full suite green; non-PDF formats either covered by
+  V3 or explicitly dropped in DECISIONS.md.
 
 ## 5. Sequencing rationale
 

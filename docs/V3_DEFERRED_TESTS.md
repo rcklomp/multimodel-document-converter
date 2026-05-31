@@ -41,18 +41,28 @@ Each is module-skipped with `pytestmark = pytest.mark.skip(reason="V3_DEFERRED -
   trailing-preposition merge. **Disposition: ADOPT-or-restore** - the underlying
   `_merge_mid_sentence_chunks` still executes on the V3 path (PROJECT_STATUS
   "Phase B Technical Debt" #2); PLAN_V3.1 P3 decides adopt (un-skip) vs remove.
-- `tests/test_docling_postprocess_ocr_gating.py` - pins the post-Docling OCR
-  heading-override heuristic. **Disposition: DEFERRED** (owner: PLAN_V3.1 P3
-  restore-or-delete; trigger: P3 disposition).
-- `tests/test_docling_postprocess_profile_integration.py` - pins the post-Docling
-  y-sort + drop-cap heuristics. **Disposition: DEFERRED** (PLAN_V3.1 P3).
 - `tests/test_vision_aided_front_matter.py` - pins VLM-aided front-matter pickup.
   **Disposition: DEFERRED** (PLAN_V3.1 P3; candidate to fold into the VLM-native
   engine rather than restore as a separate heuristic).
-- `tests/test_pdf_conversion_plan.py` - pins the v2.16 `PdfConversionPlan`
-  profile-specific policy fields; the V3 engine uses a fixed policy.
-  **Disposition: DELETE-by-decision candidate** (PLAN_V3.1 P3 - record the
-  removed contract in `docs/DECISIONS.md`, then drop the test).
+
+### Legacy V2 Docling-lane cluster (3 modules) - DELETE-by-decision on lane retirement
+
+These three guard the legacy non-batch `V2DocumentProcessor` / `DoclingPdfAdapter`
+/ `PdfConversionPlan` path, NOT the V3 chunker. Per `docs/DECISIONS.md` "Legacy
+V2DocumentProcessor / Docling lane — retirement PLANNED (PLAN_V3.1 P3,
+2026-05-31)" the lane is slated for retirement, blocked only on V3 gaining
+non-PDF (EPUB/HTML/DOCX/PPTX/XLSX) extraction. **Disposition: DELETE-by-decision
+WITH the guarded code when the legacy lane is cut** (its own future phase); they
+are deliberately NOT adopted (the lane is on a retirement path) and NOT deleted
+yet (the code still ships for non-PDF + `--batch-size 0`). Trigger: legacy-lane
+retirement phase.
+
+- `tests/test_docling_postprocess_ocr_gating.py` - post-Docling OCR
+  heading-override + bitmap-threshold gating on the adapter.
+- `tests/test_docling_postprocess_profile_integration.py` - post-Docling
+  y-sort + drop-cap profile wiring through `PdfConversionPlan`.
+- `tests/test_pdf_conversion_plan.py` (62 tests) - the `PdfConversionPlan` +
+  `DoclingPdfAdapter` policy contract for the legacy lane.
 
 ## Identity Gate
 
