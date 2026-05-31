@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>M5 VLM Chat — Qwen3-VL @ :8000</title>
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --panel2:#1c2129; --line:#30363d;
+          --text:#e6edf3; --muted:#8b949e; --accent:#388bfd; --user:#1f3a5f; --asst:#21262d; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); height:100vh; display:flex; flex-direction:column; }
+  header { background:var(--panel); border-bottom:1px solid var(--line); padding:8px 14px;
+           display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:14px; margin:0 8px 0 0; font-weight:600; }
+  header label { color:var(--muted); font-size:12px; }
+  header input, header select { background:var(--panel2); color:var(--text);
+           border:1px solid var(--line); border-radius:6px; padding:4px 7px; font-size:12px; }
+  #endpoint { width:230px; } #apikey { width:120px; }
+  #status { font-size:12px; margin-left:auto; }
+  #status.ok { color:#3fb950; } #status.err { color:#f85149; } #status.busy { color:#d29922; }
+  #log { flex:1; overflow-y:auto; padding:18px; display:flex; flex-direction:column; gap:14px; }
+  .msg { max-width:820px; padding:10px 14px; border-radius:10px; white-space:pre-wrap;
+         word-wrap:break-word; }
+  .msg.user { background:var(--user); align-self:flex-end; }
+  .msg.assistant { background:var(--asst); align-self:flex-start; border:1px solid var(--line); }
+  .msg img { max-width:280px; max-height:280px; border-radius:8px; display:block; margin-bottom:8px; }
+  .msg .meta { color:var(--muted); font-size:11px; margin-top:8px; border-top:1px solid var(--line);
+               padding-top:6px; }
+  footer { background:var(--panel); border-top:1px solid var(--line); padding:10px 14px;
+           display:flex; gap:10px; align-items:flex-end; }
+  #thumb { display:none; position:relative; }
+  #thumb img { max-height:64px; border-radius:6px; border:1px solid var(--line); }
+  #thumb button { position:absolute; top:-8px; right:-8px; background:#f85149; color:#fff;
+           border:none; border-radius:50%; width:20px; height:20px; cursor:pointer; font-size:12px; }
+  #prompt { flex:1; background:var(--panel2); color:var(--text); border:1px solid var(--line);
+           border-radius:8px; padding:9px 12px; font:inherit; resize:none; max-height:160px; }
+  button.act { background:var(--accent); color:#fff; border:none; border-radius:8px;
+           padding:9px 16px; cursor:pointer; font-weight:600; }
+  button.act:disabled { opacity:.5; cursor:default; }
+  button.ghost { background:var(--panel2); color:var(--text); border:1px solid var(--line);
+           border-radius:8px; padding:9px 12px; cursor:pointer; }
+  .hint { color:var(--muted); font-size:11px; padding:0 14px 8px; background:var(--panel); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🖼️ M5 VLM Chat</h1>
+  <label>Endpoint <input id="endpoint" value="http://10.0.10.235:8000/v1"/></label>
+  <label>Model <select id="model"></select></label>
+  <label>Key <input id="apikey" value="" placeholder="(ignored by server)"/></label>
+  <label>Max tok <input id="maxtok" type="number" value="2048" style="width:70px"/></label>
+  <label>Temp <input id="temp" type="number" step="0.1" value="0" style="width:55px"/></label>
+  <button class="ghost" id="refresh" title="Reload model list">🔄</button>
+  <button class="ghost" id="clear" title="Clear conversation">🗑️</button>
+  <span id="status">connecting…</span>
+</header>
+<div class="hint">Talks directly to the running Qwen3-VL server (uses the already-loaded model). Attach an image (📎 / paste / drag-drop) then ask about it. Shift+Enter = newline.</div>
+<div id="log"></div>
+<footer>
+  <div id="thumb"><img/><button id="dropimg" title="Remove image">×</button></div>
+  <button class="ghost" id="attach" title="Attach image">📎</button>
+  <input type="file" id="file" accept="image/*" style="display:none"/>
+  <textarea id="prompt" rows="1" placeholder="Ask about the image, or chat…"></textarea>
+  <button class="act" id="send">Send</button>
+  <button class="ghost" id="stop" style="display:none">Stop</button>
+</footer>
+<script>
+const $ = s => document.querySelector(s);
+const log = $('#log');
+let history = [];        // [{role, content}] sent to API (text only kept for context)
+let pendingImage = null; // data URL of attached image for the next turn
+let controller = null;
+
+function setStatus(t, cls){ const s=$('#status'); s.textContent=t; s.className=cls||''; }
+function base(){ return $('#endpoint').value.replace(/\/+$/,''); }
+function authHeaders(){
+  const h = {'Content-Type':'application/json'};
+  const k = $('#apikey').value.trim();
+  if (k) h['Authorization'] = 'Bearer '+k;
+  return h;
+}
+
+async function loadModels(){
+  setStatus('connecting…','busy');
+  try{
+    const r = await fetch(base()+'/models', {headers: authHeaders()});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const j = await r.json();
+    const sel = $('#model'); sel.innerHTML='';
+    (j.data||[]).forEach(m=>{ const o=document.createElement('option'); o.value=m.id;
+      o.textContent=m.id.replace(/^.*\//,''); sel.appendChild(o); });
+    // prefer the 8-bit model by default
+    const eight = [...sel.options].find(o=>/8bit/i.test(o.value));
+    if(eight) sel.value = eight.value;
+    setStatus('● ready ('+(j.data||[]).length+' models)','ok');
+  }catch(e){ setStatus('● unreachable: '+e.message,'err'); }
+}
+
+function addMsg(role, opts={}){
+  const d=document.createElement('div'); d.className='msg '+role;
+  if(opts.image){ const im=document.createElement('img'); im.src=opts.image; d.appendChild(im); }
+  const span=document.createElement('span'); span.textContent=opts.text||''; d.appendChild(span);
+  log.appendChild(d); log.scrollTop=log.scrollHeight; return {el:d, span};
+}
+
+function setImage(dataURL){
+  pendingImage=dataURL; const t=$('#thumb'); t.style.display='block'; t.querySelector('img').src=dataURL;
+}
+function clearImage(){ pendingImage=null; $('#thumb').style.display='none'; }
+
+async function send(){
+  const text=$('#prompt').value.trim();
+  if(!text && !pendingImage) return;
+  $('#send').disabled=true; $('#stop').style.display='inline-block';
+
+  // user bubble
+  addMsg('user', {text, image: pendingImage});
+
+  // build API message: image (if any) + text in a content array
+  const content=[]; if(text) content.push({type:'text', text});
+  if(pendingImage) content.push({type:'image_url', image_url:{url:pendingImage}});
+  const apiMessages=[...history, {role:'user', content}];
+
+  $('#prompt').value=''; $('#prompt').style.height='auto';
+  const imgUsed=pendingImage; clearImage();
+
+  const out=addMsg('assistant',{text:''});
+  let acc='', usage=null; const t0=performance.now(); let ttft=null;
+  controller=new AbortController();
+  try{
+    const r=await fetch(base()+'/chat/completions',{
+      method:'POST', headers:authHeaders(), signal:controller.signal,
+      body:JSON.stringify({ model:$('#model').value, messages:apiMessages,
+        max_tokens:+$('#maxtok').value||2048, temperature:+$('#temp').value||0,
+        stream:true, stream_options:{include_usage:true} })
+    });
+    if(!r.ok){ throw new Error('HTTP '+r.status+' '+(await r.text()).slice(0,200)); }
+    setStatus('● generating…','busy');
+    const reader=r.body.getReader(); const dec=new TextDecoder(); let buf='';
+    while(true){
+      const {value,done}=await reader.read(); if(done) break;
+      buf+=dec.decode(value,{stream:true});
+      let nl; while((nl=buf.indexOf('\n'))>=0){
+        const line=buf.slice(0,nl).trim(); buf=buf.slice(nl+1);
+        if(!line.startsWith('data:')) continue;
+        const data=line.slice(5).trim(); if(data==='[DONE]') continue;
+        let obj; try{obj=JSON.parse(data);}catch{continue;}
+        if(obj.usage) usage=obj.usage;
+        const delta=obj.choices?.[0]?.delta?.content;
+        if(delta){ if(ttft===null) ttft=(performance.now()-t0)/1000;
+          acc+=delta; out.span.textContent=acc; log.scrollTop=log.scrollHeight; }
+      }
+    }
+    // keep text-only history for multi-turn context
+    history.push({role:'user', content: text || '[image]'});
+    history.push({role:'assistant', content: acc});
+    const total=(performance.now()-t0)/1000;
+    if(usage||ttft!==null){
+      const m=document.createElement('div'); m.className='meta';
+      const pt=usage?.prompt_tokens, ct=usage?.completion_tokens;
+      const dt=Math.max(total-(ttft||0),1e-6);
+      m.textContent=`${pt?pt+' prompt tok · ':''}${ct?ct+' gen tok · ':''}`+
+        `TTFT ${(ttft||0).toFixed(1)}s · ${ct?(ct/dt).toFixed(1)+' tok/s · ':''}${total.toFixed(1)}s total`;
+      out.el.appendChild(m);
+    }
+    setStatus('● ready','ok');
+  }catch(e){
+    if(e.name==='AbortError'){ out.span.textContent=acc+' …[stopped]'; setStatus('● stopped','err'); }
+    else { out.span.textContent='⚠ '+e.message; setStatus('● error','err'); }
+  }finally{
+    controller=null; $('#send').disabled=false; $('#stop').style.display='none';
+  }
+}
+
+// --- wiring ---
+$('#send').onclick=send;
+$('#stop').onclick=()=>controller&&controller.abort();
+$('#refresh').onclick=loadModels;
+$('#endpoint').onchange=loadModels;
+$('#clear').onclick=()=>{ history=[]; log.innerHTML=''; clearImage(); };
+$('#attach').onclick=()=>$('#file').click();
+$('#dropimg').onclick=clearImage;
+$('#file').onchange=e=>{ const f=e.target.files[0]; if(!f) return;
+  const rd=new FileReader(); rd.onload=()=>setImage(rd.result); rd.readAsDataURL(f); };
+$('#prompt').addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); send(); } });
+$('#prompt').addEventListener('input',e=>{ e.target.style.height='auto';
+  e.target.style.height=Math.min(e.target.scrollHeight,160)+'px'; });
+window.addEventListener('paste',e=>{ for(const it of e.clipboardData.items){
+  if(it.type.startsWith('image/')){ const rd=new FileReader();
+    rd.onload=()=>setImage(rd.result); rd.readAsDataURL(it.getAsFile()); } } });
+window.addEventListener('dragover',e=>e.preventDefault());
+window.addEventListener('drop',e=>{ e.preventDefault(); const f=e.dataTransfer.files[0];
+  if(f&&f.type.startsWith('image/')){ const rd=new FileReader();
+    rd.onload=()=>setImage(rd.result); rd.readAsDataURL(f); } });
+
+loadModels();
+</script>
+</body>
+</html>
