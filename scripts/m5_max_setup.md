@@ -23,9 +23,21 @@ xcode-select --install                      # Command Line Tools
 brew install miniforge git
 ```
 
-## 2. Project + env (for the probe + pipeline)
+## 2. Two SEPARATE envs — do not merge them
+The M5 runs (a) a standalone **VLM server** and (b) optionally the **pipeline/probe
+client**. They communicate only over HTTP (`VLM_NATIVE_ENDPOINT`), share no Python
+process, and have **conflicting dependency sets** — so they get **independent envs**:
+
+- **Project env (`mmrag-v2`, Python 3.10):** the pipeline + probe client. Pinned to
+  3.10 only because `docling==2.86.0` caps `transformers`. ⚠️ **Do NOT `pip install
+  mlx-vlm` into this env** — mlx-vlm needs a newer `transformers` than Docling allows;
+  that collision is what bit the first M5 attempt. (The 3.10 cap itself is an
+  unverified inheritance from v1.0.0 — see backlog item, it may be liftable.)
+- **VLM-server env (separate, §3):** whatever Python/transformers mlx-vlm wants.
+
 ```bash
 git clone <gitea-or-github-remote> MM-Converter && cd MM-Converter
+# Project/client env — ONLY needed if this box also runs the pipeline or probe:
 conda env create -f environment.yml && conda activate mmrag-v2
 pip install -e ".[dev]"                      # gives the probe its deps (pymupdf, etc.)
 ```
@@ -48,7 +60,12 @@ huggingface-cli download mlx-community/Qwen3-VL-8B-Instruct-8bit
 huggingface-cli download mlx-community/Qwen3-VL-8B-Instruct-4bit
 
 export MLX_API_KEY="<any token — set so the probe's bearer header is exercised>"
-pip install mlx-vlm
+
+# Dedicated env for the server — NOT mmrag-v2 (see §2). Let pip pull the
+# transformers/mlx versions mlx-vlm actually requires; check its own
+# `requires-python` / pinned deps first rather than assuming 3.10 works:
+conda create -y -n vlm-server python=3.12 && conda activate vlm-server
+pip install mlx-vlm                          # pulls a recent transformers — fine, it's isolated
 python -m mlx_vlm.server --model mlx-community/Qwen3-VL-8B-Instruct-8bit --port 8000
 ```
 
@@ -116,3 +133,14 @@ regresses or stalls on the large page, mlx-vlm stands as primary.
 - The GX10 reverts to **judge-only** (it's stable + fine for the text judge).
 - Add a dated entry to `docs/paper/FINDINGS_LOG.md` with the measured numbers —
   it confirms or corrects the F7 bandwidth extrapolation (the backlog item).
+
+## 7. Backlog — investigate the project's Python 3.10 cap (separate task)
+`requires-python = ">=3.10,<3.11"` has been in place since the v1.0.0 initial
+commit (2026-01-05) and was never re-examined at V3 kickoff. No dependency in
+`pyproject.toml` visibly demands `<3.11`; the real runtime ceiling is
+`docling==2.86.0`'s `transformers` pin (Surya is **not** a dependency — OCR is
+`python-doctr`). To lift it safely: in a throwaway env, resolve the project deps
+on 3.11 then 3.12, run `pytest tests/` green, and only then relax the cap (likely
+to `>=3.10,<3.13`) + bump `environment.yml`. This is a deliberate project-wide
+change, not a casual flip — but it does **not** block the M5 server, which runs in
+its own env (§2) regardless of what the project pins.
