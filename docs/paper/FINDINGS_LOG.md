@@ -166,6 +166,63 @@ fraud — **let the probe arbitrate on real hardware**: run the same
 `vlm_profile_probe.py` against both servers on the page that actually thrashed,
 score on s/page **and** fidelity. Runbook updated: `scripts/m5_max_setup.md` §3/§5.
 
+## 2026-05-31 — M5 Max measured: the F7 bandwidth extrapolation confirmed, and beaten  `[Results][Method][Lessons]`
+
+**Context.** F7 (2026-05-30 entry) anchored the bandwidth thesis to the omlx.ai
+M1 Max bench and *extrapolated* the unboxed M5 Max at **~35–50 s/page** (PP
+~250–450, decode ~21–26 8-bit / ~30–40 4-bit), explicitly flagged *"Unverified —
+to be measured with the same probe."* This entry is that measurement. **The
+extrapolation held directionally and the M5 beat it by ~2×.**
+
+**Setup.** Apple M5 Max, 128 GB, macOS 26.5. Primary server = `mlx-vlm 0.5.0`
+(mlx 0.31.2 / mlx-metal 0.31.2), Qwen3-VL-8B served on `:8000`, per the
+2026-05-31 server-choice decision. Same `vlm_profile_probe.py`, same 150 DPI
+render, same Form_0013 invoice as the GX10 F1 baseline — apples-to-apples.
+
+| Probe | prompt tok (incl. vision) | completion tok | prefill / TTFT | decode | s/page | fidelity |
+|---|--:|--:|--:|--:|--:|---|
+| **8-bit** — Form_0013 invoice p0 | 2177 | 843 | 4.1 s (~**536** tok/s) | **58.9** tok/s | **18.4** | **4/4 OK** ✅ |
+| **4-bit** — IRJET academic p3 | 2177 | 1738 | 2.9 s (~752 tok/s) | **92.6** tok/s | 21.7 | not checked (no `--expect`) |
+
+**F8 — The M5 Max makes local VLM extraction decisively viable.** 8-bit decode
+**58.9 tok/s** is **5.2× the GX10's 11.3** (F1) and **3.9× the M1 Max's 15.1**
+(F7 anchor). 18.4 s/page on the invoice (843-tok output) vs the GX10's 132.6 s
+on the *same page* (1062-tok output) ≈ **7× the throughput**. Fidelity holds at
+8-bit — all four expected substrings present, full German invoice transcribed
+(line items, `1.949,60` total, 19% VAT reconciled). The extrapolation
+*understated* the chip: measured prefill 536 tok/s > predicted 250–450; measured
+18.4 s/page < predicted 35–50.
+
+**F9 — Decode efficiency confirms the bandwidth model.** Against the F7-estimated
+M5 bandwidth (≥546 GB/s): 8-bit 8B ≈ 8 GB weights → ~68 tok/s decode ceiling;
+observed 58.9 ≈ **87% of ceiling** (vs the GB10's 66% in F2). 4-bit ≈ 4 GB →
+~137 tok/s ceiling; observed 92.6 ≈ 68%. Both sit where a bandwidth-bound,
+one-weight-read-per-token model predicts — the F2 thesis (bytes-moved, not FLOPs)
+reproduces on a third, faster unified-memory architecture. *(Bandwidth figure is
+the F7 estimate, not independently measured — read the ratios as directional.)*
+
+**Corpus extrapolation.** Decode rate is the stable cost driver; s/page scales
+with output length. At ~1,200 output tok/page typical, 8-bit ≈ `4 + 1200/58.9`
+≈ **~24 s/page** → ~720 VLM-routed pages ≈ **~4.8 h** — a comfortable overnight
+job, and *under* the runbook's earlier 7–10 h guess. **8-bit is the default:**
+fidelity-safe (the FP8 trap does not recur at MLX 8-bit) and fast enough that
+4-bit's speed edge isn't needed for the corpus.
+
+**Still open (honest scope).** (1) The decisive *stability* test per §5 — the
+large-context (~17k-token) **magazine page that thrashed the Mac Mini's oMLX** —
+has **not** yet been run on the M5; the invoice is the throughput/fidelity test,
+not the thrash test. (2) The **oMLX A-B comparand** (does 128 GB neutralise the
+SSD-tier thrash?) is unrun. (3) 4-bit fidelity was not substring-checked. (4)
+Env caveat: installing `mlx-vlm` into `mmrag-v2` pulled `numpy 2.2.6`, violating
+the project's `numpy<2.0.0` pin — harmless for serving + the fitz-only probe, but
+the docling conversion pipeline would need numpy pinned back in this env.
+
+**Lesson (paper).** Measure-don't-extrapolate (F7→F8) cuts *both* ways: the spec
+sheet was *pessimistic* here. The 2021-laptop-beats-2025-server surprise (F7) and
+the M5-beats-its-own-extrapolation surprise (F8) are the same lesson — unified
+memory bandwidth is the axis that matters and it is not yet priced into either
+intuition or vendor positioning.
+
 ---
 
 ## Predecessor lineage: V1 → V2 (the story before V3)  `[Motivation][Architecture]`
@@ -326,6 +383,8 @@ committed `V3_OVERNIGHT_REPORT.md`). Still to do:
 - **V1 primary sources** — extract `SRS_Multimodal_Ingestion_V2.3/V2.4.md` and the
   early design docs from git history (`git show`) into `docs/paper/archive_extracts/`
   before they're harder to retrieve.
-- **M5 Max measurement** — fills/corrects the F7 extrapolation once unboxed.
+- ~~**M5 Max measurement** — fills/corrects the F7 extrapolation once unboxed.~~
+  **DONE** (2026-05-31 entry, F8/F9): extrapolation beaten ~2×, 8-bit 58.9 tok/s
+  / 18.4 s/page, fidelity OK. Remaining: large-magazine thrash test + oMLX A-B.
 - **(legacy backlog note)** Judge calibration — GX10 Qwen2.5-14B-FP8: format TRUSTWORTHY,
   rel/faith RESTRICTED; treat as directional. Source: memory `feedback_v2_14_gx10_14b_fp8_swap`.
