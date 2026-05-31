@@ -65,6 +65,12 @@ class VlmProviderConfig:
     # while keeping server memory deterministic. Override via env or
     # constructor if a backend genuinely needs more.
     max_completion_tokens: int = 4096
+    # Whether to send the OpenAI ``response_format={"type":"json_object"}``
+    # hint. OpenAI / OpenRouter honor it; many self-hosted servers
+    # (mlx-vlm, some vLLM builds) reject it with HTTP 400 instead of
+    # ignoring it. The per-page prompt already mandates JSON, so omitting
+    # the hint is safe. Defaulted endpoint-aware in ``from_env``.
+    send_response_format: bool = True
 
     @classmethod
     def from_env(cls) -> "VlmProviderConfig":
@@ -103,11 +109,24 @@ class VlmProviderConfig:
             except ValueError:
                 pass
 
+        # response_format hint: default on for OpenAI/OpenRouter (which
+        # honor it), off for everything else (self-hosted mlx-vlm/vLLM
+        # servers 400 on it). Explicit ``VLM_NATIVE_RESPONSE_FORMAT``
+        # override wins: "json_object"/"1"/"on"/"true" force on,
+        # "none"/"0"/"off"/"false" force off.
+        send_rf = ("openrouter.ai" in endpoint) or ("openai.com" in endpoint)
+        rf_raw = (os.environ.get("VLM_NATIVE_RESPONSE_FORMAT") or "").strip().lower()
+        if rf_raw in ("json_object", "1", "on", "true", "yes"):
+            send_rf = True
+        elif rf_raw in ("none", "0", "off", "false", "no"):
+            send_rf = False
+
         return cls(
             endpoint=endpoint.rstrip("/"),
             model=model,
             api_key=api_key,
             max_completion_tokens=max_tokens,
+            send_response_format=send_rf,
         )
 
 
@@ -164,7 +183,7 @@ class VlmProvider:
             "temperature": self.config.temperature,
             "max_tokens": self.config.max_completion_tokens,
         }
-        if response_format_json:
+        if response_format_json and self.config.send_response_format:
             payload["response_format"] = {"type": "json_object"}
 
         headers = {"Content-Type": "application/json"}

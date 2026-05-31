@@ -1143,6 +1143,92 @@ class BatchProcessor:
         profile = str(self._intelligence_metadata.get("profile_type", "") or "").strip().lower()
         return profile == "scanned_degraded"
 
+    def _render_visual_assets(
+        self,
+        uir_chunks: List[Any],
+        batch_path: Path,
+        page_offset: int,
+    ) -> None:
+        """Render IMAGE/TABLE region crops so vision-native chunks get asset_ref.
+
+        The VLM-native engine *describes* image/table regions but never emits a
+        binary asset, so the resulting UIR chunks reach IngestionChunk.from_uir
+        with no asset_ref and fail QA-CHECK-05 (IMAGE/TABLE require asset_ref).
+        Here we render each region from the batch PDF page (bbox is [0,COORD_SCALE]
+        normalized in the page-portrait frame), save a PNG under assets/, and set
+        the relative asset_ref. Falls back to a full-page render when a chunk has
+        no usable bbox. Page numbers passed in are still batch-local; the saved
+        filename uses the absolute page (local + page_offset).
+        """
+        visual = [
+            c
+            for c in uir_chunks
+            if getattr(c, "modality", None) in (Modality.IMAGE, Modality.TABLE)
+            and not getattr(c, "asset_ref", None)
+        ]
+        if not visual:
+            return
+
+        try:
+            doc = fitz.open(str(batch_path))
+        except Exception as exc:
+            logger.warning(f"[V3-ASSET] could not open batch PDF for crop render: {exc}")
+            return
+
+        per_page_idx: Dict[int, int] = {}
+        rendered = 0
+        try:
+            for c in visual:
+                loc = getattr(c, "locator", None)
+                local_page = (loc.page_number if loc and loc.page_number else 1)
+                page_index = local_page - 1
+                if page_index < 0 or page_index >= doc.page_count:
+                    continue
+                page = doc[page_index]
+                pw, ph = float(page.rect.width), float(page.rect.height)
+
+                clip = None
+                bbox = loc.bbox if loc else None
+                if bbox and len(bbox) == 4:
+                    x0 = max(0.0, min(pw, bbox[0] / COORD_SCALE * pw))
+                    y0 = max(0.0, min(ph, bbox[1] / COORD_SCALE * ph))
+                    x1 = max(0.0, min(pw, bbox[2] / COORD_SCALE * pw))
+                    y1 = max(0.0, min(ph, bbox[3] / COORD_SCALE * ph))
+                    if (x1 - x0) > 2.0 and (y1 - y0) > 2.0:
+                        clip = fitz.Rect(x0, y0, x1, y1)
+
+                try:
+                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=clip)
+                except Exception as exc:
+                    logger.warning(
+                        f"[V3-ASSET] pixmap render failed (page {local_page}): {exc}"
+                    )
+                    continue
+
+                abs_page = local_page + page_offset
+                mod = "table" if c.modality == Modality.TABLE else "image"
+                idx = per_page_idx.get(abs_page, 0)
+                per_page_idx[abs_page] = idx + 1
+                fname = (
+                    f"{self._doc_hash or 'doc'}_{abs_page:04d}_{mod}_{idx:03d}.png"
+                )
+                out_path = self.assets_dir / fname
+                try:
+                    pix.save(str(out_path))
+                except Exception as exc:
+                    logger.warning(f"[V3-ASSET] asset save failed ({fname}): {exc}")
+                    continue
+                c.asset_ref = f"assets/{fname}"
+                rendered += 1
+        finally:
+            doc.close()
+
+        if rendered:
+            logger.info(
+                f"[V3-ASSET] Rendered {rendered} region crop(s) for "
+                f"vision-native IMAGE/TABLE chunks"
+            )
+
     def _process_single_batch(
         self,
         batch_info: BatchInfo,
@@ -1182,6 +1268,15 @@ class BatchProcessor:
 
         universal_doc = v3_extract(str(batch_info.batch_path))
         uir_chunks = chunk_universal_document(universal_doc, profile_type=profile_type)
+
+        # Vision-native extraction describes image/table regions but emits no
+        # binary asset. Render the region crops here (batch_processor owns the
+        # assets dir) so IMAGE/TABLE chunks carry a real asset_ref and satisfy
+        # QA-CHECK-05. Must run BEFORE the page-offset projection below — the
+        # crop is rendered from the batch-local page.
+        self._render_visual_assets(
+            uir_chunks, batch_info.batch_path, batch_info.page_offset
+        )
 
         chunks: List[IngestionChunk] = []
         for uir in uir_chunks:

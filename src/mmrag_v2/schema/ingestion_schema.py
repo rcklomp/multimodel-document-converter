@@ -847,6 +847,12 @@ class IngestionChunk(BaseModel):
             confidence_threshold=confidence_threshold,
             document_domain=document_domain,
             document_modality=document_modality,
+            # Vision-native IMAGE elements carry their VLM description in
+            # content; mirror it into visual_description so the property and
+            # downstream semantic-fidelity gates see a populated description.
+            visual_description=(
+                uir.content if modality == Modality.IMAGE and uir.content else None
+            ),
         )
 
         semantic_context: Optional[SemanticContext] = None
