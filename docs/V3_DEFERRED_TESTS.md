@@ -11,51 +11,53 @@ with an owner + un-defer trigger. "Permanent" deferral is not a valid state.
 - The old premise "deferred until the Phase B LLM-sanitization layer subsumes
   these heuristics" is **retired**: that layer's hypothesis was **falsified**
   (Identity-Gate residual delta proved to be upstream of the V3 boundary, not
-  closable by any text-only post-processor). Deferring to it = deferring to
-  something that does not work.
-- Earlier revisions of this file listed ~90 tests inherited from the retired
-  `v3_execution_root` sandbox. That was misleading: the large majority either
-  RUN AND PASS today (the retrieval / HyDE / BM25 / Qdrant / refiner /
-  token-validator / telemetry subsystems are NOT deferred - their tests are
-  green) or were deleted. The authoritative deferred surface is the small set
-  below. Listing passing tests as "deferred" is what made the deferral picture
-  look like fiction; it has been removed.
+  closable by any text-only post-processor).
+- Earlier revisions listed ~90 tests inherited from the retired
+  `v3_execution_root` sandbox. The large majority either RUN AND PASS today
+  (retrieval / HyDE / BM25 / Qdrant / refiner / token-validator / telemetry are
+  NOT deferred) or were deleted. The authoritative deferred surface is the small
+  set below.
 
-## The actual deferred surface (5 unconditionally-skipped modules)
+## Restored (no longer deferred - kept here as audit trail)
+
+- `tests/test_ocr_path_heading_propagation.py` - **RESTORED 2026-05-31** (P2).
+  The un-defer trigger fired: the UIR-native TOC heading pass landed
+  (`uir_chunker._assign_headings`) and the qa HEADING gate now PASSES. 76 green
+  incl. 7 new `_assign_headings` contracts. Two prior structural pins on DELETED
+  OCR/layout-lane wiring were DELETED-by-decision (see `docs/DECISIONS.md`
+  "OCR-lane production-wiring pins retired (PLAN_V3.1 P2)").
+- `tests/test_cross_chunk_semantic_stitching.py` - **RESTORED 2026-06-01** (P3).
+  Un-skipping it surfaced a Phase A REGRESSION: `_apply_final_boundary_repairs`
+  (the bridge running `_merge_hungry_operators` + `_strip_trailing_headings` +
+  `_merge_mid_sentence_chunks` + dedup) was DEFINED but never called by
+  `process_pdf`, so those repairs ran on no document. Disposition: RE-WIRE (the
+  user's call) - the bridge + the sibling `_apply_vision_aided_front_matter_detection`
+  were restored into `process_pdf` finalize (after `_apply_quality_filters`,
+  before the export sanitizer). All 9 tests green; full suite 1313/111/0, no
+  regressions. See `docs/DECISIONS.md` "Phase A orphaned the final-boundary-repair
+  bridge - RE-WIRED (PLAN_V3.1 P3)".
+
+## The actual deferred surface (4 unconditionally-skipped modules)
 
 Each is module-skipped with `pytestmark = pytest.mark.skip(reason="V3_DEFERRED -
 ...")`. Disposition column follows MANDATE §3.
 
-- `tests/test_ocr_path_heading_propagation.py` - **RESTORED 2026-05-31** (no
-  longer skipped, no longer deferred). The un-defer trigger fired: PLAN_V3.1 P2
-  landed the UIR-native TOC heading pass (`uir_chunker._assign_headings`, fed
-  the PyMuPDF TOC threaded from `batch_processor._toc_for_batch`) and the qa
-  HEADING gate now PASSES (academic doc with bookmarks: 68% -> 100% coverage).
-  The module's 68 behavioral contracts (is_valid_heading garbage rejection +
-  ContextStateV2 carry/attribution) are green, plus 7 new contracts pinning
-  `_assign_headings` directly. Two prior structural pins on the DELETED OCR/
-  layout-lane production wiring (`callers == 1`, `_propagate_headings(` once in
-  process_pdf) were DELETED-by-decision - see `docs/DECISIONS.md` "OCR-lane
-  production-wiring pins retired (PLAN_V3.1 P2)".
-- `tests/test_cross_chunk_semantic_stitching.py` - pins the mid-sentence /
-  trailing-preposition merge. **Disposition: ADOPT-or-restore** - the underlying
-  `_merge_mid_sentence_chunks` still executes on the V3 path (PROJECT_STATUS
-  "Phase B Technical Debt" #2); PLAN_V3.1 P3 decides adopt (un-skip) vs remove.
-- `tests/test_vision_aided_front_matter.py` - pins VLM-aided front-matter pickup.
-  **Disposition: DEFERRED** (PLAN_V3.1 P3; candidate to fold into the VLM-native
-  engine rather than restore as a separate heuristic).
+- `tests/test_vision_aided_front_matter.py` - pins the VLM-aided front-matter
+  demotion. **Disposition: ADOPT-pending** - NOTE: `_apply_vision_aided_front_matter_detection`
+  was RE-WIRED into `process_pdf` on 2026-06-01 (it was the sibling of the
+  cross_chunk bridge). This module should now be un-skippable; it stays listed
+  until its tests are run + fixed to the current call shape (next P3 step).
 
 ### Legacy V2 Docling-lane cluster (3 modules) - DELETE-by-decision on lane retirement
 
 These three guard the legacy non-batch `V2DocumentProcessor` / `DoclingPdfAdapter`
 / `PdfConversionPlan` path, NOT the V3 chunker. Per `docs/DECISIONS.md` "Legacy
-V2DocumentProcessor / Docling lane — retirement PLANNED (PLAN_V3.1 P3,
+V2DocumentProcessor / Docling lane - retirement PLANNED (PLAN_V3.1 P3,
 2026-05-31)" the lane is slated for retirement, blocked only on V3 gaining
 non-PDF (EPUB/HTML/DOCX/PPTX/XLSX) extraction. **Disposition: DELETE-by-decision
-WITH the guarded code when the legacy lane is cut** (its own future phase); they
-are deliberately NOT adopted (the lane is on a retirement path) and NOT deleted
-yet (the code still ships for non-PDF + `--batch-size 0`). Trigger: legacy-lane
-retirement phase.
+WITH the guarded code when the legacy lane is cut** (its own future phase, P6);
+NOT adopted (the lane is on a retirement path) and NOT deleted yet (the code
+still ships for non-PDF + `--batch-size 0`). Trigger: legacy-lane retirement.
 
 - `tests/test_docling_postprocess_ocr_gating.py` - post-Docling OCR
   heading-override + bitmap-threshold gating on the adapter.
