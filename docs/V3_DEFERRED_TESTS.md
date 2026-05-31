@@ -37,20 +37,10 @@ Each is module-skipped with `pytestmark = pytest.mark.skip(reason="V3_DEFERRED -
   layout-lane production wiring (`callers == 1`, `_propagate_headings(` once in
   process_pdf) were DELETED-by-decision - see `docs/DECISIONS.md` "OCR-lane
   production-wiring pins retired (PLAN_V3.1 P2)".
-- `tests/test_cross_chunk_semantic_stitching.py` - pins the final-boundary-repair
-  bridge (`_merge_hungry_operators`, `_strip_trailing_headings`,
-  `_merge_mid_sentence_chunks`, dedup). **Disposition: DEFERRED to P4 soak**
-  (decided 2026-06-01). Un-skipping it surfaced a Phase A REGRESSION, not drift:
-  `_apply_final_boundary_repairs` is DEFINED but NEVER CALLED by `process_pdf`
-  (its wiring was stripped in Phase A), so `_merge_hungry_operators` +
-  `_strip_trailing_headings` no longer run on any document; 8/9 tests pass in
-  isolation but guard orphaned code, and the 1 wiring-pin test fails because the
-  bridge is gone. `_merge_mid_sentence_chunks` is separately still LIVE via
-  `_apply_quality_filters`. Keep-vs-drop is a quality call that needs P4 soak
-  evidence (does boundary-repair fragmentation hurt retrieval?), so the module
-  stays skipped with an honest reason rather than being re-wired or deleted blind.
-  Un-defer trigger: P4 soak verdict. See `docs/DECISIONS.md` "Phase A orphaned the
-  final-boundary-repair bridge".
+- `tests/test_cross_chunk_semantic_stitching.py` - pins the mid-sentence /
+  trailing-preposition merge. **Disposition: ADOPT-or-restore** - the underlying
+  `_merge_mid_sentence_chunks` still executes on the V3 path (PROJECT_STATUS
+  "Phase B Technical Debt" #2); PLAN_V3.1 P3 decides adopt (un-skip) vs remove.
 - `tests/test_vision_aided_front_matter.py` - pins VLM-aided front-matter pickup.
   **Disposition: DEFERRED** (PLAN_V3.1 P3; candidate to fold into the VLM-native
   engine rather than restore as a separate heuristic).
