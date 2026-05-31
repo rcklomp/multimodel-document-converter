@@ -76,6 +76,7 @@ budget-bound - it is LAN-local and free.
 | R9 | EPUB extraction unsupported (2 docs) | Backlog; documented, not blocking |
 | R10 | `chunk_universal_document` (V3 chunker ENTRY) has NO direct unit test - only exercised via test_v3_integration; a broken edit slipped past the entire `-k chunk` suite | Direct unit test added in P3 |
 | R11 | PyMuPDF TOC quality varies (incomplete / absent bookmarks / scanned docs) - heading fallback robustness | Precedence puts in-page headings first, TOC only third; no-TOC short docs handled via documented gate skip; confirm on real TOCs at scale in P4 soak |
+| R12 | Unbounded carry-forward poisons contextual embeddings on NO-TOC docs: one early in-page heading smears as parent_heading/breadcrumb across every later heading-less page (uir_chunker `_assign_headings` branch 2, no distance cap). NOT live until R4 turns contextual retrieval on. | Cap carry-forward by page distance; land WITH R4 (see P3 spec). Currently documented by test_carry_forward_distance_is_unbounded_until_overridden, which must be UPDATED (not deleted) to assert the cap. |
 
 ## 4. Phased execution (each phase has a hard exit gate)
 
@@ -176,6 +177,28 @@ green, do not skip it.
   (in-page > carry-forward > TOC), and breadcrumb_path. This is the unit-level
   safety net the entry point lacks - it would have caught both the kwarg break
   and any future signature drift.
+- NEW (R12) - cap carry-forward distance, landed WITH R4 (contextual retrieval).
+  Today uir_chunker._assign_headings carry-forward (branch 2) is unbounded:
+  on a NO-TOC doc one early in-page heading is stamped as parent_heading +
+  breadcrumb on every later heading-less page. Harmless while --no-contextual is
+  set (R4 off), but the moment contextual retrieval is re-enabled those stale
+  prefixes get embedded and degrade dense recall. Scope note: this only bites
+  NO-TOC docs - when a TOC exists, _extract_toc_headings fills page_map for every
+  page from the first anchor onward, so branch 3 (per-page TOC breadcrumb) wins
+  over carry-forward. Spec:
+    * Track `last_heading_page` = the page where last_heading was established by
+      an in-page heading (branch 1) or TOC (branch 3).
+    * Add a named, tunable constant `MAX_CARRY_FORWARD_PAGES` (proposed default
+      3; only affects no-TOC docs). In branch 2, carry only when
+      `page - last_heading_page <= MAX_CARRY_FORWARD_PAGES`.
+    * Beyond the cap: parent_heading = None (honest - section unknown);
+      breadcrumb_path = [doc_name, "Page N"] (doc identity + page, never a stale
+      section). Null-section is better for embeddings than a wrong section.
+    * Update test_carry_forward_distance_is_unbounded_until_overridden to assert
+      the cap (the test already instructs this; rename + assert cap, do NOT
+      delete - AGENT-TEST-01). Add a DECISIONS.md entry (stricter contract).
+  Sequencing: implement in the same change that drops --no-contextual (R4), so
+  the cap and its only consumer land together and are soak-validated in P4.
 - Resolve R6: ADOPT (un-skip the test) or REMOVE the two still-executing
   heuristics (_apply_spatial_refiner vertical-proximity merger,
   _merge_mid_sentence_chunks). The "Phase B LLM-sanitization" basis is falsified
