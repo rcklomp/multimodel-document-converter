@@ -47,5 +47,5 @@ not reference archived paths from active docs.
 
 - If a hard invariant changes, update `AGENTS.md` and record the rationale in `docs/DECISIONS.md`.
 - If a completion claim or evidence claim changes, apply `docs/V3_EXECUTION_MANDATE.md`.
-- Do not create new governance docs. `docs/V3_EXECUTION_MANDATE.md` is the only one.
+- Do not proliferate overlapping *contract* docs. The governance set is the Layer-0 list above; `docs/V3_EXECUTION_MANDATE.md` is the conflict-resolution authority within it, not the only governance file. Plans (`PLAN_*`), audits (`AUDIT_*`), and execution docs are not governance docs and may be added.
 - If task status or recommended next step changes, update `docs/PROJECT_STATUS.md`.

@@ -1,23 +1,32 @@
 # V3 EXECUTION MANDATE
 
+This is the **conflict-resolution authority** for V3 work: where it conflicts
+with another doc, this wins. It is NOT the only governance doc - the governance
+set is the Layer-0 contract list in `docs/README.md`. Plans, audits, and
+execution docs are not governance docs and may be added freely.
+
 ## 1. THE ARCHITECTURAL CONTRACT
-* **Engines:** (e.g., `engines/docling.py`) MUST parse source files and return a single `UniversalDocument`. Engines are strictly forbidden from chunking.
-* **Processor:** `processor.py` MUST be 100% engine-agnostic (zero Docling imports). It consumes the `UniversalDocument` and passes it to the chunker.
-* **Chunker:** The chunking logic MUST accept a `UniversalDocument` as input and emit `UIRChunk` objects.
+* **Engines** (e.g. `src/mmrag_v3/engines/docling_fast.py`) MUST parse source files and return a single `UniversalDocument`. Engines are forbidden from chunking.
+* **Extraction entry** (`mmrag_v3.extract`) MUST be engine-agnostic (zero Docling imports); it returns the `UniversalDocument`.
+* **Chunker** (`src/mmrag_v2/chunking/uir_chunker.py`) MUST accept a `UniversalDocument` and emit `UIRChunk` objects. Zero Docling imports.
+* **Orchestrator** (`src/mmrag_v2/batch_processor.py`) is limited to engine-agnostic orchestration: batching, routing, dedup, quality-filter finalize, emission-side asset/visual finalization (e.g. rendering region crops so IMAGE/TABLE chunks satisfy QA-CHECK-05), and JSONL writing. It MUST construct and import no Docling (AST firewall + AGENTS.md boundary note) and MUST NOT perform source extraction.
 
-## 2. THE ONLY DEFINITION OF DONE
-An architectural phase is ONLY complete when:
-1. `pytest tests/test_v3_security.py` returns Exit Code 0.
-2. `pytest tests/` returns Exit Code 0 with zero skipped tests added.
-3. The Identity Gate script runs and outputs a < 5% delta.
+## 2. DEFINITION OF DONE (achievable + mechanically checkable)
+An architectural phase is complete only when ALL hold:
+1. `pytest tests/test_v3_security.py` returns exit 0 (the AST firewall).
+2. `pytest tests/` returns exit 0. New skips are allowed ONLY as a registered §3 deferral (owner + un-defer trigger, listed in `docs/V3_DEFERRED_TESTS.md`); an unregistered skip is a failure (enforced by `tests/test_repo_integrity.py` G6).
+3. The production-CLI smoke passes on at least one document per routing lane (VLM / mixed / prose): no zero-chunk batch; every IMAGE/TABLE chunk carries `asset_ref` + `visual_description`; routing matches the lane; `qa_full_conversion` reports QA_PASS or a documented QA_WARN. Harness `scripts/smoke_production.sh` is not yet built (PLAN_V3.1 P5); until then run the lane set by hand per `docs/PLAN_V3.1_PIPELINE_RECONVERGENCE.md`.
 
-## 3. SCOPE CONSTRAINTS
-* The port of `batch_processor.py` is strictly limited to engine-agnostic orchestration (batching, routing, JSONL writing). 
-* All v2.16 heuristic reconciliation paths are permanently deferred per `V3_DEFERRED_TESTS.md`.
-* Chunk count and content parity are explicitly excluded from the smoke test requirements, as the V3 chunker fundamentally alters chunking shape.
+RETIRED criterion: the prior Identity-Gate step (`scripts/run_identity_gate.py`, NOT YET BUILT, "< 5% delta") is dropped - that script was never built, and a single sub-5% delta against the v2.16 baseline is impossible by design once the V3 chunker changes chunk shape (§3). Identity is now an explained-delta review (identity-half >= 95% AND explained-delta <= 5%), not one number against v2.16.
+
+## 3. SCOPE + DEFERRAL DISCIPLINE
+* The V3 chunker fundamentally alters chunk shape; chunk COUNT/CONTENT parity vs v2.16 is NOT a smoke requirement (use the explained-delta review).
+* Deferrals are DISPOSITIONED, never "permanent." Every deferred v2.16 heuristic or skipped test is exactly one of:
+  - (a) RESTORED - re-implemented UIR-native and its test un-skipped; or
+  - (b) DELETED - removed with a `docs/DECISIONS.md` entry recording the dropped behavior and rationale (this is the sanctioned exception to AGENT-TEST-01); or
+  - (c) DEFERRED - with an explicit OWNER + UN-DEFER TRIGGER + date, listed in `docs/V3_DEFERRED_TESTS.md`.
+  A deferral that is none of (a)-(c) is a defect, not a state (AGENT-STATUS-01).
+* The "deferred until the Phase B LLM-sanitization layer subsumes them" rationale is RETIRED: that layer's hypothesis was falsified (see `docs/V3_DEFERRED_TESTS.md`). Heuristics that still earn their place are adopted under (a); the rest are restored or deleted. Heading/breadcrumb propagation is explicitly UN-BLOCKED for repair - it is TOC-driven, not sanitization-dependent (`docs/PLAN_V3.1_PIPELINE_RECONVERGENCE.md` P2).
 
 ## 4. STATUS ENFORCEMENT
-There is no "in-progress." 
-There is no "rebooked." 
-There is no "implemented but not validated." 
-You either pass the strict programmatic gates, or you have failed the prompt.
+There is no "in-progress," "rebooked," or "implemented but not validated." A phase either passes the §2 gates or it has failed. A dispositioned deferral (§3c) is an explicit, owned, triggered exception - not open-ended limbo.

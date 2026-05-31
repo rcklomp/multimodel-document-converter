@@ -62,9 +62,16 @@ quality snapshots are quarantined in `docs/.archive/` and blocked by
 
 ## Phase B Technical Debt
 
-Carried forward from Phase A close (2026-05-29), to be retired by the Phase B
-LLM-Sanitization Layer. Accepted as deliberate debt to preserve green gates and
-the `AGENT-SPATIAL-20` invariant; NOT to be silently dropped.
+Carried forward from Phase A close (2026-05-29). **Disposition update
+(2026-05-31):** the original plan to retire these via a "Phase B LLM-Sanitization
+Layer" is void - that layer's hypothesis was falsified (see
+`docs/V3_DEFERRED_TESTS.md`). Per `docs/V3_EXECUTION_MANDATE.md` §3 these are now
+DISPOSITIONED deferrals (adopt / restore / delete-by-decision), owned by
+`docs/PLAN_V3.1_PIPELINE_RECONVERGENCE.md` P3, not open-ended debt. The
+control-doc contradictions that this exposed are catalogued in
+`docs/AUDIT_CONTROL_DOCS_2026-05-31.md`. Accepted as deliberate, owned debt to
+preserve green gates and the `AGENT-SPATIAL-20` invariant; NOT to be silently
+dropped.
 
 1. **`_apply_spatial_refiner` still executes** on the V3 path via
    `_apply_vertical_proximity_merger` inside `_sanitize_technical_manual_final`

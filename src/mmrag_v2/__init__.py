@@ -1,7 +1,7 @@
 """
 MMRAG V2 - Multimodal RAG Document Converter
 =============================================
-ENGINE_USE: Docling v2.66.0 (Native Layout Analysis)
+ENGINE_USE: Docling v2.86.0 (Native Layout Analysis)
 
 v2.4.1-stable Architecture:
 - Universal Intermediate Representation (UIR)
@@ -11,7 +11,7 @@ v2.4.1-stable Architecture:
 - NEVER "shadow" modality per ARCHITECTURE.md
 
 Features:
-- Docling v2.66.0 native layout analysis
+- Docling v2.86.0 native layout analysis
 - Hierarchical breadcrumb tracking (ContextStateV2)
 - VLM-based image enrichment (Ollama, OpenAI, Anthropic)
 - Memory-efficient batch processing

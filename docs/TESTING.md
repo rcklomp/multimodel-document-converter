@@ -8,11 +8,14 @@ authoritative current version (do not duplicate here; goes stale).
 - `MLX_API_KEY`: required for retrieval (production omlx-server
   embedder + local ModernBERT reranker, per v2.13.0+). Test-suite
   skip-gates handle the unset case for CI.
-- `DASHSCOPE_API_KEY`: required for synthetic-soak judge +
-  query generation in `scripts/synthetic_soak.py`. Not required
-  for the retrieval path since v2.13.0 (local embedder swap).
-  The retrieval-regression script tolerates the unset case via
-  skip-gates.
+- Synthetic-soak judge + query generation (`scripts/synthetic_soak.py`):
+  the default path is the local GX10 vLLM via `--judge-provider vllm` /
+  `--gen-provider vllm` (model `RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic`
+  at `http://10.0.10.239:8000`, a standing service as of 2026-05-31, no
+  auth on the LAN). `DASHSCOPE_API_KEY` is only needed for the cloud
+  `--judge-provider dashscope` alternative (`qwen-max`). Neither is
+  required for the retrieval path since v2.13.0 (local omlx embedder); the
+  retrieval-regression script tolerates the unset case via skip-gates.
 
 ## Environment
 - Runner: `conda run -n mmrag-v2`

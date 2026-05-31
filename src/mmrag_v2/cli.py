@@ -13,7 +13,7 @@ Usage:
     mmrag-v2 batch ./docs --vision-provider none
 
 REQ Compliance:
-- REQ-PDF-04: Uses Docling v2.66.0 with high-fidelity rendering
+- REQ-PDF-04: Uses Docling v2.86.0 with high-fidelity rendering
 - REQ-PDF-05: Memory hygiene via gc.collect() between batches
 - REQ-CHUNK-03: VLM descriptions truncated to 400 chars
 - REQ-MM-02: Asset naming [DocHash]_[Page]_[Type]_[Index].png
@@ -778,7 +778,7 @@ def process_document(
     console.print("[bold]MMRAG V2 Document Processor[/bold]")
     console.print("[bold blue]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold blue]")
     console.print(f"[yellow][SYSTEM][/yellow] MMRAG Engine Version: {__engine_version__}")
-    console.print("[cyan]ENGINE_USE:[/cyan] Docling v2.66.0")
+    console.print("[cyan]ENGINE_USE:[/cyan] Docling v2.86.0")
     console.print(f"[cyan]Input:[/cyan] {input_file}")
     console.print(f"[cyan]Output:[/cyan] {output_dir}")
     console.print(f"[cyan]Vision Provider:[/cyan] {vision_provider.value}")
@@ -1933,7 +1933,7 @@ def show_version() -> None:
     """Display version information."""
     console.print("\n[bold]MMRAG V2 Document Processor[/bold]")
     console.print(f"Version: {__engine_version__}")
-    console.print("ENGINE_USE: Docling v2.66.0")
+    console.print("ENGINE_USE: Docling v2.86.0")
     console.print("\n[dim]Vision Providers:[/dim]")
     console.print("  • ollama    - Local llava (localhost:11434) [DEFAULT]")
     console.print("  • openai    - OpenAI GPT-4o-mini")
