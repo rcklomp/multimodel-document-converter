@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
 """V3 Grand Soak — full-corpus batch ingest through HybridEngine.
 
+Runs the SHIPPING path (PLAN_V3.1 P1 — single extraction path):
+``HybridEngine.extract`` → ``UniversalDocument`` →
+``mmrag_v2.chunking.uir_chunker.chunk_universal_document`` →
+``IngestionChunk.from_uir``. The output JSONL is byte-shape-identical
+to what ``mmrag-v2 process`` emits (one ``IngestionChunk`` JSON object
+per line). No sandbox translation, no retired-sandbox import.
+
 For each PDF in ``data/``:
     1. Extract via HybridEngine (cost-optimizer router → VLM for
        visually-complex pages, fast Docling for prose pages).
-    2. Translate v2-UIR → v3-UIR (mirrors rebaseline_v3._translate_v2_to_v3).
-    3. Run the V3 chunker.
+    2. Run the UIR-native chunker → ``UIRChunk`` objects.
+    3. Serialize via ``IngestionChunk.from_uir`` → one JSON object/line.
     4. Write ``output/v3_baselines/<doc_stem>/ingestion.jsonl``.
     5. Record routing decisions + timings to ``meta.json``.
+
+The retired Phase-A sandbox chunker is no longer imported.
 
 Per-document failures are caught, logged, and the run continues
 (matches the unattended-execution protocol's catch+log+skip+continue
@@ -26,14 +35,12 @@ Env requirements:
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import logging
 import os
 import sys
 import time
 import traceback
-import types
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -44,117 +51,6 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("v3_batch_ingest")
-
-
-def _load_phase_c_modules() -> Tuple[Any, Any]:
-    """Load src/mmrag_v3/engines by absolute path → (VlmNativeEngine, HybridEngine).
-
-    Matches rebaseline_v3._load_phase_c_engine to sidestep the namespace
-    collision between project src/mmrag_v3 and v3_execution_root src/mmrag_v3.
-    """
-    engines_dir = REPO_ROOT / "src" / "mmrag_v3" / "engines"
-    pkg = types.ModuleType("_phase_c_engine")
-    pkg.__path__ = [str(engines_dir)]  # type: ignore[attr-defined]
-    sys.modules["_phase_c_engine"] = pkg
-
-    for module_name in (
-        "vlm_provider",
-        "vlm_native",
-        "docling_fast",
-        "router",
-    ):
-        spec = importlib.util.spec_from_file_location(
-            f"_phase_c_engine.{module_name}",
-            engines_dir / f"{module_name}.py",
-        )
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[f"_phase_c_engine.{module_name}"] = module
-        spec.loader.exec_module(module)
-
-    return (
-        sys.modules["_phase_c_engine.vlm_native"].VlmNativeEngine,
-        sys.modules["_phase_c_engine.router"].HybridEngine,
-    )
-
-
-def _translate_v2_to_v3(v2_doc: Any) -> Any:
-    """Map v2-UIR UniversalDocument → v3-UIR shape. Mirrors rebaseline_v3."""
-    from mmrag_v3.universal.document import (
-        BoundingBox as V3BBox,
-        DocumentMetadata as V3Meta,
-        Element as V3Element,
-        ElementType as V3ElementType,
-        ExtractionMethod as V3ExtractionMethod,
-        PageClassification as V3PageClassification,
-        UniversalDocument as V3Doc,
-        UniversalPage as V3Page,
-    )
-
-    method_map = {
-        "native": V3ExtractionMethod.DIGITAL,
-        "ocr_tesseract": V3ExtractionMethod.OCR,
-        "ocr_docling": V3ExtractionMethod.OCR,
-        "ocr_doctr": V3ExtractionMethod.OCR,
-        "vlm": V3ExtractionMethod.VLM,
-        "fallback": V3ExtractionMethod.UNKNOWN,
-    }
-
-    v3_pages = []
-    for v2_page in v2_doc.pages:
-        v3_elements = []
-        for el in v2_page.elements:
-            bbox = None
-            if el.bbox is not None:
-                bbox = V3BBox(
-                    x_min=int(el.bbox.x_min),
-                    y_min=int(el.bbox.y_min),
-                    x_max=int(el.bbox.x_max),
-                    y_max=int(el.bbox.y_max),
-                )
-            v3_elements.append(
-                V3Element(
-                    type=V3ElementType(el.type.value),
-                    content=el.content,
-                    bbox=bbox,
-                    confidence=float(el.confidence),
-                    raw_image=None,
-                    extraction_method=method_map.get(
-                        el.extraction_method.value, V3ExtractionMethod.UNKNOWN
-                    ),
-                    element_index=int(el.element_index),
-                    source_label=str(el.source_label or ""),
-                    metadata=dict(el.metadata or {}),
-                )
-            )
-        v3_pages.append(
-            V3Page(
-                page_number=int(v2_page.page_number),
-                elements=v3_elements,
-                classification=V3PageClassification(v2_page.classification.value),
-                dimensions=(int(v2_page.dimensions[0]), int(v2_page.dimensions[1])),
-                raw_image=None,
-                text_density=float(getattr(v2_page, "text_density", 0.0) or 0.0),
-                avg_confidence=float(getattr(v2_page, "avg_confidence", 0.0) or 0.0),
-            )
-        )
-
-    v2_meta = v2_doc.metadata
-    v3_meta = V3Meta(
-        title=getattr(v2_meta, "title", None),
-        author=getattr(v2_meta, "author", None),
-        language=getattr(v2_meta, "language", None),
-        page_count=len(v3_pages),
-    )
-
-    return V3Doc(
-        doc_id=str(v2_doc.doc_id),
-        source_file=str(v2_doc.source_file),
-        file_type=str(v2_doc.file_type),
-        pages=v3_pages,
-        metadata=v3_meta,
-        total_pages=len(v3_pages),
-    )
 
 
 def _path_for_manifest(p: Path) -> str:
@@ -231,7 +127,13 @@ def _process_one_pdf(
     chunk_document: Any,
     force: bool,
 ) -> Dict[str, Any]:
-    """Process a single PDF. Returns a manifest entry dict."""
+    """Process a single PDF. Returns a manifest entry dict.
+
+    Shipping path: ``hybrid_engine.extract`` → ``UniversalDocument`` →
+    ``chunk_universal_document`` → ``IngestionChunk.from_uir``.
+    """
+    from mmrag_v2.schema.ingestion_schema import FileType, IngestionChunk
+
     doc_dir = _doc_outdir(out_root, pdf)
     doc_dir.mkdir(parents=True, exist_ok=True)
     entry: Dict[str, Any] = {
@@ -250,22 +152,32 @@ def _process_one_pdf(
 
     t0 = time.time()
     try:
-        v2_doc = hybrid_engine.extract(str(pdf))
+        universal_doc = hybrid_engine.extract(str(pdf))
         decisions = list(getattr(hybrid_engine, "last_routing_decisions", []))
-        v3_doc = _translate_v2_to_v3(v2_doc)
-        chunks = chunk_document(v3_doc)
+        uir_chunks = chunk_document(universal_doc)
+        doc_id = universal_doc.doc_id or universal_doc.compute_doc_id()
+        chunks = [
+            IngestionChunk.from_uir(
+                uir,
+                doc_id=doc_id,
+                source_file=pdf.name,
+                file_type=FileType.PDF,
+                position=position,
+            )
+            for position, uir in enumerate(uir_chunks)
+        ]
         jsonl_path = doc_dir / "ingestion.jsonl"
         with jsonl_path.open("w", encoding="utf-8") as fh:
             for chunk in chunks:
-                fh.write(chunk.model_dump_json())
+                fh.write(json.dumps(chunk.model_dump(mode="json"), ensure_ascii=False))
                 fh.write("\n")
         elapsed = time.time() - t0
         routing = _routing_summary(decisions)
         meta: Dict[str, Any] = {
             "status": "ok",
             "source_pdf": entry["source_pdf"],
-            "doc_id": v2_doc.doc_id,
-            "page_count": len(v3_doc.pages),
+            "doc_id": doc_id,
+            "page_count": universal_doc.total_pages,
             "chunk_count": len(chunks),
             "routing": routing,
             "routing_decisions": [
@@ -357,46 +269,46 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    use_vlm = os.environ.get("USE_VLM_ENGINE", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-    if not use_vlm:
+    def _truthy(name: str) -> bool:
+        return os.environ.get(name, "").strip().lower() in {"1", "true", "yes"}
+
+    use_vlm = _truthy("USE_VLM_ENGINE")
+    docling_fast = _truthy("USE_DOCLING_FAST")
+    if not use_vlm and not docling_fast:
         logger.error(
-            "USE_VLM_ENGINE is not set — the grand soak must run through the "
-            "VLM-routed HybridEngine. Set USE_VLM_ENGINE=1 and retry."
+            "Neither USE_VLM_ENGINE nor USE_DOCLING_FAST is set — the grand "
+            "soak must run through the VLM-routed HybridEngine (set "
+            "USE_VLM_ENGINE=1). For an offline smoke (no VLM credits), set "
+            "USE_DOCLING_FAST=1 to route every page through the fast Docling "
+            "engine."
         )
         return 2
 
-    for var in ("VLM_NATIVE_ENDPOINT", "VLM_NATIVE_MODEL", "VLM_NATIVE_API_KEY"):
-        if not os.environ.get(var):
-            logger.warning(
-                "%s is not set in env. VlmProviderConfig.from_env() may fall "
-                "back to defaults that hit the wrong endpoint.",
-                var,
-            )
+    if use_vlm:
+        for var in ("VLM_NATIVE_ENDPOINT", "VLM_NATIVE_MODEL", "VLM_NATIVE_API_KEY"):
+            if not os.environ.get(var):
+                logger.warning(
+                    "%s is not set in env. VlmProviderConfig.from_env() may fall "
+                    "back to defaults that hit the wrong endpoint.",
+                    var,
+                )
 
-    # BROKEN as of 2026-05-30: v3_execution_root was retired (sandbox removed).
-    # TODO(repoint): this script must move off the sandbox chunker onto the
-    # production one. The change is NOT a drop-in — it touches the output format:
-    #   1. drop `_translate_v2_to_v3` (the v2->v3-shape translation, ~lines 81-178)
-    #      and the `from mmrag_v3.universal.document import ...` it uses;
-    #   2. chunk the v2 UniversalDocument directly:
-    #        from mmrag_v2.chunking.uir_chunker import chunk_universal_document
-    #        uir_chunks = chunk_universal_document(v2_doc, profile_type=...)
-    #   3. fix serialization: uir_chunks are mmrag_v2 UIRChunk *dataclasses*
-    #      (no .model_dump_json); emit JSONL via IngestionChunk.from_uir(...).
-    #      model_dump_json() to keep the shape v3_to_v2_jsonl.py expects.
-    # Validate offline (USE_DOCLING_FAST=1 on a 1-page doc) THEN through the full
-    # soak. Sandbox recoverable from ~/mmrag_v3_execution_root_backup_2026-05-30.tar.gz.
-    v3_src = REPO_ROOT / "v3_execution_root" / "src"
-    if str(v3_src) not in sys.path:
-        sys.path.insert(0, str(v3_src))
-    from mmrag_v3.chunking.chunker import chunk as chunk_document  # type: ignore  # noqa: E501 (see TODO above — sandbox retired)
+    # PLAN_V3.1 P1: single extraction path. Chunk the v2 UniversalDocument
+    # directly with the production UIR-native chunker; serialization to
+    # IngestionChunk JSONL happens in _process_one_pdf via from_uir.
+    from mmrag_v2.chunking.uir_chunker import chunk_universal_document as chunk_document
 
-    _, HybridEngine = _load_phase_c_modules()
-    hybrid_engine = HybridEngine()
+    # Engine selection mirrors mmrag_v3.processor.extract precedence: the
+    # full soak uses HybridEngine (cost-optimizer routing + routing
+    # decisions); USE_DOCLING_FAST forces the offline Docling route.
+    if docling_fast and not use_vlm:
+        from mmrag_v3.engines.docling_fast import DoclingFastEngine
+
+        hybrid_engine = DoclingFastEngine()
+    else:
+        from mmrag_v3.engines.router import HybridEngine
+
+        hybrid_engine = HybridEngine()
 
     out_root: Path = args.out_dir.resolve()
     out_root.mkdir(parents=True, exist_ok=True)
@@ -457,7 +369,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "elapsed_seconds": round(time.time() - t_start, 3),
     }
     manifest = {
-        "out_dir": str(out_root.relative_to(REPO_ROOT)),
+        "out_dir": _path_for_manifest(out_root),
         "started_at": t_start,
         "summary": summary,
         "entries": entries,
