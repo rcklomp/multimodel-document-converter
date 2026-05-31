@@ -791,9 +791,15 @@ class IngestionChunk(BaseModel):
                 )
 
         # --- Hierarchy / semantic context ---
+        # Explicit breadcrumb_path kwarg wins; otherwise fall back to the
+        # breadcrumb the UIR-native heading pass stamped on the chunk
+        # (PLAN_V3.1 P2 — TOC-driven heading/breadcrumb propagation).
+        resolved_breadcrumb = breadcrumb_path
+        if resolved_breadcrumb is None:
+            resolved_breadcrumb = getattr(uir, "breadcrumb_path", None)
         hierarchy = HierarchyMetadata(
             parent_heading=uir.parent_heading,
-            breadcrumb_path=list(breadcrumb_path) if breadcrumb_path else [],
+            breadcrumb_path=list(resolved_breadcrumb) if resolved_breadcrumb else [],
         )
 
         # --- OCR confidence (numeric on UIR → categorical on v2.16 schema) ---

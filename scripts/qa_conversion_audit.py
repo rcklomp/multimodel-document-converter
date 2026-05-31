@@ -849,10 +849,22 @@ def print_report(r: AuditResult, path: Path) -> bool:
         if not label_ok:
             fails.append("LABEL")
 
-    # --- HEADING --- (skipped for forms)
+    # --- HEADING --- (skipped for forms + heading-less short documents)
     heading_coverage = r.text_with_heading / max(r.text_chunks, 1)
+    # A short born-digital document with no detectable heading structure
+    # (parts list, single-table export, poster, 2-page leaflet) has no
+    # chapter hierarchy by nature — exactly like a scanned form. The
+    # >=0.80 prose-calibrated HEADING gate is meaningless there and fires
+    # spuriously. Skip it for the `short_document` class (<=5 pages AND
+    # heading_coverage < 0.10, inferred above). This is a gate-correctness
+    # fix, NOT a relaxation: the precondition is already-absent structure,
+    # so it cannot mask a heading regression on any structured document.
+    # See docs/DECISIONS.md "Short-Document HEADING-Gate Skip (PLAN_V3.1 P2)".
+    is_short_no_heading = r.document_type == "short_document"
     if is_form:
         print(f"  HEADING:     SKIP [form]")
+    elif is_short_no_heading:
+        print(f"  HEADING:     SKIP [short_document — no heading hierarchy]")
     else:
         heading_ok = (
             r.long_headings == 0

@@ -99,6 +99,7 @@ def chunk_universal_document(
     min_chars: int = MIN_CHUNK_CHARS,
     extraction_engine_version: str = EXTRACTION_ENGINE_VERSION_DEFAULT,
     profile_type: Optional[str] = None,
+    toc_headings: Optional[Dict[Any, Any]] = None,
 ) -> List[UIRChunk]:
     """Chunk a UniversalDocument into UIRChunks — pure UIR-native.
 
@@ -112,12 +113,25 @@ def chunk_universal_document(
         min_chars: Minimum chunk content length before merging.
         extraction_engine_version: Stamped on every emitted UIRChunk.
         profile_type: Optional profile hint (reserved for future tuning).
+        toc_headings: Plain-data TOC map from
+            ``BatchProcessor._extract_toc_headings`` (PyMuPDF bookmarks):
+            ``{page_number: [breadcrumb...]}`` plus a ``"__heading_map__"``
+            key mapping normalized heading title → breadcrumb. Threaded in
+            as plain data (no Docling); drives cross-page heading
+            carry-forward + breadcrumb_path (PLAN_V3.1 P2). ``None`` for
+            docs with no bookmarks (heading assignment then relies only on
+            in-page heading elements + carry-forward).
 
     Returns:
         List of UIRChunk objects ready for ingestion.
     """
     chunks: List[UIRChunk] = []
     reading_order: int = 0
+
+    doc_title: Optional[str] = None
+    meta = getattr(universal_doc, "metadata", None)
+    if meta is not None:
+        doc_title = getattr(meta, "title", None)
 
     for page in universal_doc.pages:
         page_chunks = _chunk_page(
@@ -131,7 +145,149 @@ def chunk_universal_document(
         chunks.extend(page_chunks)
         reading_order += len(page_chunks)
 
+    # PLAN_V3.1 P2: UIR-native heading assignment. Per text chunk, in
+    # reading order, set parent_heading by precedence:
+    #   1. nearest preceding in-page heading element (already on the chunk);
+    #   2. carry-forward of the last active heading from earlier pages;
+    #   3. TOC entry whose page covers the chunk;
+    # and build breadcrumb_path from the TOC hierarchy.
+    _assign_headings(chunks, toc_headings, doc_title=doc_title)
+
     return chunks
+
+
+# ---------------------------------------------------------------------------
+# Heading assignment (TOC-driven, UIR-native — PLAN_V3.1 P2)
+# ---------------------------------------------------------------------------
+
+
+def _normalize_heading(text: str) -> str:
+    """Collapse whitespace + NBSP so TOC titles match in-page headings."""
+    return re.sub(r"\s+", " ", text.replace(" ", " ")).strip()
+
+
+def _assign_headings(
+    chunks: List[UIRChunk],
+    toc_headings: Optional[Dict[Any, Any]],
+    *,
+    doc_title: Optional[str] = None,
+) -> None:
+    """Assign parent_heading + breadcrumb_path to text chunks in place.
+
+    Precedence per text chunk (in reading order):
+      1. nearest preceding in-page heading element — already stamped on the
+         chunk by the per-page chunker (``parent_heading``);
+      2. carry-forward — the last active heading from an earlier page when
+         the chunk has none of its own;
+      3. TOC fallback — the breadcrumb whose page range covers this chunk's
+         page (from PyMuPDF bookmarks), used when neither 1 nor 2 applies.
+
+    breadcrumb_path is built from the TOC hierarchy: when a chunk's heading
+    is a known TOC title, its TOC breadcrumb is used; otherwise the page's
+    TOC breadcrumb is used. The document title (when available) is prepended
+    and a ``"Page N"`` leaf appended, matching the v2.16 breadcrumb shape.
+
+    No Docling, no batch_processor methods — pure UIR data.
+    """
+    # Central heading validator (shared with the OCR-lane producer); reused
+    # here so the chunker's HEURISTIC in-page headings honor the same
+    # garbage-rejection contract. NOTE: PyMuPDF TOC bookmark titles are
+    # authoritative document structure and are NOT re-validated through
+    # is_valid_heading — that validator is tuned to reject OCR noise and
+    # numbered body-step prose, which would wrongly drop legitimate numbered
+    # subsection titles like "1.1.1 ...". A heuristic heading that EXACTLY
+    # matches a TOC title is therefore trusted.
+    from ..state.context_state import is_valid_heading
+
+    toc = toc_headings or {}
+    heading_map: Dict[str, List[str]] = toc.get("__heading_map__", {}) if toc else {}
+    # page_map: page_number -> breadcrumb at end of that page.
+    page_map: Dict[int, List[str]] = {
+        k: v for k, v in toc.items() if isinstance(k, int)
+    } if toc else {}
+
+    doc_name = _normalize_heading(doc_title) if doc_title else "Document"
+
+    def _is_toc_title(h: Optional[str]) -> bool:
+        return bool(h) and _normalize_heading(h) in heading_map  # type: ignore[arg-type]
+
+    def _trusted_heading(h: Optional[str]) -> bool:
+        # Trust a chunker heading if it is a known TOC title (authoritative)
+        # or passes the central garbage-rejection validator.
+        if not h:
+            return False
+        return _is_toc_title(h) or is_valid_heading(h)
+
+    def _page_of(ch: UIRChunk) -> int:
+        loc = ch.locator
+        if loc is not None and loc.page_number is not None:
+            return int(loc.page_number)
+        return 0
+
+    def _build_breadcrumb(toc_bc: List[str], page: int) -> List[str]:
+        body = [_normalize_heading(b) for b in toc_bc if b]
+        crumb = [doc_name] + body
+        if page > 0:
+            crumb.append(f"Page {page}")
+        # Cap depth at 5 (REQ-HIER-04) keeping doc root + deepest context.
+        if len(crumb) > 5:
+            crumb = [crumb[0]] + crumb[-4:]
+        return crumb
+
+    last_heading: Optional[str] = None
+    last_breadcrumb: List[str] = []
+
+    for ch in chunks:
+        if ch.modality != Modality.TEXT:
+            continue
+        page = _page_of(ch)
+        toc_bc = page_map.get(page)
+
+        own_heading = ch.parent_heading if _trusted_heading(ch.parent_heading) else None
+
+        if own_heading is not None:
+            # (1) Nearest preceding in-page heading element. Build its
+            # breadcrumb from the TOC heading_map when the title is known,
+            # else from the page breadcrumb, else a minimal doc+heading+page.
+            norm = _normalize_heading(own_heading)
+            heading_bc = heading_map.get(norm)
+            if heading_bc:
+                breadcrumb = _build_breadcrumb(heading_bc, page)
+            elif toc_bc:
+                breadcrumb = _build_breadcrumb(toc_bc, page)
+            else:
+                breadcrumb = _build_breadcrumb([own_heading], page)
+            ch.parent_heading = _normalize_heading(own_heading)
+            ch.breadcrumb_path = breadcrumb
+            last_heading = ch.parent_heading
+            last_breadcrumb = breadcrumb
+            continue
+
+        # (3) TOC fallback takes precedence over a stale carry when the TOC
+        # has a more specific section for this exact page. The TOC leaf is
+        # authoritative document structure, so it is used as-is.
+        if toc_bc:
+            parent = _normalize_heading(toc_bc[-1])
+            if parent:
+                breadcrumb = _build_breadcrumb(toc_bc, page)
+                ch.parent_heading = parent
+                ch.breadcrumb_path = breadcrumb
+                last_heading = parent
+                last_breadcrumb = breadcrumb
+                continue
+
+        # (2) Carry-forward the last active heading from an earlier page.
+        if last_heading:
+            ch.parent_heading = last_heading
+            # Re-leaf the carried breadcrumb to this chunk's page.
+            if last_breadcrumb:
+                body = [b for b in last_breadcrumb if not b.startswith("Page ")]
+                crumb = list(body)
+                if page > 0:
+                    crumb.append(f"Page {page}")
+                ch.breadcrumb_path = crumb
+            continue
+        # No heading available for this chunk — leave it null (honest).
 
 
 # ---------------------------------------------------------------------------

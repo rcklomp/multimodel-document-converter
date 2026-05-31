@@ -1229,6 +1229,30 @@ class BatchProcessor:
                 f"vision-native IMAGE/TABLE chunks"
             )
 
+    def _toc_for_batch(self, page_offset: int) -> Optional[Dict[Any, Any]]:
+        """Project the document-wide PyMuPDF TOC into a batch's LOCAL page space.
+
+        ``_extract_toc_headings`` keys breadcrumbs by ABSOLUTE document page
+        plus a ``"__heading_map__"`` (title -> breadcrumb) entry. The
+        UIR-native chunker (PLAN_V3.1 P2) sees batch-LOCAL page numbers
+        (local = absolute - page_offset), so shift the integer page keys here
+        and pass the heading_map through unchanged. Returns ``None`` when no
+        TOC was extracted (born-digital docs with no bookmarks).
+        """
+        toc = getattr(self, "_toc_headings", None) or {}
+        if not toc:
+            return None
+        local: Dict[Any, Any] = {}
+        for key, value in toc.items():
+            if isinstance(key, int):
+                local_page = key - page_offset
+                if local_page >= 1:
+                    local[local_page] = value
+            else:
+                # "__heading_map__" (title -> breadcrumb) is page-independent.
+                local[key] = value
+        return local or None
+
     def _process_single_batch(
         self,
         batch_info: BatchInfo,
@@ -1267,7 +1291,18 @@ class BatchProcessor:
         profile_type = self._intelligence_metadata.get("profile_type") or None
 
         universal_doc = v3_extract(str(batch_info.batch_path))
-        uir_chunks = chunk_universal_document(universal_doc, profile_type=profile_type)
+
+        # PLAN_V3.1 P2: thread the PyMuPDF TOC (extracted document-wide in
+        # process_pdf, keyed by ABSOLUTE page) into the UIR-native chunker as
+        # plain data, shifted into this batch's LOCAL page space (the chunker
+        # sees batch-local page numbers; the absolute-page projection happens
+        # below). Drives cross-page heading carry-forward + breadcrumb_path.
+        local_toc = self._toc_for_batch(batch_info.page_offset)
+        uir_chunks = chunk_universal_document(
+            universal_doc,
+            profile_type=profile_type,
+            toc_headings=local_toc,
+        )
 
         # Vision-native extraction describes image/table regions but emits no
         # binary asset. Render the region crops here (batch_processor owns the
@@ -1283,6 +1318,16 @@ class BatchProcessor:
             # Project batch-local page numbers into absolute document pages.
             if uir.locator is not None and uir.locator.page_number is not None:
                 uir.locator.page_number = uir.locator.page_number + batch_info.page_offset
+                # Re-leaf the TOC breadcrumb's "Page N" tail to the absolute
+                # page so the breadcrumb agrees with the projected locator
+                # (PLAN_V3.1 P2; the heading pass ran in batch-local space).
+                if batch_info.page_offset and uir.breadcrumb_path:
+                    uir.breadcrumb_path = [
+                        f"Page {uir.locator.page_number}"
+                        if isinstance(b, str) and b.startswith("Page ")
+                        else b
+                        for b in uir.breadcrumb_path
+                    ]
             chunks.append(
                 IngestionChunk.from_uir(
                     uir,

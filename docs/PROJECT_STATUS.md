@@ -1,6 +1,36 @@
 # Project Status
 
-Last updated: 2026-05-29
+Last updated: 2026-05-31
+
+## PLAN_V3.1 reconvergence — P1 + P2 landed (2026-05-31)
+
+**P1 (collapse to one extraction path) — DONE.** `scripts/v3_batch_ingest.py`
++ `scripts/rebaseline_v3.py` repointed off the retired `v3_execution_root`
+sandbox chunker onto the production shipping path (`HybridEngine.extract` →
+`uir_chunker.chunk_universal_document` → `IngestionChunk.from_uir`). The v2→v3
+sandbox translation + importlib namespace trick are gone. `grep -rn
+v3_execution_root scripts/` is empty; the baseline tool runs offline
+(`USE_DOCLING_FAST=1`) and emits IngestionChunk JSONL.
+
+**P2 (HEADING coverage, UIR-native) — DONE.** New
+`uir_chunker._assign_headings` pass sets `parent_heading` + `breadcrumb_path`
+per text chunk by precedence (in-page heading → cross-page carry-forward →
+PyMuPDF TOC fallback), with `breadcrumb_path` built from the TOC hierarchy. The
+TOC is extracted document-wide (`batch_processor._extract_toc_headings`) and
+threaded into the chunker as plain data, shifted to batch-local pages by the
+new `_toc_for_batch` helper (no Docling, no resurrected batch_processor
+methods). `breadcrumb_path` is a new additive field on `UIRChunk`, consumed by
+`IngestionChunk.from_uir`. Result on an academic doc with bookmarks (RAG guide,
+pp.23-32): HEADING coverage **68% → 100%**, breadcrumb 0% → 100%, qa
+`HEADING: PASS` / `AUDIT_PASS`. `tests/test_ocr_path_heading_propagation.py`
+RESTORED (un-skipped, 76 green incl. 7 new `_assign_headings` contracts). Two
+DECISIONS.md entries added: the OCR-lane production-wiring pin retirement and
+the short-document HEADING-gate skip (a born-digital doc with no bookmarks +
+no headings, e.g. `Bevestigingsmiddelen.pdf`, legitimately has no hierarchy;
+the gate is corrected to SKIP that class rather than fabricate headings).
+
+P3/P4/P5 NOT started (need re-baselining + user judgment). See
+`docs/PLAN_V3.1_PIPELINE_RECONVERGENCE.md`.
 
 Purpose: fast orientation for a new coding session. Read this before deeper project docs.
 

@@ -851,6 +851,11 @@ class UIRChunk:
     # Hierarchical context:
     parent_element_id: Optional[str] = None  # Table cell → parent table
     parent_heading: Optional[str] = None  # Nearest ancestor heading text
+    # Full TOC breadcrumb (e.g. [doc, Part, Chapter, Section, "Page N"]).
+    # Populated by the UIR-native heading-assignment pass in uir_chunker
+    # when a PyMuPDF TOC is threaded in (PLAN_V3.1 P2). Empty when no TOC
+    # covers the chunk's page; consumed by IngestionChunk.from_uir.
+    breadcrumb_path: List[str] = field(default_factory=list)
 
     # Cross-page sibling grouping (Charter §3.2, NEW in 0.5):
     #   Shared UUID across chunks that are halves/parts of the same logical

@@ -1,28 +1,50 @@
-"""Phase 6 (PLAN_V2.10) — OCR_PATH_HEADING_PROPAGATION contracts.
+"""HEADING_PROPAGATION contracts (Phase 6 PLAN_V2.10 + PLAN_V3.1 P2).
 
-The OCR/element-by-element extraction lane in ``BatchProcessor`` must promote
-Docling ``section_header`` / ``title`` items into
-``ContextStateV2.hierarchy_stack`` so body chunks emitted on this and later
-pages — including across batch boundaries — inherit ``parent_heading`` from
-a real Docling-recognized signal.
+Two layers of contract live here:
 
-The Phase 5 ``_propagate_headings`` fix on the HybridChunker lane is
-intentionally not touched here; the two lanes are independent.
+1. The central heading validator (``is_valid_heading``) and the
+   ``ContextStateV2`` carry/attribution helpers — the garbage-rejection +
+   cross-page-carry behaviour shared by every heading-assignment path.
+
+2. PLAN_V3.1 P2 — the UIR-native heading-assignment pass
+   ``uir_chunker._assign_headings``, which is the CURRENT shipping path. It
+   sets ``parent_heading`` + ``breadcrumb_path`` per text chunk by
+   precedence: (1) nearest preceding in-page heading element, (2)
+   carry-forward of the last active heading from earlier pages, (3) the
+   PyMuPDF TOC entry whose page covers the chunk; breadcrumb_path is built
+   from the TOC hierarchy. TOC bookmark titles are authoritative and are
+   NOT re-validated through ``is_valid_heading`` (which is tuned to reject
+   OCR noise / numbered body-step prose).
+
+Re-enabled 2026-05-31 (was V3_DEFERRED). The two prior production-wiring
+pins on the deleted OCR/layout lane were DELETED-by-decision; see
+docs/DECISIONS.md "OCR-lane production-wiring pins retired (PLAN_V3.1 P2)".
 """
 from __future__ import annotations
-
-import pytest as _pytest_v3defer
-pytestmark = _pytest_v3defer.mark.skip(reason="V3_DEFERRED - Legacy Heuristic (Phase A Step 5: heuristics stripped from UIR-native batch_processor; re-enable when LLM-sanitization layer subsumes them)")
 
 from types import SimpleNamespace
 
 import pytest
 
 from mmrag_v2.batch_processor import BatchProcessor
+from mmrag_v2.chunking.uir_chunker import _assign_headings, chunk_universal_document
 from mmrag_v2.state.context_state import (
     ContextStateV2,
     create_context_state,
     is_valid_heading,
+)
+from mmrag_v2.universal.intermediate import (
+    ConfidenceBreakdown,
+    CoordinateFrame,
+    Element,
+    ElementType,
+    Locator,
+    LocatorType,
+    Modality,
+    PageClassification,
+    UIRChunk,
+    UniversalDocument,
+    UniversalPage,
 )
 
 
@@ -605,20 +627,25 @@ def test_multi_page_doc_pushes_normally(tmp_path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_ocr_lane_heading_mutation_path() -> None:
-    """The OCR-lane heading mutation path on the BatchProcessor is
-    conceptually single: every push into ``ContextStateV2`` flows
-    through one of two helpers — ``_attribute_ocr_chunk_heading``
-    (per-chunk ordered attribution, the canonical path) and
-    ``_promote_ocr_section_headers`` (the VLM-fullpage /
-    Tesseract-fullpage fallback). Both push via the central
+def test_ocr_lane_heading_helpers_delegate_to_central_validator() -> None:
+    """The OCR-lane heading helpers delegate through the central
     ``update_on_heading`` validator; no parallel mechanism.
 
-    This pin used to be a brittle ``source.count(...) == 1`` string
-    assertion. The Phase 6 audit replaced it with a behavioural pin:
-    the heading-mutation entry points are explicitly named, both
-    delegate to the central API, and ``_process_page_layout_aware`` is
-    the only invoker of either.
+    The two named push helpers — ``_attribute_ocr_chunk_heading``
+    (per-chunk ordered attribution) and ``_promote_ocr_section_headers``
+    (VLM-fullpage / Tesseract-fullpage fallback) — both push via
+    ``ContextStateV2.update_on_heading`` (the only mutation API that runs
+    ``is_valid_heading``). This is the live behavioural contract.
+
+    NOTE (PLAN_V3.1 P2, 2026-05-31): the prior production-wiring
+    assertions (``callers_attribute == 1`` / ``callers_promote == 1``,
+    and the ``_propagate_headings`` call-count pin in process_pdf) were
+    DELETED-by-decision — they pinned the OCR/layout lane production
+    call sites that Phase A Step 5 removed (the lane is gone; heading
+    propagation is now UIR-native in uir_chunker._assign_headings). See
+    docs/DECISIONS.md "OCR-lane production-wiring pins retired (PLAN_V3.1 P2)".
+    The validator-delegation contract below is retained because the
+    helpers and the central validator are still LIVE.
     """
     import inspect
 
@@ -635,23 +662,6 @@ def test_ocr_lane_heading_mutation_path() -> None:
     promote_source = inspect.getsource(BatchProcessor._promote_ocr_section_headers)
     assert "update_on_heading" in attribute_source
     assert "update_on_heading" in promote_source
-
-    # Only ``_process_page_layout_aware`` invokes them in production
-    # (i.e. they are not called from other producer-side methods that
-    # could re-introduce duplicate propagation sites).
-    module_source = inspect.getsource(BatchProcessor)
-    callers_attribute = module_source.count("self._attribute_ocr_chunk_heading(")
-    callers_promote = module_source.count("self._promote_ocr_section_headers(")
-    assert callers_attribute == 1, (
-        "Expected exactly one production caller of "
-        "_attribute_ocr_chunk_heading; ordered per-chunk attribution "
-        "must be invoked from exactly one site."
-    )
-    assert callers_promote == 1, (
-        "Expected exactly one production caller of "
-        "_promote_ocr_section_headers; the VLM/Tesseract-fullpage "
-        "fallback must be invoked from exactly one site."
-    )
 
 
 def test_no_parallel_ocr_heading_validator() -> None:
@@ -854,15 +864,200 @@ def test_is_valid_heading_firearms_real_headings_pass(real_heading: str) -> None
     assert is_valid_heading(real_heading) is True
 
 
-def test_hybrid_chunker_lane_propagate_headings_call_count_unchanged() -> None:
-    """The Phase 5 structural pin (single ``_propagate_headings`` production
-    call site inside ``process_pdf``) must remain intact after the Phase 6
-    OCR-lane work. Mirrors the assertion pinned in
-    ``tests/test_vision_aided_front_matter.py``.
-    """
-    import inspect
+# DELETED-by-decision (PLAN_V3.1 P2, 2026-05-31):
+# ``test_hybrid_chunker_lane_propagate_headings_call_count_unchanged`` pinned
+# a single ``_propagate_headings(`` production call site inside process_pdf.
+# Phase A Step 5 stripped that finalize call (the v2.16 reconcile lane is
+# gone); heading + breadcrumb propagation is now UIR-native in
+# uir_chunker._assign_headings, fed the PyMuPDF TOC as plain data. The pin
+# asserted removed wiring and can no longer hold. See docs/DECISIONS.md
+# "OCR-lane production-wiring pins retired (PLAN_V3.1 P2)".
 
-    from mmrag_v2.batch_processor import BatchProcessor
 
-    source = inspect.getsource(BatchProcessor.process_pdf)
-    assert source.count("_propagate_headings(") == 1
+# ---------------------------------------------------------------------------
+# PLAN_V3.1 P2 — UIR-native heading-assignment pass (uir_chunker._assign_headings)
+#
+# These are the live contract that keeps the TOC-driven heading + breadcrumb
+# propagation fixed. They exercise the shipping path's heading pass directly
+# on UIRChunks, threading the PyMuPDF TOC in as plain data.
+# ---------------------------------------------------------------------------
+
+
+def _text_chunk(page: int, content: str, parent_heading=None) -> UIRChunk:
+    return UIRChunk(
+        modality=Modality.TEXT,
+        content=content,
+        locator=Locator(
+            type=LocatorType.BBOX,
+            bbox=[0, 0, 1000, 100],
+            page_number=page,
+            coordinate_frame=CoordinateFrame.PDF_PAGE_PORTRAIT,
+        ),
+        confidence=ConfidenceBreakdown(),
+        extraction_method="uir_native_chunker",
+        extraction_engine_version="test",
+        parent_heading=parent_heading,
+    )
+
+
+# Mirrors the BatchProcessor._extract_toc_headings shape: int page -> breadcrumb
+# at end-of-page, plus a "__heading_map__" of normalized title -> breadcrumb.
+_RAG_TOC = {
+    23: ["Part 1 Foundations", "1 LLMs and the need for RAG"],
+    24: ["Part 1 Foundations", "1 LLMs and the need for RAG", "1.1\tCurse of the LLMs"],
+    26: [
+        "Part 1 Foundations",
+        "1 LLMs and the need for RAG",
+        "1.1\tCurse of the LLMs",
+        "1.1.1\tLLMs are not trained for facts",
+    ],
+    "__heading_map__": {
+        "1 LLMs and the need for RAG": ["Part 1 Foundations", "1 LLMs and the need for RAG"],
+        "1.1.1 LLMs are not trained for facts": [
+            "Part 1 Foundations",
+            "1 LLMs and the need for RAG",
+            "1.1\tCurse of the LLMs",
+            "1.1.1\tLLMs are not trained for facts",
+        ],
+    },
+}
+
+
+def test_assign_headings_carry_forward_across_pages() -> None:
+    """A heading on page 23 carries to body chunks on pages 24/25 that have
+    no heading of their own (precedence rule 2)."""
+    chunks = [
+        _text_chunk(23, "1 chapter heading", parent_heading="1 LLMs and the need for RAG"),
+        _text_chunk(24, "body on page 24 with no heading element"),
+        _text_chunk(25, "body on page 25 with no heading element"),
+    ]
+    _assign_headings(chunks, None, doc_title=None)  # no TOC → carry-forward only
+    assert chunks[0].parent_heading == "1 LLMs and the need for RAG"
+    assert chunks[1].parent_heading == "1 LLMs and the need for RAG"
+    assert chunks[2].parent_heading == "1 LLMs and the need for RAG"
+
+
+def test_assign_headings_toc_fallback_when_no_in_page_heading() -> None:
+    """When a chunk has no in-page heading and nothing has been carried, the
+    TOC entry whose page covers the chunk supplies parent_heading +
+    breadcrumb (precedence rule 3)."""
+    chunks = [_text_chunk(24, "body text, page 24, no heading element")]
+    _assign_headings(chunks, _RAG_TOC, doc_title="A Simple Guide")
+    assert chunks[0].parent_heading == "1.1 Curse of the LLMs"  # TOC leaf, tab normalized
+    assert chunks[0].breadcrumb_path
+    assert "1.1 Curse of the LLMs" in chunks[0].breadcrumb_path
+    assert chunks[0].breadcrumb_path[0] == "A Simple Guide"
+    assert chunks[0].breadcrumb_path[-1] == "Page 24"
+
+
+def test_assign_headings_trusts_toc_title_rejected_by_is_valid_heading() -> None:
+    """A numbered subsection title like ``1.1.1 ...`` is rejected by
+    is_valid_heading (numbered body-step shape) but IS a real TOC bookmark.
+    The pass must trust it (authoritative structure) and build its
+    breadcrumb, rather than dropping the chunk's heading."""
+    assert is_valid_heading("1.1.1 LLMs are not trained for facts") is False  # premise
+    chunks = [
+        _text_chunk(
+            26,
+            "heading element text",
+            parent_heading="1.1.1 LLMs are not trained for facts",
+        ),
+        _text_chunk(26, "body under the subsection, no heading element"),
+    ]
+    _assign_headings(chunks, _RAG_TOC, doc_title="A Simple Guide")
+    for ch in chunks:
+        assert ch.parent_heading == "1.1.1 LLMs are not trained for facts"
+        assert ch.breadcrumb_path
+        assert "1.1.1 LLMs are not trained for facts" in ch.breadcrumb_path
+
+
+def test_assign_headings_breadcrumb_depth_capped_at_five() -> None:
+    """REQ-HIER-04: breadcrumb depth is capped at 5, keeping the doc root
+    plus the deepest context."""
+    chunks = [_text_chunk(26, "body, page 26, no heading element")]
+    _assign_headings(chunks, _RAG_TOC, doc_title="A Simple Guide")
+    bc = chunks[0].breadcrumb_path
+    assert len(bc) <= 5
+    assert bc[0] == "A Simple Guide"
+    assert bc[-1] == "Page 26"
+
+
+def test_assign_headings_no_toc_no_heading_stays_null() -> None:
+    """Honest behaviour: a doc with no TOC and no detectable heading element
+    (e.g. a parts-list leaflet) leaves parent_heading null. No fabrication."""
+    chunks = [
+        _text_chunk(1, "M5x40 M5x50 M3x6 grubscrew ... parts list row"),
+        _text_chunk(2, "7991 verzonken 34805-1 ... another parts row"),
+    ]
+    _assign_headings(chunks, None, doc_title=None)
+    assert all(c.parent_heading is None for c in chunks)
+    assert all(c.breadcrumb_path == [] for c in chunks)
+
+
+def test_assign_headings_garbage_in_page_heading_not_carried() -> None:
+    """A chunker heuristic heading that is NOT a TOC title and fails
+    is_valid_heading (e.g. body prose mis-detected) must not become the
+    carried heading; later body chunks stay null when there is no TOC."""
+    garbage = "This is a clear demonstration of the principle."  # 5+ words, terminal period
+    assert is_valid_heading(garbage) is False  # premise
+    chunks = [
+        _text_chunk(1, "mis-detected heading chunk", parent_heading=garbage),
+        _text_chunk(2, "later body, no heading element"),
+    ]
+    _assign_headings(chunks, None, doc_title=None)
+    assert chunks[1].parent_heading is None
+
+
+def test_chunk_universal_document_threads_toc_and_propagates() -> None:
+    """End-to-end through the chunker entry point: a 2-page UniversalDocument
+    where page 1 has a section_header element and page 2 has body only. With
+    the TOC threaded in, the page-2 body chunk inherits the heading and gets
+    a TOC breadcrumb."""
+
+    def _el(etype, content, page, label=""):
+        return Element(
+            type=etype,
+            content=content,
+            bbox=None,
+            confidence=0.95,
+            extraction_method="native",
+            element_index=0,
+            source_label=label,
+        )
+
+    page1 = UniversalPage(
+        page_number=1,
+        elements=[
+            _el(ElementType.TEXT, "1 LLMs and the need for RAG", 1, label="section_header"),
+            _el(ElementType.TEXT, "Body paragraph introducing the chapter content.", 1),
+        ],
+        classification=PageClassification.DIGITAL,
+        dimensions=(612, 792),
+    )
+    page2 = UniversalPage(
+        page_number=2,
+        elements=[
+            _el(ElementType.TEXT, "Continuation body text on the next page, no heading here.", 2),
+        ],
+        classification=PageClassification.DIGITAL,
+        dimensions=(612, 792),
+    )
+    doc = UniversalDocument(
+        doc_id="testdoc",
+        source_file="test.pdf",
+        file_type="pdf",
+        pages=[page1, page2],
+    )
+    toc = {
+        1: ["1 LLMs and the need for RAG"],
+        2: ["1 LLMs and the need for RAG"],
+        "__heading_map__": {"1 LLMs and the need for RAG": ["1 LLMs and the need for RAG"]},
+    }
+    chunks = chunk_universal_document(doc, toc_headings=toc)
+    text_chunks = [c for c in chunks if c.modality == Modality.TEXT]
+    assert text_chunks, "expected at least one text chunk"
+    # Every text chunk (both pages) inherits the chapter heading.
+    assert all(c.parent_heading == "1 LLMs and the need for RAG" for c in text_chunks)
+    # Page-2 body chunk carries a populated breadcrumb.
+    page2_chunks = [c for c in text_chunks if c.locator.page_number == 2]
+    assert page2_chunks and all(c.breadcrumb_path for c in page2_chunks)
