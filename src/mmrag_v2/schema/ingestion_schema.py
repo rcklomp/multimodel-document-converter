@@ -118,6 +118,25 @@ def _collapse_replacement_chars(value: Optional[str]) -> Optional[str]:
     return _REPLACEMENT_CHAR_RUN_PATTERN.sub(" ", value)
 
 
+# Mirrors ChunkMetadata.visual_description Field(max_length=...) below. Kept as a
+# named constant so the producer-side truncation and the schema cap stay in sync.
+_VISUAL_DESCRIPTION_MAX_CHARS = 400
+
+
+def _fit_visual_description(text: str) -> str:
+    """Safely fit vision-native IMAGE text into the visual_description cap.
+
+    The full, unbounded description stays authoritative in the chunk's
+    ``content`` field; ``visual_description`` is only an internal mirror, so
+    truncating it loses nothing retrievable. This keeps the result within the
+    400-char schema cap (we do NOT raise the cap - the QA gate stays intact)
+    and marks the cut so a reader can tell it was abbreviated.
+    """
+    if len(text) <= _VISUAL_DESCRIPTION_MAX_CHARS:
+        return text
+    return text[: _VISUAL_DESCRIPTION_MAX_CHARS - 3].rstrip() + "..."
+
+
 # ============================================================================
 # ENUMS
 # ============================================================================
@@ -854,10 +873,14 @@ class IngestionChunk(BaseModel):
             document_domain=document_domain,
             document_modality=document_modality,
             # Vision-native IMAGE elements carry their VLM description in
-            # content; mirror it into visual_description so the property and
-            # downstream semantic-fidelity gates see a populated description.
+            # content; mirror a length-bounded copy into visual_description so
+            # the property and downstream semantic-fidelity gates see a
+            # populated description without overflowing its 400-char cap. The
+            # full text stays authoritative in `content`.
             visual_description=(
-                uir.content if modality == Modality.IMAGE and uir.content else None
+                _fit_visual_description(uir.content)
+                if modality == Modality.IMAGE and uir.content
+                else None
             ),
         )
 

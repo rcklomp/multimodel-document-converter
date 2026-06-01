@@ -373,6 +373,11 @@ def _chunk_page(
         text_buffer.clear()
 
     for element in page.elements:
+        # Charter §7.1: ElementType is the 3-value legacy vocabulary. The VLM
+        # adapter smuggles 'code'/'form' through as ElementType.TEXT and tags
+        # the original signal here; promote it to Modality.CODE/FORM at this
+        # ElementType->Modality boundary (where the 5-value widening belongs).
+        promoted = (element.metadata or {}).get("promoted_modality")
         if element.type == ElementType.IMAGE:
             # Flush pending text before emitting image
             _flush_text_buffer()
@@ -383,6 +388,18 @@ def _chunk_page(
         elif element.type == ElementType.TABLE:
             _flush_text_buffer()
             chunks.append(_table_element_to_uirchunk(
+                element, page, extraction_engine_version, reading_order,
+            ))
+            reading_order += 1
+        elif promoted == "code":
+            _flush_text_buffer()
+            chunks.append(_code_element_to_uirchunk(
+                element, page, extraction_engine_version, reading_order,
+            ))
+            reading_order += 1
+        elif promoted == "form":
+            _flush_text_buffer()
+            chunks.append(_form_element_to_uirchunk(
                 element, page, extraction_engine_version, reading_order,
             ))
             reading_order += 1
@@ -397,7 +414,7 @@ def _chunk_page(
 
 
 # ---------------------------------------------------------------------------
-# Element → UIRChunk converters (IMAGE, TABLE)
+# Element → UIRChunk converters (IMAGE, TABLE, CODE, FORM)
 # ---------------------------------------------------------------------------
 
 
@@ -441,6 +458,59 @@ def _table_element_to_uirchunk(
     bbox = _element_bbox_list(element)
     return UIRChunk(
         modality=Modality.TABLE,
+        content=element.content or "",
+        locator=Locator(
+            type=LocatorType.BBOX,
+            bbox=bbox,
+            page_number=page.page_number,
+            coordinate_frame=CoordinateFrame.PDF_PAGE_PORTRAIT,
+        ),
+        confidence=ConfidenceBreakdown(),
+        extraction_method=EXTRACTION_METHOD_UIR,
+        extraction_engine_version=extraction_engine_version,
+        reading_order=reading_order,
+    )
+
+
+def _code_element_to_uirchunk(
+    element: Element,
+    page: UniversalPage,
+    extraction_engine_version: str,
+    reading_order: int,
+) -> UIRChunk:
+    """Convert a CODE Element to a UIRChunk.
+
+    Content is preserved VERBATIM (no strip, no whitespace normalization) so
+    code indentation survives - the whole reason vision-native handles code
+    instead of letting it fall back to Docling.
+    """
+    bbox = _element_bbox_list(element)
+    return UIRChunk(
+        modality=Modality.CODE,
+        content=element.content or "",
+        locator=Locator(
+            type=LocatorType.BBOX,
+            bbox=bbox,
+            page_number=page.page_number,
+            coordinate_frame=CoordinateFrame.PDF_PAGE_PORTRAIT,
+        ),
+        confidence=ConfidenceBreakdown(),
+        extraction_method=EXTRACTION_METHOD_UIR,
+        extraction_engine_version=extraction_engine_version,
+        reading_order=reading_order,
+    )
+
+
+def _form_element_to_uirchunk(
+    element: Element,
+    page: UniversalPage,
+    extraction_engine_version: str,
+    reading_order: int,
+) -> UIRChunk:
+    """Convert a FORM Element to a UIRChunk (key-value / structured layout)."""
+    bbox = _element_bbox_list(element)
+    return UIRChunk(
+        modality=Modality.FORM,
         content=element.content or "",
         locator=Locator(
             type=LocatorType.BBOX,

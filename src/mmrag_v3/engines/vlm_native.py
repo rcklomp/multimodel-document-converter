@@ -74,7 +74,7 @@ JSON schema:
   "classification": "digital" | "scanned" | "hybrid",
   "elements": [
     {{
-      "type": "text" | "image" | "table",
+      "type": "text" | "image" | "table" | "code" | "form",
       "content": "<extracted text; for image use a brief visual description; for table use Markdown grid>",
       "bbox": [x_min_px, y_min_px, x_max_px, y_max_px],
       "confidence": <float in [0.0, 1.0]>,
@@ -106,7 +106,14 @@ Rules:
    image, write only the visual description and omit the Data block.
    Photographs, diagrams, logos, and illustrative figures keep the
    plain visual-description-only form.
-6. Return JSON only — any non-JSON output is a contract violation.
+6. For CODE elements (source code, shell/command blocks, config files), you
+   MUST preserve all exact spacing, line breaks, and indentation. Wrap the
+   body in a standard Markdown code fence with the appropriate language tag
+   (```language ... ```). Never reflow, re-indent, or summarize code.
+7. For FORM elements (forms, invoices, key-value layouts), extract the layout
+   as structured key-value pairs or a Markdown table in `content`, preserving
+   the reading order and field hierarchy.
+8. Return JSON only - any non-JSON output is a contract violation.
 """
 
 
@@ -280,8 +287,28 @@ class VlmNativeEngine:
                     f"UIR element[{index}] must be an object, got "
                     f"{type(raw_element).__name__}"
                 )
-            type_raw = raw_element.get("type") or "text"
-            element_type = ElementType(type_raw)
+            type_raw = str(raw_element.get("type") or "text").strip().lower()
+            # Charter §7.1: ElementType stays the 3-value legacy vocabulary
+            # (TEXT/IMAGE/TABLE). The VLM's richer 'code'/'form' signal is
+            # SMUGGLED through as TEXT here and PROMOTED to Modality.CODE/FORM
+            # in the chunker (the ElementType->Modality boundary, where the
+            # widening belongs). An unexpected type also degrades to TEXT
+            # rather than crashing the whole page to a Docling fallback.
+            promoted_modality: Optional[str] = None
+            if type_raw in ("code", "form"):
+                promoted_modality = type_raw
+                element_type = ElementType.TEXT
+            else:
+                try:
+                    element_type = ElementType(type_raw)
+                except ValueError:
+                    logger.warning(
+                        "VLM emitted unknown element type %r on page %d; "
+                        "treating as text (page extraction preserved)",
+                        type_raw,
+                        page_number,
+                    )
+                    element_type = ElementType.TEXT
             content = raw_element.get("content") or ""
             raw_bbox = raw_element.get("bbox")
             normalized_bbox = None
@@ -303,6 +330,11 @@ class VlmNativeEngine:
                     extraction_method=ExtractionMethod.VLM,
                     element_index=index,
                     source_label=str(source_label),
+                    metadata=(
+                        {"promoted_modality": promoted_modality}
+                        if promoted_modality
+                        else None
+                    ),
                 )
             )
 

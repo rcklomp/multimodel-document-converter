@@ -2391,3 +2391,85 @@ probe did not evaluate; its R6 guard stays green. Likewise
 `_merge_mid_sentence_chunks` remains live via `_apply_quality_filters`. The
 now-orphaned bridge methods are dead-code cleanup candidates for a later pass;
 this change is scoped to the revert + test deletion the evidence supports.
+
+
+## Fail-Fast Infrastructure Rule for unattended VLM batches (2026-06-01)
+
+**Decision:** Any unattended batch script that depends on a network/VLM endpoint
+MUST implement a hard circuit breaker. An infrastructure/transport failure
+(connection refused, connect/read timeout, gateway 502/503/504) MUST halt the
+entire batch immediately with a non-zero exit, and MUST NOT silently fall back to
+the Docling CPU pipeline. Silent CPU fallback on a network outage fabricates pages
+that masquerade as VLM baselines - it corrupts the run with mixed-provenance data
+and burns hardware in dead retry loops. Per-page Docling fallback remains permitted
+ONLY for *semantic* failures on a *live* node (empty content, malformed JSON,
+non-retryable 4xx, 429 rate-limit, 500 app error).
+
+**Wiring (V3 extraction path):** `engines/vlm_provider.py` raises `VlmInfraError`
+(subclass of `VlmProviderError`) when the terminal cause is transport/gateway,
+and the semantic base otherwise. `engines/router.py` (`HybridEngine.extract`)
+propagates `VlmInfraError` with no Docling demotion, while still catching semantic
+errors for the per-page fallback. `scripts/v3_batch_ingest.py` lets `VlmInfraError`
+halt with exit 1 and writes a `status: halted_circuit_breaker` manifest (completed
+docs are skipped on resume). Contract locked by `tests/test_v3_circuit_breaker.py`.
+
+**Incident context - READ THIS BEFORE RE-RUNNING THE SOAK.** This rule was written
+after the 2026-06-01 "crucible" soak, but the circuit breaker is NOT what that
+incident actually needed. The soak produced **0/18 usable baselines**, and the
+primary cause was a SCHEMA bug, not the M5 outage: docs 1-13 completed while the
+VLM node was healthy but every one raised `IngestionChunk`/`ChunkMetadata`
+`ValidationError` at `from_uir` (`QA-CHECK-05 VIOLATION: modality=image/table
+requires asset_ref` because the VLM-native path emits no on-disk asset; and
+`visual_description String should have at most 400 characters` because
+`from_uir` mirrors full VLM content into a 400-capped field). The M5 outage was
+SECONDARY and only touched doc 14 (PCWorld), which produced nothing. The
+circuit breaker would not have saved a single doc. **Do not "fix" the schema bug
+by weakening QA-CHECK-05 or raising the 400-char cap** - that is the forbidden
+"make-the-failing-run-pass" pattern; fix the extraction layer (emit `asset_ref`
+by cropping/saving described regions; keep description text in `content` and
+truncate/summarize `visual_description` to fit the cap).
+
+**Corollary (verify before burning credits):** an unattended VLM batch MUST
+validate the output schema on the FIRST document and abort if it fails, before
+committing hours of GPU credits to a run that cannot produce a valid chunk. This
+is the [CLAUDE.md "Verify before converting"] principle applied to soak runs.
+
+**Resolution (2026-06-01, same day):** Both schema defects fixed in the
+extraction layer with the gates intact. (1) Asset generation consolidated into a
+single shared helper `src/mmrag_v2/universal/asset_materializer.py`
+(`materialize_visual_assets`) that crops IMAGE/TABLE bbox regions from the source
+PDF, saves a PNG, and sets `asset_ref`. Both the production batch path
+(`BatchProcessor._render_visual_assets`, now a thin wrapper) and the soak harness
+(`scripts/v3_batch_ingest.py`) call it, so the two crop paths cannot diverge
+again. (2) `IngestionChunk.from_uir` fits the `visual_description` mirror to the
+400-char cap via `_fit_visual_description`; the full text stays authoritative in
+`content`. QA-CHECK-05 and the 400-char cap were NOT weakened. Contract:
+`tests/test_v3_asset_materializer.py` (8 tests). Full suite green (1334 passed).
+
+
+## VLM code/form: smuggle-and-promote, NOT ElementType widening (PLAN_V3.1, 2026-06-01)
+
+**Decision:** The VLM emits `type:'code'` / `type:'form'` elements, but the
+intermediate `ElementType` enum stays FROZEN at 3 values (TEXT/IMAGE/TABLE) per
+Charter §7.1 (ElementType is the legacy extraction vocabulary, being REPLACED by
+the 5-value `Modality`, not widened). The adapter
+(`vlm_native._page_from_payload`) smuggles code/form through as
+`ElementType.TEXT` and tags `element.metadata['promoted_modality']`; the chunker
+(`uir_chunker`) promotes the tagged element to `Modality.CODE` / `Modality.FORM`
+at the ElementType->Modality boundary, where the widening belongs. The VLM prompt
+advertises code/form (with an explicit preserve-indentation rule for code).
+Unknown VLM types degrade to TEXT with a warning instead of crashing the page.
+
+**Rationale:** The naive fix (widen `ElementType` to 5) tripped the committed
+contract `test_modality_distinct_from_elementtype` and pushed against the
+documented one-way migration. Smuggle-and-promote achieves the same end
+(Modality.CODE/FORM, code indentation preserved, no page dropped to Docling) with
+the contract test passing UNMODIFIED and zero governance change. QA-CHECK-05 is
+not weakened (CODE/FORM need no asset_ref). Contract:
+`tests/test_v3_vlm_code_form.py`.
+
+**Background:** Before this, a VLM `code` element raised `ElementType('code')` ->
+the whole page's vision extraction was discarded -> Docling fallback stripped the
+code indentation (the original v2 defect). This closes that silent failure for
+the V3 path. The naive-widen attempt was correctly rejected mid-session when it
+broke the contract test (Test Contract Integrity: do not weaken a guard to ship).

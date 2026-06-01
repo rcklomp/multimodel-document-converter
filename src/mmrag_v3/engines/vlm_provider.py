@@ -40,7 +40,25 @@ OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY"
 
 
 class VlmProviderError(RuntimeError):
-    """Raised when the VLM endpoint returns a non-recoverable error."""
+    """Raised when the VLM endpoint returns a non-recoverable error.
+
+    This is the *semantic* base: malformed response shape, empty content,
+    non-retryable 4xx, or exhausted retries on an application-level error.
+    The page router may demote a single page that fails this way to the
+    Docling CPU path without poisoning the rest of the run.
+    """
+
+
+class VlmInfraError(VlmProviderError):
+    """Infrastructure / transport failure: the endpoint is unreachable.
+
+    Raised when the terminal cause is a connect/read timeout, connection
+    refused, or a gateway status (502/503/504/408). Distinct from the
+    semantic base so the router can treat it as a CIRCUIT-BREAKER trip:
+    propagate and halt the batch instead of silently falling back to
+    Docling. A silent CPU fallback during a network outage fabricates
+    pages that masquerade as VLM baselines and corrupts the whole run.
+    """
 
 
 @dataclass
@@ -200,6 +218,10 @@ class VlmProvider:
         url = f"{base}{suffix}"
 
         last_error: Optional[Exception] = None
+        # Tracks whether the *most recent* failure was an infrastructure
+        # fault (node unreachable) vs a semantic one. Decides the class of
+        # the terminal raise so the router can trip its circuit breaker.
+        last_was_infra = False
         for attempt in range(1, self.config.max_retries + 1):
             try:
                 response = requests.post(
@@ -210,6 +232,13 @@ class VlmProvider:
                 )
             except requests.RequestException as exc:
                 last_error = exc
+                # Connect/read timeout and connection refused mean the node
+                # is unreachable -> infra fault. Other RequestExceptions
+                # (bad URL, too many redirects) are config/semantic.
+                last_was_infra = isinstance(
+                    exc,
+                    (requests.exceptions.Timeout, requests.exceptions.ConnectionError),
+                )
                 logger.warning(
                     "VLM transport failure (attempt %d/%d): %s",
                     attempt,
@@ -230,6 +259,8 @@ class VlmProvider:
                         last_error = VlmProviderError(
                             f"Empty VLM content (finish_reason={finish!r})"
                         )
+                        # 200 reached the model; empty output is semantic.
+                        last_was_infra = False
                         logger.warning(
                             "VLM returned empty content (attempt %d/%d, "
                             "finish_reason=%s)",
@@ -244,6 +275,10 @@ class VlmProvider:
                         f"Retryable VLM status {response.status_code}: "
                         f"{response.text[:200]}"
                     )
+                    # Gateway/unavailable/request-timeout statuses mean the
+                    # serving infra is down or saturated -> infra fault.
+                    # 429 (rate limit) and 500 (app error) stay semantic.
+                    last_was_infra = response.status_code in (408, 502, 503, 504)
                     logger.warning(
                         "VLM retryable status %d (attempt %d/%d)",
                         response.status_code,
@@ -259,6 +294,36 @@ class VlmProvider:
             if attempt < self.config.max_retries:
                 time.sleep(self.config.retry_backoff_seconds * attempt)
 
-        raise VlmProviderError(
+        err_cls = VlmInfraError if last_was_infra else VlmProviderError
+        raise err_cls(
             f"VLM call failed after {self.config.max_retries} attempts: {last_error}"
         )
+
+    def probe_health(self, *, timeout_seconds: float = 10.0) -> bool:
+        """Lightweight liveness probe: ``GET {base}/models`` -> True iff HTTP 200.
+
+        Used by resilient batch harnesses to poll for endpoint recovery after a
+        :class:`VlmInfraError` WITHOUT paying for a full inference call. Never
+        raises: any transport error or non-200 status returns False ("still
+        down"). ``/v1/models`` is the portable liveness route exposed by every
+        OpenAI-compatible backend (vLLM, mlx-vlm, OpenAI, OpenRouter).
+
+        NOTE: a 200 means the HTTP server is up and the model is listed; it does
+        NOT prove inference works. The harness pairs this with a resume-attempt
+        cap so an "HTTP-up-but-inference-dead" endpoint cannot loop forever.
+        """
+        base = self.config.endpoint.rstrip("/")
+        suffix = "/models" if base.endswith("/v1") else "/v1/models"
+        url = f"{base}{suffix}"
+        headers = {}
+        if self.config.api_key:
+            headers["Authorization"] = f"Bearer {self.config.api_key}"
+        try:
+            response = requests.get(url, headers=headers, timeout=timeout_seconds)
+        except requests.RequestException as exc:
+            logger.debug("VLM health probe failed (transport): %s", exc)
+            return False
+        if response.status_code == 200:
+            return True
+        logger.debug("VLM health probe non-200: %s", response.status_code)
+        return False

@@ -310,6 +310,62 @@ gaining non-PDF extraction.
 
 ---
 
+## 2026-06-01 - V3 extraction hardening: the crucible 0/18 was a schema bug, not the outage  `[Results][Method][Lessons]`
+
+The "Grand Crucible" VLM soak (18 docs, ~600 pages, local M5 Qwen3-VL-8B) was
+reported as a node-outage catastrophe (M5 dropped -> silent Docling fallback ->
+"hours of junk data"). The disk said otherwise: docs 1-13 completed while M5 was
+HEALTHY and ALL failed `IngestionChunk.from_uir` with `ValidationError` BEFORE
+any JSONL was written. 0/18 usable baselines. Two schema defects, both in the
+VLM-native -> from_uir path:
+
+- 11/13: `QA-CHECK-05 VIOLATION: modality=image/table requires asset_ref`. The
+  VLM describes a region but emits no on-disk binary; `from_uir` left
+  `asset_ref=None`. Fix: a shared `asset_materializer.materialize_visual_assets`
+  crops the bbox region to PNG and sets `asset_ref` - used by BOTH the batch
+  path and the soak harness (the soak had silently bypassed the batch path's
+  existing crop step; that divergence WAS the bug).
+- 1/13: `visual_description` > 400 chars. `from_uir` mirrored full VLM content
+  into a 400-capped field. Fix: producer-side truncation; full text stays in
+  `content`. Cap not raised, QA-CHECK-05 not weakened.
+
+The M5 outage was SECONDARY and touched only doc 14 (PCWorld), which produced
+nothing. Fixing the from_uir crash UNMASKED the next defect: the VLM emits
+`type:'code'`, which crashed `ElementType('code')` (enum has only
+text/image/table) and dropped the whole page to Docling (strips code
+indentation - the original v2 defect). Resolved without widening the legacy
+`ElementType` (Charter §7.1): smuggle code/form through as TEXT + a
+`promoted_modality` tag, promote to `Modality.CODE`/`FORM` in the chunker.
+
+**M5 throughput (data point for the bandwidth thread):**
+
+| node state | s / VLM page | source |
+|---|---:|---|
+| degraded (right before the drop) | 150-275 | original crucible per-doc elapsed |
+| healthy (this session) | ~49 | single-doc `0013` smoke |
+
+The 6x spread is the difference between a ~24h and a ~4-7h crucible. The
+"degraded" timing was a dying node, not the model's real rate.
+
+**Router blind spot, quantified:** `HybridEngine._classify_page` routes on
+OBJECT presence (`get_images`/`find_tables`/`get_drawings>10`), no visual-intent
+or code/text-complexity signal. Measured on AIOS: 35 pages -> 25 VLM, 10 to the
+Docling whitespace-stripping lane. Code-as-text on those 10 pages loses
+indentation before the VLM sees it. Deferred (measure-via-smoke before building
+a heuristic).
+
+**Lessons.** (1) A passing gate is not correct data: QA_PASS checks asset_ref
+PRESENCE, not crop CORRECTNESS, so a hallucinated VLM bbox produces a garbage
+PNG that still passes - hence the crop-audit (edge-clamp = clamped-overflow
+fingerprint; low-information = whitespace-landing fingerprint; cannot catch
+interior misplacement). (2) Smoke the HARDEST representative case: validating the
+schema fix on a 1-page FORM (no code) gave false confidence; the first code-heavy
+doc broke in 30s. (3) Verify premises under "just do it" pressure - this session
+caught a "purge" that would have deleted the only forensic evidence, a wrong ETA,
+and a "widen ElementType" directive that violated a locked contract.
+
+---
+
 ## Predecessor lineage: V1 → V2 (the story before V3)  `[Motivation][Architecture]`
 
 Reconstructed 2026-05-30 from git tags/commit messages (all verifiable), README

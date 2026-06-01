@@ -36,7 +36,7 @@ from mmrag_v2.universal.intermediate import (
 
 from .docling_fast import DoclingFastEngine
 from .vlm_native import VlmNativeEngine, _build_schema_prompt
-from .vlm_provider import VlmProvider, VlmProviderConfig
+from .vlm_provider import VlmInfraError, VlmProvider, VlmProviderConfig
 
 logger = logging.getLogger(__name__)
 
@@ -153,9 +153,25 @@ class HybridEngine:
                             pixel_height=ph,
                         )
                         pages_by_number[page_number] = universal_page
+                    except VlmInfraError:
+                        # CIRCUIT BREAKER. An infrastructure/transport failure
+                        # (node offline, connection refused, connect/read
+                        # timeout, gateway 502/503/504) is NOT a per-page
+                        # quality problem. Demoting to Docling here would
+                        # silently fabricate a CPU-extracted page that
+                        # masquerades as a VLM baseline and corrupt the whole
+                        # run. Propagate so the batch HALTS instead of
+                        # degrading. Semantic failures still fall back below.
+                        logger.error(
+                            "VLM INFRASTRUCTURE FAILURE on page %d - circuit "
+                            "breaker tripped; halting (NO docling fallback for "
+                            "transport/endpoint outages)",
+                            page_number,
+                        )
+                        raise
                     except Exception as exc:
-                        # Single-page VLM failures (transport drop, empty
-                        # content, malformed JSON) must not kill the
+                        # Single-page *semantic* VLM failures (empty content,
+                        # malformed JSON, non-retryable 4xx) must not kill the
                         # whole document. Fall back to Docling for this
                         # page and record the demotion in the decision log.
                         logger.warning(

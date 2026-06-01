@@ -1151,83 +1151,26 @@ class BatchProcessor:
     ) -> None:
         """Render IMAGE/TABLE region crops so vision-native chunks get asset_ref.
 
-        The VLM-native engine *describes* image/table regions but never emits a
-        binary asset, so the resulting UIR chunks reach IngestionChunk.from_uir
-        with no asset_ref and fail QA-CHECK-05 (IMAGE/TABLE require asset_ref).
-        Here we render each region from the batch PDF page (bbox is [0,COORD_SCALE]
-        normalized in the page-portrait frame), save a PNG under assets/, and set
-        the relative asset_ref. Falls back to a full-page render when a chunk has
-        no usable bbox. Page numbers passed in are still batch-local; the saved
-        filename uses the absolute page (local + page_offset).
+        Thin wrapper over the shared ``materialize_visual_assets`` helper -
+        the single source of truth shared with scripts/v3_batch_ingest.py so
+        the batch and soak crop paths cannot diverge. The vision-native engine
+        describes image/table regions but emits no binary asset; the helper
+        renders each region crop from the batch PDF page (bbox is
+        [0,COORD_SCALE] normalized in the page-portrait frame), saves a PNG
+        under assets/, and sets the relative asset_ref so the chunk satisfies
+        QA-CHECK-05. Falls back to a full-page render when a chunk has no usable
+        bbox. Page numbers passed in are batch-local; the saved filename uses
+        the absolute page (local + page_offset).
         """
-        visual = [
-            c
-            for c in uir_chunks
-            if getattr(c, "modality", None) in (Modality.IMAGE, Modality.TABLE)
-            and not getattr(c, "asset_ref", None)
-        ]
-        if not visual:
-            return
+        from .universal.asset_materializer import materialize_visual_assets
 
-        try:
-            doc = fitz.open(str(batch_path))
-        except Exception as exc:
-            logger.warning(f"[V3-ASSET] could not open batch PDF for crop render: {exc}")
-            return
-
-        per_page_idx: Dict[int, int] = {}
-        rendered = 0
-        try:
-            for c in visual:
-                loc = getattr(c, "locator", None)
-                local_page = (loc.page_number if loc and loc.page_number else 1)
-                page_index = local_page - 1
-                if page_index < 0 or page_index >= doc.page_count:
-                    continue
-                page = doc[page_index]
-                pw, ph = float(page.rect.width), float(page.rect.height)
-
-                clip = None
-                bbox = loc.bbox if loc else None
-                if bbox and len(bbox) == 4:
-                    x0 = max(0.0, min(pw, bbox[0] / COORD_SCALE * pw))
-                    y0 = max(0.0, min(ph, bbox[1] / COORD_SCALE * ph))
-                    x1 = max(0.0, min(pw, bbox[2] / COORD_SCALE * pw))
-                    y1 = max(0.0, min(ph, bbox[3] / COORD_SCALE * ph))
-                    if (x1 - x0) > 2.0 and (y1 - y0) > 2.0:
-                        clip = fitz.Rect(x0, y0, x1, y1)
-
-                try:
-                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=clip)
-                except Exception as exc:
-                    logger.warning(
-                        f"[V3-ASSET] pixmap render failed (page {local_page}): {exc}"
-                    )
-                    continue
-
-                abs_page = local_page + page_offset
-                mod = "table" if c.modality == Modality.TABLE else "image"
-                idx = per_page_idx.get(abs_page, 0)
-                per_page_idx[abs_page] = idx + 1
-                fname = (
-                    f"{self._doc_hash or 'doc'}_{abs_page:04d}_{mod}_{idx:03d}.png"
-                )
-                out_path = self.assets_dir / fname
-                try:
-                    pix.save(str(out_path))
-                except Exception as exc:
-                    logger.warning(f"[V3-ASSET] asset save failed ({fname}): {exc}")
-                    continue
-                c.asset_ref = f"assets/{fname}"
-                rendered += 1
-        finally:
-            doc.close()
-
-        if rendered:
-            logger.info(
-                f"[V3-ASSET] Rendered {rendered} region crop(s) for "
-                f"vision-native IMAGE/TABLE chunks"
-            )
+        materialize_visual_assets(
+            uir_chunks,
+            batch_path,
+            self.assets_dir,
+            doc_hash=self._doc_hash or "doc",
+            page_offset=page_offset,
+        )
 
     def _toc_for_batch(self, page_offset: int) -> Optional[Dict[Any, Any]]:
         """Project the document-wide PyMuPDF TOC into a batch's LOCAL page space.

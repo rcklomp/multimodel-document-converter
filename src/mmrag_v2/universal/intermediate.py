@@ -52,6 +52,13 @@ class ElementType(Enum):
     TEXT: Text content (paragraphs, headings, lists)
     IMAGE: Visual content (figures, photos, diagrams)
     TABLE: Tabular data (tables, spreadsheets)
+
+    Frozen at 3 values per Charter §7.1: this is the legacy extraction
+    vocabulary, being replaced by the 5-value ``Modality`` (which adds
+    CODE/FORM). The widening lives at the ElementType->Modality boundary
+    (the VLM adapter smuggles code/form through as TEXT, then the chunker
+    promotes to Modality.CODE/FORM), NOT in this enum. Guarded by
+    tests/test_v3_uir_contract.py::test_modality_distinct_from_elementtype.
     """
 
     TEXT = "text"

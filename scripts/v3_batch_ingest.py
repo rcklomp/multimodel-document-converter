@@ -42,7 +42,7 @@ import sys
 import time
 import traceback
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -133,6 +133,8 @@ def _process_one_pdf(
     ``chunk_universal_document`` → ``IngestionChunk.from_uir``.
     """
     from mmrag_v2.schema.ingestion_schema import FileType, IngestionChunk
+    from mmrag_v2.universal.asset_materializer import materialize_visual_assets
+    from mmrag_v3.engines.vlm_provider import VlmInfraError
 
     doc_dir = _doc_outdir(out_root, pdf)
     doc_dir.mkdir(parents=True, exist_ok=True)
@@ -156,6 +158,31 @@ def _process_one_pdf(
         decisions = list(getattr(hybrid_engine, "last_routing_decisions", []))
         uir_chunks = chunk_document(universal_doc)
         doc_id = universal_doc.doc_id or universal_doc.compute_doc_id()
+        # Vision-native IMAGE/TABLE chunks describe regions but carry no binary
+        # asset; render the region crops to <doc>/assets/ and set asset_ref so
+        # they satisfy QA-CHECK-05. The production batch path does the same via
+        # BatchProcessor._render_visual_assets -> the same shared helper. Without
+        # this step the crucible soak produced 0 valid baselines. Whole-doc run,
+        # so page_offset=0; doc_id is the stable asset-filename hash.
+        crop_audit = materialize_visual_assets(
+            uir_chunks,
+            pdf,
+            doc_dir / "assets",
+            doc_hash=doc_id,
+            page_offset=0,
+        )
+        if crop_audit.exceeds_threshold:
+            logger.warning(
+                "%s: %s - %d/%d crops show drift (edge-clamp/blank), rate=%.0f%% "
+                "> %.0f%% threshold; suspect crops in meta.json "
+                "crop_audit.suspect_assets",
+                pdf.name,
+                crop_audit.gate_status,
+                crop_audit.drift_flagged,
+                crop_audit.rendered,
+                crop_audit.drift_rate * 100,
+                crop_audit.warn_threshold * 100,
+            )
         chunks = [
             IngestionChunk.from_uir(
                 uir,
@@ -184,6 +211,7 @@ def _process_one_pdf(
                 {"page": pn, "engine": choice, "reason": reason}
                 for pn, choice, reason in decisions
             ],
+            "crop_audit": crop_audit.to_dict(),
             "elapsed_seconds": round(elapsed, 3),
         }
         (doc_dir / "meta.json").write_text(
@@ -206,9 +234,16 @@ def _process_one_pdf(
                 "page_count": meta["page_count"],
                 "chunk_count": meta["chunk_count"],
                 "routing": routing,
+                "crop_audit_gate": crop_audit.gate_status,
                 "elapsed_seconds": meta["elapsed_seconds"],
             }
         )
+    except VlmInfraError:
+        # CIRCUIT BREAKER. Infra/transport outage is NOT a per-doc data
+        # error. Do NOT write an error stub and continue - every later doc
+        # would silently degrade to Docling and produce corrupt baselines.
+        # Propagate to main(), which halts the batch with exit 1.
+        raise
     except Exception as exc:
         elapsed = time.time() - t0
         tb = traceback.format_exc()
@@ -233,6 +268,112 @@ def _process_one_pdf(
             }
         )
     return entry
+
+
+def _wait_for_vlm_recovery(
+    probe_fn: Callable[[], bool],
+    *,
+    poll_interval_s: float,
+    recovery_ceiling_s: float,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> bool:
+    """Poll the VLM endpoint until it recovers or the ceiling elapses.
+
+    Returns True if ``probe_fn()`` returned True within ``recovery_ceiling_s``
+    (resume the batch), or False once that many seconds of continuous
+    unreachability have elapsed (hard-fail). Polls every ``poll_interval_s``.
+    """
+    # Immediate probe: the endpoint may have come back during the failed retries
+    # that produced the VlmInfraError.
+    if probe_fn():
+        return True
+    waited = 0.0
+    while waited < recovery_ceiling_s:
+        sleep_fn(poll_interval_s)
+        waited += poll_interval_s
+        if probe_fn():
+            logger.warning("VLM endpoint recovered after ~%.0fs down; resuming soak.", waited)
+            return True
+        logger.warning(
+            "VLM endpoint still down after ~%.0fs of %.0fs ceiling; re-probing in %.0fs.",
+            waited,
+            recovery_ceiling_s,
+            poll_interval_s,
+        )
+    logger.critical(
+        "VLM endpoint unreachable for the full %.0fs ceiling; giving up.",
+        recovery_ceiling_s,
+    )
+    return False
+
+
+def _process_with_resilience(
+    pdf: Path,
+    process_fn: Callable[[Path], Dict[str, Any]],
+    *,
+    strict: bool,
+    probe_fn: Callable[[], bool],
+    poll_interval_s: float,
+    recovery_ceiling_s: float,
+    max_resume_attempts: int,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Run ``process_fn(pdf)``, applying the breaker policy on VlmInfraError.
+
+    Returns ``(entry, None)`` on success, or ``(None, halt_reason)`` when the
+    breaker decides to hard-fail. Two bounded guards ensure the unattended soak
+    never hangs:
+
+    * ``recovery_ceiling_s`` - max continuous endpoint unreachability per wait
+      (the "truly dead machine" case).
+    * ``max_resume_attempts`` - max infra failures on a single doc before giving
+      up (the "HTTP-up-but-inference-dead" flap, which the ceiling alone misses
+      because the health probe keeps returning 200).
+
+    ``strict=True`` restores the original behavior: hard-fail on the first
+    VlmInfraError with no polling. On recovery the doc is retried from scratch
+    (its partial in-memory work is discarded; completed docs on disk are skipped
+    on resume).
+    """
+    from mmrag_v3.engines.vlm_provider import VlmInfraError
+
+    attempts = 0
+    while True:
+        try:
+            return process_fn(pdf), None
+        except VlmInfraError as exc:
+            if strict:
+                return None, f"strict breaker: {type(exc).__name__}: {exc}"
+            attempts += 1
+            if attempts > max_resume_attempts:
+                return None, (
+                    f"exceeded {max_resume_attempts} resume attempts on this doc "
+                    f"(endpoint flapping / inference dead?): "
+                    f"{type(exc).__name__}: {exc}"
+                )
+            logger.warning(
+                "RESILIENT BREAKER on %s: VLM infra failure (%s). Resume attempt "
+                "%d/%d - polling endpoint every %.0fs (ceiling %.0fs) before "
+                "resuming.",
+                pdf.name,
+                exc,
+                attempts,
+                max_resume_attempts,
+                poll_interval_s,
+                recovery_ceiling_s,
+            )
+            recovered = _wait_for_vlm_recovery(
+                probe_fn,
+                poll_interval_s=poll_interval_s,
+                recovery_ceiling_s=recovery_ceiling_s,
+                sleep_fn=sleep_fn,
+            )
+            if not recovered:
+                return None, (
+                    f"endpoint unreachable past {recovery_ceiling_s:.0f}s ceiling: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+            # else: loop and retry the same doc from scratch.
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -266,6 +407,34 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=None,
         help="Skip PDFs with more than N pages (budget guardrail for long-tail "
              "tech-manual books). Unset = no cap.",
+    )
+    parser.add_argument(
+        "--strict-breaker",
+        action="store_true",
+        help="Hard-fail the batch on the FIRST VlmInfraError (no pause-and-poll). "
+             "Default is the resilient breaker: poll the endpoint and resume on "
+             "recovery. Use for short attended runs (e.g. the Crucible Subset).",
+    )
+    parser.add_argument(
+        "--vlm-poll-interval-s",
+        type=float,
+        default=60.0,
+        help="Resilient mode: seconds between endpoint health probes (default 60).",
+    )
+    parser.add_argument(
+        "--vlm-recovery-ceiling-s",
+        type=float,
+        default=1800.0,
+        help="Resilient mode: hard-fail after this many seconds of continuous "
+             "endpoint unreachability (default 1800 = 30 min).",
+    )
+    parser.add_argument(
+        "--vlm-max-resume-attempts",
+        type=int,
+        default=5,
+        help="Resilient mode: max infra failures on a single doc before "
+             "hard-failing (guards against an HTTP-up-but-inference-dead flap "
+             "the ceiling alone would miss; default 5).",
     )
     args = parser.parse_args(argv)
 
@@ -327,15 +496,70 @@ def main(argv: Optional[List[str]] = None) -> int:
     manifest_path = out_root / "manifest.json"
     entries: List[Dict[str, Any]] = []
     t_start = time.time()
+
+    # Health-probe bound to the configured VLM endpoint, lazily built on the
+    # first infra failure (never constructed in strict/docling-fast runs).
+    _probe_state: Dict[str, Any] = {}
+
+    def _probe_fn() -> bool:
+        prov = _probe_state.get("provider")
+        if prov is None:
+            from mmrag_v3.engines.vlm_provider import VlmProvider, VlmProviderConfig
+
+            prov = VlmProvider(VlmProviderConfig.from_env())
+            _probe_state["provider"] = prov
+        return prov.probe_health()
+
+    def _halt(halted_on: Path, reason: str, processed: int) -> None:
+        logger.critical(
+            "HALTING batch on %s: %s. Completed docs are skipped automatically "
+            "on resume.",
+            halted_on.name,
+            reason,
+        )
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "out_dir": _path_for_manifest(out_root),
+                    "started_at": t_start,
+                    "status": "halted_circuit_breaker",
+                    "halted_on": _path_for_manifest(halted_on),
+                    "halt_reason": reason,
+                    "elapsed_seconds_so_far": round(time.time() - t_start, 3),
+                    "doc_count_total": len(pdfs),
+                    "doc_count_processed": processed,
+                    "entries": entries,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+    breaker_mode = "strict" if args.strict_breaker else "resilient"
+    logger.info(
+        "VLM circuit breaker: %s (poll=%.0fs, ceiling=%.0fs, max-resume=%d)",
+        breaker_mode,
+        args.vlm_poll_interval_s,
+        args.vlm_recovery_ceiling_s,
+        args.vlm_max_resume_attempts,
+    )
+
     for i, pdf in enumerate(pdfs, 1):
         logger.info("[%d/%d] %s", i, len(pdfs), pdf.name)
-        entry = _process_one_pdf(
+        entry, halt_reason = _process_with_resilience(
             pdf,
-            out_root,
-            hybrid_engine,
-            chunk_document,
-            force=args.force,
+            lambda p: _process_one_pdf(
+                p, out_root, hybrid_engine, chunk_document, force=args.force
+            ),
+            strict=args.strict_breaker,
+            probe_fn=_probe_fn,
+            poll_interval_s=args.vlm_poll_interval_s,
+            recovery_ceiling_s=args.vlm_recovery_ceiling_s,
+            max_resume_attempts=args.vlm_max_resume_attempts,
         )
+        if halt_reason is not None:
+            _halt(pdf, halt_reason, i - 1)
+            return 1
         entries.append(entry)
         # Persist manifest incrementally so a crash mid-run is recoverable.
         manifest = {

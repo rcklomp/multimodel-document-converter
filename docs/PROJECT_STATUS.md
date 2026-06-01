@@ -1,6 +1,41 @@
 # Project Status
 
-Last updated: 2026-05-31
+Last updated: 2026-06-01
+
+## V3 extraction hardening + pre-Crucible boundary audit (2026-06-01)
+
+Four fixes landed on the V3 vision-native path (all UNCOMMITTED; HEAD still
+`00ac15d`). Full suite 1355 passed / 99 skipped / 0 failed; offline
+`SMOKE_PRODUCTION_PASS`. See `HANDOVER_2026-06-01.md` for the full picture.
+
+1. **Schema compliance (the crucible-killer).** VLM-native IMAGE/TABLE chunks
+   reached `from_uir` with no `asset_ref` and failed QA-CHECK-05 (0/18 baselines
+   in the original soak). Fixed by a shared `universal/asset_materializer.py`
+   that crops bbox regions to PNG + sets `asset_ref` (used by BOTH batch and soak
+   so they cannot diverge), plus producer-side `visual_description` truncation in
+   `from_uir`. Gates NOT weakened. Proven on real M5 VLM output (doc `0013`).
+2. **Crop-audit instrumentation.** Per-crop drift signals (full-page-fallback /
+   edge-clamp / low-information, reusing the v2.9 blank def) + doc-level
+   `QA_WARN_CROP_DRIFT` gate at 15%, recorded in meta.json.
+3. **VLM circuit breaker.** Infra/transport errors raise `VlmInfraError` and
+   hard-fail instead of silently falling back to Docling; the soak harness
+   defaults to a pause-and-poll breaker (poll 60s, hard-fail after 30min down or
+   5 per-doc infra failures); `--strict-breaker` for attended runs.
+4. **VLM code/form (Charter-respecting).** `ElementType` stays 3 (Charter §7.1,
+   contract test unchanged); code/form are smuggled as TEXT + a
+   `promoted_modality` tag and promoted to `Modality.CODE`/`FORM` in the chunker;
+   unknown types degrade to TEXT with a warning instead of crashing the page.
+
+**3-boundary audit (read-only):** serialization and legacy post-processing are
+CLEAN for code/form (indentation survives; refiners modality-gated; soak runs
+none; `docling_postprocess` not wired into V3). The one REAL gap is the router
+pre-flight (`router.py::_classify_page`): object-presence only, no
+code/text-complexity heuristic - on AIOS, 10 of 35 pages route to Docling. This
+is the deferred "measure before fixing" item.
+
+**Next step:** the AIOS single-doc smoke (M5 is up) - both the code-heavy schema
+proof and the Boundary-1 measurement. The Crucible Subset has NOT been run.
+Telemetry-1 (V3-vs-V2.16 deltas) is blocked on missing V2.16 baselines.
 
 ## PLAN_V3.1 reconvergence — P1 + P2 landed (2026-05-31)
 
