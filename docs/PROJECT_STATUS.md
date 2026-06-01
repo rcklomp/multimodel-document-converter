@@ -103,18 +103,22 @@ control-doc contradictions that this exposed are catalogued in
 preserve green gates and the `AGENT-SPATIAL-20` invariant; NOT to be silently
 dropped.
 
-1. **`_apply_spatial_refiner` still executes** on the V3 path via
-   `_apply_vertical_proximity_merger` inside `_sanitize_technical_manual_final`
-   / `_apply_technical_manual_hygiene` (live finalize calls). It is governed by
-   `AGENT-SPATIAL-20` (single 20-unit vertical threshold). Phase B must subsume
-   vertical-proximity merging into LLM sanitization before this can be removed.
-2. **`_merge_mid_sentence_chunks` still executes** via `_apply_quality_filters`
-   (live at finalize) and `_vision_gate_headings`. It is entangled with the
-   empty-chunk `UNIVERSAL_FAIL` gate in `_apply_quality_filters`, so it cannot
-   be excised without first relocating that gate.
+1. **`_apply_spatial_refiner` — ADOPTED + GUARDED (R6 closed 2026-06-01).**
+   Still executes live on the V3 path via `_apply_vertical_proximity_merger`;
+   governed by `AGENT-SPATIAL-20` (single 20-unit vertical threshold). No longer
+   debt: its invariant is now an executable guard,
+   `tests/test_spatial_refiner_agent_spatial_20.py` (7 tests, mutation-verified).
+   See `docs/DECISIONS.md` "R6 closed - AGENT-SPATIAL-20 is now an executable
+   guard".
+2. **`_merge_mid_sentence_chunks` — ADOPTED (P3 2026-06-01).** Still executes via
+   `_apply_quality_filters`; its module `test_cross_chunk_semantic_stitching.py`
+   was RESTORED (un-skipped, 9/9) when the orphaned final-boundary-repair bridge
+   was re-wired into `process_pdf`. See `docs/DECISIONS.md` "Phase A orphaned the
+   final-boundary-repair bridge - RE-WIRED".
 
-Both have unit tests deferred under `@pytest.mark.skip(reason="V3_DEFERRED -
-Legacy Heuristic")` (`test_cross_chunk_semantic_stitching.py` covers #2).
+Both heuristics are now adopted and test-guarded (no longer deferred). The
+remaining deferred surface is the 3-module legacy V2-Docling-lane cluster
+(`docs/V3_DEFERRED_TESTS.md`), dispositioned to the Phase 6 lane retirement.
 
 ### What's landed
 

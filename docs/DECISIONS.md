@@ -2318,3 +2318,36 @@ stricter about the real wiring, not weaker.
 ~3935) and `_propagate_headings` (line ~4459) are now dead methods (0 call
 sites). They are candidates for deletion in a later P3/P6 cleanup; left in place
 for now to keep this change scoped to the test disposition.
+
+
+## R6 closed - AGENT-SPATIAL-20 is now an executable guard (PLAN_V3.1 P3, 2026-06-01)
+
+**Finding:** `_apply_spatial_refiner` (aliased `_apply_vertical_proximity_merger`
+/ `..._pagewise`) runs on every document at 6+ live `process_pdf` call sites but
+had ZERO test coverage. Its core rule IS the hard invariant AGENT-SPATIAL-20
+("single 20-unit vertical threshold, no profile/heading branches" - AGENTS.md
+§1.6 / CLAUDE.md / this log). The `20` was a BARE MAGIC LITERAL
+(`if 0 <= v_gap <= 20 ...`) guarded only by prose - it could have drifted to any
+value, or grown a profile branch, with nothing failing. Exactly the
+"untested invariant" liability R6 was meant to resolve.
+
+**Decision: ADOPT (not remove).** The heuristic is load-bearing and live;
+removing it was never the right call. Closed R6 by making the invariant
+EXECUTABLE: new `tests/test_spatial_refiner_agent_spatial_20.py` (7 tests) pins
+(a) merge at v_gap == 20 (inclusive boundary), (b) NO merge at v_gap == 21 (the
+exact threshold), (c) the horizontal-overlap clause (no column merges), (d) the
+no-cross-page rule, (e) the code-vs-prose fidelity separation, (f) a source-level
+guard that the single `<= 20` literal exists and NO `profile_type` /
+`document_domain` / `parent_heading` / `sensitivity` branch was added to the
+refiner, and (g) that `_apply_vertical_proximity_merger` stays a thin alias.
+
+**Teeth verified by mutation:** temporarily flipping the literal 20 -> 25 made 2
+tests fail (the gap=21 boundary test + the source-literal guard); restoring made
+all 7 green. The guard catches both value drift and structural (profile-branch)
+drift.
+
+**Future re-tuning contract:** if the threshold is ever intentionally changed,
+this test + the AGENTS.md/CLAUDE.md invariant text must be updated together with
+a DECISIONS entry. Per AGENT-TEST-01 the test is not to be weakened to let drift
+pass. PROJECT_STATUS "Phase B Technical Debt" #1 is hereby retired - the spatial
+refiner is adopted + guarded, not deferred.
