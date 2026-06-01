@@ -5,6 +5,9 @@ Per-page pre-flight via PyMuPDF picks the right tool per page:
 * Pages with images, tables, or non-trivial vector drawings are
   visually complex → routed to the ``VlmNativeEngine`` (vision-native
   UIR JSON extraction).
+* Pages dense with monospace text (source-code blocks) carry no object
+  signal but would lose their indentation under Docling → also routed
+  to the ``VlmNativeEngine``.
 * Pure-prose pages → routed to the ``DoclingFastEngine`` (CPU,
   OCR disabled) for sub-second extraction.
 
@@ -58,6 +61,50 @@ def _drawings_threshold() -> int:
         return DEFAULT_DRAWINGS_THRESHOLD
 
 
+# Code blocks are the one visually-complex content class that carries NO
+# object signal: a pure-text page of source code has zero images, tables,
+# or drawings, so the object-only pre-flight would route it to Docling,
+# which strips leading whitespace and destroys code indentation. Code is
+# almost universally typeset in a monospace font, which prose is not, so
+# the monospace-character ratio is a precise, object-independent code
+# signal. Empirically calibrated across three doc profiles (code/prose
+# mix, code-heavy book, pure-prose novel): code pages land >= 0.28, prose
+# pages <= 0.014, with an empty margin between; a page with a single inline
+# monospace token (a URL or a variable name in running prose) stays well
+# below threshold. Token list excludes foundry-family prefixes like
+# "nimbus" that also name proportional prose faces (Nimbus Roman/Sans).
+MONO_FONT_TOKENS = (
+    "mono",  # ubuntu mono, roboto mono, dejavu sans mono, pt mono, ...
+    "nimbusmon",  # URW Nimbus Mono (mono family lacking the 'mono' substring)
+    "courier",
+    "consol",  # consolas / consola
+    "menlo",
+    "monaco",
+    "inconsolata",
+    "typewriter",
+    "fira code",
+    "firacode",
+    "source code",
+    "sourcecode",
+    "jetbrains",
+    "lucida console",
+    "andale",
+)
+
+DEFAULT_MONO_RATIO_THRESHOLD = 0.10
+
+
+def _mono_ratio_threshold() -> float:
+    raw = os.environ.get("VLM_MONO_RATIO_THRESHOLD", "").strip()
+    if not raw:
+        return DEFAULT_MONO_RATIO_THRESHOLD
+    try:
+        val = float(raw)
+        return val if val >= 0 else DEFAULT_MONO_RATIO_THRESHOLD
+    except ValueError:
+        return DEFAULT_MONO_RATIO_THRESHOLD
+
+
 class HybridEngine:
     """Cost-optimizer router fulfilling ``extract(str) -> UniversalDocument``."""
 
@@ -66,13 +113,15 @@ class HybridEngine:
         vlm_engine: Optional[VlmNativeEngine] = None,
         docling_engine: Optional[DoclingFastEngine] = None,
         drawings_threshold: Optional[int] = None,
+        mono_ratio_threshold: Optional[float] = None,
     ) -> None:
         self.vlm_engine = vlm_engine or VlmNativeEngine()
         self.docling_engine = docling_engine or DoclingFastEngine()
         self.drawings_threshold = (
-            drawings_threshold
-            if drawings_threshold is not None
-            else _drawings_threshold()
+            drawings_threshold if drawings_threshold is not None else _drawings_threshold()
+        )
+        self.mono_ratio_threshold = (
+            mono_ratio_threshold if mono_ratio_threshold is not None else _mono_ratio_threshold()
         )
         # Populated by extract(); list of (page_number, "vlm"|"docling", reason).
         self.last_routing_decisions: List[Tuple[int, str, str]] = []
@@ -96,10 +145,39 @@ class HybridEngine:
             return "vlm", f"images={n_images}"
         if n_drawings > self.drawings_threshold:
             return "vlm", f"drawings={n_drawings}>{self.drawings_threshold}"
+        # Object-independent code signal: a pure-text page dense with
+        # monospace characters is a code block that Docling would mangle.
+        mono_ratio = self._mono_char_ratio(page)
+        if mono_ratio >= self.mono_ratio_threshold:
+            return "vlm", (f"code (mono_ratio={mono_ratio:.2f}>={self.mono_ratio_threshold})")
         return "docling", (
             f"prose (images=0, tables=0, drawings={n_drawings}"
-            f"<={self.drawings_threshold})"
+            f"<={self.drawings_threshold}, mono_ratio={mono_ratio:.2f}"
+            f"<{self.mono_ratio_threshold})"
         )
+
+    def _mono_char_ratio(self, page: "fitz.Page") -> float:
+        """Fraction of glyphs on the page set in a monospace font.
+
+        Char-weighted (not span-weighted) so a single long mono run counts
+        more than many short proportional spans. Returns 0.0 on empty or
+        unreadable pages.
+        """
+        try:
+            text_dict = page.get_text("dict")
+        except Exception:  # pragma: no cover - defensive: PyMuPDF API drift
+            return 0.0
+        total = 0
+        mono = 0
+        for block in text_dict.get("blocks", []):
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    n = len(span.get("text", ""))
+                    total += n
+                    font = span.get("font", "").lower()
+                    if any(token in font for token in MONO_FONT_TOKENS):
+                        mono += n
+        return mono / total if total else 0.0
 
     # ------------------------------------------------------------------
     # Public contract
@@ -142,9 +220,7 @@ class HybridEngine:
                     try:
                         image_bytes, pw, ph = self._render_page_png(doc[i])
                         prompt = _build_schema_prompt(pw, ph)
-                        raw_json = provider.describe(
-                            image_bytes, prompt, mime="image/png"
-                        )
+                        raw_json = provider.describe(image_bytes, prompt, mime="image/png")
                         payload = VlmNativeEngine._parse_strict_json(raw_json)
                         universal_page = VlmNativeEngine._page_from_payload(
                             payload,
@@ -202,9 +278,7 @@ class HybridEngine:
         finally:
             doc.close()
 
-        ordered_pages = [
-            pages_by_number[n] for n in sorted(pages_by_number.keys())
-        ]
+        ordered_pages = [pages_by_number[n] for n in sorted(pages_by_number.keys())]
         metadata = DocumentMetadata(
             page_count=len(ordered_pages),
             file_size_bytes=path.stat().st_size,
