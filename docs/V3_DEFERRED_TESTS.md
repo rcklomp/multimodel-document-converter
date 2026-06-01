@@ -30,24 +30,23 @@ with an owner + un-defer trigger. "Permanent" deferral is not a valid state.
   Un-skipping it surfaced a Phase A REGRESSION: `_apply_final_boundary_repairs`
   (the bridge running `_merge_hungry_operators` + `_strip_trailing_headings` +
   `_merge_mid_sentence_chunks` + dedup) was DEFINED but never called by
-  `process_pdf`, so those repairs ran on no document. Disposition: RE-WIRE (the
-  user's call) - the bridge + the sibling `_apply_vision_aided_front_matter_detection`
-  were restored into `process_pdf` finalize (after the VLM-table dedup step,
-  replacing the "STRIPPED" comment block that documented the Phase A removal).
-  All 9 tests green; full suite 1320 passed / 111 skipped / 0 failed, no
-  regressions. See `docs/DECISIONS.md` "Phase A orphaned the final-boundary-repair
-  bridge - RE-WIRED (PLAN_V3.1 P3)".
+  `process_pdf`, so those repairs ran on no document. Disposition: RE-WIRE - the
+  bridge + the sibling `_apply_vision_aided_front_matter_detection` were restored
+  into `process_pdf` finalize (after the VLM-table dedup step). All 9 tests green.
+  See `docs/DECISIONS.md` "Phase A orphaned the final-boundary-repair bridge -
+  RE-WIRED (PLAN_V3.1 P3)".
+- `tests/test_vision_aided_front_matter.py` - **RESTORED 2026-06-01** (P3). Its
+  target `_apply_vision_aided_front_matter_detection` was re-wired alongside the
+  cross_chunk bridge, so 7/8 behavioral tests passed on un-skip. The 8th was a
+  stale wiring pin asserting the v2.16 heading architecture
+  (`_infer_headings_from_text` + `_propagate_headings` + a dual
+  `all_chunks`/`export_chunks` front-matter call) that Phase A replaced with
+  UIR-native `_assign_headings` (P2); it was DELETED-by-decision and a new pin
+  added for the current contract (front-matter runs after boundary repairs, which
+  run after the quality-filter pass). 8/8 green. See `docs/DECISIONS.md`
+  "Front-matter wiring pin re-pointed to the V3 architecture (PLAN_V3.1 P3)".
 
-## The actual deferred surface (4 unconditionally-skipped modules)
-
-Each is module-skipped with `pytestmark = pytest.mark.skip(reason="V3_DEFERRED -
-...")`. Disposition column follows MANDATE §3.
-
-- `tests/test_vision_aided_front_matter.py` - pins the VLM-aided front-matter
-  demotion. **Disposition: ADOPT-pending** - NOTE: `_apply_vision_aided_front_matter_detection`
-  was RE-WIRED into `process_pdf` on 2026-06-01 (it was the sibling of the
-  cross_chunk bridge). This module should now be un-skippable; it stays listed
-  until its tests are run + fixed to the current call shape (next P3 step).
+## The actual deferred surface (3 unconditionally-skipped modules)
 
 ### Legacy V2 Docling-lane cluster (3 modules) - DELETE-by-decision on lane retirement
 

@@ -1,6 +1,4 @@
 
-import pytest as _pytest_v3defer
-pytestmark = _pytest_v3defer.mark.skip(reason="V3_DEFERRED - Legacy Heuristic (Phase A Step 5: heuristics stripped from UIR-native batch_processor; re-enable when LLM-sanitization layer subsumes them)")
 import inspect
 
 from mmrag_v2.batch_processor import BatchProcessor
@@ -141,15 +139,30 @@ def test_legacy_vision_gate_wrapper_routes_to_front_matter_detector(tmp_path):
     assert result[1].metadata.hierarchy.parent_heading == "Front Matter"
 
 
-def test_process_pdf_routes_front_matter_after_all_heading_assignment_paths():
+def test_process_pdf_routes_front_matter_after_boundary_repairs():
+    """Current-architecture wiring pin (PLAN_V3.1 P3, 2026-06-01).
+
+    Replaces the original pin, which asserted the v2.16 heading architecture
+    (`_infer_headings_from_text` + `_propagate_headings` + a dual
+    `all_chunks`/`export_chunks` front-matter call). Phase A replaced per-chunk
+    heading assignment with UIR-native `uir_chunker._assign_headings` (PLAN_V3.1
+    P2), so those calls no longer exist in `process_pdf` and the methods are
+    orphaned. The contract that still matters: front-matter demotion runs in
+    `process_pdf` finalize AFTER the boundary-repair bridge (so it sees the
+    repaired, heading-assigned chunk set). See DECISIONS.md "Front-matter
+    wiring pin re-pointed to the V3 architecture (PLAN_V3.1 P3)".
+    """
     source = inspect.getsource(BatchProcessor.process_pdf)
 
-    assert "_apply_vision_aided_front_matter_detection(all_chunks)" in source
-    assert "_apply_vision_aided_front_matter_detection(export_chunks)" in source
-    assert source.index("_infer_headings_from_text(all_chunks)") < source.index(
+    assert "_apply_vision_aided_front_matter_detection(all_chunks)" in source, (
+        "process_pdf no longer wires the vision-aided front-matter detector"
+    )
+    # Front-matter demotion must follow the final-boundary-repair bridge.
+    assert source.index("_apply_final_boundary_repairs(all_chunks)") < source.index(
         "_apply_vision_aided_front_matter_detection(all_chunks)"
-    )
-    assert source.count("_propagate_headings(") == 1
-    assert source.index("_propagate_headings(export_chunks)") < source.index(
-        "_apply_vision_aided_front_matter_detection(export_chunks)"
-    )
+    ), "front-matter detection must run AFTER boundary repairs"
+    # ...and both run after the canonical quality-filter pass that assembles
+    # the final chunk set.
+    assert source.index("_apply_quality_filters(all_chunks)") < source.index(
+        "_apply_final_boundary_repairs(all_chunks)"
+    ), "boundary repairs must run after the canonical quality-filter pass"

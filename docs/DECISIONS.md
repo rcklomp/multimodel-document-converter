@@ -2285,3 +2285,36 @@ coverage on the tested corpus). The behavior change (boundary repairs now run on
 every doc) is to be confirmed net-positive in the P4 soak; cheap revert =
 removing the two lines. AGENT-TEST-01 honored: the implementation was fixed to
 satisfy the test, not the reverse.
+
+
+## Front-matter wiring pin re-pointed to the V3 architecture (PLAN_V3.1 P3, 2026-06-01)
+
+**Finding:** Un-skipping `tests/test_vision_aided_front_matter.py` (P3) passed
+7/8 immediately — `_apply_vision_aided_front_matter_detection` had just been
+re-wired into `process_pdf` (see the orphaned-bridge entry above). The 8th test,
+`test_process_pdf_routes_front_matter_after_all_heading_assignment_paths`, was a
+SOURCE-INSPECTION pin asserting the v2.16 heading architecture:
+`_infer_headings_from_text(all_chunks)` + a single `_propagate_headings(...)`
+call + a dual front-matter call on both `all_chunks` and `export_chunks`. Phase A
+replaced per-chunk heading assignment with UIR-native
+`uir_chunker._assign_headings` (PLAN_V3.1 P2), so `process_pdf` no longer calls
+`_infer_headings_from_text` or `_propagate_headings` (both methods remain DEFINED
+but are now orphaned — 0 call sites anywhere in src), and there is one
+front-matter call (`all_chunks`), not a dual call. The pin asserted a pipeline
+that intentionally no longer exists.
+
+**Decision: DELETE-by-decision the obsolete pin, ADD a current-architecture pin
+(MANDATE §3b).** Re-introducing `_infer_headings_from_text`/`_propagate_headings`
+to satisfy the old pin would regress the heading work that took qa HEADING
+coverage 68% -> 100%. The replacement
+`test_process_pdf_routes_front_matter_after_boundary_repairs` pins the contract
+that actually matters and is durable: front-matter demotion runs in `process_pdf`
+finalize AFTER `_apply_final_boundary_repairs`, which runs AFTER the canonical
+`_apply_quality_filters` pass. 8/8 green. AGENT-TEST-01 honored: the obsolete
+contract was removed with this rationale; the surviving + new assertions are
+stricter about the real wiring, not weaker.
+
+**Related orphan note (not yet actioned):** `_infer_headings_from_text` (line
+~3935) and `_propagate_headings` (line ~4459) are now dead methods (0 call
+sites). They are candidates for deletion in a later P3/P6 cleanup; left in place
+for now to keep this change scoped to the test disposition.
