@@ -225,6 +225,91 @@ intuition or vendor positioning.
 
 ---
 
+## 2026-05-31 / 06-01 - M5 production smoke exposed the sandbox/shipping split; PLAN_V3.1 reconverged it  `[Results][Method][Lessons]`
+
+**Context.** The first end-to-end smoke of the V3 *production CLI* (`mmrag-v2
+process`) against the self-hosted M5 VLM endpoint (not OpenRouter). Until now every
+V3 quality number came from `scripts/v3_batch_ingest.py`, which used the retired
+`v3_execution_root` sandbox chunker + a permissive schema. The smoke ran the path
+that actually ships - and it immediately broke, three different ways. That kicked
+off a five-phase reconvergence (PLAN_V3.1), all merged to a clean linear `main`.
+
+**F10 - The headline result was measured on a path that does not ship.** The
+V3_OVERNIGHT "V3 beats V2.16 on every axis" numbers (Recall@1 +22.8pp, Faith
++22.7pp) came from the sandbox chunker. The production CLI emits *different*
+(fewer, denser) chunks. The result may still hold, but it was not reproducible
+through the shipping path. **Lesson (paper): an evidence path that diverges from
+the shipping path is a latent integrity failure - the prettier the numbers, the
+more dangerous, because nobody re-checks a win.**
+
+**F11 - Three production bugs were invisible because the sandbox bypassed the
+gates.** First real M5 CLI run surfaced, in order: (a) the V3 provider hardcoded
+`response_format=json_object`, which OpenRouter accepts but self-hosted mlx-vlm
+**400s** - so the path only ever worked on the cloud endpoint; (b) vision-native
+IMAGE/TABLE chunks reached `from_uir` with no `asset_ref` -> QA-CHECK-05 failed the
+whole batch to 0 chunks (the sandbox wrote a permissive schema that never checked);
+(c) image chunks had empty `visual_description` (VLM text went only to `content`).
+All three were one-commit fixes - but they had been masked for the entire V3 cycle.
+
+**F12 - REJECTED (the crucible's centrepiece): spatial boundary-repair merging is
+an anti-pattern on VLM-native extraction.** A legacy heuristic
+(`_apply_final_boundary_repairs`: hungry-operator / trailing-heading / mid-sentence
+merges), built for OCR/Docling physically splitting sentences across bounding
+boxes, was found orphaned by Phase A and re-wired back in - then falsified by a
+*deterministic* A/B. Method mattered: a random-sample judge soak would have buried
+the ~3-merges-per-doc signal under VLM run-to-run variance (two live extractions of
+IRJET were only **84% identical** chunk-for-chunk). Instead, applying repairs
+in-process to ONE fixed extraction (same input, repairs on vs off) gave a clean
+delta: IRJET 104 -> 97 chunks. An omlx targeted retrieval probe on the 7 merge
+boundaries: only ~1 was a clean split-sentence rejoin; the rest **over-merged**
+distinct concepts (equations, references, conclusion+bibliography) into oversized
+blobs, and the focused fragment **out-retrieved** the merged chunk on 2 of 4 probed
+queries (M2 equation cos 0.786 vs 0.766; M6 reference 0.736 vs 0.716), the rest
+neutral. **Lesson (paper): geometric merging overrides the VLM's semantic chunk
+boundaries. The VLM already reads where a paragraph ends and an equation begins;
+layering a spatial merger on top lets dumb geometry override smart semantics. The
+Docling-era reading-order/boundary heuristics do not transfer to a VLM substrate -
+they are not just unnecessary, they are net-negative for retrieval.** This
+generalizes F-series: V3 isn't "V2 + a better extractor," it requires *removing*
+the geometric scaffolding V2 needed.
+
+**F13 - Untested invariants drift; the fix is to make them executable.**
+`AGENT-SPATIAL-20` (the single 20-unit vertical merge threshold) was a hard
+invariant in prose only - a bare magic literal `if 0 <= v_gap <= 20` at 6+ live
+call sites, zero tests. Converted to a mutation-verified guard: flipping 20->25
+failed 2 assertions; restoring greened all 7. **Lesson: a prose invariant guarding
+live code is a liability, not a contract; only an executable test that demonstrably
+fails on drift counts.**
+
+**Governance dead-letter finding.** The post-V3 control docs had split into
+load-bearing rules (honored) and dead-letter rules (unachievable/violated, so
+ignored): a Definition-of-Done citing an Identity-Gate script that was never built,
+"all heuristics permanently deferred" to a Phase B whose hypothesis was already
+falsified, "the single governance file" when seven exist. **Lesson: a rule the
+project visibly ignores trains agents to ignore all rules, eroding the load-bearing
+ones. Dead-letter strict rules are worse than no rule.** Repaired: achievable DoD,
+dispositioned deferrals (restore / delete-by-decision / defer-with-trigger), and
+the deferral registry regenerated from the real 6 skips (it had listed ~90, mostly
+passing tests).
+
+**Infra.** GX10 judge made a standing `unless-stopped` service (was orchestrator-
+ephemeral, so "GX10 down" was its normal idle state); survived the session. M5 VLM
+remains boot-non-persistent by design (`vlm_serve.sh`), confirmed down->up twice -
+the production-smoke's FULL mode now preflights it with 3 consecutive probes and
+fails loudly rather than hanging on per-page VLM timeouts.
+
+**What shipped (PLAN_V3.1, all on `main`).** One canonical extraction path (sandbox
+tooling repointed); UIR-native TOC heading propagation (qa HEADING coverage 68% ->
+100%); the gate wall restored (chunker-entry contract test + AGENT-SPATIAL-20
+executable + deferred-test registry reconciled); the F12 heuristic reverted; and
+`scripts/smoke_production.sh` - a mandatory pre-merge gate that runs one doc per
+routing lane and asserts batch integrity, IMAGE/TABLE `asset_ref` + on-disk asset,
+V3-path routing, and `QA_PASS`. That gate would have caught all three F11 bugs.
+Open: P6 (retire the non-batch `V2DocumentProcessor`/Docling lane), gated on V3
+gaining non-PDF extraction.
+
+---
+
 ## Predecessor lineage: V1 → V2 (the story before V3)  `[Motivation][Architecture]`
 
 Reconstructed 2026-05-30 from git tags/commit messages (all verifiable), README
@@ -367,7 +452,11 @@ content without loss, which de-risked the refactor that this session closed.
 retrieval maturation (embedder 17× → rerank/hybrid +32pp) → **text levers
 exhausted** (HyDE/query-rewrite/omlx-deficit) → bet on **visual retrieval (ColPali)**
 → **ColPali C-spike fails at page granularity** → pivot to **VLM-native extraction**
-(current V3) → **throughput wall** (2026-05-30 entry: bandwidth-bound; M5 Max thesis).
+(current V3) → **throughput wall** (2026-05-30 entry: bandwidth-bound; M5 Max thesis)
+-> **sandbox/shipping reconvergence** (2026-05-31/06-01, F10-F13: the shipping path
+had never been tested; fixing it falsified the carried-over Docling boundary
+heuristics and proved V3 requires *removing* geometric scaffolding, not adding to
+it; closed with an executable pre-merge gate).
 
 ---
 
