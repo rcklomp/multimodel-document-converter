@@ -94,6 +94,13 @@ mypy src/mmrag_v2
 
 ## Acceptance Gate
 ```bash
+# Production-CLI anti-rot smoke (MANDATORY pre-merge gate for any change to the
+# extraction path: batch_processor.py, chunking/uir_chunker.py, src/mmrag_v3/**,
+# IngestionChunk.from_uir). Offline/CI by default (USE_DOCLING_FAST, no VLM):
+bash scripts/smoke_production.sh
+# Full M5-VLM check (opt-in): SMOKE_FULL=1 + VLM_NATIVE_* env. Look for the
+# per-lane table and the final SMOKE_PRODUCTION_PASS line (exit 0).
+
 # Multi-profile smoke test (cross-category baseline — run first):
 bash scripts/smoke_multiprofile.sh
 # Look for GATE_PASS + UNIVERSAL_PASS in every row of the summary table.
@@ -111,6 +118,8 @@ python scripts/qa_full_conversion.py output/<run_name>/ingestion.jsonl \
 python scripts/qa_universal_invariants.py output/<run_name>/ingestion.jsonl
 ```
 Look for explicit `GATE_PASS` / `GATE_FAIL` and `UNIVERSAL_PASS` / `UNIVERSAL_FAIL` in output, and `QA_PASS` / `QA_WARN` / `QA_FAIL` from `qa_full_conversion.py`. The strict-gate command is `qa_full_conversion.py --source-pdf` (per Phase 4 Step 1, 2026-05-09); the no-flag form reports phantom MISSING_PAGES failures on docs with blank-source pages.
+
+`scripts/smoke_production.sh` (PLAN_V3.1 Phase 5) is the mandatory pre-merge gate for any change touching the V3 extraction path; it must print `SMOKE_PRODUCTION_PASS` (exit 0) in offline mode before merge. It runs one doc per routing lane through the shipping CLI and asserts batch integrity, IMAGE/TABLE asset_ref + on-disk asset (QA-CHECK-05), V3-path routing (`extraction_method=uir_native_chunker` offline), and `QA_PASS`/`QA_PASS_WITH_ADVISORIES`.
 
 ## Runtime Architecture
 - CLI entry: `src/mmrag_v2/cli.py` (`process`, `batch`, `version`, `check`).
