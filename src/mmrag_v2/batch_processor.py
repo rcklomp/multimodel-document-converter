@@ -1892,8 +1892,23 @@ class BatchProcessor:
         # both run AFTER per-batch heading assignment (uir_chunker._assign_headings)
         # so front-matter demotion sees final headings. See DECISIONS.md
         # "Phase A orphaned the final-boundary-repair bridge - RE-WIRED".
-        all_chunks = self._apply_final_boundary_repairs(all_chunks)
-        all_chunks = self._apply_vision_aided_front_matter_detection(all_chunks)
+        #
+        # PLAN_V3.1 P4 A/B harness: MMRAG_DISABLE_BOUNDARY_REPAIRS=1 no-ops
+        # BOTH re-wired bridges so Arm A reproduces the exact pre-re-wire state
+        # (both were absent before commit df7e79d), isolating the re-wire's
+        # effect as the single variable under test. Default (unset) = Arm B =
+        # current shipping behavior. This is a measurement knob, NOT a
+        # production switch; remove after P4 if the soak confirms the re-wire.
+        import os as _os_p4
+        if _os_p4.environ.get("MMRAG_DISABLE_BOUNDARY_REPAIRS", "").strip().lower() not in ("1", "true", "yes"):
+            all_chunks = self._apply_final_boundary_repairs(all_chunks)
+            all_chunks = self._apply_vision_aided_front_matter_detection(all_chunks)
+        else:
+            logger.warning(
+                "[P4-AB] MMRAG_DISABLE_BOUNDARY_REPAIRS set: skipping "
+                "_apply_final_boundary_repairs + _apply_vision_aided_front_matter_detection "
+                "(Arm A baseline)"
+            )
 
         # Selective OCR patching for encoding-corrupted chunks.
         # Keeps HybridChunker structure, replaces only the corrupted text spans.
