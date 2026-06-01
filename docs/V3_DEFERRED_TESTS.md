@@ -26,25 +26,20 @@ with an owner + un-defer trigger. "Permanent" deferral is not a valid state.
   incl. 7 new `_assign_headings` contracts. Two prior structural pins on DELETED
   OCR/layout-lane wiring were DELETED-by-decision (see `docs/DECISIONS.md`
   "OCR-lane production-wiring pins retired (PLAN_V3.1 P2)").
-- `tests/test_cross_chunk_semantic_stitching.py` - **RESTORED 2026-06-01** (P3).
-  Un-skipping it surfaced a Phase A REGRESSION: `_apply_final_boundary_repairs`
-  (the bridge running `_merge_hungry_operators` + `_strip_trailing_headings` +
-  `_merge_mid_sentence_chunks` + dedup) was DEFINED but never called by
-  `process_pdf`, so those repairs ran on no document. Disposition: RE-WIRE - the
-  bridge + the sibling `_apply_vision_aided_front_matter_detection` were restored
-  into `process_pdf` finalize (after the VLM-table dedup step). All 9 tests green.
-  See `docs/DECISIONS.md` "Phase A orphaned the final-boundary-repair bridge -
-  RE-WIRED (PLAN_V3.1 P3)".
-- `tests/test_vision_aided_front_matter.py` - **RESTORED 2026-06-01** (P3). Its
-  target `_apply_vision_aided_front_matter_detection` was re-wired alongside the
-  cross_chunk bridge, so 7/8 behavioral tests passed on un-skip. The 8th was a
-  stale wiring pin asserting the v2.16 heading architecture
-  (`_infer_headings_from_text` + `_propagate_headings` + a dual
-  `all_chunks`/`export_chunks` front-matter call) that Phase A replaced with
-  UIR-native `_assign_headings` (P2); it was DELETED-by-decision and a new pin
-  added for the current contract (front-matter runs after boundary repairs, which
-  run after the quality-filter pass). 8/8 green. See `docs/DECISIONS.md`
-  "Front-matter wiring pin re-pointed to the V3 architecture (PLAN_V3.1 P3)".
+- `test_cross_chunk_semantic_stitching.py` + `test_vision_aided_front_matter.py`
+  - **DELETED 2026-06-01** (P4). Briefly RESTORED + re-wired in P3 (the
+  final-boundary-repair / front-matter bridge was found orphaned and re-wired
+  into `process_pdf`), then the P4 targeted retrieval probe proved that
+  spatial/geometric boundary merging is an ANTI-PATTERN on VLM-native extraction
+  (it over-merges distinct concepts and dilutes retrieval vectors - see
+  `docs/DECISIONS.md` "Spatial proximity boundary-repair bridge DEPRECATED for
+  VLM-native"). The bridge was reverted (cut from `process_pdf`) and both test
+  files were DELETED-by-decision - we do not keep tests guarding code we have
+  rejected. The methods themselves remain DEFINED but orphaned (dead-code cleanup
+  candidates for a later pass). NOTE: this does NOT touch
+  `tests/test_spatial_refiner_agent_spatial_20.py` (R6) - `_apply_spatial_refiner`
+  is a SEPARATE, still-live path via `_sanitize_technical_manual_final`
+  (AGENT-SPATIAL-20), which the P4 probe did not test; its guard stays.
 
 ## The actual deferred surface (3 unconditionally-skipped modules)
 

@@ -2351,3 +2351,43 @@ this test + the AGENTS.md/CLAUDE.md invariant text must be updated together with
 a DECISIONS entry. Per AGENT-TEST-01 the test is not to be weakened to let drift
 pass. PROJECT_STATUS "Phase B Technical Debt" #1 is hereby retired - the spatial
 refiner is adopted + guarded, not deferred.
+
+
+## Spatial proximity boundary-repair bridge DEPRECATED for VLM-native (PLAN_V3.1 P4, 2026-06-01)
+
+**Decision:** Spatial-proximity / mid-sentence boundary merging (the
+`_apply_final_boundary_repairs` bridge: `_merge_hungry_operators` +
+`_strip_trailing_headings` + mid-sentence merge, plus the sibling
+`_apply_vision_aided_front_matter_detection`) is DEPRECATED for VLM-native
+pipelines. The P3 re-wire of this bridge into `process_pdf` is REVERTED (cut from
+the finalize path); the two test files guarding it
+(`test_cross_chunk_semantic_stitching.py`, `test_vision_aided_front_matter.py`)
+are DELETED.
+
+**Evidence (P4 targeted retrieval probe):** geometric merging overrides the VLM's
+semantic chunk boundaries, causing over-merging of distinct concepts (equations,
+references, conclusion+bibliography) into oversized blobs and diluting retrieval
+vectors. On a clean deterministic A/B of IRJET (same extraction, repairs on vs
+off): 104 -> 97 chunks (7 merges), but only ~1 was a clean split-sentence rejoin;
+the rest fused unrelated content. omlx-embedded retrieval on the merged
+boundaries: the focused Arm-A fragment OUT-retrieved the merged Arm-B chunk on 2
+of 4 probed queries (M2 equation 0.786 vs 0.766; M6 reference 0.736 vs 0.716),
+the rest ~neutral. Net: neutral-to-negative for retrieval.
+
+**Rationale:** `_apply_final_boundary_repairs` is a geometric solution to a
+geometric problem - OCR/Docling physically splitting sentences across bounding
+boxes. The VLM reads semantics, not just geometry, and emits natively coherent
+chunks; layering a spatial merger on top lets dumb geometry override smart
+semantics. We do not carry this Phase B debt into the V3 era. The P3 tests did
+their job (they let us safely manipulate the boundary and measure it), then were
+retired with the code.
+
+**Scope guard (verified before deletion):** this does NOT touch
+`_apply_spatial_refiner` / AGENT-SPATIAL-20 or its test
+(`tests/test_spatial_refiner_agent_spatial_20.py`). That is a SEPARATE, still-live
+path reached via `process_pdf` -> `_sanitize_technical_manual_final` ->
+`_apply_vertical_proximity_merger` -> `_apply_spatial_refiner`, which the P4
+probe did not evaluate; its R6 guard stays green. Likewise
+`_merge_mid_sentence_chunks` remains live via `_apply_quality_filters`. The
+now-orphaned bridge methods are dead-code cleanup candidates for a later pass;
+this change is scoped to the revert + test deletion the evidence supports.

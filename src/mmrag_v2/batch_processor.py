@@ -1882,33 +1882,22 @@ class BatchProcessor:
         # picked the prose chunk 29/30 times.
         all_chunks = self._apply_vlm_table_iou_dedup(all_chunks)
 
-        # PLAN_V3.1 P3 (2026-06-01): RE-WIRE the final-boundary-repair bridge
-        # that Phase A orphaned. These helpers were left DEFINED but un-called
-        # by process_pdf, so hungry-operator / trailing-heading / mid-sentence
-        # boundary repairs and vision-aided front-matter demotion ran on NO
-        # document. They are UIR-shape-agnostic (operate on IngestionChunk text +
-        # metadata, not DoclingDocument), so re-introducing them is safe on the
-        # V3 path. Order: boundary repairs first, then front-matter demotion —
-        # both run AFTER per-batch heading assignment (uir_chunker._assign_headings)
-        # so front-matter demotion sees final headings. See DECISIONS.md
-        # "Phase A orphaned the final-boundary-repair bridge - RE-WIRED".
-        #
-        # PLAN_V3.1 P4 A/B harness: MMRAG_DISABLE_BOUNDARY_REPAIRS=1 no-ops
-        # BOTH re-wired bridges so Arm A reproduces the exact pre-re-wire state
-        # (both were absent before commit df7e79d), isolating the re-wire's
-        # effect as the single variable under test. Default (unset) = Arm B =
-        # current shipping behavior. This is a measurement knob, NOT a
-        # production switch; remove after P4 if the soak confirms the re-wire.
-        import os as _os_p4
-        if _os_p4.environ.get("MMRAG_DISABLE_BOUNDARY_REPAIRS", "").strip().lower() not in ("1", "true", "yes"):
-            all_chunks = self._apply_final_boundary_repairs(all_chunks)
-            all_chunks = self._apply_vision_aided_front_matter_detection(all_chunks)
-        else:
-            logger.warning(
-                "[P4-AB] MMRAG_DISABLE_BOUNDARY_REPAIRS set: skipping "
-                "_apply_final_boundary_repairs + _apply_vision_aided_front_matter_detection "
-                "(Arm A baseline)"
-            )
+        # PLAN_V3.1 P4 (2026-06-01): the final-boundary-repair bridge
+        # (_apply_final_boundary_repairs -> hungry-operator / trailing-heading /
+        # mid-sentence merges + _apply_vision_aided_front_matter_detection) is
+        # DEPRECATED for the VLM-native path and NOT wired here. The P4 targeted
+        # retrieval probe proved spatial/geometric merging overrides the VLM's
+        # semantic chunk boundaries: on dense academic text it over-merged
+        # distinct concepts (equations, references, conclusion+bibliography) into
+        # oversized blobs and DILUTED retrieval vectors (focused fragments
+        # out-retrieved the merged chunk on 2 of 4 probed boundaries; only ~1 of
+        # 7 merges was a clean split-sentence win). The bridge was a geometric
+        # fix for an OCR/Docling problem (sentences physically split across
+        # bboxes) that VLM-native extraction does not have. See DECISIONS.md
+        # "Spatial proximity boundary-repair bridge DEPRECATED for VLM-native".
+        # NOTE: _merge_mid_sentence_chunks remains live via _apply_quality_filters
+        # and _apply_spatial_refiner remains live via _sanitize_technical_manual_final
+        # (AGENT-SPATIAL-20) - those are separate paths, not this bridge.
 
         # Selective OCR patching for encoding-corrupted chunks.
         # Keeps HybridChunker structure, replaces only the corrupted text spans.
