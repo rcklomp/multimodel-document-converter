@@ -2225,3 +2225,96 @@ more pages or detectable headings), so the gate continues to enforce
 >= 0.80 on every document where heading coverage is a meaningful
 quality signal. This is a gate-correctness fix, not a relaxation, and
 does not touch the form acceptance class (QUALITY_GATES.md).
+
+
+## Legacy V2DocumentProcessor / Docling lane - retirement PLANNED (PLAN_V3.1 P3, 2026-05-31)
+
+**Decision:** The non-batch `V2DocumentProcessor` + `DoclingPdfAdapter` /
+`PdfConversionPlan` lane is slated for retirement toward the single-path north
+star (one extraction path = the V3 CLI / HybridEngine). The cut is SCOPED AS ITS
+OWN FUTURE PHASE (PLAN_V3.1 P6), not done now - it has a hard prerequisite.
+
+**Current reachability (why it is NOT dead code today):** `cli.py` still routes
+to `V2DocumentProcessor.process_to_jsonl_atomic` for (a) PDFs run with
+`--batch-size 0`, and (b) ALL non-PDF inputs - EPUB / HTML / DOCX / PPTX / XLSX.
+The V3 path (`mmrag_v3.extract` -> HybridEngine) is fitz-based, PDF-only, so it
+cannot yet cover those formats.
+
+**Blocker (why deferred, not executed):** retiring the lane requires FIRST
+either (1) V3-native non-PDF extractors that emit `UniversalDocument`, or (2) an
+explicit decision to drop non-PDF support.
+
+**Consequence for the 3 deferred legacy-path test modules**
+(`test_pdf_conversion_plan.py` 62 tests, `test_docling_postprocess_ocr_gating.py`,
+`test_docling_postprocess_profile_integration.py`): NOT adopted, NOT deleted now.
+They stay deferred with the retirement as their disposition trigger -
+DELETE-by-decision (MANDATE §3b) WITH the `DoclingPdfAdapter` / `PdfConversionPlan`
+code they guard, at the moment the lane is cut. Until then the legacy lane ships
+unguarded by these tests - an accepted, documented risk because the lane is on a
+retirement path and the V3 batch path is the one under active test.
+
+
+## Phase A orphaned the final-boundary-repair bridge - RE-WIRED (PLAN_V3.1 P3, 2026-06-01)
+
+**Finding (a regression, found by un-skipping a deferred test):** Adopting
+`tests/test_cross_chunk_semantic_stitching.py` revealed that
+`BatchProcessor._apply_final_boundary_repairs` was DEFINED but had ZERO call
+sites - `process_pdf` no longer invoked it (Phase A Step 5 stripped the wiring,
+leaving a "STRIPPED" comment in its place). So `_merge_hungry_operators`
+(orphan-preposition stitching) and `_strip_trailing_headings` ran on NO document.
+The sibling `_apply_vision_aided_front_matter_detection` was orphaned the same
+way (only reachable via the self-delegating `_vision_gate_headings` wrapper).
+`_merge_mid_sentence_chunks` was NOT orphaned (still live via
+`_apply_quality_filters`).
+
+**Decision: RE-WIRE both bridges into `process_pdf` finalize.** Replaced the
+"STRIPPED" comment block (after the VLM-table IoU dedup step) with
+`self._apply_final_boundary_repairs(all_chunks)` then
+`self._apply_vision_aided_front_matter_detection(all_chunks)`. Order: boundary
+repairs before front-matter; both run AFTER per-batch heading assignment
+(`uir_chunker._assign_headings`, P2) so front-matter demotion sees final
+headings. These helpers operate on `IngestionChunk` text + metadata (not
+DoclingDocument), so they are UIR-shape-agnostic and safe on the V3 path. This
+treats the orphaning as the regression it was, not as intended removal.
+
+**Validation:** `test_cross_chunk_semantic_stitching` 9/9 (incl. the
+ordering + process_pdf-wiring pins); FULL suite **1320 passed / 111 skipped /
+0 failed** - no regression, and specifically the P2 heading tests + R10 contract
++ v3_integration stayed green (front-matter demotion did not lower heading
+coverage on the tested corpus). The behavior change (boundary repairs now run on
+every doc) is to be confirmed net-positive in the P4 soak; cheap revert =
+removing the two lines. AGENT-TEST-01 honored: the implementation was fixed to
+satisfy the test, not the reverse.
+
+
+## Front-matter wiring pin re-pointed to the V3 architecture (PLAN_V3.1 P3, 2026-06-01)
+
+**Finding:** Un-skipping `tests/test_vision_aided_front_matter.py` (P3) passed
+7/8 immediately — `_apply_vision_aided_front_matter_detection` had just been
+re-wired into `process_pdf` (see the orphaned-bridge entry above). The 8th test,
+`test_process_pdf_routes_front_matter_after_all_heading_assignment_paths`, was a
+SOURCE-INSPECTION pin asserting the v2.16 heading architecture:
+`_infer_headings_from_text(all_chunks)` + a single `_propagate_headings(...)`
+call + a dual front-matter call on both `all_chunks` and `export_chunks`. Phase A
+replaced per-chunk heading assignment with UIR-native
+`uir_chunker._assign_headings` (PLAN_V3.1 P2), so `process_pdf` no longer calls
+`_infer_headings_from_text` or `_propagate_headings` (both methods remain DEFINED
+but are now orphaned — 0 call sites anywhere in src), and there is one
+front-matter call (`all_chunks`), not a dual call. The pin asserted a pipeline
+that intentionally no longer exists.
+
+**Decision: DELETE-by-decision the obsolete pin, ADD a current-architecture pin
+(MANDATE §3b).** Re-introducing `_infer_headings_from_text`/`_propagate_headings`
+to satisfy the old pin would regress the heading work that took qa HEADING
+coverage 68% -> 100%. The replacement
+`test_process_pdf_routes_front_matter_after_boundary_repairs` pins the contract
+that actually matters and is durable: front-matter demotion runs in `process_pdf`
+finalize AFTER `_apply_final_boundary_repairs`, which runs AFTER the canonical
+`_apply_quality_filters` pass. 8/8 green. AGENT-TEST-01 honored: the obsolete
+contract was removed with this rationale; the surviving + new assertions are
+stricter about the real wiring, not weaker.
+
+**Related orphan note (not yet actioned):** `_infer_headings_from_text` (line
+~3935) and `_propagate_headings` (line ~4459) are now dead methods (0 call
+sites). They are candidates for deletion in a later P3/P6 cleanup; left in place
+for now to keep this change scoped to the test disposition.
