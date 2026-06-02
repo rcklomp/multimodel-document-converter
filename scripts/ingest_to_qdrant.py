@@ -408,7 +408,11 @@ def build_qdrant_payload(
     # in v2.12 Phase 0; pre-Phase-0 ingest preferred refined_content and
     # the v2.11 soak's Format dips on IRJET/Earthship/CarOK traced back
     # to that staleness — see docs/PLAN_V2.12.md Phase 0.)
-    content = chunk.get("content") or metadata.get("refined_content", "")
+    # Trailing ``or ""`` guards an explicit ``refined_content: null`` (distinct
+    # from a missing key): asset chunks (IMAGE/TABLE crops with no text
+    # description) legitimately carry empty content, and ``"" or None`` would
+    # yield None and crash the ``content[:10000]`` slice below.
+    content = chunk.get("content") or metadata.get("refined_content") or ""
     page = metadata.get("page_number", 0)
     hierarchy = metadata.get("hierarchy") or {}
 
@@ -561,8 +565,10 @@ def main():
         # refinement normalization passes); `refined_content` is the
         # raw VLM refiner output kept for provenance and only used as a
         # fallback. See build_qdrant_payload() comment for the full
-        # rationale.
-        content = chunk.get("content") or metadata.get("refined_content", "")
+        # rationale. Trailing ``or ""`` guards an explicit
+        # ``refined_content: null`` so empty-content asset chunks do not
+        # produce a None passed into the embedder below.
+        content = chunk.get("content") or metadata.get("refined_content") or ""
         page = metadata.get("page_number", 0)
 
         # Build embedding
