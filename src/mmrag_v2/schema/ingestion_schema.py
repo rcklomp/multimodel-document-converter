@@ -73,8 +73,20 @@ _CTRL_RUN_PATTERN = re.compile(r" *[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+ *")
 # lists read naturally. The token list intentionally requires a trailing
 # space / character so it doesn't false-match prose like "ifs" or "fortunately".
 _CODE_CONTEXT_TOKENS = (
-    " = ", "def ", "class ", "import ", "if ", "for ", "while ",
-    "return ", "print(", "elif ", "else:", ":=", "->", "lambda ",
+    " = ",
+    "def ",
+    "class ",
+    "import ",
+    "if ",
+    "for ",
+    "while ",
+    "return ",
+    "print(",
+    "elif ",
+    "else:",
+    ":=",
+    "->",
+    "lambda ",
 )
 
 
@@ -531,24 +543,20 @@ class ChunkMetadata(BaseModel):
 
     # V2.7 VLM ENRICHMENT METADATA
     vision_status: Optional[str] = Field(
-        default=None,
-        description="VLM enrichment status: pending|done|failed|skipped"
+        default=None, description="VLM enrichment status: pending|done|failed|skipped"
     )
     vision_attempts: Optional[int] = Field(
-        default=None, ge=0,
-        description="Number of VLM enrichment attempts"
+        default=None, ge=0, description="Number of VLM enrichment attempts"
     )
     vision_provider_used: Optional[str] = Field(
         default=None,
-        description="VLM provider that produced the description (openai|ollama|anthropic)"
+        description="VLM provider that produced the description (openai|ollama|anthropic)",
     )
     vision_error: Optional[str] = Field(
-        default=None,
-        description="Last VLM error message if status=failed"
+        default=None, description="Last VLM error message if status=failed"
     )
     vision_validation_issues: Optional[List[str]] = Field(
-        default=None,
-        description="Source Sanctity validation issues detected during VLM enrichment"
+        default=None, description="Source Sanctity validation issues detected during VLM enrichment"
     )
 
     # V2.7 CODE BLOCK METADATA
@@ -562,8 +570,7 @@ class ChunkMetadata(BaseModel):
         default=None, description="True if code parses as valid Python (ast.parse)"
     )
     indentation_fidelity: Optional[float] = Field(
-        default=None, ge=0.0, le=1.0,
-        description="1.0 = has indentation, 0.0 = flat code"
+        default=None, ge=0.0, le=1.0, description="1.0 = has indentation, 0.0 = flat code"
     )
     partial_code: Optional[bool] = Field(
         default=None,
@@ -572,6 +579,17 @@ class ChunkMetadata(BaseModel):
             "or contiguous indented run) mid-unit because end-of-unit exceeded "
             "the size-limit safe-max (1.5×). Both halves of the split carry "
             "this flag. Observability signal for v2.14 Phase 6 chunking hygiene."
+        ),
+    )
+    original_vlm_type: Optional[str] = Field(
+        default=None,
+        description=(
+            "The VLM's original element type when it did not map cleanly onto "
+            "the 3-value ElementType: 'code'/'form' (promoted to Modality.CODE/"
+            "FORM) or a non-standard type degraded to TEXT (comma-joined when a "
+            "merged text chunk carried more than one). None for natively-typed "
+            "extraction. Provenance marker so smuggled/degraded chunks are "
+            "auditable, never silently indistinguishable from prose."
         ),
     )
 
@@ -654,7 +672,7 @@ class IngestionChunk(BaseModel):
     contextualized_text: Optional[str] = Field(
         default=None,
         description="Contextualized text for embedding (breadcrumb + neighbor context prepended). "
-        "Canonical `content` is NOT mutated. QA validation uses `content`."
+        "Canonical `content` is NOT mutated. QA validation uses `content`.",
     )
 
     @field_validator("content", mode="before")
@@ -824,9 +842,7 @@ class IngestionChunk(BaseModel):
         # --- OCR confidence (numeric on UIR → categorical on v2.16 schema) ---
         ocr_conf_level: Optional[str] = None
         if uir.confidence.ocr_confidence is not None:
-            ocr_conf_level = get_ocr_confidence_level(
-                float(uir.confidence.ocr_confidence)
-            )
+            ocr_conf_level = get_ocr_confidence_level(float(uir.confidence.ocr_confidence))
 
         # --- Structural flags → v2.16 metadata fields ---
         partial_code: Optional[bool] = None
@@ -863,8 +879,11 @@ class IngestionChunk(BaseModel):
             extraction_method=uir.extraction_method or "docling",
             ocr_confidence=ocr_conf_level,
             partial_code=partial_code,
-            search_priority="high" if modality == Modality.TEXT else (
-                "medium" if modality == Modality.TABLE else "low"
+            original_vlm_type=uir.original_vlm_type,
+            search_priority=(
+                "high"
+                if modality == Modality.TEXT
+                else ("medium" if modality == Modality.TABLE else "low")
             ),
             profile_type=profile_type,
             profile_sensitivity=profile_sensitivity,

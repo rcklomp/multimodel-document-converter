@@ -46,6 +46,24 @@ logger = logging.getLogger(__name__)
 PAGE_RENDER_DPI = 200
 
 
+def _vlm_element_metadata(
+    promoted_modality: Optional[str], original_vlm_type: Optional[str]
+) -> Optional[Dict[str, Any]]:
+    """Build the element metadata bag for a parsed VLM element.
+
+    ``promoted_modality`` drives the chunker's Modality.CODE/FORM promotion;
+    ``original_vlm_type`` is the provenance marker surfaced on the final chunk.
+    Returns None when neither applies (a natively-typed element) so plain text
+    carries no metadata.
+    """
+    md: Dict[str, Any] = {}
+    if promoted_modality:
+        md["promoted_modality"] = promoted_modality
+    if original_vlm_type:
+        md["original_vlm_type"] = original_vlm_type
+    return md or None
+
+
 def _build_schema_prompt(pixel_width: int, pixel_height: int) -> str:
     """Per-page prompt anchored to the actual render dimensions.
 
@@ -197,9 +215,7 @@ class VlmNativeEngine:
         return buffer.getvalue(), pixmap.width, pixmap.height
 
     @staticmethod
-    def _project_bbox_to_uir(
-        raw_bbox: List[int], pixel_width: int, pixel_height: int
-    ) -> List[int]:
+    def _project_bbox_to_uir(raw_bbox: List[int], pixel_width: int, pixel_height: int) -> List[int]:
         """Project raw pixel-space [x_min, y_min, x_max, y_max] into [0, 1000].
 
         Deterministic adapter math — does not depend on the VLM honoring
@@ -208,8 +224,7 @@ class VlmNativeEngine:
         """
         if pixel_width <= 0 or pixel_height <= 0:
             raise ValueError(
-                f"pixel_width={pixel_width}, pixel_height={pixel_height} "
-                "must both be > 0"
+                f"pixel_width={pixel_width}, pixel_height={pixel_height} " "must both be > 0"
             )
         if len(raw_bbox) != 4:
             raise ValueError(f"bbox must have 4 elements, got {len(raw_bbox)}")
@@ -251,9 +266,7 @@ class VlmNativeEngine:
         """
         payload = json.loads(raw)
         if not isinstance(payload, dict):
-            raise ValueError(
-                f"VLM payload must be JSON object, got {type(payload).__name__}"
-            )
+            raise ValueError(f"VLM payload must be JSON object, got {type(payload).__name__}")
         return payload
 
     @classmethod
@@ -284,8 +297,7 @@ class VlmNativeEngine:
         for index, raw_element in enumerate(elements_payload):
             if not isinstance(raw_element, dict):
                 raise ValueError(
-                    f"UIR element[{index}] must be an object, got "
-                    f"{type(raw_element).__name__}"
+                    f"UIR element[{index}] must be an object, got " f"{type(raw_element).__name__}"
                 )
             type_raw = str(raw_element.get("type") or "text").strip().lower()
             # Charter §7.1: ElementType stays the 3-value legacy vocabulary
@@ -295,8 +307,15 @@ class VlmNativeEngine:
             # widening belongs). An unexpected type also degrades to TEXT
             # rather than crashing the whole page to a Docling fallback.
             promoted_modality: Optional[str] = None
+            # The VLM's original type whenever it does NOT map cleanly onto the
+            # 3-value ElementType vocabulary: a 'code'/'form' promotion or an
+            # unknown type degraded to TEXT. Carried downstream as the
+            # original_vlm_type provenance marker so a smuggled or degraded
+            # chunk is never silently indistinguishable from genuine prose.
+            original_vlm_type: Optional[str] = None
             if type_raw in ("code", "form"):
                 promoted_modality = type_raw
+                original_vlm_type = type_raw
                 element_type = ElementType.TEXT
             else:
                 try:
@@ -309,14 +328,13 @@ class VlmNativeEngine:
                         page_number,
                     )
                     element_type = ElementType.TEXT
+                    original_vlm_type = type_raw
             content = raw_element.get("content") or ""
             raw_bbox = raw_element.get("bbox")
             normalized_bbox = None
             if raw_bbox is not None:
                 raw_ints = [int(round(float(c))) for c in raw_bbox]
-                normalized_bbox = cls._project_bbox_to_uir(
-                    raw_ints, pixel_width, pixel_height
-                )
+                normalized_bbox = cls._project_bbox_to_uir(raw_ints, pixel_width, pixel_height)
             confidence = float(raw_element.get("confidence", 0.9))
             # VLMs sometimes emit out-of-range confidence; clamp.
             confidence = max(0.0, min(1.0, confidence))
@@ -330,11 +348,7 @@ class VlmNativeEngine:
                     extraction_method=ExtractionMethod.VLM,
                     element_index=index,
                     source_label=str(source_label),
-                    metadata=(
-                        {"promoted_modality": promoted_modality}
-                        if promoted_modality
-                        else None
-                    ),
+                    metadata=_vlm_element_metadata(promoted_modality, original_vlm_type),
                 )
             )
 

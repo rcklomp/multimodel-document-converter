@@ -756,24 +756,17 @@ class Locator:
             if self.bbox is None:
                 raise ValueError("Locator(type=BBOX) requires bbox")
             if len(self.bbox) != 4:
-                raise ValueError(
-                    f"Locator.bbox must be 4 ints, got len={len(self.bbox)}"
-                )
+                raise ValueError(f"Locator.bbox must be 4 ints, got len={len(self.bbox)}")
             for i, coord in enumerate(self.bbox):
                 if not isinstance(coord, int):
-                    raise TypeError(
-                        f"Locator.bbox[{i}]={coord!r} must be int (REQ-COORD-01)"
-                    )
+                    raise TypeError(f"Locator.bbox[{i}]={coord!r} must be int (REQ-COORD-01)")
                 if not (0 <= coord <= 1000):
                     raise ValueError(
-                        f"Locator.bbox[{i}]={coord} out of range [0,1000] "
-                        "(REQ-COORD-01)"
+                        f"Locator.bbox[{i}]={coord} out of range [0,1000] " "(REQ-COORD-01)"
                     )
         elif self.type in (LocatorType.FLOW_OFFSET, LocatorType.DOM_PATH):
             if self.path is None:
-                raise ValueError(
-                    f"Locator(type={self.type.value}) requires path"
-                )
+                raise ValueError(f"Locator(type={self.type.value}) requires path")
 
 
 @dataclass
@@ -813,9 +806,7 @@ class ConfidenceBreakdown:
         for name in self._VALID_FIELDS:
             value = getattr(self, name)
             if value is not None and not (0.0 <= value <= 1.0):
-                raise ValueError(
-                    f"ConfidenceBreakdown.{name}={value} out of range [0,1]"
-                )
+                raise ValueError(f"ConfidenceBreakdown.{name}={value} out of range [0,1]")
 
 
 @dataclass
@@ -844,6 +835,16 @@ class UIRChunk:
     asset_ref: Optional[str] = None  # Path to extracted image/asset (IMAGE)
     lang: Optional[str] = None  # ISO 639-1 language code
     reading_order: Optional[int] = None  # Monotonic logical position
+
+    # Provenance: the VLM's original element type when it did not map cleanly
+    # onto the 3-value ElementType vocabulary - 'code'/'form' promoted to
+    # Modality.CODE/FORM, or a non-standard type degraded to TEXT. None for
+    # natively-typed extraction. Surfaced into
+    # IngestionChunk.metadata.original_vlm_type by from_uir so smuggled and
+    # degraded chunks stay auditable rather than silently indistinguishable
+    # from prose. Additive-optional: does NOT bump uir_version (3.0 is still
+    # the current contract; the exporter roundtrips this field symmetrically).
+    original_vlm_type: Optional[str] = None
 
     # Provenance fields (Charter §3.2):
     content_original: Optional[str] = None  # Pre-sanitization raw extraction
@@ -889,8 +890,7 @@ class UIRChunk:
 
     def __post_init__(self) -> None:
         if not any(
-            self.sanitization_status == prefix
-            or self.sanitization_status.startswith(prefix)
+            self.sanitization_status == prefix or self.sanitization_status.startswith(prefix)
             for prefix in self._VALID_SANITIZATION_STATUS_PREFIXES
         ):
             raise ValueError(

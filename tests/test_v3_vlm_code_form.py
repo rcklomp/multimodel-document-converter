@@ -68,12 +68,15 @@ def test_code_smuggles_as_text_promotes_to_code_modality(tmp_path):
     # signal is preserved on the element for the chunker to promote.
     assert page.elements[0].type == ElementType.TEXT
     assert page.elements[0].metadata.get("promoted_modality") == "code"
+    # Provenance marker captured alongside the routing flag.
+    assert page.elements[0].metadata.get("original_vlm_type") == "code"
 
     # Chunk layer: promoted to Modality.CODE, indentation preserved verbatim.
     chunks = chunk_universal_document(_doc(tmp_path, page))
     code_chunks = [c for c in chunks if c.modality == Modality.CODE]
     assert len(code_chunks) == 1
     assert "        return 1" in code_chunks[0].content
+    assert code_chunks[0].original_vlm_type == "code"
 
     ic = IngestionChunk.from_uir(
         code_chunks[0], doc_id="abc123abc123", source_file="t.pdf", file_type=FileType.PDF
@@ -81,6 +84,8 @@ def test_code_smuggles_as_text_promotes_to_code_modality(tmp_path):
     assert ic.modality == Modality.CODE
     assert ic.metadata.chunk_type == ChunkType.CODE
     assert ic.content == code
+    # Provenance survives serialization into the output metadata.
+    assert ic.metadata.original_vlm_type == "code"
 
 
 def test_form_smuggles_as_text_promotes_to_form_modality(tmp_path):
@@ -88,16 +93,19 @@ def test_form_smuggles_as_text_promotes_to_form_modality(tmp_path):
     page = _page_from_vlm([_el("form", form)])
     assert page.elements[0].type == ElementType.TEXT
     assert page.elements[0].metadata.get("promoted_modality") == "form"
+    assert page.elements[0].metadata.get("original_vlm_type") == "form"
 
     chunks = chunk_universal_document(_doc(tmp_path, page))
     form_chunks = [c for c in chunks if c.modality == Modality.FORM]
     assert len(form_chunks) == 1
+    assert form_chunks[0].original_vlm_type == "form"
 
     # FORM needs no asset_ref -> from_uir must not raise QA-CHECK-05.
     ic = IngestionChunk.from_uir(
         form_chunks[0], doc_id="abc123abc123", source_file="t.pdf", file_type=FileType.PDF
     )
     assert ic.modality == Modality.FORM
+    assert ic.metadata.original_vlm_type == "form"
 
 
 def test_elementtype_stays_three_values():
@@ -119,11 +127,45 @@ def test_unknown_type_degrades_to_text_without_dropping_page(tmp_path):
     assert len(page.elements) == 2
     assert page.elements[0].type == ElementType.TEXT
     assert page.elements[0].metadata.get("promoted_modality") is None  # plain text
+    # The degraded type is NOT silently lost: provenance marker is recorded.
+    assert page.elements[0].metadata.get("original_vlm_type") == "formula"
     assert page.elements[1].type == ElementType.TEXT
     assert page.elements[1].metadata.get("promoted_modality") == "code"
+    assert page.elements[1].metadata.get("original_vlm_type") == "code"
 
     chunks = chunk_universal_document(_doc(tmp_path, page))
     assert any(c.modality == Modality.CODE for c in chunks)
+
+
+def test_degraded_unknown_marker_survives_chunking_and_serialization(tmp_path):
+    # A pure degraded-unknown page (no sibling code) must still carry the
+    # 'formula' marker through the text-grouping path onto the final chunk and
+    # into the serialized IngestionChunk metadata - the previously-silent gap.
+    page = _page_from_vlm([_el("formula", "E = mc^2 is a famous equation. " * 4)])
+    assert page.elements[0].metadata.get("original_vlm_type") == "formula"
+
+    chunks = chunk_universal_document(_doc(tmp_path, page))
+    text_chunks = [c for c in chunks if c.modality == Modality.TEXT]
+    assert text_chunks, "degraded element must still produce a text chunk"
+    assert text_chunks[0].original_vlm_type == "formula"
+
+    ic = IngestionChunk.from_uir(
+        text_chunks[0], doc_id="abc123abc123", source_file="t.pdf", file_type=FileType.PDF
+    )
+    assert ic.modality == Modality.TEXT
+    assert ic.metadata.original_vlm_type == "formula"
+
+
+def test_native_text_has_no_provenance_marker(tmp_path):
+    # Ordinary prose (VLM type 'text') must NOT get a spurious marker.
+    page = _page_from_vlm([_el("text", "Just some ordinary prose. " * 4)])
+    assert page.elements[0].metadata is None or (
+        page.elements[0].metadata.get("original_vlm_type") is None
+    )
+    chunks = chunk_universal_document(_doc(tmp_path, page))
+    text_chunks = [c for c in chunks if c.modality == Modality.TEXT]
+    assert text_chunks
+    assert text_chunks[0].original_vlm_type is None
 
 
 def test_prompt_advertises_code_and_form_with_instructions():

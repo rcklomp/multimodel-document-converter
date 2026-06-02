@@ -54,37 +54,72 @@ EXTRACTION_ENGINE_VERSION_DEFAULT: str = "mmrag-v3.0-uir"
 
 # Source labels that indicate heading elements
 _HEADING_LABELS: Set[str] = {
-    "section_header", "section-header", "sectionheader",
-    "title", "heading", "h1", "h2", "h3", "h4",
+    "section_header",
+    "section-header",
+    "sectionheader",
+    "title",
+    "heading",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
     "subtitle",
 }
 
 # Source labels that indicate code elements
 _CODE_LABELS: Set[str] = {
-    "code", "code_block", "codeblock", "pre",
-    "listing", "programlisting",
+    "code",
+    "code_block",
+    "codeblock",
+    "pre",
+    "listing",
+    "programlisting",
 }
 
 # Source labels that indicate list items
 _LIST_LABELS: Set[str] = {
-    "list_item", "listitem", "list-item",
-    "bullet", "enum", "item",
+    "list_item",
+    "listitem",
+    "list-item",
+    "bullet",
+    "enum",
+    "item",
 }
 
 # Source labels that indicate table elements
 _TABLE_LABELS: Set[str] = {
-    "table", "table_cell", "tablecell",
-    "tabular", "grid",
+    "table",
+    "table_cell",
+    "tablecell",
+    "tabular",
+    "grid",
 }
 
 # Terminal sentence boundary characters
 _SENTENCE_ENDS = {".", "!", "?", ":", ";", ")", '"', "\u201d"}
 
 # Heading continuation leads (lowercase)
-_HEADING_CONTINUATION_LEADS = frozenset({
-    "and", "or", "the", "a", "an", "of", "in", "to", "on", "at",
-    "by", "for", "with", "from", "into", "onto", "upon",
-})
+_HEADING_CONTINUATION_LEADS = frozenset(
+    {
+        "and",
+        "or",
+        "the",
+        "a",
+        "an",
+        "of",
+        "in",
+        "to",
+        "on",
+        "at",
+        "by",
+        "for",
+        "with",
+        "from",
+        "into",
+        "onto",
+        "upon",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -202,9 +237,9 @@ def _assign_headings(
     toc = toc_headings or {}
     heading_map: Dict[str, List[str]] = toc.get("__heading_map__", {}) if toc else {}
     # page_map: page_number -> breadcrumb at end of that page.
-    page_map: Dict[int, List[str]] = {
-        k: v for k, v in toc.items() if isinstance(k, int)
-    } if toc else {}
+    page_map: Dict[int, List[str]] = (
+        {k: v for k, v in toc.items() if isinstance(k, int)} if toc else {}
+    )
 
     doc_name = _normalize_heading(doc_title) if doc_title else "Document"
 
@@ -352,22 +387,25 @@ def _chunk_page(
 
             confidence = _element_confidence(text_buffer[0])
 
-            chunks.append(UIRChunk(
-                modality=modality,
-                content=tc_text.strip(),
-                locator=Locator(
-                    type=LocatorType.BBOX,
-                    bbox=tc_bbox,
-                    page_number=page.page_number,
-                    coordinate_frame=CoordinateFrame.PDF_PAGE_PORTRAIT,
-                ),
-                confidence=confidence,
-                extraction_method=EXTRACTION_METHOD_UIR,
-                extraction_engine_version=extraction_engine_version,
-                structural_flags=structural_flags,
-                parent_heading=tc_heading,
-                reading_order=reading_order,
-            ))
+            chunks.append(
+                UIRChunk(
+                    modality=modality,
+                    content=tc_text.strip(),
+                    locator=Locator(
+                        type=LocatorType.BBOX,
+                        bbox=tc_bbox,
+                        page_number=page.page_number,
+                        coordinate_frame=CoordinateFrame.PDF_PAGE_PORTRAIT,
+                    ),
+                    confidence=confidence,
+                    extraction_method=EXTRACTION_METHOD_UIR,
+                    extraction_engine_version=extraction_engine_version,
+                    structural_flags=structural_flags,
+                    parent_heading=tc_heading,
+                    reading_order=reading_order,
+                    original_vlm_type=tc_metadata.get("original_vlm_type"),
+                )
+            )
             reading_order += 1
 
         text_buffer.clear()
@@ -381,27 +419,47 @@ def _chunk_page(
         if element.type == ElementType.IMAGE:
             # Flush pending text before emitting image
             _flush_text_buffer()
-            chunks.append(_image_element_to_uirchunk(
-                element, page, extraction_engine_version, reading_order,
-            ))
+            chunks.append(
+                _image_element_to_uirchunk(
+                    element,
+                    page,
+                    extraction_engine_version,
+                    reading_order,
+                )
+            )
             reading_order += 1
         elif element.type == ElementType.TABLE:
             _flush_text_buffer()
-            chunks.append(_table_element_to_uirchunk(
-                element, page, extraction_engine_version, reading_order,
-            ))
+            chunks.append(
+                _table_element_to_uirchunk(
+                    element,
+                    page,
+                    extraction_engine_version,
+                    reading_order,
+                )
+            )
             reading_order += 1
         elif promoted == "code":
             _flush_text_buffer()
-            chunks.append(_code_element_to_uirchunk(
-                element, page, extraction_engine_version, reading_order,
-            ))
+            chunks.append(
+                _code_element_to_uirchunk(
+                    element,
+                    page,
+                    extraction_engine_version,
+                    reading_order,
+                )
+            )
             reading_order += 1
         elif promoted == "form":
             _flush_text_buffer()
-            chunks.append(_form_element_to_uirchunk(
-                element, page, extraction_engine_version, reading_order,
-            ))
+            chunks.append(
+                _form_element_to_uirchunk(
+                    element,
+                    page,
+                    extraction_engine_version,
+                    reading_order,
+                )
+            )
             reading_order += 1
         else:
             # TEXT element — buffer for grouping
@@ -498,6 +556,7 @@ def _code_element_to_uirchunk(
         extraction_method=EXTRACTION_METHOD_UIR,
         extraction_engine_version=extraction_engine_version,
         reading_order=reading_order,
+        original_vlm_type=(element.metadata or {}).get("original_vlm_type"),
     )
 
 
@@ -522,6 +581,7 @@ def _form_element_to_uirchunk(
         extraction_method=EXTRACTION_METHOD_UIR,
         extraction_engine_version=extraction_engine_version,
         reading_order=reading_order,
+        original_vlm_type=(element.metadata or {}).get("original_vlm_type"),
     )
 
 
@@ -558,19 +618,26 @@ def _partition_text_elements(
             if e.content.strip():
                 parent_heading = e.content.strip()
 
+    # Aggregate any original_vlm_type provenance markers carried by the
+    # constituent elements (a degraded-unknown VLM type smuggled in as TEXT).
+    # Distinct values are comma-joined so a merged text group containing more
+    # than one degraded type stays auditable. Empty for ordinary prose.
+    vlm_types = sorted({t for e in elements if (t := (e.metadata or {}).get("original_vlm_type"))})
+    group_metadata: Dict[str, Any] = {"original_vlm_type": ",".join(vlm_types)} if vlm_types else {}
+
     # Build combined text
     full_text = _join_element_contents(elements)
     current_bbox = _elements_union_bbox(elements, page_w, page_h)
 
     # If under budget, return as single chunk
     if len(full_text) <= max_chars:
-        return [(full_text, dominant_label, current_bbox, parent_heading, {})]
+        return [(full_text, dominant_label, current_bbox, parent_heading, group_metadata)]
 
     # Split at sentence boundaries
     parts = _split_at_sentence_boundaries(full_text, max_chars, min_chars)
     result: List[Tuple[str, str, List[int], Optional[str], Dict[str, Any]]] = []
     for part in parts:
-        result.append((part, dominant_label, current_bbox, parent_heading, {}))
+        result.append((part, dominant_label, current_bbox, parent_heading, group_metadata))
 
     return result
 
@@ -727,15 +794,29 @@ def _looks_like_code(text: str, label: str) -> bool:
     lines = text.splitlines()
     if len(lines) < 3:
         return False
-    code_keywords = {"def ", "class ", "import ", "from ", "return ",
-                     "if __", "def __", "// ", "package ", "func ",
-                     "public ", "private ", "void ", "int ", "var ",
-                     "const ", "let ", "async ", "await "}
+    code_keywords = {
+        "def ",
+        "class ",
+        "import ",
+        "from ",
+        "return ",
+        "if __",
+        "def __",
+        "// ",
+        "package ",
+        "func ",
+        "public ",
+        "private ",
+        "void ",
+        "int ",
+        "var ",
+        "const ",
+        "let ",
+        "async ",
+        "await ",
+    }
     leading_ws = sum(1 for ln in lines if ln.startswith((" ", "\t")))
-    keyword_hits = sum(
-        1 for ln in lines
-        if any(kw in ln for kw in code_keywords)
-    )
+    keyword_hits = sum(1 for ln in lines if any(kw in ln for kw in code_keywords))
     if keyword_hits >= 2:
         return True
     if leading_ws >= len(lines) * 0.6 and keyword_hits >= 1:
@@ -779,4 +860,5 @@ def _most_common(items: List[str]) -> str:
     if not items:
         return "text"
     from collections import Counter
+
     return Counter(items).most_common(1)[0][0]

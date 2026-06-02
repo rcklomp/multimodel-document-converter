@@ -46,7 +46,6 @@ from .v2x_to_v3_mapper import (
     uirchunk_to_identity_projection,
 )
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -134,6 +133,7 @@ def serialize_uirchunk_to_jsonl_dict(
         "asset_ref": chunk.asset_ref,
         "lang": chunk.lang,
         "reading_order": chunk.reading_order,
+        "original_vlm_type": chunk.original_vlm_type,
         "parent_element_id": chunk.parent_element_id,
         "parent_heading": chunk.parent_heading,
         "continuation_group_id": chunk.continuation_group_id,
@@ -255,14 +255,21 @@ def export_v2x_jsonl_to_uir(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as out:
-        out.write(json.dumps(_build_uir_header(
-            doc_id=doc_id,
-            source_path=input_path,
-            v2x_chunk_count=len(chunks),
-        )) + "\n")
+        out.write(
+            json.dumps(
+                _build_uir_header(
+                    doc_id=doc_id,
+                    source_path=input_path,
+                    v2x_chunk_count=len(chunks),
+                )
+            )
+            + "\n"
+        )
         for chunk in uirchunks:
             payload = serialize_uirchunk_to_jsonl_dict(
-                chunk, doc_id=doc_id, source_file=source_file,
+                chunk,
+                doc_id=doc_id,
+                source_file=source_file,
             )
             out.write(json.dumps(payload) + "\n")
 
@@ -281,7 +288,8 @@ def export_v2x_jsonl_to_uir(
         baseline = [_baseline_identity_projection(c, doc_id) for c in chunks]
         candidate = [uirchunk_to_identity_projection(c, doc_id) for c in uirchunks]
         gate = compare_for_identity(
-            baseline_chunks=baseline, candidate_chunks=candidate,
+            baseline_chunks=baseline,
+            candidate_chunks=candidate,
         )
         report.identity_ratio = gate.identity_ratio
         report.identity_matched = gate.matched
@@ -380,6 +388,7 @@ def parse_uir_jsonl_record(record: Dict[str, Any]) -> UIRChunk:
         asset_ref=record.get("asset_ref"),
         lang=record.get("lang"),
         reading_order=record.get("reading_order"),
+        original_vlm_type=record.get("original_vlm_type"),
         parent_element_id=record.get("parent_element_id"),
         parent_heading=record.get("parent_heading"),
         continuation_group_id=record.get("continuation_group_id"),
