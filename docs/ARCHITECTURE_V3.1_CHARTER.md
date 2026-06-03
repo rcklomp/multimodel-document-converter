@@ -278,23 +278,89 @@ modality-switched rubric matrix is design intent `[PROPOSED]`.
 
 ## 9. Roadmap & Definition of Done
 
-"Done" is gate-defined, not vibe-defined.
+Cycle status: the AIOS code-extraction smoke PASSED (clean born-digital code doc),
+but the 2026-06-02 Grand Soak was HALTED at doc 9/17 - the pipeline does not meet
+requirements on dense magazines and forms/scans (the two §8 blockers; see
+`docs/paper/FINDINGS_LOG.md` 2026-06-02). The roadmap therefore leads with
+remediation, and the soak re-run is gated behind it.
 
-1. **AIOS code-extraction smoke** (immediate next move; needs M5 up). Run a
-   code-heavy doc through the soak path; inspect the Docling-routed pages for code
-   loss and the `crop_audit` block. This measures the B7/router residual.
-2. **Run + validate the crucible** (18 docs) end-to-end: every doc `status=ok`,
-   `QA_PASS`, crop-audit within threshold. Only then is the extraction path
-   "validated," not just "green in unit tests."
-3. **Retire-or-harden the Docling lane** (Section 8 decision).
-4. **Complete the ElementType -> Modality migration** (2.2).
-5. **Modality-aware CODE/TABLE/FORM judge rubric** (Section 7).
-6. **(Conditional) ColPali reranker** (6.2), only if 6.1 is measured insufficient.
-7. **Grand Soak** with a budgeted page-hour ceiling and the resilient breaker.
+### 9.1 Remediation plan for the two blockers (PROPOSED, immediate priority)
 
-A component is "done" when its boundary contract test (Section 2.1) is green AND it
-has passed on the hardest relevant content class (2.3) AND the run-level gate
-(`SMOKE_PRODUCTION_PASS` + `QA_PASS`) holds.
+All items are PROPOSED (not built). Each restores the fail-open invariant (§2) at
+the boundary that failed. Sequence cheap -> structural -> design; re-validate on
+the crucible subset before any Grand Soak.
+
+**Blocker A - VLM emits invalid JSON on dense pages** (truncation + malformation
+-> mass Docling fallback; ~58% of pages on the one magazine reached):
+
+- **A1. Detect truncation (cheap, do first).** `vlm_provider.describe` checks HTTP
+  200 + empty content but NOT `finish_reason`. Treat `finish_reason == "length"`
+  as a typed truncation signal (today it is silently a `json.loads` failure ->
+  fallback): escalate the token budget once and retry, then hand to A4.
+- **A2. Adaptive output budget.** Raise `max_completion_tokens` (the overnight run
+  used 8192; the soak likely hit the 4096 default) and scale it with a cheap
+  per-page element-density estimate. Bounded, to respect the self-hosted-OOM
+  constraint already noted in the provider.
+- **A3. Guided JSON decoding (structural fix - guarantees parseable output).**
+  Upgrade the provider from the `response_format=json_object` hint to a full
+  `json_schema`-constrained decode of the UIR element schema. Verified available
+  on BOTH endpoints: mlx-vlm `/v1/chat/completions` supports OpenAI-compatible
+  `json_schema` structured outputs, and vLLM supports `guided_json` (xgrammar
+  default backend). Eliminates the malformation class. Caveat: a constrained
+  decode can still hit the token cap (valid-but-incomplete), so A3 pairs with
+  A1+A4, it does not replace them.
+- **A4. Bounded JSON repair (fail-open last resort).** If a response is still
+  truncated/malformed, repair to the last complete element (drop the trailing
+  partial) and keep the N complete elements instead of discarding the whole page
+  to Docling. Partial VLM extraction beats full Docling fallback on a dense page -
+  the fail-open invariant applied at this boundary.
+- **A5. Per-region (decoupled) extraction for dense pages (design fix).** Replace
+  whole-page extraction with a coarse layout pass then per-region content
+  extraction, bounding each call's output and removing the density ceiling.
+  Precedent: MinerU2.5's decoupled two-stage (global layout on a thumbnail ->
+  targeted high-res per-region recognition). Costs more VLM calls; build only if
+  A1-A4 do not clear the dense-doc fallback rate.
+
+**Blocker B - VLM bbox crop drift 40-50%** (hallucinated coordinates -> garbage
+crops on forms/scans/tables):
+
+- **B1. Prefer deterministic bboxes for cropping (structural fix).** The VLM is
+  good at semantics, bad at coordinates. When a page also yields detectable
+  objects, crop from the GEOMETRIC bbox (PyMuPDF `get_images()` / `find_tables()`
+  or the Docling-layout bbox) and use the VLM only for the description/content.
+  Trust VLM coordinates only when no deterministic source exists.
+- **B2. Crop-audit as a re-extraction trigger (fail-open).** Today crop-audit only
+  WARNS. Make a flagged crop (edge-clamp / blank) fall back to the deterministic
+  bbox or a full-page render for that asset, so a garbage crop is never persisted.
+- **B3. Higher render DPI / stronger model** - secondary, only if B1+B2 leave
+  residual drift.
+
+**Acceptance criteria (these gate the soak re-run):**
+- A: on a dense magazine (Combat Aircraft / PCWorld), whole-page JSON fallback
+  rate near 0 (down from ~58%), and zero SILENT truncation (A1 makes it typed).
+- B: crop-audit drift back under the 15% threshold on the forms/scans/tables that
+  measured 40-50%.
+- Re-run the bounded crucible subset to `QA_PASS` + crop-audit within threshold
+  BEFORE any Grand Soak.
+
+### 9.2 Broader roadmap (after the blockers clear)
+
+1. Re-run + validate the crucible (18 docs) end-to-end: every doc `status=ok`,
+   `QA_PASS`, crop-audit within threshold.
+2. Retire-or-harden the Docling lane (§8 decision).
+3. Complete the ElementType -> Modality migration (§2.2).
+4. Modality-aware CODE/TABLE/FORM judge rubric (§7).
+5. (Conditional) ColPali reranker (§6.2), only if §6.1 is measured insufficient.
+6. Grand Soak with a budgeted page-hour ceiling and the long tail included - only
+   after 9.1 passes its acceptance criteria.
+
+### 9.3 Definition of done
+
+A component is "done" when its boundary contract test (§2.1) is green AND it has
+passed on the hardest relevant content class (§2.3) AND the run-level gate
+(`SMOKE_PRODUCTION_PASS` + `QA_PASS`) holds. The pipeline "meets requirements"
+only when a full crucible run (dense magazines + forms/scans included) clears
+9.1's acceptance criteria - the bar the 2026-06-02 soak failed.
 
 ---
 
@@ -305,7 +371,8 @@ has passed on the hardest relevant content class (2.3) AND the run-level gate
 | ColPali - Faysse et al., [arXiv:2407.01449](https://arxiv.org/abs/2407.01449) | Late-interaction multi-vector retrieval over image patches (PaliGemma, ~1024 patches/page, 128-dim, MaxSim) | Foundation for the PROPOSED visual reranker (6.2) |
 | GOT-OCR 2.0 - [arXiv:2409.01704](https://arxiv.org/abs/2409.01704) | 580M end-to-end model (VitDet + Qwen-0.5B), raw image -> markdown/LaTeX, no cascade | Validates the vision-native thesis (3.3) |
 | LlamaParse Cost Optimizer / Auto Mode ([LlamaIndex](https://www.llamaindex.ai/blog/optimize-parsing-costs-with-llamaparse-auto-mode)) | Per-page tier routing run in parallel (standard vs Premium/Agentic) | Industry precedent for the cost router (3.2) |
-| MinerU - [arXiv:2409.18839](https://arxiv.org/pdf/2409.18839) | Pipeline backend is a layout-detection + OCR **cascade** (doclayout_yolo + PP-OCRv5 + formula/table models); MinerU2.5 adds a decoupled VLM | The cascade approach V3 moves AWAY from (not a vision-native exemplar) |
+| MinerU - [arXiv:2409.18839](https://arxiv.org/pdf/2409.18839) | Pipeline backend is a layout-detection + OCR **cascade** (doclayout_yolo + PP-OCRv5 + formula/table models); MinerU2.5 adds a decoupled two-stage VLM (global layout -> per-region recognition) | v1 cascade is what V3 moves AWAY from; MinerU2.5's decoupled two-stage is the precedent for the A5 per-region fix (§9.1) |
+| Guided JSON decoding - [vLLM structured outputs](https://docs.vllm.ai/en/v0.8.2/features/structured_outputs.html), [mlx-vlm](https://github.com/Blaizzy/mlx-vlm) | Constrained decoding to a JSON schema: vLLM `guided_json` (xgrammar default backend); mlx-vlm OpenAI-compatible `json_schema` structured outputs | The A3 structural fix for Blocker A (§9.1); verified available on both M5 (mlx-vlm) and GX10 (vLLM) |
 | HierFinRAG - [MDPI Informatics 13(2):30](https://www.mdpi.com/2227-9709/13/2/30) | Table-text GNN + symbolic-neural fusion for FinQA arithmetic | Suggestive support for routing numeric/tabular queries to a symbolic engine. CAVEAT: 1-month-old, lower-tier venue - verify before adopting |
 | DGX Spark GB10 ([NVIDIA](https://docs.nvidia.com/dgx/dgx-spark/hardware.html), [LMSYS](https://www.lmsys.org/blog/2025-10-13-nvidia-dgx-spark/)) | Unified 128GB LPDDR5X, 273 GB/s; token-gen is bandwidth-limited | Backs the bandwidth-segregation rationale (5) |
 
