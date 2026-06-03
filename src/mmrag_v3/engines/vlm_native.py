@@ -38,7 +38,12 @@ from mmrag_v2.universal.intermediate import (
     create_page,
 )
 
-from .vlm_provider import VlmProvider, VlmProviderConfig
+from .vlm_provider import (
+    VlmProvider,
+    VlmProviderConfig,
+    VlmProviderError,
+    VlmTruncationError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +74,102 @@ def estimate_output_budget(page: "fitz.Page") -> int:
     except Exception:  # pragma: no cover - defensive: PyMuPDF API drift
         return 0
     return int((len(text) * BUDGET_STRUCTURE_OVERHEAD) / BUDGET_CHARS_PER_TOKEN)
+
+
+def _recover_complete_elements(raw: str) -> List[Dict[str, Any]]:
+    """Scan a (possibly truncated) UIR JSON string for COMPLETE element objects.
+
+    Walks the ``"elements"`` array with a strict ``JSONDecoder``, collecting
+    each fully-decodable object and stopping at the first one that fails to
+    parse (the truncated trailing element). No regex, no brace-counting
+    heuristics - the decoder defines "complete". Returns [] when there is no
+    recoverable array.
+    """
+    key = raw.find('"elements"')
+    if key == -1:
+        return []
+    bracket = raw.find("[", key)
+    if bracket == -1:
+        return []
+    decoder = json.JSONDecoder()
+    pos = bracket + 1
+    n = len(raw)
+    out: List[Dict[str, Any]] = []
+    while pos < n:
+        while pos < n and raw[pos] in " \t\r\n,":
+            pos += 1
+        if pos >= n or raw[pos] == "]":
+            break
+        try:
+            obj, end = decoder.raw_decode(raw, pos)
+        except json.JSONDecodeError:
+            break  # trailing element was cut off; keep what we have
+        if isinstance(obj, dict):
+            out.append(obj)
+        pos = end
+    return out
+
+
+def repair_truncated_json(raw: str) -> Optional[Dict[str, Any]]:
+    """Bounded JSON repair (A4): salvage the complete elements of a cut page.
+
+    Fail-open last resort for Charter Blocker A: when a VLM page response is
+    truncated or malformed, recover the N complete elements (dropping the
+    partial trailing one) instead of discarding the whole page to a Docling
+    fallback. Partial vision-native extraction beats full Docling fallback on
+    a dense page. Returns a payload dict carrying just the recovered elements
+    (page_number/width/height are supplied by the adapter, not the payload),
+    or ``None`` when nothing parseable can be recovered.
+    """
+    try:
+        payload = json.loads(raw)
+        if isinstance(payload, dict):
+            return payload
+    except json.JSONDecodeError:
+        pass
+    elements = _recover_complete_elements(raw)
+    if not elements:
+        return None
+    return {"elements": elements}
+
+
+def _describe_and_parse(
+    provider: VlmProvider,
+    image_bytes: bytes,
+    prompt: str,
+    *,
+    max_tokens: int,
+) -> Dict[str, Any]:
+    """Call the VLM, strict-parse, and apply bounded A4 repair on failure.
+
+    Infra failures (``VlmInfraError``) and unrecoverable semantic failures
+    propagate unchanged so the router can trip its circuit breaker or fall
+    back to Docling for that page. A truncated/malformed body that still
+    contains >=1 complete element is repaired into a usable payload here.
+    """
+    try:
+        raw = provider.describe(image_bytes, prompt, mime="image/png", max_tokens=max_tokens)
+    except VlmTruncationError as exc:
+        repaired = repair_truncated_json(exc.partial_content)
+        if repaired is None:
+            raise
+        logger.warning(
+            "A4: repaired truncated VLM page to %d complete element(s) "
+            "(partial extraction kept instead of Docling fallback)",
+            len(repaired.get("elements") or []),
+        )
+        return repaired
+    try:
+        return VlmNativeEngine._parse_strict_json(raw)
+    except ValueError as exc:
+        repaired = repair_truncated_json(raw)
+        if repaired is None:
+            raise VlmProviderError(f"unrepairable VLM JSON: {exc}") from exc
+        logger.warning(
+            "A4: repaired malformed VLM page to %d complete element(s)",
+            len(repaired.get("elements") or []),
+        )
+        return repaired
 
 
 def _vlm_element_metadata(
@@ -202,13 +303,12 @@ class VlmNativeEngine:
                 page_number = page_index + 1
                 image_bytes, pixel_w, pixel_h = self._render_page_png(page)
                 prompt = _build_schema_prompt(pixel_w, pixel_h)
-                raw_json = self.provider.describe(
+                payload = _describe_and_parse(
+                    self.provider,
                     image_bytes,
                     prompt,
-                    mime="image/png",
                     max_tokens=estimate_output_budget(page),
                 )
-                payload = self._parse_strict_json(raw_json)
                 universal_page = self._page_from_payload(
                     payload,
                     fallback_page_number=page_number,

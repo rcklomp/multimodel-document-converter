@@ -38,7 +38,12 @@ from mmrag_v2.universal.intermediate import (
 )
 
 from .docling_fast import DoclingFastEngine
-from .vlm_native import VlmNativeEngine, _build_schema_prompt, estimate_output_budget
+from .vlm_native import (
+    VlmNativeEngine,
+    _build_schema_prompt,
+    _describe_and_parse,
+    estimate_output_budget,
+)
 from .vlm_provider import VlmInfraError, VlmProvider, VlmProviderConfig
 
 logger = logging.getLogger(__name__)
@@ -220,13 +225,12 @@ class HybridEngine:
                     try:
                         image_bytes, pw, ph = self._render_page_png(doc[i])
                         prompt = _build_schema_prompt(pw, ph)
-                        raw_json = provider.describe(
+                        payload = _describe_and_parse(
+                            provider,
                             image_bytes,
                             prompt,
-                            mime="image/png",
                             max_tokens=estimate_output_budget(doc[i]),
                         )
-                        payload = VlmNativeEngine._parse_strict_json(raw_json)
                         universal_page = VlmNativeEngine._page_from_payload(
                             payload,
                             fallback_page_number=page_number,
