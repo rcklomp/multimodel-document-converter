@@ -38,6 +38,13 @@ OPENROUTER_DEFAULT_ENDPOINT = "https://openrouter.ai/api/v1"
 OPENROUTER_DEFAULT_MODEL = "qwen/qwen3-vl-8b-instruct"
 OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY"
 
+# Hard ceiling for the one-shot budget escalation that A1 triggers on a
+# truncated (finish_reason=length) response. Bounded to respect the
+# self-hosted-OOM constraint already noted on max_completion_tokens: a
+# runaway budget on a dense page is what crashes mlx-vlm/vLLM. Past this,
+# escalation stops and the partial body is surfaced (typed) for A4 repair.
+TRUNCATION_ESCALATION_CAP = 16384
+
 
 class VlmProviderError(RuntimeError):
     """Raised when the VLM endpoint returns a non-recoverable error.
@@ -59,6 +66,31 @@ class VlmInfraError(VlmProviderError):
     Docling. A silent CPU fallback during a network outage fabricates
     pages that masquerade as VLM baselines and corrupts the whole run.
     """
+
+
+class VlmTruncationError(VlmProviderError):
+    """The VLM hit its output-token ceiling (``finish_reason == "length"``).
+
+    A *typed* signal for the dense-page failure mode (Charter Blocker A): a
+    200 with non-empty but truncated content that downstream ``json.loads``
+    silently rejects, mass-demoting dense pages to Docling. ``describe``
+    escalates the token budget once and retries before raising this; the
+    ``partial_content`` it carries is the longest truncated body seen, which
+    the bounded JSON-repair stage (A4) can salvage to the last complete
+    element instead of discarding the whole page. Semantic (not infra), so
+    the router's circuit breaker does not trip on it.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        partial_content: str = "",
+        finish_reason: str = "length",
+    ) -> None:
+        super().__init__(message)
+        self.partial_content = partial_content
+        self.finish_reason = finish_reason
 
 
 @dataclass
@@ -222,6 +254,12 @@ class VlmProvider:
         # fault (node unreachable) vs a semantic one. Decides the class of
         # the terminal raise so the router can trip its circuit breaker.
         last_was_infra = False
+        # A1 (Charter Blocker A): longest truncated body seen + whether the
+        # one-shot budget escalation has fired. A finish_reason=length 200 is
+        # truncation, not success: keep the partial, escalate the budget once,
+        # retry, then surface a typed VlmTruncationError for A4 repair.
+        best_partial = ""
+        budget_escalated = False
         for attempt in range(1, self.config.max_retries + 1):
             try:
                 response = requests.post(
@@ -249,31 +287,61 @@ class VlmProvider:
                 if response.status_code == 200:
                     try:
                         body = response.json()
-                        content = body["choices"][0]["message"]["content"]
+                        choice0 = body["choices"][0]
+                        content = choice0["message"]["content"]
                     except (ValueError, KeyError, IndexError, TypeError) as exc:
-                        raise VlmProviderError(
-                            f"Malformed VLM response shape: {exc}"
-                        ) from exc
+                        raise VlmProviderError(f"Malformed VLM response shape: {exc}") from exc
+                    finish = choice0.get("finish_reason")
                     if not content or not str(content).strip():
-                        finish = body["choices"][0].get("finish_reason")
                         last_error = VlmProviderError(
                             f"Empty VLM content (finish_reason={finish!r})"
                         )
                         # 200 reached the model; empty output is semantic.
                         last_was_infra = False
                         logger.warning(
-                            "VLM returned empty content (attempt %d/%d, "
-                            "finish_reason=%s)",
+                            "VLM returned empty content (attempt %d/%d, " "finish_reason=%s)",
                             attempt,
                             self.config.max_retries,
                             finish,
                         )
+                    elif finish == "length":
+                        # A1: truncation. Non-empty but cut at the token
+                        # ceiling -> json.loads would fail downstream. Retain
+                        # the longest partial, escalate the budget ONCE, retry.
+                        text = str(content)
+                        if len(text) > len(best_partial):
+                            best_partial = text
+                        if not budget_escalated:
+                            budget_escalated = True
+                            escalated = min(payload["max_tokens"] * 2, TRUNCATION_ESCALATION_CAP)
+                            if escalated > payload["max_tokens"]:
+                                payload["max_tokens"] = escalated
+                            last_error = VlmProviderError(
+                                "VLM output truncated (finish_reason=length)"
+                            )
+                            last_was_infra = False
+                            logger.warning(
+                                "VLM TRUNCATED (finish_reason=length, attempt %d/%d); "
+                                "escalating max_tokens to %d and retrying",
+                                attempt,
+                                self.config.max_retries,
+                                payload["max_tokens"],
+                            )
+                        else:
+                            # Escalation already spent and still truncated.
+                            # Stop retrying truncation; surface typed below.
+                            logger.warning(
+                                "VLM still truncated after budget escalation "
+                                "(attempt %d/%d); surfacing typed truncation for repair",
+                                attempt,
+                                self.config.max_retries,
+                            )
+                            break
                     else:
                         return str(content)
-                if response.status_code in (408, 429, 500, 502, 503, 504):
+                elif response.status_code in (408, 429, 500, 502, 503, 504):
                     last_error = VlmProviderError(
-                        f"Retryable VLM status {response.status_code}: "
-                        f"{response.text[:200]}"
+                        f"Retryable VLM status {response.status_code}: " f"{response.text[:200]}"
                     )
                     # Gateway/unavailable/request-timeout statuses mean the
                     # serving infra is down or saturated -> infra fault.
@@ -287,17 +355,26 @@ class VlmProvider:
                     )
                 else:
                     raise VlmProviderError(
-                        f"VLM status {response.status_code}: "
-                        f"{response.text[:500]}"
+                        f"VLM status {response.status_code}: " f"{response.text[:500]}"
                     )
 
             if attempt < self.config.max_retries:
                 time.sleep(self.config.retry_backoff_seconds * attempt)
 
+        # A1: a retained partial body means the terminal cause was truncation,
+        # not an outage. Surface it typed (with the partial) so the caller can
+        # repair to the last complete element instead of discarding the page.
+        if best_partial:
+            raise VlmTruncationError(
+                f"VLM output truncated (finish_reason=length) after "
+                f"{self.config.max_retries} attempts; {len(best_partial)} chars "
+                "of partial content retained for repair",
+                partial_content=best_partial,
+                finish_reason="length",
+            )
+
         err_cls = VlmInfraError if last_was_infra else VlmProviderError
-        raise err_cls(
-            f"VLM call failed after {self.config.max_retries} attempts: {last_error}"
-        )
+        raise err_cls(f"VLM call failed after {self.config.max_retries} attempts: {last_error}")
 
     def probe_health(self, *, timeout_seconds: float = 10.0) -> bool:
         """Lightweight liveness probe: ``GET {base}/models`` -> True iff HTTP 200.
