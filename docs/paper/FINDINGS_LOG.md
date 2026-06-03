@@ -694,6 +694,12 @@ for the gate; `reextracted` flag added) - a garbage crop is never written.
 - Run 2 (batch=1, `VLM_NATIVE_STRUCTURED_OUTPUT=off`): **10 chunks via
   `uir_native_chunker`, 5 image assets, 1 B2 re-extraction fired, 0 truncation, 0
   Docling fallback, 0 breaker trips - 4 dense pages in 352s (~88 s/page).**
+- Run 3 (PCWorld, the 2nd named dense doc, batch=1, shipped defaults =
+  structured output off): **27 chunks all via `uir_native_chunker`, 12 image
+  assets, 0 truncation, 0 Docling fallback, 0 breaker trips, 0 crop-drift
+  re-extractions - 6 dense pages in 135s (~23 s/page).** Second confirmation of
+  the §9.1 acceptance criteria (fallback ~0, crop drift < 15%) on a different
+  dense-magazine class.
 
 **Lesson - the json_schema latency trap.** mlx-vlm ACCEPTS the json_schema
 `response_format` (no 400) but its grammar-constrained decode is pathologically
