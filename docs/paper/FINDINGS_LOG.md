@@ -658,6 +658,65 @@ it; closed with an executable pre-merge gate).
 
 ---
 
+## 2026-06-03 - Blocker remediation shipped (A1-A4, B1-B2) + the json_schema latency trap  `[Results][Method][Lessons]`
+
+The two 2026-06-02 Grand-Soak blockers (Charter §9.1) were remediated cheap ->
+structural and validated against a dense magazine through M5. Seven atomic
+commits, each gated on the full suite + repo-integrity + `smoke_production.sh`
+(`SMOKE_PRODUCTION_PASS`), pushed to origin.
+
+**Blocker A (VLM invalid JSON on dense pages).** Four composing fixes:
+- **A1** typed truncation: `vlm_provider.describe` reads `finish_reason` on every
+  200, escalates `max_tokens` once on `length`, then raises
+  `VlmTruncationError(partial_content=...)` instead of silently returning a
+  truncated body that `json.loads` rejects. (Also fixed a latent fall-through
+  where a 200-retry hit the status else-raise via `if` not `elif`.)
+- **A2** adaptive budget: floor 4096 -> 8192 (the known-good overnight value),
+  scaled per page by `estimate_output_budget` (text chars x2.5 / 3.5), capped at
+  16384. Wired at both VLM call sites.
+- **A4** bounded repair: `repair_truncated_json` walks the `elements` array with a
+  strict `JSONDecoder`, keeps the N complete elements, drops the cut trailing one
+  - partial VLM extraction beats full Docling fallback.
+- **A3** json_schema/guided_json constrained-decode capability + a fail-open 400
+  strip-and-retry.
+
+**Blocker B (bbox crop drift 40-50%).** B1: crop from a deterministic geometric
+bbox (`get_image_info`/`find_tables`) when the page has a detectable object;
+trust VLM coords only when none exists. B2: a drift-flagged VLM crop is
+re-rendered to the full page before persisting (detection fingerprints preserved
+for the gate; `reextracted` flag added) - a garbage crop is never written.
+
+**Live numbers (M5, Combat Aircraft dense magazine, 2026-06-03):**
+- Run 1 (batch=10, shipped json_schema-on default): one ultra-dense page exceeded
+  the **180s read timeout** x3 -> `VlmInfraError` -> breaker tripped (correct B4)
+  -> under batch=10 the whole 10-page batch fell to the text recovery path (37
+  recovery chunks, 0 assets, 0 real VLM pages).
+- Run 2 (batch=1, `VLM_NATIVE_STRUCTURED_OUTPUT=off`): **10 chunks via
+  `uir_native_chunker`, 5 image assets, 1 B2 re-extraction fired, 0 truncation, 0
+  Docling fallback, 0 breaker trips - 4 dense pages in 352s (~88 s/page).**
+
+**Lesson - the json_schema latency trap.** mlx-vlm ACCEPTS the json_schema
+`response_format` (no 400) but its grammar-constrained decode is pathologically
+slow on dense pages, blowing the 180s client timeout. The charter "verified
+available on both endpoints" was true for *acceptance*, false for *throughput* -
+"supported" is not "fast." Net: A3's self-hosted default was flipped to OFF
+(prompt-only, known-good); json_schema/guided_json stay opt-in via env for vLLM +
+xgrammar. The capability ships; the default is conservative on live evidence.
+
+**A1-A4 verdict: the JSON-validity blocker is cleared.** On the pages that
+complete, dense-page fallback went from the soak's ~58% (Combat Aircraft ~25/43)
+to **0**. So **A5 (per-region extraction) was NOT built** - the mandate gates it
+on "A1-A4 do not clear the fallback rate," and they did.
+
+**Residual, flagged (out of §9.1 scope - throughput / Charter §5+§8):** an
+occasional ultra-dense page still exceeds the 180s read timeout; under batch=10
+the breaker sinks the batch. The correct B4 fail-fast is intact; the fix is
+operator/throughput-side - batch=1 for dense docs, a `VLM_NATIVE_TIMEOUT` env,
+distinguishing ReadTimeout (slow page) from ConnectTimeout (node down) in the
+breaker, or A5 to cut per-call latency. Not changed this cycle.
+
+---
+
 ## Backfill backlog (remaining threads — to expand when drafting)
 
 *Covered above as of 2026-05-30:* V1→V2 lineage · V2 metrics trajectory · V2

@@ -1,6 +1,44 @@
 # Project Status
 
-Last updated: 2026-06-03
+Last updated: 2026-06-03 (PM - blocker remediation shipped)
+
+## Current state (2026-06-03 PM) - Charter §9.1 remediation SHIPPED
+
+The two Grand-Soak blockers (Charter §8/§9.1) are remediated on branch
+`v3.1-extraction-hardening` (pushed to origin), seven atomic commits, each gated
+on `pytest tests/ -q` (1395 passed / 99 skipped), `tests/test_repo_integrity.py`,
+ruff/black on changed files, and `scripts/smoke_production.sh`
+(`SMOKE_PRODUCTION_PASS`, offline).
+
+- **Blocker A (VLM invalid JSON on dense pages) - CLEARED.** A1 typed truncation
+  detection (`finish_reason=length` + one budget escalation +
+  `VlmTruncationError`); A2 adaptive per-page output budget (floor 8192, cap
+  16384); A4 bounded JSON repair (keep the N complete elements); A3
+  json_schema/guided_json constrained-decode capability + fail-open 400
+  strip-retry. Live M5 check (Combat Aircraft dense magazine, json_schema off):
+  dense-page Docling fallback **~58% -> 0**, 0 truncation, real VLM extraction
+  (`uir_native_chunker`) at ~88 s/page.
+- **Blocker B (bbox crop drift 40-50%) - REMEDIATED.** B1 prefers a deterministic
+  geometric bbox (`get_image_info`/`find_tables`) for the crop; B2 re-renders a
+  drift-flagged crop to the full page before persisting (garbage crop never
+  written; `reextracted` flag). Live: 5 image assets materialized, 1 B2
+  re-extraction fired.
+- **json_schema default = OFF for self-hosted (live-evidence correction).**
+  mlx-vlm accepts json_schema but its constrained decode is too slow on dense
+  pages (180s timeout). json_schema/guided_json stay opt-in via
+  `VLM_NATIVE_STRUCTURED_OUTPUT` for vLLM + xgrammar. See `docs/DECISIONS.md`
+  + `docs/paper/FINDINGS_LOG.md` (2026-06-03).
+- **A5 (per-region) NOT built** - gated on A1-A4 not clearing the fallback rate;
+  they cleared it.
+- **Residual (flagged, OUT of §9.1 scope):** an occasional ultra-dense page still
+  exceeds the 180s client read timeout; under batch=10 the breaker (correctly,
+  B4) sinks the batch. Operator/throughput-side fix (batch=1 for dense docs, a
+  `VLM_NATIVE_TIMEOUT` env, ReadTimeout-vs-ConnectTimeout split, or A5).
+- **Crucible re-run / Grand Soak: still NOT run** - re-run the bounded crucible
+  subset (`batch_size=1` for dense docs, structured output off) to confirm the
+  acceptance criteria at corpus scale before any Grand Soak.
+
+## Prior state (2026-06-03 AM)
 
 Layer-1 current-state doc. For the as-built architecture + roadmap read
 `docs/ARCHITECTURE_V3.1_CHARTER.md`; for decision history `docs/DECISIONS.md`;
