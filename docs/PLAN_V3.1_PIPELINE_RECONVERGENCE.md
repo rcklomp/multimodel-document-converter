@@ -1,10 +1,14 @@
 # PLAN_V3.1 - Pipeline Reconvergence
 
-Status: IN PROGRESS (proposed 2026-05-31). P0 anchored on main; P1 + P2 DONE and
-verified green on branch `v3.1-reconvergence` (commits 4099475, e947627), pending
-merge. P3-P5 remain.
+Status: LARGELY EXECUTED (updated 2026-06-03). P0 anchored on main; P1 + P2 DONE.
+P3 dispositioned (kept heuristics adopted + guarded: AGENT-SPATIAL-20 and
+`_merge_mid_sentence_chunks`), P4 (geometric boundary-repair bridge deprecated for
+VLM-native), and P5 (`scripts/smoke_production.sh` anti-rot gate) all SHIPPED. The
+2026-06-01 V3.1 extraction-hardening cycle (schema/breaker/code-form/router) built
+on top of this plan. For current as-built state see
+`docs/ARCHITECTURE_V3.1_CHARTER.md`; for decisions see `docs/DECISIONS.md`.
 Owner: next coding session
-Supersedes: nothing; complements docs/PROJECT_STATUS.md "Phase B Technical Debt"
+Supersedes: nothing; complements docs/PROJECT_STATUS.md and the V3.1 charter
 
 ## 1. The diagnosis (why the pipeline feels FUBAR after V3)
 

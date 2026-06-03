@@ -366,6 +366,148 @@ and a "widen ElementType" directive that violated a locked contract.
 
 ---
 
+## 2026-06-02 - Why V3 still failed despite being built to fix V2: a semantic engine wrapped around the geometric one it was meant to replace  `[Lessons][Architecture][Results]`
+
+The paradox that frames this whole reconvergence: on the 2026-05-31 overnight
+soak, V3 (VLM-native) beat the V2.16 baseline on EVERY measured axis (Recall@1
++22.8pp, Faithfulness +22.7pp, etc.). The engine is not wrong - it reads better
+than Docling. And yet V3 failed, repeatedly, all session: 0/18 crucible
+baselines, code pages crashing, a silent infra corruption, a routing blind spot,
+provenance loss, a qdrant ingest crash, and a markdown that still needs a
+post-hoc repair script. None of those failures were IN the VLM. Every one was at
+a SEAM between the new engine and the old pipeline it was dropped into.
+
+### Catalog: every V3 failure this cycle was a boundary mismatch, not an engine fault
+
+| Seam | V2-era contract assumed | VLM / router reality | Failure -> fix |
+|---|---|---|---|
+| asset_ref (QA-CHECK-05) | Docling extracts a binary image file per picture | VLM describes the region inline, emits no binary | from_uir rejected every image/table chunk = 0/18 baselines -> shared crop materializer (c6c2105) |
+| visual_description cap | OCR-era ~400-char captions | VLM writes paragraph-length descriptions | from_uir rejected long text -> producer-side truncation, full text kept in content (c6c2105) |
+| ElementType (3 values) | Docling vocabulary: text/image/table | VLM emits 'code' / 'form' | ElementType('code') CRASHED -> whole page dropped to Docling, which strips indentation = the exact original V2 defect -> smuggle-and-promote to Modality.CODE/FORM (c6c2105) |
+| Resilience model | Docling is local CPU; a network failure class does not exist | VLM is a remote endpoint that drops mid-run | breaker-less soak silently fell back to Docling and fabricated hours of junk -> VlmInfraError + resilient pause-poll breaker (c6c2105) |
+| Router pre-flight | cheap geometric object-counts pick the engine | a GEOMETRIC gate decides the fate of SEMANTIC content | code-styled TEXT (no image/table tags) routed to Docling, indentation stripped - 10/35 pages on AIOS -> monospace-ratio heuristic (2a60a99) |
+| Type provenance | one type in, one type out | the rich VLM type is squeezed through the 3-value ElementType | the original type was silently lost downstream -> original_vlm_type marker threaded adapter -> chunk -> JSONL (3d5d9e5) |
+| Empty-content asset chunk | text chunks always carry content | a VLM asset chunk can legitimately have empty content | qdrant ingest crashed -> empty-content guard (b44724b) |
+| The Docling lane itself | "V3 replaces Docling" | the router STILL sends prose pages to DoclingFast to save VLM cost | Docling's per-page layout inconsistency persists (abbrev pairs classed TEXT on p1 / TABLE on p2; placeholder images; mid-sentence page breaks) -> postprocess_markdown.py band-aid (untracked) |
+
+### Two structural causes (the seams were never going to hold)
+
+**(A) V3 is additive, not a replacement.** `HybridEngine` routes visually-complex
+pages to the VLM and "simple/prose" pages to `DoclingFastEngine` for cost. So
+Docling - and every V2 caveat it carries (stripped code indentation, per-page
+layout inconsistency, placeholder images, mangled reading order) - is STILL the
+engine for a large fraction of pages. V2's problems were never eliminated; they
+were CONFINED to the Docling lane and made conditional on a router guess. The
+untracked `postprocess_markdown.py` is the smoking gun: a V2-era markdown repair
+living inside a "V3" pipeline, whose own docstring names "Docling's per-page
+layout model inconsistency" as the root cause. Worse, the gate that decides which
+content suffers V2's caveats is itself a GEOMETRIC heuristic (object counts, now a
+monospace ratio) - precisely the geometric reasoning V3 was supposed to
+transcend.
+
+**(B) Richer, more dynamic output meeting fail-closed contracts.** The VLM emits
+inline descriptions, long text, new modalities, network failures, and empty asset
+content. The surrounding V2-era schema, vocabulary, and resilience layer were
+built to FAIL CLOSED - crash, reject, strip, or silently drop - rather than fail
+open (generate, fit, carry-through, degrade). Every fix in the catalog is the
+same move: convert one fail-closed boundary into a fail-open one.
+
+### Why they surfaced one at a time
+
+- **Masking.** `from_uir` crashed FIRST, hiding every downstream seam behind it.
+  Fixing it peeled the onion to the next (code crash), then the next (router),
+  then provenance, then empty-content, then the Docling-lane band-aid. You cannot
+  see boundary N+1 until boundary N stops crashing - hence commit after commit.
+- **Easy-case validation.** Each fix was smoked on the easiest available doc (a
+  1-page form, no code), so the next content class hit a FRESH un-migrated seam in
+  production rather than in the smoke. (See the dated entry above and
+  `feedback_smoke_hardest_case`.)
+
+### The deeper cause: an unfinished migration
+
+Charter §7.1 defined the correct end-state - a one-way migration from the 3-value
+`ElementType` to the 5-value `Modality`, retiring the old vocabulary. That
+migration was STARTED (Modality widened, VLM engine added) but never COMPLETED:
+`ElementType` stayed 3-value, the schema validators / field caps / router /
+resilience model were never migrated to V3's assumptions, and the Docling lane was
+never retired or fully hardened. So V3 ran as a hybrid - emitting V3-shaped data
+into V2-shaped contracts while still leaning on the very engine it was meant to
+replace.
+
+### Conclusion
+
+V3 did not fail because the VLM is wrong; it fails because "overcome V2's caveats"
+was implemented as "add a better engine" instead of "complete the migration and
+retire or repair the old one." That yields the worst of both worlds: V2's caveats
+SURVIVE in the still-active Docling lane (now band-aided post-hoc), AND a new
+class of integration failures appears at every seam where the richer VLM output
+meets the narrower, fail-closed V2 contracts. "Done" is therefore not when the
+VLM extracts well - it already does. "Done" is when (1) every contract between
+extraction and disk speaks `Modality`, not `ElementType`; (2) the router stops
+being a geometric gate on semantic content, or the Docling lane is retired; and
+(3) the boundaries fail open, not closed. Until those three hold, each new hard
+document will keep finding the next un-migrated seam - which is exactly what it
+did, commit after commit, across this cycle.
+
+---
+
+## 2026-06-02 - Grand Soak halted: VLM JSON validity collapses on dense pages, bbox crops drift 40-50%  `[Results][Lessons]`
+
+The first real Grand Soak (M5 Qwen3-VL-8B, `--max-pages 200`) was stopped by the
+operator at doc 9/17 (~2.4h in). It is the empirical proof of the
+"additive-hybrid degrades on the hardest docs" thesis. Per-doc:
+
+| # | doc | pages | vlm | docling | json-fail fallback | crop-audit | time |
+|---|---|---:|---:|---:|---:|---|---:|
+| 1 | AIOS (agent paper, born-digital) | 35 | 25 | 10 | 0 | PASS 0/32 | 745s |
+| 2 | hybrid-electric review | 31 | 6 | 24 | 1 | PASS 0/45 | 319s |
+| 3 | Hybrid EV challenges | 16 | 7 | 7 | 2 | WARN 3/18 (17%) | 641s |
+| 4 | IRJET solar | 7 | 6 | 0 | 1 | PASS 2/16 (12%) | 331s |
+| 5 | Recent Transport | 5 | 4 | 1 | 0 | WARN 2/5 (40%) | 134s |
+| 6 | Form_0013 | 1 | 1 | 0 | 0 | PASS 0/2 | 55s |
+| 7 | betwistingsformulier | 1 | 1 | 0 | 0 | WARN 1/2 (50%) | 41s |
+| 8 | CarOK voorraadtelling | 12 | 7 | 0 | 5 | WARN 6/12 (50%) | 704s |
+| 9 | Combat Aircraft (magazine) | 43+ | - | - | ~25 | stopped mid-doc | - |
+
+**A. VLM emits invalid JSON on dense pages -> mass Docling fallback.** 34
+page-level `json.loads` failures in `_parse_strict_json`: 27 "Unterminated
+string" (truncation, consistently mid-`content`-value = output hit the token
+cap) + 7 structural ("Expecting value / ',' delimiter / property name"). Each is
+a *semantic* failure -> per-page Docling fallback (breaker working as designed).
+Concentrated on the densest doc: Combat Aircraft, ~25 of 43 pages -> Docling, the
+layout-mangling path V3 exists to replace, on the one magazine the soak reached.
+Root cause: an 8B VLM cannot reliably emit a large strictly-valid whole-page
+JSON; the "one strict-JSON per page" design has a density ceiling. There is no
+`finish_reason=length` detection today, so a truncated response is silently a
+parse failure. Levers: raise/handle `max_completion_tokens`, guided/constrained
+JSON decoding, or per-region extraction.
+
+**B. VLM bbox crop drift 40-50% on forms/scans/tables.** `QA_WARN_CROP_DRIFT`
+fired on 5 of 8 completed docs (above). The charter §3.3 residual risk (interior
+misplacement / edge-clamp) is now MEASURED: roughly half the image/table crops on
+visually-busy docs are garbage. The crop-audit catches it correctly; the
+extraction does not produce correct coordinates.
+
+**C. Throughput + coverage.** ~20-60 s/VLM-page; dense pages with retries ran
+2.5-5 min each. `--max-pages 200` excluded ~20 of the largest books (Fluent
+Python 766p, Zephyr 689p, ...), so the "Grand" soak only attempted 17
+small/medium docs and could not finish them.
+
+**Quality eval (15-doc subset, GX10 judge):** R@1 70.0% / R@5 chunk 76.7% / R@5
+doc 96.7% / Relevance 78.3% / Format 98.3% / Faithfulness 73.3% - directional,
+below the (sampled, single-seed) V3_OVERNIGHT head-to-head, with cross-doc
+confusion in the weakest cases (an invoice query retrieving the wrong form; a
+Python-prerequisites query retrieving Fluent Python over the RAG guide).
+
+**Verdict.** The operator stopped the soak because the pipeline does not meet
+requirements on the documents V3 targets. AIOS-class clean born-digital docs work
+well; dense magazines and forms/scans do not - invalid JSON -> Docling fallback,
+and 40-50% crop drift. The remedy is extraction-layer (VLM JSON validity + bbox
+fidelity), not another soak run. This sharpens the 2026-06-02 "why V3 still
+failed" analysis above with measured rates.
+
+---
+
 ## Predecessor lineage: V1 → V2 (the story before V3)  `[Motivation][Architecture]`
 
 Reconstructed 2026-05-30 from git tags/commit messages (all verifiable), README

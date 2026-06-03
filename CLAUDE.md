@@ -7,6 +7,7 @@ This file provides guidance to Claude Code when working with this repository.
 1. `docs/PROJECT_STATUS.md` — current task state.
 2. `AGENTS.md` — agent-protocol contract.
 3. `docs/ARCHITECTURE_V3_DRAFT_0.5.md` — **V3.0 target architecture (canonical)**.
+3a. `docs/ARCHITECTURE_V3.1_CHARTER.md` — **V3.1 as-built + roadmap** (current reality, status-tagged SHIPPED/PARTIAL/PROPOSED; read alongside the 0.5 target).
 4. `docs/README.md` — docs index + three-layer model overview.
 5. `docs/V3_EXECUTION_MANDATE.md` — conflict-resolution authority for V3 work (governance set is the Layer-0 list in `docs/README.md`; the mandate wins where it conflicts).
 6. `docs/DECISIONS.md` — locked decisions log.

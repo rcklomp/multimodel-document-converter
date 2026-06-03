@@ -1,5 +1,12 @@
 # MM-Converter V3.0: Architectural Charter — Draft 0.5
 
+> **As-built note (2026-06-03):** this draft is the original V3.0 *target*. The
+> current as-built reality and audit-corrected roadmap are tracked in
+> `docs/ARCHITECTURE_V3.1_CHARTER.md` (status-tagged SHIPPED/PARTIAL/PROPOSED).
+> Where this draft and the V3.1 charter differ, the charter reflects what the
+> code does today; this draft is retained for the Phase-A micro-sequence and the
+> original intent.
+
 ## Phase A: Non-Negotiable UIR Foundation
 
 **Scope:** Phase A2 is a mandatory, non-deferrable structural dependency. The core `batch_processor.py` and `processor.py` (approx 1,755 LOC) MUST be refactored to natively consume the Universal Intermediate Representation (`UniversalDocument` / UIR). 
