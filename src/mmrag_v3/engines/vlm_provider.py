@@ -46,6 +46,63 @@ OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY"
 TRUNCATION_ESCALATION_CAP = 16384
 
 
+# A3 (Charter Blocker A): the UIR page schema for guided/constrained JSON
+# decoding. Mirrors the per-page prompt contract in vlm_native._build_schema_
+# prompt (kept here because the provider owns wire-format concerns and
+# importing vlm_native would be circular). Deliberately NOT strict/closed:
+# `content` + `type` are the only required element fields and additional
+# properties are allowed, so the constraint guarantees a well-formed JSON
+# OBJECT with a typed `elements` array (eliminating the malformation class)
+# without forcing the model to invent fields it would otherwise omit.
+UIR_PAGE_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "page_number": {"type": "integer"},
+        "width": {"type": "integer"},
+        "height": {"type": "integer"},
+        "classification": {"type": "string", "enum": ["digital", "scanned", "hybrid"]},
+        "elements": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "enum": ["text", "image", "table", "code", "form"],
+                    },
+                    "content": {"type": "string"},
+                    "bbox": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "minItems": 4,
+                        "maxItems": 4,
+                    },
+                    "confidence": {"type": "number"},
+                    "source_label": {"type": "string"},
+                },
+                "required": ["type", "content"],
+            },
+        },
+    },
+    "required": ["elements"],
+}
+
+# Structured-output modes (config.structured_output_mode). "json_schema" is the
+# A3 constrained decode (mlx-vlm / vLLM OpenAI-compatible); "guided_json" is the
+# vLLM extra-body form; "json_object" is the legacy weak hint; "off" sends no
+# structured-output field (prompt-only contract).
+STRUCTURED_JSON_SCHEMA = "json_schema"
+STRUCTURED_GUIDED_JSON = "guided_json"
+STRUCTURED_JSON_OBJECT = "json_object"
+STRUCTURED_OFF = "off"
+_STRUCTURED_MODES = (
+    STRUCTURED_JSON_SCHEMA,
+    STRUCTURED_GUIDED_JSON,
+    STRUCTURED_JSON_OBJECT,
+    STRUCTURED_OFF,
+)
+
+
 class VlmProviderError(RuntimeError):
     """Raised when the VLM endpoint returns a non-recoverable error.
 
@@ -121,8 +178,19 @@ class VlmProviderConfig:
     # hint. OpenAI / OpenRouter honor it; many self-hosted servers
     # (mlx-vlm, some vLLM builds) reject it with HTTP 400 instead of
     # ignoring it. The per-page prompt already mandates JSON, so omitting
-    # the hint is safe. Defaulted endpoint-aware in ``from_env``.
+    # the hint is safe. Defaulted endpoint-aware in ``from_env``. Only
+    # consulted when ``structured_output_mode == "json_object"``.
     send_response_format: bool = True
+    # A3 structured-output mode: "json_schema" (constrained decode, the
+    # structural fix for Blocker A), "guided_json" (vLLM extra body),
+    # "json_object" (legacy weak hint), or "off". A 400 that the endpoint
+    # returns for an unsupported structured-output field is handled
+    # fail-open in ``describe`` (strip the field and retry once), so a
+    # backend that does not support the schema degrades to the prompt-only
+    # contract rather than hard-failing. Default preserves the legacy
+    # json_object behavior; ``from_env`` upgrades self-hosted endpoints to
+    # json_schema.
+    structured_output_mode: str = STRUCTURED_JSON_OBJECT
 
     @classmethod
     def from_env(cls) -> "VlmProviderConfig":
@@ -163,9 +231,9 @@ class VlmProviderConfig:
 
         # response_format hint: default on for OpenAI/OpenRouter (which
         # honor it), off for everything else (self-hosted mlx-vlm/vLLM
-        # servers 400 on it). Explicit ``VLM_NATIVE_RESPONSE_FORMAT``
-        # override wins: "json_object"/"1"/"on"/"true" force on,
-        # "none"/"0"/"off"/"false" force off.
+        # servers 400 on the bare json_object). Explicit
+        # ``VLM_NATIVE_RESPONSE_FORMAT`` override wins: "json_object"/"1"/
+        # "on"/"true" force on, "none"/"0"/"off"/"false" force off.
         send_rf = ("openrouter.ai" in endpoint) or ("openai.com" in endpoint)
         rf_raw = (os.environ.get("VLM_NATIVE_RESPONSE_FORMAT") or "").strip().lower()
         if rf_raw in ("json_object", "1", "on", "true", "yes"):
@@ -173,12 +241,26 @@ class VlmProviderConfig:
         elif rf_raw in ("none", "0", "off", "false", "no"):
             send_rf = False
 
+        # A3 structured-output mode. Default: json_schema (constrained decode)
+        # for self-hosted endpoints (the M5 mlx-vlm / GX10 vLLM targets, which
+        # the charter verified support it), json_object for OpenAI/OpenRouter
+        # (json_schema support is model-dependent there; the weak hint is the
+        # safe default and the prompt still mandates JSON). The 400 strip-and-
+        # retry in describe makes either choice fail-open. Explicit
+        # ``VLM_NATIVE_STRUCTURED_OUTPUT`` override wins.
+        is_hosted_cloud = ("openrouter.ai" in endpoint) or ("openai.com" in endpoint)
+        mode = STRUCTURED_JSON_OBJECT if is_hosted_cloud else STRUCTURED_JSON_SCHEMA
+        so_raw = (os.environ.get("VLM_NATIVE_STRUCTURED_OUTPUT") or "").strip().lower()
+        if so_raw in _STRUCTURED_MODES:
+            mode = so_raw
+
         return cls(
             endpoint=endpoint.rstrip("/"),
             model=model,
             api_key=api_key,
             max_completion_tokens=max_tokens,
             send_response_format=send_rf,
+            structured_output_mode=mode,
         )
 
 
@@ -193,6 +275,28 @@ class VlmProvider:
         """Return a ``data:`` URI suitable for the OpenAI image_url field."""
         b64 = base64.b64encode(image_bytes).decode("ascii")
         return f"data:{mime};base64,{b64}"
+
+    def _structured_output_fields(self) -> dict:
+        """Payload fragment that constrains the decode per ``structured_output_mode``.
+
+        Returns the request-body key(s) to merge into the chat-completions
+        payload. ``{}`` when no structured output applies. A1/A4 still apply on
+        top: a constrained decode can hit the token cap (valid-but-incomplete),
+        so json_schema PAIRS with truncation handling, it does not replace it.
+        """
+        mode = self.config.structured_output_mode
+        if mode == STRUCTURED_JSON_SCHEMA:
+            return {
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {"name": "uir_page", "schema": UIR_PAGE_JSON_SCHEMA},
+                }
+            }
+        if mode == STRUCTURED_GUIDED_JSON:
+            return {"guided_json": UIR_PAGE_JSON_SCHEMA}
+        if mode == STRUCTURED_JSON_OBJECT and self.config.send_response_format:
+            return {"response_format": {"type": "json_object"}}
+        return {}
 
     def describe(
         self,
@@ -248,8 +352,12 @@ class VlmProvider:
             "temperature": self.config.temperature,
             "max_tokens": budget,
         }
-        if response_format_json and self.config.send_response_format:
-            payload["response_format"] = {"type": "json_object"}
+        # A3: constrain the decode (json_schema/guided_json) when configured.
+        # ``structured_active`` lets the loop strip the field and retry on a
+        # 400 from a backend that does not support it (fail-open).
+        structured_fields = self._structured_output_fields() if response_format_json else {}
+        payload.update(structured_fields)
+        structured_active = bool(structured_fields)
 
         headers = {"Content-Type": "application/json"}
         if self.config.api_key:
@@ -365,6 +473,23 @@ class VlmProvider:
                     logger.warning(
                         "VLM retryable status %d (attempt %d/%d)",
                         response.status_code,
+                        attempt,
+                        self.config.max_retries,
+                    )
+                elif response.status_code == 400 and structured_active:
+                    # A3 fail-open: the endpoint rejected the structured-output
+                    # field. Strip it and retry with the prompt-only JSON
+                    # contract rather than hard-failing the page.
+                    structured_active = False
+                    payload.pop("response_format", None)
+                    payload.pop("guided_json", None)
+                    last_error = VlmProviderError(
+                        f"structured output rejected (400): {response.text[:200]}"
+                    )
+                    last_was_infra = False
+                    logger.warning(
+                        "VLM endpoint rejected structured output (400, attempt "
+                        "%d/%d); retrying without it (prompt-only JSON contract)",
                         attempt,
                         self.config.max_retries,
                     )
