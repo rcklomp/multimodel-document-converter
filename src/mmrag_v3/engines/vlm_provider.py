@@ -45,6 +45,16 @@ OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY"
 # escalation stops and the partial body is surfaced (typed) for A4 repair.
 TRUNCATION_ESCALATION_CAP = 16384
 
+# A read timeout means the endpoint accepted the request and is generating, just
+# too slowly to answer within timeout_seconds (measured on dense interior
+# magazine pages 2026-06-03: median ~265s, several pages exceed any reasonable
+# single-call budget). Unlike a connect failure, retrying a read timeout almost
+# never helps - the same heavy page will blow the same timeout again, wasting a
+# full timeout_seconds per retry. So read timeouts get their OWN small attempt
+# cap, independent of max_retries (which still governs connect/connection
+# faults, where a retry can legitimately recover a transient blip).
+READ_TIMEOUT_MAX_ATTEMPTS = 1
+
 
 # A3 (Charter Blocker A): the UIR page schema for guided/constrained JSON
 # decoding. Mirrors the per-page prompt contract in vlm_native._build_schema_
@@ -230,6 +240,19 @@ class VlmProviderConfig:
             except ValueError:
                 pass
 
+        # ``VLM_NATIVE_TIMEOUT`` (seconds) - the per-call read timeout for the V3
+        # extraction VLM. The hardcoded 180s default is too tight for dense
+        # interior magazine pages (2026-06-03 measurement: median ~265s), which
+        # silently fail under it; this env makes it tunable for the bandwidth-rich
+        # M5 path without touching the CLI's separate (legacy-refiner) --vlm-timeout.
+        timeout_raw = (os.environ.get("VLM_NATIVE_TIMEOUT") or "").strip()
+        timeout_seconds = cls.timeout_seconds  # type: ignore[attr-defined]
+        if timeout_raw:
+            try:
+                timeout_seconds = max(10.0, float(timeout_raw))
+            except ValueError:
+                pass
+
         # response_format hint: default on for OpenAI/OpenRouter (which
         # honor it), off for everything else (self-hosted mlx-vlm/vLLM
         # servers 400 on the bare json_object). Explicit
@@ -263,6 +286,7 @@ class VlmProviderConfig:
             endpoint=endpoint.rstrip("/"),
             model=model,
             api_key=api_key,
+            timeout_seconds=timeout_seconds,
             max_completion_tokens=max_tokens,
             send_response_format=send_rf,
             structured_output_mode=mode,
@@ -388,6 +412,7 @@ class VlmProvider:
         # retry, then surface a typed VlmTruncationError for A4 repair.
         best_partial = ""
         budget_escalated = False
+        read_timeout_attempts = 0
         for attempt in range(1, self.config.max_retries + 1):
             try:
                 response = requests.post(
@@ -411,6 +436,23 @@ class VlmProvider:
                     self.config.max_retries,
                     exc,
                 )
+                # A read timeout (server is generating, just too slowly) gets a
+                # small dedicated cap: retrying repeats the full timeout for a
+                # page that is simply too heavy. ConnectTimeout is BOTH a
+                # ReadTimeout-sibling and a ConnectionError, so exclude it here
+                # (a connect failure can recover and keeps the full max_retries).
+                if isinstance(exc, requests.exceptions.ReadTimeout) and not isinstance(
+                    exc, requests.exceptions.ConnectTimeout
+                ):
+                    read_timeout_attempts += 1
+                    if read_timeout_attempts >= READ_TIMEOUT_MAX_ATTEMPTS:
+                        logger.warning(
+                            "VLM read timeout after %d attempt(s) at %.0fs; not "
+                            "retrying (a heavier retry would just repeat the wait)",
+                            read_timeout_attempts,
+                            self.config.timeout_seconds,
+                        )
+                        break
             else:
                 if response.status_code == 200:
                     try:
