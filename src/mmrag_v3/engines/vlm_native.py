@@ -45,6 +45,31 @@ logger = logging.getLogger(__name__)
 
 PAGE_RENDER_DPI = 200
 
+# A2 (Charter Blocker A): cheap per-page output-budget estimate. The VLM's
+# JSON output size tracks the page's content volume, and the page's own
+# extractable text length is a fast, allocation-free proxy (PyMuPDF text
+# read, no second render). Budget = raw text chars scaled by a structural
+# overhead (bbox arrays, field names, markdown fences, table grids roughly
+# 2.5x the raw text) converted to tokens at ~3.5 chars/token. The provider
+# floors this at its config default and caps it at TRUNCATION_ESCALATION_CAP,
+# so a dense page gets headroom above the 8192 default while a sparse or
+# scanned page (little/no text layer) falls back to the floor. Any residual
+# underestimate is caught by the A1 escalation retry and A4 repair.
+BUDGET_CHARS_PER_TOKEN = 3.5
+BUDGET_STRUCTURE_OVERHEAD = 2.5
+
+
+def estimate_output_budget(page: "fitz.Page") -> int:
+    """Estimate the VLM output-token budget for one page from its text volume.
+
+    Returns 0 on an unreadable page so the provider uses its config default.
+    """
+    try:
+        text = page.get_text("text")
+    except Exception:  # pragma: no cover - defensive: PyMuPDF API drift
+        return 0
+    return int((len(text) * BUDGET_STRUCTURE_OVERHEAD) / BUDGET_CHARS_PER_TOKEN)
+
 
 def _vlm_element_metadata(
     promoted_modality: Optional[str], original_vlm_type: Optional[str]
@@ -181,6 +206,7 @@ class VlmNativeEngine:
                     image_bytes,
                     prompt,
                     mime="image/png",
+                    max_tokens=estimate_output_budget(page),
                 )
                 payload = self._parse_strict_json(raw_json)
                 universal_page = self._page_from_payload(

@@ -111,10 +111,12 @@ class VlmProviderConfig:
     temperature: float = 0.0
     # Bounded output budget — omlx/vLLM servers OOM and drop the
     # connection when asked to generate unbounded JSON for dense
-    # academic pages. 4096 tokens covers a typical UIR page payload
-    # while keeping server memory deterministic. Override via env or
-    # constructor if a backend genuinely needs more.
-    max_completion_tokens: int = 4096
+    # academic pages. This is the FLOOR/default when a caller passes no
+    # per-page override; the dense-page soak hit the old 4096 default and
+    # truncated, so the floor is 8192 (the known-good overnight value).
+    # The VLM path scales above this per page via describe(max_tokens=...)
+    # (A2). Override via env or constructor if a backend needs more.
+    max_completion_tokens: int = 8192
     # Whether to send the OpenAI ``response_format={"type":"json_object"}``
     # hint. OpenAI / OpenRouter honor it; many self-hosted servers
     # (mlx-vlm, some vLLM builds) reject it with HTTP 400 instead of
@@ -199,6 +201,7 @@ class VlmProvider:
         *,
         mime: str = "image/png",
         response_format_json: bool = True,
+        max_tokens: Optional[int] = None,
     ) -> str:
         """Send a single (prompt, image) pair to the VLM and return assistant text.
 
@@ -210,6 +213,12 @@ class VlmProvider:
                 output to a JSON object via the OpenAI ``response_format``
                 hint. Endpoints that don't honor this still receive a
                 strict instruction in the prompt itself.
+            max_tokens: Per-call output budget override (A2). When the caller
+                has a cheap per-page density estimate it passes the scaled
+                budget here; the value is floored at the config default and
+                capped at ``TRUNCATION_ESCALATION_CAP`` so a single page can
+                neither under-run the default nor OOM the server. ``None``
+                uses the config default unchanged.
 
         Returns:
             Raw assistant message content. The caller deserializes.
@@ -218,6 +227,12 @@ class VlmProvider:
             VlmProviderError: On unrecoverable transport / API errors.
         """
         data_uri = self.encode_image_bytes(image_bytes, mime=mime)
+
+        budget = self.config.max_completion_tokens
+        if max_tokens is not None:
+            # Floor at the config default (never below the known-good value),
+            # cap at the OOM ceiling shared with the truncation escalation.
+            budget = max(budget, min(int(max_tokens), TRUNCATION_ESCALATION_CAP))
 
         payload = {
             "model": self.config.model,
@@ -231,7 +246,7 @@ class VlmProvider:
                 }
             ],
             "temperature": self.config.temperature,
-            "max_tokens": self.config.max_completion_tokens,
+            "max_tokens": budget,
         }
         if response_format_json and self.config.send_response_format:
             payload["response_format"] = {"type": "json_object"}
