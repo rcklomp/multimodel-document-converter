@@ -91,6 +91,11 @@ class CropHealth:
     # PyMuPDF-detected object bbox (trusted coordinates), "vlm" when cropped
     # from the VLM-supplied bbox, "full_page" when no usable bbox existed.
     crop_source: str = "vlm"
+    # B2: True when the drift-flagged crop was re-extracted to a full-page
+    # render before persisting (the garbage crop was NOT written to disk). The
+    # detection fingerprints above describe the ORIGINAL drifted crop; this
+    # flag records that the persisted asset is the full-page fallback.
+    reextracted: bool = False
 
     @property
     def is_drift_flagged(self) -> bool:
@@ -164,6 +169,7 @@ class CropAuditReport:
                     "is_full_page_fallback": c.is_full_page_fallback,
                     "is_edge_clamped": c.is_edge_clamped,
                     "is_low_information": c.is_low_information,
+                    "reextracted": c.reextracted,
                 }
                 for c in self.crops
                 if c.is_drift_flagged or c.is_full_page_fallback
@@ -189,6 +195,11 @@ def _luminance_from_png(png_bytes: bytes) -> Tuple[float, float]:
         return float(arr.mean()), float(arr.std())
     except Exception:  # pragma: no cover - defensive
         return 255.0, 0.0
+
+
+def _is_low_information(mean_lum: float, std_lum: float) -> bool:
+    """Blank/low-information crop fingerprint (shared blank definition)."""
+    return std_lum < _BLANK_STD_MAX and (mean_lum > _BLANK_MEAN_HI or mean_lum < _BLANK_MEAN_LO)
 
 
 def _bbox_touches_edge(bbox: Sequence[float]) -> bool:
@@ -379,16 +390,45 @@ def materialize_visual_assets(
             out_path = assets_dir / fname
 
             png_bytes = pix.tobytes("png")
+            mean_lum, std_lum = _luminance_from_png(png_bytes)
+            is_low_information = _is_low_information(mean_lum, std_lum)
+
+            # B2: crop-audit as a re-extraction trigger (fail-open). The audit
+            # fingerprints above still RECORD that the VLM crop drifted (blank /
+            # edge-clamped) - that detection signal is preserved for telemetry
+            # and the doc-level drift gate. But a garbage crop must never be the
+            # PERSISTED asset, so re-render the FULL PAGE and write that instead:
+            # a degraded-but-honest asset always beats a whitespace crop.
+            # Geometric crops are trusted coordinates and never re-triggered (B1
+            # already preferred a deterministic bbox; B2 covers the residue where
+            # no detectable object existed).
+            reextracted = False
+            if crop_source != "geometric" and (is_edge_clamped or is_low_information):
+                try:
+                    full_png = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=None).tobytes(
+                        "png"
+                    )
+                except Exception as exc:  # pragma: no cover - defensive render guard
+                    logger.warning(
+                        "[V3-ASSET] B2 re-extraction render failed (page %d): %s",
+                        local_page,
+                        exc,
+                    )
+                else:
+                    png_bytes = full_png
+                    reextracted = True
+                    logger.info(
+                        "[V3-ASSET] B2 re-extraction: page %d crop drift-flagged "
+                        "(%s); persisted a full-page render instead of the garbage crop",
+                        local_page,
+                        "blank" if is_low_information else "edge-clamped",
+                    )
+
             try:
                 out_path.write_bytes(png_bytes)
             except Exception as exc:  # pragma: no cover - defensive write guard
                 logger.warning("[V3-ASSET] asset save failed (%s): %s", fname, exc)
                 continue
-
-            mean_lum, std_lum = _luminance_from_png(png_bytes)
-            is_low_information = std_lum < _BLANK_STD_MAX and (
-                mean_lum > _BLANK_MEAN_HI or mean_lum < _BLANK_MEAN_LO
-            )
 
             asset_ref = f"{asset_ref_prefix}/{fname}"
             c.asset_ref = asset_ref
@@ -403,6 +443,7 @@ def materialize_visual_assets(
                     is_edge_clamped=is_edge_clamped,
                     is_low_information=is_low_information,
                     crop_source=crop_source,
+                    reextracted=reextracted,
                 )
             )
     finally:
