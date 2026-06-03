@@ -39,7 +39,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import fitz  # PyMuPDF - pure renderer
 
@@ -87,6 +87,10 @@ class CropHealth:
     is_full_page_fallback: bool
     is_edge_clamped: bool
     is_low_information: bool
+    # Provenance of the crop rectangle (B1): "geometric" when cropped from a
+    # PyMuPDF-detected object bbox (trusted coordinates), "vlm" when cropped
+    # from the VLM-supplied bbox, "full_page" when no usable bbox existed.
+    crop_source: str = "vlm"
 
     @property
     def is_drift_flagged(self) -> bool:
@@ -154,6 +158,7 @@ class CropAuditReport:
                     "asset_ref": c.asset_ref,
                     "page": c.page,
                     "modality": c.modality,
+                    "crop_source": c.crop_source,
                     "mean_luminance": round(c.mean_luminance, 1),
                     "std_luminance": round(c.std_luminance, 1),
                     "is_full_page_fallback": c.is_full_page_fallback,
@@ -195,6 +200,62 @@ def _bbox_touches_edge(bbox: Sequence[float]) -> bool:
         or x1 >= COORD_SCALE - EDGE_TOUCH_EPS
         or y1 >= COORD_SCALE - EDGE_TOUCH_EPS
     )
+
+
+def _geometric_candidates(page: "fitz.Page", modality: Modality) -> List["fitz.Rect"]:
+    """Detected-object bboxes (page coords) for B1 deterministic cropping.
+
+    The VLM is good at semantics, bad at coordinates, so when the page yields
+    its own detectable objects we crop from THOSE rather than the hallucinated
+    VLM bbox. IMAGE -> embedded raster rects (``get_image_info``); TABLE ->
+    ``find_tables`` bboxes. Returns only non-degenerate rects; [] when the page
+    has no detectable object of that kind (then the VLM bbox is used).
+    """
+    rects: List["fitz.Rect"] = []
+    try:
+        if modality == Modality.IMAGE:
+            for info in page.get_image_info():
+                bb = info.get("bbox")
+                if bb:
+                    rects.append(fitz.Rect(bb))
+        elif modality == Modality.TABLE:
+            for table in page.find_tables().tables:
+                if table.bbox:
+                    rects.append(fitz.Rect(table.bbox))
+    except Exception:  # pragma: no cover - defensive: PyMuPDF API drift
+        return []
+    return [r for r in rects if r.width > 2.0 and r.height > 2.0]
+
+
+def _pick_geometric_clip(
+    candidates: List["fitz.Rect"],
+    consumed: set,
+    vlm_clip: "Optional[fitz.Rect]",
+) -> "Optional[Tuple[int, fitz.Rect]]":
+    """Choose the best unconsumed detected object for this chunk.
+
+    Prefer the candidate that overlaps the VLM's (rough, semantically-placed)
+    bbox most; with no overlap or no VLM bbox, fall back to the largest
+    remaining object (most likely the primary figure/table). Returns
+    ``(index, rect)`` or ``None`` when every candidate is already consumed.
+    """
+    avail = [(i, r) for i, r in enumerate(candidates) if i not in consumed]
+    if not avail:
+        return None
+
+    def _overlap(rect: "fitz.Rect") -> float:
+        if vlm_clip is None:
+            return 0.0
+        inter = rect & vlm_clip
+        return 0.0 if inter.is_empty else inter.width * inter.height
+
+    if vlm_clip is not None:
+        best_idx, best_rect = max(avail, key=lambda ir: _overlap(ir[1]))
+        if _overlap(best_rect) > 0.0:
+            return best_idx, best_rect
+    # No overlap signal: take the largest remaining real object.
+    best_idx, best_rect = max(avail, key=lambda ir: ir[1].width * ir[1].height)
+    return best_idx, best_rect
 
 
 def materialize_visual_assets(
@@ -251,6 +312,11 @@ def materialize_visual_assets(
     assets_dir.mkdir(parents=True, exist_ok=True)
 
     per_page_idx: Dict[int, int] = {}
+    # B1: per-page caches so detected objects are computed once and distributed
+    # across the page's visual chunks (one object is not cropped twice when the
+    # page offers enough of them).
+    geo_cache: Dict[Tuple[int, str], List["fitz.Rect"]] = {}
+    geo_consumed: Dict[Tuple[int, str], set] = {}
     try:
         for c in visual:
             loc = getattr(c, "locator", None)
@@ -261,8 +327,9 @@ def materialize_visual_assets(
             page = doc[page_index]
             pw, ph = float(page.rect.width), float(page.rect.height)
 
-            clip = None
-            is_edge_clamped = False
+            # VLM-supplied bbox -> page-coord clip (the rough, semantic placement).
+            vlm_clip = None
+            vlm_edge = False
             bbox = loc.bbox if loc else None
             if bbox and len(bbox) == 4:
                 x0 = max(0.0, min(pw, bbox[0] / COORD_SCALE * pw))
@@ -270,10 +337,31 @@ def materialize_visual_assets(
                 x1 = max(0.0, min(pw, bbox[2] / COORD_SCALE * pw))
                 y1 = max(0.0, min(ph, bbox[3] / COORD_SCALE * ph))
                 if (x1 - x0) > 2.0 and (y1 - y0) > 2.0:
-                    clip = fitz.Rect(x0, y0, x1, y1)
+                    vlm_clip = fitz.Rect(x0, y0, x1, y1)
                     # Edge-touch is only meaningful for a usable bbox; a
                     # degenerate one is reported as a full-page fallback instead.
-                    is_edge_clamped = _bbox_touches_edge(bbox)
+                    vlm_edge = _bbox_touches_edge(bbox)
+
+            # B1: prefer a deterministic geometric bbox when the page yields a
+            # detectable object. The VLM is bad at coordinates, so a real
+            # object rect beats a (possibly hallucinated) VLM bbox; trust VLM
+            # coords only when no geometric source exists.
+            cache_key = (page_index, "table" if c.modality == Modality.TABLE else "image")
+            if cache_key not in geo_cache:
+                geo_cache[cache_key] = _geometric_candidates(page, c.modality)
+                geo_consumed[cache_key] = set()
+            picked = _pick_geometric_clip(geo_cache[cache_key], geo_consumed[cache_key], vlm_clip)
+
+            if picked is not None:
+                geo_idx, clip = picked
+                geo_consumed[cache_key].add(geo_idx)
+                # Trusted source: not a clamp artifact.
+                is_edge_clamped = False
+                crop_source = "geometric"
+            else:
+                clip = vlm_clip
+                is_edge_clamped = vlm_edge
+                crop_source = "vlm" if clip is not None else "full_page"
 
             is_full_page_fallback = clip is None
 
@@ -314,6 +402,7 @@ def materialize_visual_assets(
                     is_full_page_fallback=is_full_page_fallback,
                     is_edge_clamped=is_edge_clamped,
                     is_low_information=is_low_information,
+                    crop_source=crop_source,
                 )
             )
     finally:
