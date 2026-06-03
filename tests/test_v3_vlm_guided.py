@@ -152,12 +152,15 @@ def test_400_on_structured_strips_and_retries(monkeypatch):
     assert "guided_json" not in payloads[1]
 
 
-def test_from_env_defaults_self_hosted_to_json_schema(monkeypatch):
+def test_from_env_defaults_self_hosted_to_off(monkeypatch):
+    # 2026-06-03 live check: mlx-vlm json_schema decode is too slow on dense
+    # pages (180s timeout), so self-hosted defaults to prompt-only (OFF).
+    # json_schema stays opt-in via VLM_NATIVE_STRUCTURED_OUTPUT.
     monkeypatch.setenv("VLM_NATIVE_ENDPOINT", "http://macbook-pro-m5.lan:8000/v1")
     monkeypatch.setenv("VLM_NATIVE_MODEL", "Qwen3-VL")
     monkeypatch.delenv("VLM_NATIVE_STRUCTURED_OUTPUT", raising=False)
     cfg = VlmProviderConfig.from_env()
-    assert cfg.structured_output_mode == STRUCTURED_JSON_SCHEMA
+    assert cfg.structured_output_mode == STRUCTURED_OFF
 
 
 def test_from_env_defaults_openrouter_to_json_object(monkeypatch):

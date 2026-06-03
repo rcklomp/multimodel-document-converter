@@ -2473,3 +2473,55 @@ the whole page's vision extraction was discarded -> Docling fallback stripped th
 code indentation (the original v2 defect). This closes that silent failure for
 the V3 path. The naive-widen attempt was correctly rejected mid-session when it
 broke the contract test (Test Contract Integrity: do not weaken a guard to ship).
+
+---
+
+## V3.1 Blocker remediation (A1-A4, B1-B2) + json_schema default (2026-06-03)
+
+**Decision:** Implemented the Charter (§9.1) remediation for the two Grand-Soak
+blockers, and set the self-hosted structured-output default to OFF (prompt-only)
+based on a live M5 bounded check.
+
+**Blocker A (VLM invalid JSON on dense pages):**
+- A1 typed truncation detection (`finish_reason=length`) + one budget escalation
+  + `VlmTruncationError(partial_content=...)`.
+- A2 adaptive per-page output budget (`estimate_output_budget`, floor 8192, cap
+  16384), wired at both VLM call sites.
+- A4 bounded JSON repair (`repair_truncated_json`): keep the N complete elements
+  of a truncated page instead of discarding the whole page to Docling.
+- A3 json_schema / guided_json constrained-decode capability + a fail-open 400
+  strip-and-retry.
+
+**Blocker B (VLM bbox crop drift 40-50%):**
+- B1 prefer a deterministic geometric bbox (`get_image_info` / `find_tables`) for
+  the crop; trust VLM coords only when no detectable object exists.
+- B2 crop-audit re-extraction trigger: a drift-flagged VLM crop is re-rendered to
+  the full page before persisting (detection fingerprints preserved; new
+  `reextracted` flag). A garbage crop is never written to disk.
+
+**json_schema default = OFF for self-hosted (live-evidence correction).** The A3
+landing defaulted self-hosted endpoints to `json_schema`. A 2026-06-03 bounded
+live check on M5 (Combat Aircraft dense magazine) showed mlx-vlm ACCEPTS
+json_schema (no 400) but its grammar-constrained decode is pathologically slow on
+dense pages: one page exceeded the 180s read timeout and tripped the circuit
+breaker (under batch_size=10 that sank the whole 10-page batch to the text
+recovery path). With structured output OFF, the same pages extracted cleanly via
+`uir_native_chunker` at ~88 s/page - 0 truncation, 0 Docling fallback, 5 image
+assets materialized, 1 B2 re-extraction fired. So `from_env` now defaults
+self-hosted to OFF (the known-good pre-A3 prompt-only behavior; the per-page
+prompt still mandates JSON); json_schema/guided_json stay opt-in via
+`VLM_NATIVE_STRUCTURED_OUTPUT` for backends that decode them efficiently (vLLM +
+xgrammar). Contract test `test_from_env_defaults_self_hosted_to_off` updated to
+the corrected default (the resolution-logic guard is kept, not weakened).
+
+**A5 (per-region extraction) NOT built.** The mandate gates A5 on "A1-A4 do not
+clear the dense-doc fallback rate." The live check shows A1-A4 cleared it (0
+truncation / 0 fallback on dense pages that complete). A5 remains deferred.
+
+**Residual (flagged for the operator, OUT of §9.1 scope - throughput/§5+§8):** an
+occasional ultra-dense page still exceeds the 180s client read timeout; under
+batch_size=10 the breaker (correctly, per B4) sinks the whole batch. Options:
+batch_size=1 for dense docs, a `VLM_NATIVE_TIMEOUT` env, distinguishing
+ReadTimeout (slow page) from ConnectTimeout (node down) in the breaker, or A5 to
+cut per-call latency. Not changed this cycle (B4 is a fail-open boundary; the
+batch-size knob is operator-side).

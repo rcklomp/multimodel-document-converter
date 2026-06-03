@@ -187,9 +187,10 @@ class VlmProviderConfig:
     # returns for an unsupported structured-output field is handled
     # fail-open in ``describe`` (strip the field and retry once), so a
     # backend that does not support the schema degrades to the prompt-only
-    # contract rather than hard-failing. Default preserves the legacy
-    # json_object behavior; ``from_env`` upgrades self-hosted endpoints to
-    # json_schema.
+    # contract rather than hard-failing. ``from_env`` resolves the default
+    # endpoint-aware: OFF for self-hosted (mlx-vlm json_schema decode is too
+    # slow on dense pages - 2026-06-03 live check), json_object for
+    # OpenAI/OpenRouter. json_schema/guided_json are opt-in via env.
     structured_output_mode: str = STRUCTURED_JSON_OBJECT
 
     @classmethod
@@ -241,15 +242,19 @@ class VlmProviderConfig:
         elif rf_raw in ("none", "0", "off", "false", "no"):
             send_rf = False
 
-        # A3 structured-output mode. Default: json_schema (constrained decode)
-        # for self-hosted endpoints (the M5 mlx-vlm / GX10 vLLM targets, which
-        # the charter verified support it), json_object for OpenAI/OpenRouter
-        # (json_schema support is model-dependent there; the weak hint is the
-        # safe default and the prompt still mandates JSON). The 400 strip-and-
-        # retry in describe makes either choice fail-open. Explicit
-        # ``VLM_NATIVE_STRUCTURED_OUTPUT`` override wins.
+        # A3 structured-output mode. Defaults are conservative based on the
+        # 2026-06-03 live M5 bounded check: mlx-vlm ACCEPTS json_schema (no 400)
+        # but its grammar-constrained decode is pathologically slow on dense
+        # pages - one Combat Aircraft page exceeded the 180s read timeout and
+        # tripped the breaker, whereas prompt-only returned the same pages
+        # cleanly at ~88 s/page (0 truncation, 0 fallback). So self-hosted
+        # defaults to OFF (prompt-only, the known-good pre-A3 behavior; the
+        # per-page prompt still mandates JSON), and OpenAI/OpenRouter to the
+        # json_object hint. json_schema / guided_json remain OPT-IN via
+        # ``VLM_NATIVE_STRUCTURED_OUTPUT`` for backends that decode them
+        # efficiently (e.g. vLLM + xgrammar on the GX10). The override wins.
         is_hosted_cloud = ("openrouter.ai" in endpoint) or ("openai.com" in endpoint)
-        mode = STRUCTURED_JSON_OBJECT if is_hosted_cloud else STRUCTURED_JSON_SCHEMA
+        mode = STRUCTURED_JSON_OBJECT if is_hosted_cloud else STRUCTURED_OFF
         so_raw = (os.environ.get("VLM_NATIVE_STRUCTURED_OUTPUT") or "").strip().lower()
         if so_raw in _STRUCTURED_MODES:
             mode = so_raw
