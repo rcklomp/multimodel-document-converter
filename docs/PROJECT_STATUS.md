@@ -1,6 +1,23 @@
 # Project Status
 
-Last updated: 2026-06-04 (bounded crucible subset PASSES 4/4)
+Last updated: 2026-06-04 (PIVOT: VLM evaluation workstream; main code PAUSED)
+
+## PIVOT (2026-06-04): evaluate the extraction VLM before more scaffolding
+
+Decision: PAUSE main extraction-code work and run a thorough evaluation of
+candidate document-extraction VLMs. Rationale: the §9.2 full crucible showed this
+cycle's fixes hold at scale, but the next-weakest axis is VLM output QUALITY
+(table->markdown compliance, empty tables) - i.e. we may be scaffolding around a
+model mismatch. Rather than build more corrective layers around Qwen3-VL-8B,
+evaluate whether a better-fit model (esp. document-specialist VLMs that emit
+structure+bboxes, or markdown-first models) removes the need. Plan + rubric +
+golden test set: `docs/PLAN_VLM_EVAL.md`. The central fork is keep-UIR
+(structured+bbox, near-drop-in) vs markdown-first (rearchitect). Main-code fixes
+flagged on 2026-06-04 (render guard, empty-table degrade, table-prompt tuning,
+crop-audit heuristic) are deferred behind the model decision - several are
+model-specific.
+
+
 
 ## Current state (2026-06-04) - bounded crucible subset MEETS §9.1 acceptance
 
