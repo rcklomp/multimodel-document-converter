@@ -487,36 +487,46 @@ def _chunk_page(
 # ---------------------------------------------------------------------------
 
 
-# Mirror scripts/qa_full_conversion.py::_duplicate_text_issues: a "long
-# duplicate" is whitespace-normalized TEXT content >= this many chars repeated
-# on one page. Kept equal to that gate's default --min-duplicate-chars so the
-# chunker satisfies the contract at the source.
+# Whitespace-normalized TEXT duplicates >= this length also clear
+# scripts/qa_full_conversion.py::_duplicate_text_issues (its default
+# --min-duplicate-chars), catching whitespace-variant long repeats on top of
+# the exact-match pass below.
 _DEDUP_MIN_CHARS = 120
 
 
 def _dedupe_within_page_text(chunks: List[UIRChunk]) -> List[UIRChunk]:
-    """Drop later within-page exact-duplicate long TEXT chunks (keep the first).
+    """Drop later within-page duplicate TEXT chunks (keep the first occurrence).
 
-    TEXT modality only (matching the QA gate); IMAGE/TABLE/CODE/FORM are never
-    deduped. Whitespace-normalized exact match, >= ``_DEDUP_MIN_CHARS``. Order
-    is preserved; short text and cross-page repeats (headers/footers) are left
-    untouched.
+    The VLM loops on dense pages and re-emits the same paragraph/heading. Two
+    QA gates forbid the result, at different strictness:
+      * qa_universal_invariants: ANY within-page byte-equal (``content.strip()``)
+        text dupe is a hard fail - no length floor;
+      * qa_full_conversion: whitespace-normalized dupes >= 120 chars.
+    Dedup at the union: drop on an exact ``content.strip()`` match (any length)
+    OR a whitespace-normalized match >= ``_DEDUP_MIN_CHARS``. TEXT only;
+    IMAGE/TABLE/CODE/FORM, empty text, and cross-page repeats (headers/footers)
+    are untouched; order preserved.
     """
-    seen: Dict[int, Set[str]] = {}
+    seen_exact: Dict[int, Set[str]] = {}
+    seen_norm: Dict[int, Set[str]] = {}
     out: List[UIRChunk] = []
     for c in chunks:
         if c.modality is not Modality.TEXT:
             out.append(c)
             continue
-        norm = re.sub(r"\s+", " ", (c.content or "").strip())
+        stripped = (c.content or "").strip()
         page = c.locator.page_number if c.locator else None
-        if page is None or len(norm) < _DEDUP_MIN_CHARS:
+        if page is None or not stripped:
             out.append(c)
             continue
-        page_seen = seen.setdefault(page, set())
-        if norm in page_seen:
-            continue  # exact within-page duplicate of an earlier chunk
-        page_seen.add(norm)
+        exact = seen_exact.setdefault(page, set())
+        norm = re.sub(r"\s+", " ", stripped)
+        norms = seen_norm.setdefault(page, set())
+        if stripped in exact or (len(norm) >= _DEDUP_MIN_CHARS and norm in norms):
+            continue  # within-page duplicate of an earlier chunk
+        exact.add(stripped)
+        if len(norm) >= _DEDUP_MIN_CHARS:
+            norms.add(norm)
         out.append(c)
     return out
 

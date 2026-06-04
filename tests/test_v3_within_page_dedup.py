@@ -60,9 +60,16 @@ def test_whitespace_variant_duplicates_collapse():
     assert len(out) == 1  # normalized-equal -> deduped
 
 
-def test_short_duplicates_are_kept():
+def test_short_exact_duplicates_are_dropped():
+    # qa_universal_invariants forbids ANY within-page byte-equal text dupe (no
+    # length floor), so short exact repeats are deduped too.
     short = "KJ-600 AEW"  # < 120 chars
     out = _dedupe_within_page_text([_txt(short, 1), _txt(short, 1)])
+    assert len(out) == 1
+
+
+def test_short_distinct_text_is_kept():
+    out = _dedupe_within_page_text([_txt("KJ-600 AEW", 1), _txt("J-15 fighter", 1)])
     assert len(out) == 2
 
 
