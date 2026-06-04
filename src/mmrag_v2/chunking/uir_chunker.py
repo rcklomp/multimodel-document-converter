@@ -180,6 +180,15 @@ def chunk_universal_document(
         chunks.extend(page_chunks)
         reading_order += len(page_chunks)
 
+    # Crucible fix #2: drop within-page duplicate long-text chunks. Dense pages
+    # can make the VLM loop and re-emit the same paragraph/heading several times
+    # (Combat Aircraft: a heading 10x on one page) - QA's DUPLICATE_LONG_TEXT /
+    # within_page_text_dupe_excess gate. No document legitimately repeats a
+    # 120+ char paragraph verbatim on one page, so the first occurrence is kept
+    # and later exact (whitespace-normalized) copies are dropped. Mirrors the
+    # gate's modality (TEXT only), normalization, and threshold.
+    chunks = _dedupe_within_page_text(chunks)
+
     # PLAN_V3.1 P2: UIR-native heading assignment. Per text chunk, in
     # reading order, set parent_heading by precedence:
     #   1. nearest preceding in-page heading element (already on the chunk);
@@ -476,6 +485,40 @@ def _chunk_page(
 # ---------------------------------------------------------------------------
 # Element → UIRChunk converters (IMAGE, TABLE, CODE, FORM)
 # ---------------------------------------------------------------------------
+
+
+# Mirror scripts/qa_full_conversion.py::_duplicate_text_issues: a "long
+# duplicate" is whitespace-normalized TEXT content >= this many chars repeated
+# on one page. Kept equal to that gate's default --min-duplicate-chars so the
+# chunker satisfies the contract at the source.
+_DEDUP_MIN_CHARS = 120
+
+
+def _dedupe_within_page_text(chunks: List[UIRChunk]) -> List[UIRChunk]:
+    """Drop later within-page exact-duplicate long TEXT chunks (keep the first).
+
+    TEXT modality only (matching the QA gate); IMAGE/TABLE/CODE/FORM are never
+    deduped. Whitespace-normalized exact match, >= ``_DEDUP_MIN_CHARS``. Order
+    is preserved; short text and cross-page repeats (headers/footers) are left
+    untouched.
+    """
+    seen: Dict[int, Set[str]] = {}
+    out: List[UIRChunk] = []
+    for c in chunks:
+        if c.modality is not Modality.TEXT:
+            out.append(c)
+            continue
+        norm = re.sub(r"\s+", " ", (c.content or "").strip())
+        page = c.locator.page_number if c.locator else None
+        if page is None or len(norm) < _DEDUP_MIN_CHARS:
+            out.append(c)
+            continue
+        page_seen = seen.setdefault(page, set())
+        if norm in page_seen:
+            continue  # exact within-page duplicate of an earlier chunk
+        page_seen.add(norm)
+        out.append(c)
+    return out
 
 
 def _page_dims_px(page: UniversalPage) -> Tuple[int, int]:
