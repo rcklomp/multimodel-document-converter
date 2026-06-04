@@ -24,7 +24,11 @@ _MD_TABLE_RE = re.compile(r"^\s*\|.*\|\s*$\n\s*\|[\s:|-]*-[\s:|-]*\|\s*$", re.MU
 _FENCE_RE = re.compile(r"```[\w-]*\n(.*?)```", re.DOTALL)
 _REPEAT_RE = re.compile(r"(.{1,80}?)\1{7,}", re.DOTALL)
 _BBOX_HINTS = ("bbox", '"box"', "<loc_", "location", '"poly"', "x_min", 'x1"')
-_DOCTAGS_HINTS = ("<doctag", "<otsl", "<text>", "<picture>", "<table>", "<code>", "<loc_")
+_DOCTAGS_HINTS = ("<doctag", "<otsl", "<fcel>", "<lcel>", "<nl>", "<text>", "<picture>", "<code>")
+# A table captured in any STRUCTURED, convertible form (markdown grid, OTSL/
+# DocTags cells, or HTML) - vs flattened to prose/plain text.
+_OTSL_RE = re.compile(r"<(fcel|ecel|lcel|ucel|xcel|otsl)>")
+_HTML_TABLE_RE = re.compile(r"<t(able|d|r)\b", re.IGNORECASE)
 
 
 def _detect_format(text: str) -> str:
@@ -84,6 +88,11 @@ def _has_markdown_table(text: str) -> bool:
     return bool(_MD_TABLE_RE.search(text))
 
 
+def _has_structured_table(text: str) -> bool:
+    """Table captured in ANY structured/convertible form (md grid, OTSL, HTML)."""
+    return bool(_MD_TABLE_RE.search(text) or _OTSL_RE.search(text) or _HTML_TABLE_RE.search(text))
+
+
 def _table_cells_nonempty(text: str) -> bool:
     # at least one grid data row with a non-empty cell (not just separators)
     for line in text.splitlines():
@@ -132,6 +141,7 @@ def score_candidate(run_dir: Path, manifest: list) -> dict:
         }
         if cap == "table":
             row["table_md"] = _has_markdown_table(content) and _table_cells_nonempty(content)
+            row["table_struct"] = _has_structured_table(content)
         if cap == "code":
             row["code_indent"] = _code_indent_score(content)
         rows.append(row)
@@ -164,8 +174,8 @@ def main() -> int:
         return 1
 
     hdr = (
-        f"{'candidate':>16} | {'fmt':>8} {'bbox%':>5} {'parse%':>6} "
-        f"{'tbl_md%':>7} {'code_ind':>8} {'rep%':>5} {'med_lat':>7}"
+        f"{'candidate':>16} | {'fmt':>9} {'bbox%':>5} {'parse%':>6} "
+        f"{'tbl_str%':>8} {'tbl_md%':>7} {'code_ind':>8} {'rep%':>5} {'med_lat':>7}"
     )
     print(hdr)
     print("-" * len(hdr))
@@ -173,21 +183,25 @@ def main() -> int:
         rows = c["rows"]
         fmts = {r["fmt"] for r in rows}
         lat = sorted(r["latency_s"] for r in rows if r.get("latency_s") is not None)
+        has_tbl = any(r["cap"] == "table" for r in rows)
+        has_code = any(r["cap"] == "code" for r in rows)
         print(
-            f"{c['label']:>16} | {('/'.join(sorted(fmts)))[:8]:>8} "
+            f"{c['label']:>16} | {('/'.join(sorted(fmts)))[:9]:>9} "
             f"{_agg(rows,'has_bbox',kind='rate') or 0:>5} "
             f"{_agg(rows,'parseable',kind='rate') or 0:>6} "
-            f"{_agg(rows,'table_md',cap='table',kind='rate') if any(r['cap']=='table' for r in rows) else '-':>7} "
-            f"{_agg(rows,'code_indent',cap='code') if any(r['cap']=='code' for r in rows) else '-':>8} "
+            f"{_agg(rows,'table_struct',cap='table',kind='rate') if has_tbl else '-':>8} "
+            f"{_agg(rows,'table_md',cap='table',kind='rate') if has_tbl else '-':>7} "
+            f"{_agg(rows,'code_indent',cap='code') if has_code else '-':>8} "
             f"{_agg(rows,'repetition',kind='rate') or 0:>5} "
             f"{(lat[len(lat)//2] if lat else '-'):>7}"
         )
     print(
-        "\nLEGEND: bbox%=pages emitting per-element bboxes (structural fit); "
-        "tbl_md%=table pages with a non-empty markdown grid (R2); code_ind=code "
-        "pages with fenced+indented code (R3, 0-1); rep%=pages with a >=8x loop "
-        "(R6); med_lat=median s/page (R8). Semantic completeness/fidelity is the "
-        "separate judged pass."
+        "\nLEGEND: bbox%=pages with per-element bboxes (structural fit); "
+        "tbl_str%=table pages capturing the table in ANY structured/convertible "
+        "form (markdown|OTSL|HTML); tbl_md%=markdown grid specifically (R2); "
+        "code_ind=code pages fenced+indented (R3, 0-1); rep%=pages with a >=8x "
+        "loop (R6); med_lat=median s/page (R8). Semantic fidelity = separate "
+        "judged pass."
     )
     return 0
 
