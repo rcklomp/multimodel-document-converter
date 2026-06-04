@@ -99,17 +99,56 @@ Reuse what exists: `scripts/measure_vlm_page_latency.py` (latency), the v3
 indentation + repetition detectors, the GX10 judge harness
 (`scripts/synthetic_soak.py`).
 
-## 5. Candidate shortlist  `[PENDING - from the deep-research run wf_6a3d73f6-901]`
+## 5. Candidate shortlist  `[from deep-research wf_6a3d73f6-901, 2026-06-04; 24/25 claims verified]`
 
-To be filled from research, grouped by structural fit:
-- **Group A - structured + bbox (keep UIR):** TBD (dots.ocr / MinerU2.5 /
-  Granite-Docling / PaddleOCR-VL ...)
-- **Group B - markdown-first (rearchitect):** TBD (NuMarkdown / olmOCR / GOT-OCR2 ...)
-- **Group C - ceilings (reference only):** TBD (bigger Qwen / cloud frontier)
-- **Baseline:** Qwen3-VL-8B (current), scored identically as the control.
+**Strategic insight from the research:** the strongest candidates are
+*document-specialist* VLMs that are SMALLER than Qwen3-VL-8B (258M-3B), emit
+structure WITH bboxes, and several use a DEDICATED layout-detection stage for
+the bbox (MinerU2.5, PaddleOCR-VL) - which would give us RELIABLE detector
+bboxes, fixing our Blocker-B crop drift AND the table-format problem in one
+move, while KEEPING the UIR architecture. The markdown-first rewrite
+(NuMarkdown) looks like the weaker path.
 
-Pick 3-5 to actually A/B (servability + license + promise). Cloud ceilings run
-only for reference with a cost cap.
+**Group A - structure-preserving (keep UIR, primary A/B):**
+- **MinerU2.5 (1.2B)** - TOP PICK. Decoupled two-stage (global layout ->
+  per-region recognition; the §10 precedent). Leads dots.ocr on OmniDocBench
+  (Overall 90.67, **TableTEDS 88.22**); emits bbox in **0-1000** (our exact
+  scale); MLX + vLLM. Two-stage layout = reliable bboxes. CAVEAT: the "2.12
+  pages/s / 7x" speed is **A100, not MLX** - must measure on M5.
+- **Granite-Docling-258M** - size/speed winner. 258M, **official MLX**, Apache
+  2.0, strong tables (FinTabNet TEDS 0.97 vs SmolDocling 0.82, OCRBench 500 vs
+  338). Outputs **DocTags** -> needs a DocTags->UIR adapter (Docling tooling
+  exists). Tiny -> fast even on M5.
+- **PaddleOCR-VL (0.9B)** - top OmniDocBench (94.5/96.3), bbox from a dedicated
+  RT-DETR layout stage (reliable). CAVEATS: SOTA contested (GLM-OCR reportedly
+  ahead); **MLX serving unverified**; two-stage pipeline integration. SECONDARY
+  (gate on servability).
+- **dots.ocr (3B)** - emits JSON+bbox, MLX via mlx-vlm. DOWNRANKED: **weak on
+  complex tables/formulas** (our #1 need) and its headline OmniDocBench SOTA was
+  **REFUTED (0-3)**. Include only if a slot is free.
+
+**Group B - markdown-first (rearchitect, only if Group A fails):**
+- **NuMarkdown-8B-Thinking** - markdown-ONLY + slow thinking phase (bad on
+  bandwidth-bound M5). The user's candidate; test only if Group A disappoints.
+- **DeepSeek-OCR** - vision-token compression (efficient); CAN emit
+  grounding/layout (not pure markdown) - a possible hybrid; keep as a wildcard.
+
+**Group C - ceilings (reference only, cost-capped):** Qwen3-VL-30B; one cloud
+frontier (Gemini/GPT/Claude vision) for an upper-bound on the hard pages.
+
+**Baseline / control:** Qwen3-VL-8B (current), scored identically.
+
+**Recommended A/B (run these first):** MinerU2.5 + Granite-Docling-258M
+(+ PaddleOCR-VL if servable) vs the Qwen3-VL-8B baseline - all
+structure-preserving, so we test "keep the architecture, fix tables + crop
+drift" BEFORE considering any markdown-first rewrite.
+
+**Hard caveats (the verification earned its keep):** benchmarks are vendor
+self-reported and OmniDocBench is "saturated" - leaderboard rank != performance
+on OUR corpus (German technical tables, magazines, code books). Benchmarks set
+the shortlist; the golden-set A/B is the real test. dots.ocr's SOTA claim was
+refuted; MinerU's speed is A100; PaddleOCR-VL MLX is unverified - all must be
+re-measured on M5.
 
 ## 6. Operator steps (gating the A/B)
 
