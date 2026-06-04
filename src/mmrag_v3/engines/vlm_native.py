@@ -169,6 +169,21 @@ def _int_from_json_head(raw: str, key: str, default: int) -> int:
     return int(m.group(1)) if m else default
 
 
+# A unit (<= 80 chars) repeated this many times in a row is a degenerate VLM
+# generation loop (CarOK p7: "Transporter 1.9 TD 68pk, " x hundreds), not real
+# content. No document legitimately repeats an identical phrase 8+ times
+# consecutively, so collapse the run to a single occurrence. Bounded unit length
+# keeps the backreference scan fast (~6ms on a 17k-char looped row).
+_REPEAT_LOOP_RE = re.compile(r"(.{1,80}?)\1{7,}", re.DOTALL)
+
+
+def _collapse_degenerate_repeats(text: str) -> str:
+    """Collapse a substring repeated >= 8 times in a row to one occurrence."""
+    if not text:
+        return text
+    return _REPEAT_LOOP_RE.sub(r"\1", text)
+
+
 def repair_truncated_json(raw: str) -> Optional[Dict[str, Any]]:
     """Bounded JSON repair (A4): salvage the complete elements of a cut page.
 
@@ -521,6 +536,11 @@ class VlmNativeEngine:
                     element_type = ElementType.TEXT
                     original_vlm_type = type_raw
             content = raw_element.get("content") or ""
+            # Collapse degenerate VLM generation loops (a cell/phrase re-emitted
+            # hundreds of times - CarOK p7 trips TABLE_CORRUPTION). Skip CODE,
+            # which must stay verbatim.
+            if type_raw != "code":
+                content = _collapse_degenerate_repeats(str(content))
             raw_bbox = raw_element.get("bbox")
             normalized_bbox = None
             if raw_bbox is not None:
