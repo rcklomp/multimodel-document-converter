@@ -748,6 +748,11 @@ class Locator:
     bbox: Optional[List[int]] = None  # [x1, y1, x2, y2] in [0, 1000]
     page_number: Optional[int] = None
     coordinate_frame: CoordinateFrame = CoordinateFrame.UNKNOWN
+    # Source page pixel dimensions, carried so IngestionChunk.from_uir can
+    # populate spatial.page_width/page_height without every caller threading
+    # them (a null page dim is a hard TABLE-structural QA failure).
+    page_width: Optional[int] = None
+    page_height: Optional[int] = None
     # For FLOW_OFFSET / DOM_PATH types:
     path: Optional[str] = None  # CFI, DOM XPath, or character offset range
 

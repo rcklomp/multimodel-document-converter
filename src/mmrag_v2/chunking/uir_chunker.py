@@ -396,6 +396,8 @@ def _chunk_page(
                         bbox=tc_bbox,
                         page_number=page.page_number,
                         coordinate_frame=CoordinateFrame.PDF_PAGE_PORTRAIT,
+                        page_width=int(page_w),
+                        page_height=int(page_h),
                     ),
                     confidence=confidence,
                     extraction_method=EXTRACTION_METHOD_UIR,
@@ -476,6 +478,17 @@ def _chunk_page(
 # ---------------------------------------------------------------------------
 
 
+def _page_dims_px(page: UniversalPage) -> Tuple[int, int]:
+    """Page (width, height) in pixels, with the standard Letter fallback.
+
+    Carried onto each Locator so IngestionChunk.from_uir can populate
+    spatial.page_width/page_height (a null page dim is a hard TABLE QA failure).
+    """
+    w = int(page.dimensions[0]) if page.dimensions and page.dimensions[0] else 612
+    h = int(page.dimensions[1]) if page.dimensions and page.dimensions[1] else 792
+    return w, h
+
+
 def _image_element_to_uirchunk(
     element: Element,
     page: UniversalPage,
@@ -489,6 +502,7 @@ def _image_element_to_uirchunk(
     if "asset_path" in element.metadata:
         asset_ref = str(element.metadata["asset_path"])
 
+    pw, ph = _page_dims_px(page)
     return UIRChunk(
         modality=Modality.IMAGE,
         content=element.content or "",
@@ -497,6 +511,8 @@ def _image_element_to_uirchunk(
             bbox=bbox,
             page_number=page.page_number,
             coordinate_frame=CoordinateFrame.PDF_PAGE_PORTRAIT,
+            page_width=pw,
+            page_height=ph,
         ),
         confidence=ConfidenceBreakdown(),
         extraction_method=EXTRACTION_METHOD_UIR,
@@ -514,6 +530,7 @@ def _table_element_to_uirchunk(
 ) -> UIRChunk:
     """Convert a TABLE Element to a UIRChunk."""
     bbox = _element_bbox_list(element)
+    pw, ph = _page_dims_px(page)
     return UIRChunk(
         modality=Modality.TABLE,
         content=element.content or "",
@@ -522,6 +539,8 @@ def _table_element_to_uirchunk(
             bbox=bbox,
             page_number=page.page_number,
             coordinate_frame=CoordinateFrame.PDF_PAGE_PORTRAIT,
+            page_width=pw,
+            page_height=ph,
         ),
         confidence=ConfidenceBreakdown(),
         extraction_method=EXTRACTION_METHOD_UIR,
@@ -543,6 +562,7 @@ def _code_element_to_uirchunk(
     instead of letting it fall back to Docling.
     """
     bbox = _element_bbox_list(element)
+    pw, ph = _page_dims_px(page)
     return UIRChunk(
         modality=Modality.CODE,
         content=element.content or "",
@@ -551,6 +571,8 @@ def _code_element_to_uirchunk(
             bbox=bbox,
             page_number=page.page_number,
             coordinate_frame=CoordinateFrame.PDF_PAGE_PORTRAIT,
+            page_width=pw,
+            page_height=ph,
         ),
         confidence=ConfidenceBreakdown(),
         extraction_method=EXTRACTION_METHOD_UIR,
@@ -568,6 +590,7 @@ def _form_element_to_uirchunk(
 ) -> UIRChunk:
     """Convert a FORM Element to a UIRChunk (key-value / structured layout)."""
     bbox = _element_bbox_list(element)
+    pw, ph = _page_dims_px(page)
     return UIRChunk(
         modality=Modality.FORM,
         content=element.content or "",
@@ -576,6 +599,8 @@ def _form_element_to_uirchunk(
             bbox=bbox,
             page_number=page.page_number,
             coordinate_frame=CoordinateFrame.PDF_PAGE_PORTRAIT,
+            page_width=pw,
+            page_height=ph,
         ),
         confidence=ConfidenceBreakdown(),
         extraction_method=EXTRACTION_METHOD_UIR,

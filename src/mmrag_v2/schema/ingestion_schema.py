@@ -806,10 +806,14 @@ class IngestionChunk(BaseModel):
                     "cannot project to IngestionChunk (page_number is required)"
                 )
             page_number = int(uir.locator.page_number)
+            # Page dims: prefer the explicit param, else the Locator's stamped
+            # dims (the chunker carries them). A null page dim is a hard TABLE
+            # structural QA failure, so this is the single source that fixes it
+            # for every caller without each having to thread the dimensions.
             spatial = SpatialMetadata(
                 bbox=list(uir.locator.bbox) if uir.locator.bbox else None,
-                page_width=page_width,
-                page_height=page_height,
+                page_width=page_width if page_width is not None else uir.locator.page_width,
+                page_height=(page_height if page_height is not None else uir.locator.page_height),
             )
         else:
             if uir.locator.page_number is None:
