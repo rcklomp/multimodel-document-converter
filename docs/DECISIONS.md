@@ -2525,3 +2525,29 @@ batch_size=1 for dense docs, a `VLM_NATIVE_TIMEOUT` env, distinguishing
 ReadTimeout (slow page) from ConnectTimeout (node down) in the breaker, or A5 to
 cut per-call latency. Not changed this cycle (B4 is a fail-open boundary; the
 batch-size knob is operator-side).
+
+---
+
+## V3.1 dense-page VLM timeout (2026-06-04)
+
+**Decision:** Raise the V3 extraction VLM read timeout default 180 -> 600s, wire
+`VLM_NATIVE_TIMEOUT`, and cap read-timeout retries at 1.
+
+**Evidence:** Per-page measurement of Combat Aircraft interior pages
+(`scripts/measure_vlm_page_latency.py`). At 180s: median 265s, 9/13 over 180s,
+5/13 fully timed out (547s = 3x180s retries) producing nothing (~46% page loss).
+At 600s: 13/13 ok, zero hangs, previously-failed pages complete at ~248s = 8192
+tokens (A2 budget floor) / M5 ~33 tok/s. The 180s default physically could not
+fit normal dense-page generation; it was guillotining, not catching a pathology.
+
+**Why not the alternatives:** Image density does NOT predict latency (slow pages
+span 1-4 images; a 1-image/153-char page took 287s), so density-keyed batch
+sizing would target the wrong pages. A5 (per-region) and a render-DPI cut are
+unnecessary for correctness because nothing hangs - the only problem was the
+timeout. Batch-size blast-radius insurance is moot once pages stop failing.
+
+**Contract:** `tests/test_v3_vlm_timeout.py` - env wiring + the read-timeout
+1-attempt cap (connect faults keep full `max_retries`; all terminal cases still
+raise `VlmInfraError`, so the B4 circuit-breaker contract is unchanged, not
+amended). 600s is a ceiling, not a target: fast cloud endpoints still return in
+seconds. Slower-decode / very text-dense workloads can raise it via the env.

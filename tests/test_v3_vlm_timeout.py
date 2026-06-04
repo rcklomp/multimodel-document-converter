@@ -55,9 +55,11 @@ def test_timeout_env_default_and_invalid(monkeypatch):
     monkeypatch.setenv("VLM_NATIVE_ENDPOINT", "http://macbook-pro-m5.lan:8000/v1")
     monkeypatch.setenv("VLM_NATIVE_MODEL", "Qwen3-VL")
     monkeypatch.delenv("VLM_NATIVE_TIMEOUT", raising=False)
-    assert VlmProviderConfig.from_env().timeout_seconds == 180.0
+    # Default raised 180 -> 600 (2026-06-04 dense-doc measurement: 8192-token
+    # pages need ~248s on M5, which 180s guillotined).
+    assert VlmProviderConfig.from_env().timeout_seconds == 600.0
     monkeypatch.setenv("VLM_NATIVE_TIMEOUT", "not-a-number")
-    assert VlmProviderConfig.from_env().timeout_seconds == 180.0
+    assert VlmProviderConfig.from_env().timeout_seconds == 600.0
     # Floored at a sane minimum.
     monkeypatch.setenv("VLM_NATIVE_TIMEOUT", "0")
     assert VlmProviderConfig.from_env().timeout_seconds == 10.0

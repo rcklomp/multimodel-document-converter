@@ -30,10 +30,17 @@ ruff/black on changed files, and `scripts/smoke_production.sh`
   + `docs/paper/FINDINGS_LOG.md` (2026-06-03).
 - **A5 (per-region) NOT built** - gated on A1-A4 not clearing the fallback rate;
   they cleared it.
-- **Residual (flagged, OUT of §9.1 scope):** an occasional ultra-dense page still
-  exceeds the 180s client read timeout; under batch=10 the breaker (correctly,
-  B4) sinks the batch. Operator/throughput-side fix (batch=1 for dense docs, a
-  `VLM_NATIVE_TIMEOUT` env, ReadTimeout-vs-ConnectTimeout split, or A5).
+- **Dense-page TIMEOUT failure - RESOLVED (2026-06-04).** A follow-up per-page
+  measurement of Combat Aircraft INTERIOR pages corrected an over-optimistic
+  read: at the 180s default, dense interior pages lost ~46% (median 265s, 5/13
+  fully timed out). Root cause was a budget x decode-speed mismatch - 8192-token
+  pages need ~248s on M5, which 180s guillotined - NOT a hang and NOT predicted
+  by image density. Fix shipped: `VLM_NATIVE_TIMEOUT` wired into `from_env` +
+  default raised 180 -> 600s + read-timeout retries capped at 1 (B4 intact).
+  Re-measure: **13/13 ok, 0 loss**. A5 / DPI cut / density-keyed batch sizing are
+  unnecessary for correctness (nothing hangs). See DECISIONS.md + FINDINGS_LOG
+  2026-06-04. NOTE: this corrects the framing above - A1-A4 cleared Blocker A's
+  JSON-VALIDITY half; this timeout failure was a separate dense-page issue.
 - **Crucible re-run / Grand Soak: still NOT run** - re-run the bounded crucible
   subset (`batch_size=1` for dense docs, structured output off) to confirm the
   acceptance criteria at corpus scale before any Grand Soak.

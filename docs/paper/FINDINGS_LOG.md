@@ -723,6 +723,51 @@ breaker, or A5 to cut per-call latency. Not changed this cycle.
 
 ---
 
+## 2026-06-04 - The dense-page "timeout" was a budget x decode-speed mismatch, not a hang  `[Results][Method][Lessons]`
+
+Follow-up to the 2026-06-03 residual. Measured Combat Aircraft INTERIOR pages
+(24-36) per-page through the V3 router on M5 (`scripts/measure_vlm_page_latency.py`),
+which corrected an over-optimistic read: the earlier "json_schema-off cleared it"
+was a LEADING-page artifact (covers/TOC are light, 23-88s). Interior feature
+pages at the 180s default: median 265s, **9/13 over 180s, 5/13 fully timed out
+(547s = 3x180s retries) producing nothing** - i.e. a ~46% silent page loss that
+the leading-page runs hid.
+
+**The hypothesis we were about to build was wrong.** Image density does NOT
+predict latency: the slow pages span 1-4 images; a 1-image / 153-char page took
+287s and failed while a 3-image page took 70s and passed. So "adaptive batch
+size by image density" would have shrunk batches for the wrong pages. The real
+driver is vision prefill + generation length, invisible to the cheap pre-flight
+signals.
+
+**Root cause: a budget x decode-speed x timeout mismatch.** Re-measuring the same
+13 pages at `VLM_NATIVE_TIMEOUT=600` (+ read-timeout retries capped at 1): **13/13
+ok, zero hangs**, and the previously-failed pages all completed at **~248s**. That
+number is the tell - 8192 tokens (the A2 budget floor) at M5's ~33 tok/s is ~248s,
+which physically cannot finish inside 180s. The old timeout wasn't catching a
+pathology; it was guillotining normal dense-page generation.
+
+**Resolution (shipped):** `VLM_NATIVE_TIMEOUT` wired into `VlmProviderConfig.from_env`
+and the hardcoded default raised 180 -> 600s (a ceiling, not a target - cloud
+endpoints still return in seconds). Read timeouts now get a dedicated 1-attempt
+cap (a heavy page would just blow the same timeout again; connect faults keep the
+full `max_retries`; all terminal cases still raise `VlmInfraError`, B4 intact).
+
+**What this buys / costs:** dense-doc interior page loss ~46% -> 0. A5 (per-region),
+a render-DPI cut, and density-keyed batch sizing are all UNNECESSARY for
+correctness - nothing hangs, so there is nothing to bound or insure against.
+Cost: dense pages are ~250s each, so a full magazine is multi-hour (already known)
+- but now with zero page loss. **Correction to the 2026-06-03 entry: Blocker A's
+JSON-VALIDITY half was cleared by A1-A4, but a separate dense-page TIMEOUT failure
+dominated interior pages; that is what this entry resolves.**
+
+**Lesson:** measure the hard case fully before designing for it. A plausible,
+intuitive knob (batch size by image density) was killed by 13 pages of data, and
+the actual fix was a one-line coupling (budget/decode-speed/timeout) that no
+amount of density-classification would have found.
+
+---
+
 ## Backfill backlog (remaining threads — to expand when drafting)
 
 *Covered above as of 2026-05-30:* V1→V2 lineage · V2 metrics trajectory · V2

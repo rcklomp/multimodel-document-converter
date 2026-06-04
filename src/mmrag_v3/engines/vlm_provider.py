@@ -172,7 +172,14 @@ class VlmProviderConfig:
     endpoint: str
     model: str
     api_key: Optional[str] = None
-    timeout_seconds: float = 180.0
+    # Per-call read timeout. 600s, not the old 180s: the 2026-06-04 dense-doc
+    # measurement (Combat Aircraft interior pages) showed dense pages generate
+    # to the 8192-token budget cap, which at M5's ~33 tok/s is ~248s and CANNOT
+    # finish inside 180s - 180s silently failed ~46% of interior pages while
+    # 600s completed 13/13 (max observed 249s, with headroom for slower decode).
+    # It is a ceiling, not a target: fast cloud endpoints still return in
+    # seconds. Override via ``VLM_NATIVE_TIMEOUT``.
+    timeout_seconds: float = 600.0
     max_retries: int = 3
     retry_backoff_seconds: float = 2.0
     temperature: float = 0.0
@@ -241,10 +248,9 @@ class VlmProviderConfig:
                 pass
 
         # ``VLM_NATIVE_TIMEOUT`` (seconds) - the per-call read timeout for the V3
-        # extraction VLM. The hardcoded 180s default is too tight for dense
-        # interior magazine pages (2026-06-03 measurement: median ~265s), which
-        # silently fail under it; this env makes it tunable for the bandwidth-rich
-        # M5 path without touching the CLI's separate (legacy-refiner) --vlm-timeout.
+        # extraction VLM. The default is now 600s (see the config field); this env
+        # tunes it per-run without touching the CLI's separate (legacy-refiner)
+        # --vlm-timeout. Raise it for slower-decode/text-dense workloads.
         timeout_raw = (os.environ.get("VLM_NATIVE_TIMEOUT") or "").strip()
         timeout_seconds = cls.timeout_seconds  # type: ignore[attr-defined]
         if timeout_raw:
