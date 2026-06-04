@@ -185,3 +185,52 @@ re-measured on M5.
 - [ ] Build the harness (§4).
 - [ ] Operator serves the shortlist.
 - [ ] Run A/B, score, decide.
+
+## 10. RESULT (2026-06-05): MinerU2.5 wins; topology stays Config C
+
+Empirical A/B on the 15-page golden set (M5 + GX10), deterministic scorecard:
+
+| candidate | fmt | bbox% | tbl_struct% | rep% | med s/page | verdict |
+|---|---|---|---|---|---|---|
+| **mineru_mlx (M5 native)** | json | 100 | 67 | 7 | **6.8** | **WINNER** |
+| mineru_pipeline (M5 MPS) | json | 100 | 67 | 7 | 26.7 | same quality, 4x slower path |
+| granite_docling (M5 MLX) | doctags | 100 | 83 | 7 | 2.1 | fastest, but EMPTIES dense tables (CarOK) -> not viable |
+| paddleocr_vl | markdown | 7 | 0 | 20 | 2.8 | needs full pipeline for bbox/tables |
+| qwen_baseline (M5 server) | markdown | 93 | 0 | 27 | 25.3 | the baseline failure (tables 0%) |
+
+Key findings:
+- **MinerU2.5 is the extractor.** Two-stage (layout detector -> per-region recognition)
+  emits per-element JSON with NORMALIZED [0,1] bboxes + rich typing (header/title/
+  text/code/table/figure...) -> near-drop-in for UIR (x1000 = our frame). Detector
+  bboxes are RELIABLE -> fixes Blocker-B crop drift. Built-in anti-repetition
+  (no_repeat_ngram_size=100) -> 7% vs Qwen 27%. Reads the DENSE tables Qwen empties
+  (CarOK full <table>). Use the Apache-2.0 **Pro** variant (`opendatalab/
+  MinerU2.5-Pro-2604-1.2B`); the 2509 base is AGPL-3.0.
+- **Granite-Docling (Apache-2.0, MLX-native, 2.1s)** is excellent on moderate pages
+  but its 258M model EMPTIES the dense CarOK spreadsheet -> re-introduces our #1
+  failure. Not viable as primary; possible fast-path in a future hybrid.
+- **mlx-engine fix (the unlock):** mineru-vl-utils mlx backend crashed
+  (`mlx.array == None`) because mlx_vlm 0.3.12 dropped `image_token_id` through
+  mineru's config rewrite. One-line fix: after constructing
+  `MinerUClient(backend="mlx-engine", model_path="mlx-community/MinerU2.5-2509-1.2B-bf16")`,
+  set `client.client.model.config.image_token_id = 151655` (Qwen2-VL `<|image_pad|>`)
+  and `video_token_id = 151656`, plus
+  `mlx_vlm.utils.MODEL_REMAPPING["qwen2_vl_text"]="qwen2_vl"`. Env: isolated venv on
+  the M5 with `mlx-vlm==0.3.12`, `mlx<=0.31.1`, `mineru-vl-utils`, torch+torchvision
+  (processor dep), `transformers<5`. Result: native MLX two_step_extract at 3-12s/page.
+
+## 11. Hardware topology decision (2026-06-05): Config C (no reshuffle)
+
+Measured the 3 deciding numbers:
+- **M5 native MinerU = fast** (6.8s median; the "M5 is slow" premise was the mlx-engine
+  bug, now fixed).
+- **GX10 = 44GB free** with the judge healthy (co-location feasible, but unneeded).
+- **Mac Mini = no SSH + production embedder** -> locked to the embedder role.
+
+**Decision: Extraction=MinerU2.5(M5 native MLX), Judge=GX10, Embedder=Mac Mini** -
+i.e. the current topology with MinerU swapped in for Qwen3-VL. Contention-free
+(each workload isolated; embedder active both phases so it sits alone), no judge
+re-quant/re-calibration. The judge->Mac-Mini swap is dominated (judge+embedder
+collide during soaks + re-cal cost). **Config F** (parallel extraction on M5+GX10,
+judge time-shared on GX10 across phases) remains an OPTIONAL throughput upgrade for
+the full corpus/Grand Soak; not needed for correctness.
