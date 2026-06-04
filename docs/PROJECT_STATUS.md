@@ -1,6 +1,40 @@
 # Project Status
 
-Last updated: 2026-06-03 (PM - blocker remediation shipped)
+Last updated: 2026-06-04 (bounded crucible subset PASSES 4/4)
+
+## Current state (2026-06-04) - bounded crucible subset MEETS §9.1 acceptance
+
+The bounded crucible subset - one doc per class that failed the 2026-06-02 soak
+(CombatAircraft dense-magazine interior, CarOK spreadsheet/tables, Form_0013
+scanned form, FluentPython code) - now passes end-to-end through the shipping
+HybridEngine on M5:
+
+- **4/4 docs `status=ok`, 0 failed, 0 Docling fallbacks, all `CROP_AUDIT_PASS`.**
+- QA gate: CarOK / FluentPython / Form `QA_PASS`; Combat `QA_PASS_WITH_ADVISORIES`
+  (0 failures; one `ASSET_TINY` advisory on small logo crops).
+- Acceptance criteria met: dense-page whole-page JSON fallback ~0 (was ~58%);
+  crop-audit drift cleared (was 40-50%).
+
+Five fixes this cycle closed the gap, each one a deeper layer of the SAME 8B-VLM
+repetition pathology surfaced only by running the hardest pages (charter §2.3):
+1. page-dim propagation into chunk spatial metadata (`297a384`) - the hard TABLE
+   structural fail;
+2. within-page text dedup (`a7ddc07`) + completion to exact-any-length
+   (`77aa2ec`) - chunk-level repetition (DUPLICATE_LONG_TEXT + the stricter
+   universal byte-equal gate + the page-chunk outlier);
+3. VLM sampling repetition penalty (`0b15a48`) - source-side curb;
+4. partial-first-element salvage (`93dac05`) - premature-EOS mid-table truncation
+   (the 5 CarOK Docling fallbacks);
+5. degenerate-repetition collapse (`64cf109`) - within-cell loops (CarOK's
+   13,955-char looped row -> TABLE_CORRUPTION).
+Earlier in the cycle: the `VLM_NATIVE_TIMEOUT` 180->600s fix and the
+json_schema-off self-hosted default (see the 2026-06-03 entry below).
+
+- **Next:** the §9.2 full crucible (all ~18 docs) at corpus scale, then the Grand
+  Soak with a page-hour budget. Both still NOT run; the bounded subset is the
+  gate that precedes them.
+
+## Prior state (2026-06-03 PM - blocker remediation shipped)
 
 ## Current state (2026-06-03 PM) - Charter §9.1 remediation SHIPPED
 

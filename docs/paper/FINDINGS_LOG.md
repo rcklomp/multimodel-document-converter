@@ -768,6 +768,46 @@ amount of density-classification would have found.
 
 ---
 
+## 2026-06-04 - Bounded crucible passes 4/4: the dense-doc failure was ONE pathology in five layers  `[Results][Lessons]`
+
+Ran the bounded crucible subset (one doc per class that failed the 2026-06-02
+soak: CombatAircraft dense-magazine interior 20p, CarOK spreadsheet 12p,
+Form_0013 scanned form 1p, FluentPython code 15p) through the shipping
+HybridEngine on M5. First pass: 0/4 QA_PASS despite the timeout fix - the gate
+caught real defects (its job). Three iterations later: **4/4 (Combat
+QA_PASS_WITH_ADVISORIES, rest QA_PASS), 0 Docling fallbacks, all CROP_AUDIT_PASS.**
+
+The headline lesson: the dense-doc failure was never a set of independent bugs -
+it was **one 8B-VLM repetition pathology observed at five depths**, and each
+depth was invisible until the previous fix exposed it on the real hard pages:
+1. a plumbing gap (page dims null -> hard TABLE QA fail) - found only because the
+   gate ran on real TABLE chunks;
+2. whole-chunk repetition (a Combat heading 10x) -> within-page long-text dedup;
+3. the STRICTER universal gate (any byte-equal within-page text dupe, no length
+   floor) -> dedup completion to exact-any-length, which also cleared the
+   page-chunk outlier (the outlier WAS the short dups);
+4. premature-EOS mid-table truncation (5 CarOK pages, finish_reason=stop, one
+   giant unterminated string) -> partial-first-element salvage (recovered 211 /
+   125 markdown rows vs 0 -> Docling);
+5. within-CELL loops (CarOK "Transporter 1.9 TD 68pk, " x hundreds = a 13,955
+   -char row -> TABLE_CORRUPTION) -> bounded degenerate-repetition collapse
+   (17k-char row -> max_row 405 in ~6ms).
+
+Method notes that paid off: (a) capturing the RAW VLM bytes settled every
+diagnosis - "unterminated string at char 150" looked like an escaping bug until
+the tail showed mid-table EOS; (b) replaying the gate logic OFFLINE on the
+existing run's chunks predicted the dedup-completion effect (dupe-excess 23->0,
+p16 52->29) without an 85-min re-run; (c) the chunk-vs-cell distinction matters -
+dedup fixes repeated CHUNKS, the collapser fixes repetition INSIDE one chunk, and
+the salvage fixes the truncation the loop ends in. Each tool is necessary and
+none subsumes another.
+
+Acceptance: dense-page whole-page JSON fallback ~58% -> 0; crop drift 40-50% ->
+CROP_AUDIT_PASS. Gate to the §9.2 full crucible (~18 docs) + the Grand Soak,
+both still un-run.
+
+---
+
 ## Backfill backlog (remaining threads — to expand when drafting)
 
 *Covered above as of 2026-05-30:* V1→V2 lineage · V2 metrics trajectory · V2
