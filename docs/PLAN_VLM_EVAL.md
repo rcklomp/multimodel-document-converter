@@ -234,3 +234,43 @@ re-quant/re-calibration. The judge->Mac-Mini swap is dominated (judge+embedder
 collide during soaks + re-cal cost). **Config F** (parallel extraction on M5+GX10,
 judge time-shared on GX10 across phases) remains an OPTIONAL throughput upgrade for
 the full corpus/Grand Soak; not needed for correctness.
+
+## 12. Config F measurement (2026-06-05): GX10 vLLM throughput vs M5
+
+Measured MinerU2.5-2509-1.2B served via vanilla vllm-openai on the GX10 (Docker,
+port 8001, gpu-memory-utilization 0.15, co-resident with the judge on 8000),
+driven from the M5 over LAN via mineru-vl-utils http-client over the 15-page
+golden set. MinerU2.5 is `Qwen2VLForConditionalGeneration` -> served by stock
+vLLM, no custom code; image_token_id already in config (the mlx-engine bug is
+mlx-only).
+
+| metric | M5 (mlx native) | GX10 (vLLM, c=8) | note |
+|---|---|---|---|
+| latency, single page (median) | **6.8s** | 13.4s | M5 ~2x faster = the 546 vs 273 GB/s bandwidth ratio; decode is bandwidth-bound |
+| throughput, batched | 0.147 p/s | **0.34 p/s** | **GX10 2.3x faster**: vLLM continuous-batches, mlx-engine is sequential |
+
+GX10 sequential per-page: 3.7-35.2s (dense CarOK/AIOS pages are the 30s+ tails;
+they amortize under concurrency -> 44.2s total for 15 pages). 15/15 OK.
+
+**Throughput ranking (corpus-scale, fair):**
+1. **Config F (M5 mlx + GX10 vLLM in parallel): ~0.49 p/s** (= 0.147 + 0.34; 3.3x M5-alone)
+2. GX10 vLLM alone: 0.34 p/s (2.3x M5-alone)
+3. M5 mlx alone: 0.147 p/s (latency-optimal, 6.8s/page)
+
+At 1000 pages: M5-alone ~1.9h, GX10-alone ~0.8h, Config F ~0.57h.
+
+Phase-contention check PASSES: the judge runs in the EVAL phase, idle during
+INGESTION, so GX10 extraction during a soak's ingest phase is compute-contention-
+free (judge holds memory at 0.60, MinerU fits in 0.15; 44GB headroom).
+
+**Decision (refines §11):**
+- **Config C (M5 extraction) stays the DEFAULT** - simplest, latency-optimal, no
+  GX10 dependency, best for interactive/single-doc and small jobs.
+- For **corpus-scale reconversion / Grand Soak**, route extraction to the **GX10
+  vLLM** (2.3x the M5 alone, frees the M5) or **Config F** (3.3x, both boxes).
+  GX10-alone is the better cost/complexity point than Config F unless ingest
+  wall-time is a hard bottleneck (Config F needs a 2-endpoint work-split
+  dispatcher; we already drive MinerU over HTTP so the delta is small).
+- Net: the "extract on the bandwidth-king M5" rule is a LATENCY rule, not a
+  throughput rule. Pick the box by the job: M5 for latency, GX10/Config F for
+  batch throughput.
