@@ -21,6 +21,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -110,6 +111,64 @@ def _recover_complete_elements(raw: str) -> List[Dict[str, Any]]:
     return out
 
 
+def _salvage_partial_first_element(raw: str) -> Optional[Dict[str, Any]]:
+    """Recover the partial FIRST element of a page cut mid-content.
+
+    The 2026-06-04 crucible found the VLM gives up mid-generation on long dense
+    tables (premature EOS, finish_reason=stop) - the single giant table element
+    is left as an unterminated string, so there are ZERO complete elements and
+    A4's complete-element recovery returns nothing (-> Docling, which drops most
+    spreadsheet rows). This salvages that one element's ``type`` + the partial
+    ``content`` (the markdown table built so far) so the data survives.
+
+    Gives the element a near-full-page bbox (the page dims live in the intact
+    JSON head; a ~2% inset avoids a false crop-audit edge-clamp) so an IMAGE/
+    TABLE salvage still satisfies QA-CHECK-05. Returns None when nothing
+    meaningful is recoverable.
+    """
+    key = raw.find('"content"')
+    if key == -1:
+        return None
+    colon = raw.find(":", key)
+    if colon == -1:
+        return None
+    open_q = raw.find('"', colon + 1)
+    if open_q == -1:
+        return None
+    body = raw[open_q + 1 :]
+    # Drop a trailing incomplete escape so the string decode does not choke.
+    if body.endswith("\\"):
+        body = body[:-1]
+    try:
+        content = json.loads('"' + body + '"', strict=False)
+    except (json.JSONDecodeError, ValueError):
+        content = (
+            body.replace("\\n", "\n").replace("\\t", "\t").replace('\\"', '"').replace("\\\\", "\\")
+        )
+    if not content.strip():
+        return None
+    # Type: the last "type": "..." before the content key (the element being cut).
+    type_match = None
+    for type_match in re.finditer(r'"type"\s*:\s*"(\w+)"', raw[:key]):
+        pass
+    elem_type = type_match.group(1) if type_match else "text"
+    width = _int_from_json_head(raw, "width", 1000)
+    height = _int_from_json_head(raw, "height", 1000)
+    inset_x, inset_y = int(width * 0.02), int(height * 0.02)
+    return {
+        "type": elem_type,
+        "content": content,
+        "bbox": [inset_x, inset_y, width - inset_x, height - inset_y],
+        "confidence": 0.5,
+        "source_label": "salvaged_partial",
+    }
+
+
+def _int_from_json_head(raw: str, key: str, default: int) -> int:
+    m = re.search(rf'"{key}"\s*:\s*(\d+)', raw)
+    return int(m.group(1)) if m else default
+
+
 def repair_truncated_json(raw: str) -> Optional[Dict[str, Any]]:
     """Bounded JSON repair (A4): salvage the complete elements of a cut page.
 
@@ -117,9 +176,11 @@ def repair_truncated_json(raw: str) -> Optional[Dict[str, Any]]:
     truncated or malformed, recover the N complete elements (dropping the
     partial trailing one) instead of discarding the whole page to a Docling
     fallback. Partial vision-native extraction beats full Docling fallback on
-    a dense page. Returns a payload dict carrying just the recovered elements
-    (page_number/width/height are supplied by the adapter, not the payload),
-    or ``None`` when nothing parseable can be recovered.
+    a dense page. When there are NO complete elements (the first/only element
+    was cut mid-content - the dense-spreadsheet premature-EOS case), salvage
+    that partial element's content. Returns a payload dict carrying the
+    recovered elements (page_number/width/height are supplied by the adapter,
+    not the payload), or ``None`` when nothing parseable can be recovered.
     """
     try:
         payload = json.loads(raw)
@@ -128,6 +189,10 @@ def repair_truncated_json(raw: str) -> Optional[Dict[str, Any]]:
     except json.JSONDecodeError:
         pass
     elements = _recover_complete_elements(raw)
+    if not elements:
+        partial = _salvage_partial_first_element(raw)
+        if partial is not None:
+            elements = [partial]
     if not elements:
         return None
     return {"elements": elements}
