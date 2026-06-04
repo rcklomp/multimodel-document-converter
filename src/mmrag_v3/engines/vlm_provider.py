@@ -191,6 +191,14 @@ class VlmProviderConfig:
     # The VLM path scales above this per page via describe(max_tokens=...)
     # (A2). Override via env or constructor if a backend needs more.
     max_completion_tokens: int = 8192
+    # Sampling repetition penalty (mlx-vlm / mlx_lm native; >1.0 discourages
+    # token repetition). The 2026-06-04 crucible found the VLM LOOPS on dense
+    # pages - re-emitting the same paragraph until it hits the token cap (which
+    # also inflates latency and under-extracts the real content). A mild penalty
+    # curbs that at the source; the chunker's within-page dedup is the safety
+    # net. Only sent when > 1.0; folded into the fail-open 400-strip so a backend
+    # that rejects it degrades gracefully. Defaulted endpoint-aware in from_env.
+    repetition_penalty: Optional[float] = None
     # Whether to send the OpenAI ``response_format={"type":"json_object"}``
     # hint. OpenAI / OpenRouter honor it; many self-hosted servers
     # (mlx-vlm, some vLLM builds) reject it with HTTP 400 instead of
@@ -259,6 +267,22 @@ class VlmProviderConfig:
             except ValueError:
                 pass
 
+        # Repetition penalty: default a mild 1.1 for self-hosted (the mlx-vlm /
+        # vLLM targets that loop on dense pages), off for cloud (OpenAI/OpenRouter
+        # use frequency_penalty, a different param). ``VLM_NATIVE_REPETITION_
+        # PENALTY`` overrides; a value <= 1.0 (or "off"/"none") disables it.
+        is_hosted_cloud_rp = ("openrouter.ai" in endpoint) or ("openai.com" in endpoint)
+        repetition_penalty: Optional[float] = None if is_hosted_cloud_rp else 1.1
+        rp_raw = (os.environ.get("VLM_NATIVE_REPETITION_PENALTY") or "").strip().lower()
+        if rp_raw in ("off", "none", "0"):
+            repetition_penalty = None
+        elif rp_raw:
+            try:
+                val = float(rp_raw)
+                repetition_penalty = val if val > 1.0 else None
+            except ValueError:
+                pass
+
         # response_format hint: default on for OpenAI/OpenRouter (which
         # honor it), off for everything else (self-hosted mlx-vlm/vLLM
         # servers 400 on the bare json_object). Explicit
@@ -296,6 +320,7 @@ class VlmProviderConfig:
             max_completion_tokens=max_tokens,
             send_response_format=send_rf,
             structured_output_mode=mode,
+            repetition_penalty=repetition_penalty,
         )
 
 
@@ -388,11 +413,14 @@ class VlmProvider:
             "max_tokens": budget,
         }
         # A3: constrain the decode (json_schema/guided_json) when configured.
-        # ``structured_active`` lets the loop strip the field and retry on a
-        # 400 from a backend that does not support it (fail-open).
+        # Plus the optional repetition penalty (#2). Both are "optional" params a
+        # backend may reject with a 400; ``optional_params_active`` lets the loop
+        # strip them and retry on a 400 (fail-open).
         structured_fields = self._structured_output_fields() if response_format_json else {}
         payload.update(structured_fields)
-        structured_active = bool(structured_fields)
+        if self.config.repetition_penalty and self.config.repetition_penalty > 1.0:
+            payload["repetition_penalty"] = float(self.config.repetition_penalty)
+        optional_params_active = bool(structured_fields) or ("repetition_penalty" in payload)
 
         headers = {"Content-Type": "application/json"}
         if self.config.api_key:
@@ -529,20 +557,22 @@ class VlmProvider:
                         attempt,
                         self.config.max_retries,
                     )
-                elif response.status_code == 400 and structured_active:
-                    # A3 fail-open: the endpoint rejected the structured-output
-                    # field. Strip it and retry with the prompt-only JSON
-                    # contract rather than hard-failing the page.
-                    structured_active = False
+                elif response.status_code == 400 and optional_params_active:
+                    # A3 + #2 fail-open: the endpoint rejected an optional param
+                    # (structured-output field or repetition_penalty). Strip them
+                    # and retry with the plain prompt-only request rather than
+                    # hard-failing the page.
+                    optional_params_active = False
                     payload.pop("response_format", None)
                     payload.pop("guided_json", None)
+                    payload.pop("repetition_penalty", None)
                     last_error = VlmProviderError(
-                        f"structured output rejected (400): {response.text[:200]}"
+                        f"optional params rejected (400): {response.text[:200]}"
                     )
                     last_was_infra = False
                     logger.warning(
-                        "VLM endpoint rejected structured output (400, attempt "
-                        "%d/%d); retrying without it (prompt-only JSON contract)",
+                        "VLM endpoint rejected optional params (400, attempt "
+                        "%d/%d); retrying without them (plain prompt-only request)",
                         attempt,
                         self.config.max_retries,
                     )
