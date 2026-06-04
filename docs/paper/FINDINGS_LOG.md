@@ -808,6 +808,42 @@ both still un-run.
 
 ---
 
+## 2026-06-04 - Full crucible (16 docs, 8 classes): the cycle's fixes held; VLM table FORMAT is the next wall  `[Results][Lessons]`
+
+Ran the 16-doc full crucible (all 8 categories; big docs sliced ~25 interior
+pages; 285 pages, 224 VLM-routed; 3.9h on M5). Purpose: validate this cycle's
+dense-doc fixes at corpus scale AND surface the next layer. Both happened.
+
+HELD AT SCALE (the validation): 0 Docling fallbacks across all 224 VLM pages, 0
+within-page repetition dupes, salvage/timeout/dedup/collapser stable. 10/15
+extracted docs pass (8 QA_PASS + 2 advisories). The repetition pathology that
+dominated the bounded subset is closed corpus-wide.
+
+THE NEW WALL: every one of the 5 QA_FAILs is the SAME new failure -
+`table_markdown_ratio < 0.80`: the VLM does not reliably emit tables as markdown
+grids (Firearms 0%, Grundlagen 0%, Hybrid-EV 17%, AIOS 63%, FluentPython 75%).
+It describes some tables as prose, or detects a table region and emits EMPTY
+content (AIOS 2/8, Grundlagen 1/1, Hybrid-EV 1/6). This is a VLM prompt-
+COMPLIANCE problem, a different axis from the JSON-VALIDITY and REPETITION
+problems this cycle solved - and it only showed up once the corpus widened past
+magazines/code into spec tables, parts lists, and German technical tables.
+
+Secondary: crop-audit fired QA_WARN_CROP_DRIFT on the photography book
+(DigitaleFotografie 42% edge-clamp) and an academic paper (Hybrid-EV 68%
+edge-clamp) - almost certainly edge-clamp FALSE POSITIVES on legitimate
+full-bleed art, i.e. the heuristic (not the extraction) needs review. One hard
+render crash (Kimothi, fitz bandwriter, transient - all pages render fine
+solo) argues for a fail-open render guard.
+
+Lesson: each corpus-widening exposes the next-weakest axis. JSON validity ->
+repetition -> now table-format compliance. The bounded subset (4 docs) could not
+have found the table-format wall because its one table doc (CarOK) happened to
+emit markdown. Breadth finds class-specific failures depth cannot - both passes
+are necessary, in that order (fix the hard cases deep, then widen to find the
+next axis).
+
+---
+
 ## Backfill backlog (remaining threads — to expand when drafting)
 
 *Covered above as of 2026-05-30:* V1→V2 lineage · V2 metrics trajectory · V2

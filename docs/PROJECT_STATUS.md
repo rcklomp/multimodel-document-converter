@@ -30,9 +30,38 @@ repetition pathology surfaced only by running the hardest pages (charter §2.3):
 Earlier in the cycle: the `VLM_NATIVE_TIMEOUT` 180->600s fix and the
 json_schema-off self-hosted default (see the 2026-06-03 entry below).
 
-- **Next:** the §9.2 full crucible (all ~18 docs) at corpus scale, then the Grand
-  Soak with a page-hour budget. Both still NOT run; the bounded subset is the
-  gate that precedes them.
+## §9.2 full crucible (2026-06-04) - this cycle's fixes HELD; a new layer surfaced
+
+Ran a 16-doc crucible across all 8 categories (big docs sliced to ~25 interior
+pages, small full; 285 pages, 224 VLM-routed; 3.9h on M5, resilient breaker).
+
+**This cycle's fixes held at corpus scale:** 0 Docling fallbacks across all 224
+VLM pages, 0 within-page repetition dupes, salvage/timeout/dedup all stable.
+**10/15 extracted docs pass** (8 QA_PASS + 2 QA_PASS_WITH_ADVISORIES).
+
+**The broader corpus surfaced a NEW layer of work (next cycle, needs
+prioritization) - all in VLM output QUALITY, not the fixed failure modes:**
+1. `table_markdown_ratio < 0.80` (all 5 fails: Firearms 0%, Grundlagen 0%,
+   Hybrid-EV 17%, AIOS 63%, FluentPython 75%) - the VLM does not always format
+   tables as markdown grids. The dominant new failure.
+2. Empty TABLE content (AIOS 2/8, Grundlagen 1/1, Hybrid-EV 1/6) - a table
+   region detected but emitted with empty content -> TABLE_CORRUPTION /
+   table_placeholder_ratio.
+3. Crop drift on full-bleed / photo content (DigitaleFotografie 42% edge-clamp,
+   Hybrid-EV 68% edge-clamp, HarryPotter 33% blank) - likely crop-audit
+   edge-clamp FALSE POSITIVES on legitimate full-bleed art (a photography book),
+   plus blank crops on prose pages. Needs a heuristic review, not necessarily a
+   crop fix.
+4. 1 empty image visual_description (Grundlagen).
+5. 1 hard render crash: Kimothi `FzErrorArgument: Invalid bandwriter header
+   dimensions` (fitz, in-run/transient; all 25 pages render fine in isolation).
+   Fail-open render guard is the clear robustness fix.
+
+**Next:** prioritize the table-format/empty-element/crop-heuristic work (some
+needs prompt changes + live re-validation), add a render guard, then re-run the
+crucible. The Grand Soak (all 43 docs / 12,215 pages) remains multi-day and
+un-run. Live artifacts: output/crucible_full_run/ + output/crucible_full_src/
+(gitignored).
 
 ## Prior state (2026-06-03 PM - blocker remediation shipped)
 
