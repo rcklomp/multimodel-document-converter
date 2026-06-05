@@ -274,3 +274,45 @@ free (judge holds memory at 0.60, MinerU fits in 0.15; 44GB headroom).
 - Net: the "extract on the bandwidth-king M5" rule is a LATENCY rule, not a
   throughput rule. Pick the box by the job: M5 for latency, GX10/Config F for
   batch throughput.
+
+## 13. MinerU2.5 integration SHIPPED + live-validated (2026-06-05)
+
+The MinerU2.5 extractor is integrated into the V3 pipeline as a selectable
+engine and live-validated end-to-end. Five atomic commits on
+v3.1-extraction-hardening (all gated: full suite, firewall, repo-integrity,
+ruff+black, SMOKE_PRODUCTION_PASS at each):
+
+1. b3b5b9b - pure MinerU element-JSON -> UniversalDocument converter (bbox
+   [0,1]->[0,1000], 13-type vocab -> 3-value ElementType, code smuggle), 13
+   offline tests, registered in the AST firewall.
+2. e6afa93 - MineruNativeEngine: render (PyMuPDF 200 DPI -> PIL) + drive a MinerU
+   server via the LIGHT lazy-imported mineru_vl_utils http-client + assemble;
+   offline-mocked-transport tests. Model stays in an ISOLATED server (Option A).
+3. 1b9e650 - USE_MINERU_ENGINE processor route (top precedence) + routing tests.
+4. 8179f3a - pyproject [mineru] optional extra (mineru-vl-utils>=1.0.3; light,
+   no torch/mlx/vllm).
+5. 5273c71 - HTML-table -> Markdown-grid transcode (live validation found MinerU
+   emits HTML tables; the pipeline contract R2 needs Markdown). Fixed the
+   conversion, not the gate.
+
+**Live validation (USE_MINERU_ENGINE=1 -> GX10 MinerU vLLM server, real CLI):**
+6/6 golden docs QA_PASS via qa_full_conversion.py --source-pdf, across every
+capability class:
+
+| doc | class | result |
+|---|---|---|
+| table_spreadsheet_carok | dense table (Qwen EMPTIED it) | QA_PASS - 45-row Markdown table |
+| table_spec_firearms | spec table | QA_PASS |
+| code_python_fluent | code (indentation R3) | QA_PASS |
+| form_digital_betwisting | form | QA_PASS |
+| magazine_pcworld | multi-column layout + image | QA_PASS |
+| prose_baseline_hp | prose | QA_PASS |
+
+The dense CarOK spreadsheet - the original Blocker-A failure class - now produces
+a full 45-row Markdown table with extraction_method=uir_native_chunker (V3 path)
+and an on-disk asset (QA-CHECK-05). The MinerU extractor delivers the eval's
+promised win through the production CLI.
+
+**Remaining (not yet done):** make MinerU the DEFAULT route (today it is opt-in
+via USE_MINERU_ENGINE; the router/HybridEngine still defaults to Qwen-VLM/
+Docling); broader corpus soak; the merge_prev reading-order pass (inert today).
