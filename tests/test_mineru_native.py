@@ -18,8 +18,15 @@ Contract under test:
 
 from __future__ import annotations
 
-from mmrag_v2.universal.intermediate import ElementType
+import typing
+
+import fitz
+import pytest
+
+from mmrag_v2.universal.intermediate import ElementType, UniversalDocument
 from mmrag_v3.engines.mineru_native import (
+    MineruConfigError,
+    MineruNativeEngine,
     _mineru_bbox_to_uir,
     _mineru_element_to_element,
     mineru_page_to_universal_page,
@@ -240,3 +247,82 @@ def test_bbox_values_land_in_valid_uir_range_on_dense_page():
             assert 0 <= coord <= 1000
         assert el.bbox.x_max > el.bbox.x_min
         assert el.bbox.y_max > el.bbox.y_min
+
+
+# ---------------------------------------------------------------------------
+# Engine (MineruNativeEngine) — offline, mocked transport
+# ---------------------------------------------------------------------------
+
+
+class _FakeMineruClient:
+    """Stand-in for mineru_vl_utils.MinerUClient: no model, no network.
+
+    Records the rendered images it is handed and returns a canned, per-page
+    element list so the engine's render -> drive -> convert path is exercised
+    end-to-end without the heavy MinerU stack.
+    """
+
+    def __init__(self, pages_elements):
+        self._pages = list(pages_elements)
+        self.calls = []
+
+    def two_step_extract(self, image):
+        self.calls.append(image)
+        # One canned element list per call, in order.
+        return self._pages[len(self.calls) - 1]
+
+
+def _make_pdf(path, n_pages=2):
+    doc = fitz.open()
+    for i in range(n_pages):
+        page = doc.new_page(width=595, height=842)  # A4 points
+        page.insert_text((72, 72), f"page {i + 1}")
+    doc.save(str(path))
+    doc.close()
+
+
+def test_engine_honors_v3_extraction_contract():
+    extract = MineruNativeEngine.extract
+    hints = typing.get_type_hints(extract)
+    assert hints.get("file_path") is str
+    assert hints.get("return") is UniversalDocument
+
+
+def test_engine_renders_drives_and_assembles_uir(tmp_path):
+    src = tmp_path / "doc.pdf"
+    _make_pdf(src, n_pages=2)
+    canned = [
+        _dense_table_page(),  # page 1: dense table + code + image
+        [{"type": "text", "bbox": [0.1, 0.1, 0.9, 0.2], "content": "second page prose"}],
+    ]
+    client = _FakeMineruClient(canned)
+    engine = MineruNativeEngine(client=client)
+
+    doc = engine.extract(str(src))
+
+    # Rendered both pages and handed each to MinerU.
+    assert len(client.calls) == 2
+    # Renderer produced PIL images at 200 DPI (A4 595x842 pt -> ~1654x2339 px).
+    first_img = client.calls[0]
+    assert first_img.size[0] > 1600 and first_img.size[1] > 2300
+    # Assembled a 2-page UIR with the canned content, real page dims stamped.
+    assert isinstance(doc, UniversalDocument)
+    assert doc.total_pages == 2
+    assert doc.get_page(1).dimensions == first_img.size
+    assert doc.get_page(1).table_elements and doc.get_page(1).image_elements
+    assert doc.get_page(2).text_elements[0].content == "second page prose"
+    # Page numbers come from the engine's index, not the model.
+    assert [p.page_number for p in doc.pages] == [1, 2]
+
+
+def test_engine_missing_file_raises():
+    engine = MineruNativeEngine(client=_FakeMineruClient([]))
+    with pytest.raises(FileNotFoundError):
+        engine.extract("/no/such/file.pdf")
+
+
+def test_engine_without_endpoint_raises_config_error(monkeypatch):
+    monkeypatch.delenv("MINERU_ENDPOINT", raising=False)
+    engine = MineruNativeEngine()  # no client injected, no endpoint
+    with pytest.raises(MineruConfigError):
+        _ = engine.client

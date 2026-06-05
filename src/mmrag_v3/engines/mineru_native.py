@@ -20,11 +20,12 @@ table_caption/table_footnote/list/code/aside_text).
 This module is the MinerU -> UIR boundary. It contains:
 
 * the PURE converter (this file's first half) — element-JSON + page
-  dimensions -> ``UniversalDocument``, with NO model / network / heavy
-  dependency, so it is fully offline-testable; and
-* the extraction engine (second half, added in a later increment) — which
-  renders pages with PyMuPDF and drives a MinerU sidecar over HTTP, keeping
-  the mineru-vl-utils / mlx / vllm dependencies out of the mmrag-v2 env.
+  dimensions -> ``UniversalDocument``, with NO model / network dependency,
+  so it is fully offline-testable; and
+* ``MineruNativeEngine`` (second half) — renders pages with PyMuPDF and
+  drives a MinerU2.5 server over HTTP via the light, lazy-imported
+  ``mineru_vl_utils`` http-client, keeping the model (and the heavy mlx /
+  vllm / transformers stack) in an isolated server, out of the mmrag-v2 env.
 
 Charter §7.1: ElementType stays the 3-value legacy vocabulary
 (TEXT/IMAGE/TABLE). MinerU's ``code`` signal is SMUGGLED through as TEXT
@@ -39,8 +40,11 @@ module). No Docling, no v2.x post-processing.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+import fitz  # PyMuPDF — pure renderer; no extraction semantics used
 
 from mmrag_v2.universal.intermediate import (
     DocumentMetadata,
@@ -224,3 +228,108 @@ def mineru_to_universal_document(
         pages=universal_pages,
         metadata=metadata,
     )
+
+
+# ============================================================================
+# EXTRACTION ENGINE
+# ============================================================================
+
+PAGE_RENDER_DPI = 200
+DEFAULT_MINERU_MODEL = "MinerU2.5-2509-1.2B"
+
+
+class MineruConfigError(RuntimeError):
+    """Raised when the MinerU engine is asked to run with no endpoint configured."""
+
+
+class MineruNativeEngine:
+    """MinerU2.5 vision-native UIR extraction engine.
+
+    Fulfils the V3 contract ``extract(file_path: str) -> UniversalDocument``.
+    Each page is rendered with PyMuPDF and sent to a MinerU2.5 server (the
+    model lives in an ISOLATED env — mlx on the M5, or vLLM on the GX10 —
+    NEVER in the mmrag-v2 env). The two-stage layout->recognition
+    orchestration is driven by ``mineru_vl_utils`` over the OpenAI-compatible
+    HTTP endpoint; that client is a LIGHT pure-python dependency (httpx/
+    pillow/pydantic) and is LAZY-imported so this module stays importable
+    (and the converter above stays dependency-free) where MinerU is not
+    installed.
+
+    Parameters:
+        provider/client: an object exposing ``two_step_extract(image) -> list``
+            (a ``mineru_vl_utils.MinerUClient``). When omitted, one is built
+            from env at first use. Injectable for offline testing.
+        render_dpi: PDF page render resolution.
+        server_url: MinerU endpoint base (default ``MINERU_ENDPOINT`` env).
+        model_name: served model id (default ``MINERU_MODEL`` env).
+    """
+
+    def __init__(
+        self,
+        client: Optional[Any] = None,
+        *,
+        render_dpi: int = PAGE_RENDER_DPI,
+        server_url: Optional[str] = None,
+        model_name: Optional[str] = None,
+    ) -> None:
+        self._client = client
+        self.render_dpi = render_dpi
+        self._server_url = (
+            server_url if server_url is not None else os.environ.get("MINERU_ENDPOINT", "")
+        )
+        self._model_name = model_name or os.environ.get("MINERU_MODEL", DEFAULT_MINERU_MODEL)
+
+    @property
+    def client(self) -> Any:
+        if self._client is None:
+            self._client = self._build_client()
+        return self._client
+
+    def _build_client(self) -> Any:
+        if not self._server_url:
+            raise MineruConfigError(
+                "MinerU endpoint not configured: set MINERU_ENDPOINT (or pass "
+                "server_url=) to the OpenAI-compatible MinerU2.5 server."
+            )
+        # Lazy import: keeps mineru_native importable (and the converter
+        # dependency-free) without mineru_vl_utils installed.
+        from mineru_vl_utils import MinerUClient
+
+        headers = None
+        api_key = os.environ.get("MINERU_API_KEY", "").strip()
+        if api_key:
+            headers = {"Authorization": f"Bearer {api_key}"}
+        return MinerUClient(
+            backend="http-client",
+            server_url=self._server_url,
+            server_headers=headers,
+            model_name=self._model_name,
+            skip_model_name_checking=True,
+        )
+
+    def extract(self, file_path: str) -> UniversalDocument:
+        """Render each page, run MinerU two-step extraction, assemble UIR."""
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Source file not found: {file_path}")
+
+        doc = fitz.open(str(path))
+        try:
+            pages: List[Tuple[int, Sequence[Dict[str, Any]], Tuple[int, int]]] = []
+            for page_index in range(doc.page_count):
+                image, pixel_w, pixel_h = self._render_page(doc[page_index])
+                elements = self.client.two_step_extract(image)
+                pages.append((page_index + 1, list(elements), (pixel_w, pixel_h)))
+        finally:
+            doc.close()
+
+        return mineru_to_universal_document(pages, str(path))
+
+    def _render_page(self, page: "fitz.Page") -> "Tuple[Any, int, int]":
+        """Render a page to a PIL RGB image (MinerU's input contract)."""
+        from PIL import Image
+
+        zoom = self.render_dpi / 72.0
+        pixmap = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
+        return image, pixmap.width, pixmap.height
