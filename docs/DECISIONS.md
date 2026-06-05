@@ -2678,3 +2678,33 @@ chunks demoted, 15/15 Hybrid-EV equations demoted as math.
 **Still deferred (separate sign-off):** Thread 2 proper — the MinerU-default +
 Qwen-for-code-pages extraction ROUTE that raises AIOS's code fidelity from 0.33
 to ~1.00 (F5), measured by this metric.
+
+### Live F5 validation + dedup precision fix (2026-06-06, d4c3648)
+
+Ran AIOS live through M5 Qwen3-VL-8B-8bit and measured R3. The raw number was
+0.75 (still failing), which on investigation was a METRIC ARTIFACT, not a Qwen
+limitation:
+
+- The production CLI emits each code listing TWICE — a clean, fully-indented
+  `modality=code` chunk (the VLM's code element) AND redundant flush-left
+  `modality=text` fragments that `batch_processor._classify_text_content` stamps
+  `content_classification=code`. The metric counted the duplicates as failures.
+- Seam-split: Qwen `modality=code` = **24 judgeable, 0 fail, fid 1.00** (code
+  extracted PERFECTLY); the 0.75 came entirely from 14 redundant text-fragments.
+  The crucible run (which read 1.00) simply did not run the text-classifier — its
+  24 code chunks are byte-identical. **F5 HOLDS: Qwen extracts AIOS code cleanly.**
+- MinerU `modality=code` = 9 judgeable, 5 fail, **fid 0.44** — its primary code is
+  genuinely mangled (the 1.2B model), independent of the duplicate artifact.
+
+Fix (precision, not relaxation): `code_quality()` excludes a `modality=text` code
+chunk whose content duplicates a clean `modality=code` chunk. Qwen AIOS ->
+**1.00 PASS** (correct); MinerU AIOS -> **0.44 FAIL** (still honestly failing —
+anti-weakening guard pinned by `test_text_only_mangled_code_with_no_clean_twin_still_fails`).
+The 0.90 floor is untouched.
+
+**OPEN — pipeline output-redundancy bug (logged, not yet fixed):** the shipping
+CLI duplicates every code listing as redundant flush-left `modality=text`
+fragments (with leaked page headers). This bloats output and adds retrieval
+noise on all code docs; it is a `batch_processor` chunking/classification defect,
+distinct from R3, and did NOT occur on the crucible/sandbox path (the "two
+pipeline realities", `project_v3_pipeline_reconvergence`). Needs its own fix.
