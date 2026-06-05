@@ -423,3 +423,51 @@ def test_mineru_route_takes_precedence_and_calls_engine(monkeypatch):
     result = processor.extract("/some/doc.pdf")
     assert result == "SENTINEL_UIR"
     assert seen["file_path"] == "/some/doc.pdf"
+
+
+def _route_spies(monkeypatch):
+    """Patch all four engines to identifying sentinels; return the processor."""
+    from mmrag_v3 import processor
+
+    def _spy(name):
+        class _E:
+            def extract(self, _fp):
+                return name
+
+        return lambda: _E()
+
+    monkeypatch.setattr(processor, "MineruNativeEngine", _spy("mineru"))
+    monkeypatch.setattr(processor, "VlmNativeEngine", _spy("vlm"))
+    monkeypatch.setattr(processor, "DoclingFastEngine", _spy("docling"))
+    monkeypatch.setattr(processor, "HybridEngine", _spy("hybrid"))
+    for var in ("USE_MINERU_ENGINE", "USE_VLM_ENGINE", "USE_DOCLING_FAST", "USE_HYBRID_ENGINE"):
+        monkeypatch.delenv(var, raising=False)
+    return processor
+
+
+def test_default_route_is_mineru_when_endpoint_configured(monkeypatch):
+    proc = _route_spies(monkeypatch)
+    monkeypatch.setenv("MINERU_ENDPOINT", "http://10.0.10.239:8001")
+    assert proc.extract("/d.pdf") == "mineru"
+
+
+def test_default_route_falls_back_to_hybrid_without_endpoint(monkeypatch):
+    proc = _route_spies(monkeypatch)
+    monkeypatch.delenv("MINERU_ENDPOINT", raising=False)
+    assert proc.extract("/d.pdf") == "hybrid"
+
+
+def test_use_hybrid_engine_overrides_mineru_default(monkeypatch):
+    proc = _route_spies(monkeypatch)
+    monkeypatch.setenv("MINERU_ENDPOINT", "http://10.0.10.239:8001")  # would default to mineru
+    monkeypatch.setenv("USE_HYBRID_ENGINE", "1")  # explicit legacy override
+    assert proc.extract("/d.pdf") == "hybrid"
+
+
+def test_docling_fast_overrides_mineru_default(monkeypatch):
+    # The offline smoke relies on this: USE_DOCLING_FAST wins even with a
+    # MinerU endpoint configured in the environment.
+    proc = _route_spies(monkeypatch)
+    monkeypatch.setenv("MINERU_ENDPOINT", "http://10.0.10.239:8001")
+    monkeypatch.setenv("USE_DOCLING_FAST", "1")
+    assert proc.extract("/d.pdf") == "docling"

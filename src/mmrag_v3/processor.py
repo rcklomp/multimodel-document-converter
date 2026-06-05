@@ -1,13 +1,15 @@
 """V3 Phase C processor — engine-agnostic UIR producer.
 
 Exposes a single ``extract`` function that returns a
-``mmrag_v2.universal.intermediate.UniversalDocument``. Today the only
-route is the vision-native VLM engine; future routes (e.g., direct
-PDF parsing, EPUB engines) plug in via the same contract.
+``mmrag_v2.universal.intermediate.UniversalDocument``. Several engines
+plug in via the same contract: MinerU2.5 (the chosen default extractor),
+the vision-native VLM engine, fast-Docling, and the legacy HybridEngine
+cost-optimizer.
 
-Routing is controlled by the ``USE_VLM_ENGINE`` environment variable
-so the Identity Gate (and any other batch driver) can flip the engine
-without code edits.
+Routing is controlled by ``USE_MINERU_ENGINE`` / ``USE_VLM_ENGINE`` /
+``USE_DOCLING_FAST`` / ``USE_HYBRID_ENGINE`` (and, for the default,
+whether ``MINERU_ENDPOINT`` is configured) so any batch driver can flip
+the engine without code edits. See ``extract`` for the precedence.
 
 This file lives in the Phase C namespace and intentionally does NOT
 import from ``v3_execution_root``; the execution-sandbox subprocess
@@ -47,14 +49,33 @@ def is_docling_fast_route_enabled() -> bool:
     return _env_flag("USE_DOCLING_FAST")
 
 
+def is_hybrid_route_enabled() -> bool:
+    """Return True when the legacy HybridEngine is force-selected via env."""
+    return _env_flag("USE_HYBRID_ENGINE")
+
+
+def _default_route_is_mineru() -> bool:
+    """The default route is MinerU2.5 whenever a MinerU server is configured.
+
+    MinerU2.5 is the chosen extractor (PLAN_VLM_EVAL §10-13). Making it the
+    default is gated on ``MINERU_ENDPOINT`` being set so that standing up a
+    MinerU server is the single, explicit act that opts a deployment into it;
+    setups with no MinerU endpoint keep the legacy ``HybridEngine`` default
+    and are never hard-broken by this flip.
+    """
+    return bool(os.environ.get("MINERU_ENDPOINT", "").strip())
+
+
 def extract(file_path: Union[str, "os.PathLike[str]"]) -> UniversalDocument:
     """Run the Phase C pipeline and return a v2-UIR document.
 
-    Routing precedence:
+    Routing precedence (first match wins):
         * ``USE_MINERU_ENGINE=1``   → all pages through ``MineruNativeEngine``
         * ``USE_VLM_ENGINE=1``      → all pages through ``VlmNativeEngine``
         * ``USE_DOCLING_FAST=1``    → all pages through ``DoclingFastEngine``
-        * default                   → ``HybridEngine`` (cost-optimizer router)
+        * ``USE_HYBRID_ENGINE=1``   → legacy ``HybridEngine`` (explicit)
+        * default                   → ``MineruNativeEngine`` when
+          ``MINERU_ENDPOINT`` is configured, else legacy ``HybridEngine``.
     """
     if is_mineru_route_enabled():
         return MineruNativeEngine().extract(str(file_path))
@@ -62,4 +83,8 @@ def extract(file_path: Union[str, "os.PathLike[str]"]) -> UniversalDocument:
         return VlmNativeEngine().extract(str(file_path))
     if is_docling_fast_route_enabled():
         return DoclingFastEngine().extract(str(file_path))
+    if is_hybrid_route_enabled():
+        return HybridEngine().extract(str(file_path))
+    if _default_route_is_mineru():
+        return MineruNativeEngine().extract(str(file_path))
     return HybridEngine().extract(str(file_path))
