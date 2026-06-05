@@ -15,8 +15,15 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# Shared R3 code-indentation metric (single source of truth shared with
+# qa_conversion_audit.py; see docs/PLAN_R3_CODE_GATE_REDESIGN.md). This script
+# remains ADVISORY — the authoritative hard gate is qa_conversion_audit.py.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _code_quality as code_quality_mod  # noqa: E402
 
 
 LABEL_RE = re.compile(r"^[A-Z][A-Za-z0-9/&()' .,-]{1,50}:?$")
@@ -128,23 +135,20 @@ def main() -> int:
     )
     table_markdown = sum(1 for r in tables if is_markdown_table(r.get("content") or ""))
 
-    code_chunks = []
-    for r in texts:
-        md = r.get("metadata") or {}
-        if (
-            str(md.get("chunk_type") or "").lower() == "code"
-            or str(md.get("content_classification") or "").lower() == "code"
-        ):
-            code_chunks.append(r)
-    code_flat = sum(1 for r in code_chunks if "\n" not in (r.get("content") or ""))
-    code_with_indent_or_repl = 0
-    for r in code_chunks:
-        s = r.get("content") or ""
-        lines = [ln for ln in s.splitlines() if ln.strip()]
-        has_indented_line = any(ln.startswith(("    ", "\t")) for ln in lines)
-        has_repl = ">>>" in s or re.search(r"(?m)^\s*\.\.\.\s", s) is not None
-        if has_indented_line or has_repl:
-            code_with_indent_or_repl += 1
+    # R3 code-indentation metric via the shared module over the FULL chunk
+    # population (modality=code + legacy text-code), with positive code-ID
+    # (equations excluded) and judge-only-judgeable scoring. Replaces the dead
+    # modality=text-only computation that the V3 modality=code promotion bypassed.
+    cq = code_quality_mod.code_quality(rows)
+    # Flat ratio is advisory and computed over the positively-identified code
+    # population (single-line struct code) — kept for parity with the prior gate.
+    struct_code = [
+        r
+        for r in rows
+        if code_quality_mod.is_code_population(r)
+        and code_quality_mod.has_code_structure(r.get("content") or "")
+    ]
+    code_flat = sum(1 for r in struct_code if "\n" not in (r.get("content") or ""))
 
     text_rows = []
     for r in texts:
@@ -166,10 +170,8 @@ def main() -> int:
     image_description_coverage = (image_with_description / len(images)) if images else 1.0
     table_placeholder_ratio = (table_placeholders / len(tables)) if tables else 0.0
     table_markdown_ratio = (table_markdown / len(tables)) if tables else 1.0
-    code_flat_ratio = (code_flat / len(code_chunks)) if code_chunks else 0.0
-    code_indentation_fidelity = (
-        code_with_indent_or_repl / len(code_chunks) if code_chunks else 1.0
-    )
+    code_flat_ratio = (code_flat / len(struct_code)) if struct_code else 0.0
+    code_indentation_fidelity = cq.indentation_fidelity
     # Normalize cross-page risk by number of text chunks to keep threshold stable.
     cross_page_anchor_risk_ratio = (
         cross_page_anchor_risk / len(text_rows) if text_rows else 0.0
@@ -183,7 +185,11 @@ def main() -> int:
         f"tables={len(tables)} table_placeholder_ratio={table_placeholder_ratio:.4f} "
         f"table_markdown_ratio={table_markdown_ratio:.4f}"
     )
-    print(f"code_chunks={len(code_chunks)} code_flat_ratio={code_flat_ratio:.4f}")
+    print(
+        f"code_population={cq.n_population} struct={cq.n_struct} "
+        f"math_excluded={cq.n_math_excluded} judgeable={cq.n_judgeable} "
+        f"code_flat_ratio={code_flat_ratio:.4f}"
+    )
     print(f"code_indentation_fidelity={code_indentation_fidelity:.4f}")
     print(
         "cross_page_label_anchor_risk="
@@ -213,12 +219,18 @@ def main() -> int:
             )
     # Require at least 3 code chunks before penalising flat ratio — a single
     # flat snippet in a 20-page sample is a statistical artefact, not a bug.
-    if len(code_chunks) >= 3 and code_flat_ratio > args.max_code_flat_ratio:
+    if len(struct_code) >= 3 and code_flat_ratio > args.max_code_flat_ratio:
         fails.append(
             f"code_flat_ratio={code_flat_ratio:.3f} "
             f"(>{args.max_code_flat_ratio:.2f})"
         )
-    if len(code_chunks) >= 3 and code_indentation_fidelity < args.min_code_indentation_fidelity:
+    # Indentation fidelity is scored only over JUDGEABLE code (multi-line nested
+    # blocks); flat/REPL/equation chunks are exempt. Advisory here — the
+    # authoritative hard gate is qa_conversion_audit.py (Policy B).
+    if (
+        cq.n_judgeable >= code_quality_mod.DEFAULT_MIN_JUDGEABLE
+        and code_indentation_fidelity < args.min_code_indentation_fidelity
+    ):
         fails.append(
             f"code_indentation_fidelity={code_indentation_fidelity:.3f} "
             f"(<{args.min_code_indentation_fidelity:.2f})"
