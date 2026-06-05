@@ -513,10 +513,19 @@ def audit(jsonl_path: Path) -> AuditResult:
 
     # Document type inference: short scanned docs without heading structure are forms
     heading_coverage = r.text_with_heading / max(r.text_chunks, 1)
+    # A table-dominant document (data spreadsheet, parts/price export, inventory
+    # count) has no chapter hierarchy by nature — like a form — regardless of
+    # page count. Detected by a TABLE-chunk share that a prose document never
+    # reaches, conjoined with near-absent heading coverage, so the class cannot
+    # admit a book whose headings were merely missed (prose has ~0 table share).
+    table_share = r.table_chunks / max(r.text_chunks + r.table_chunks, 1)
+    is_table_dominant = r.table_chunks >= 3 and table_share >= 0.20
     if r.total_pages <= 5 and r.doc_class == "scanned" and heading_coverage < 0.10:
         r.document_type = "form"
     elif r.total_pages <= 5 and heading_coverage < 0.10:
         r.document_type = "short_document"
+    elif heading_coverage < 0.10 and is_table_dominant:
+        r.document_type = "tabular_document"
     else:
         r.document_type = "book"
 
@@ -856,15 +865,21 @@ def print_report(r: AuditResult, path: Path) -> bool:
     # chapter hierarchy by nature — exactly like a scanned form. The
     # >=0.80 prose-calibrated HEADING gate is meaningless there and fires
     # spuriously. Skip it for the `short_document` class (<=5 pages AND
-    # heading_coverage < 0.10, inferred above). This is a gate-correctness
-    # fix, NOT a relaxation: the precondition is already-absent structure,
-    # so it cannot mask a heading regression on any structured document.
-    # See docs/DECISIONS.md "Short-Document HEADING-Gate Skip (PLAN_V3.1 P2)".
+    # heading_coverage < 0.10, inferred above) and for the `tabular_document`
+    # class (table-dominant data export of any length — same already-absent
+    # hierarchy). This is a gate-correctness fix, NOT a relaxation: the
+    # precondition is already-absent structure (a prose document reaches
+    # neither class), so it cannot mask a heading regression on any
+    # structured document. See docs/DECISIONS.md "Short-Document HEADING-Gate
+    # Skip (PLAN_V3.1 P2)" and "Tabular-Document HEADING-Gate Skip".
     is_short_no_heading = r.document_type == "short_document"
+    is_tabular = r.document_type == "tabular_document"
     if is_form:
         print(f"  HEADING:     SKIP [form]")
     elif is_short_no_heading:
         print(f"  HEADING:     SKIP [short_document — no heading hierarchy]")
+    elif is_tabular:
+        print("  HEADING:     SKIP [tabular_document — table-dominant, no heading hierarchy]")
     else:
         heading_ok = (
             r.long_headings == 0

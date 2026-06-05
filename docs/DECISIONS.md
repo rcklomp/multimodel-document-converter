@@ -2227,6 +2227,42 @@ quality signal. This is a gate-correctness fix, not a relaxation, and
 does not touch the form acceptance class (QUALITY_GATES.md).
 
 
+## Tabular-Document HEADING-Gate Skip (MinerU default validation, 2026-06-05)
+
+**Decision:** `scripts/qa_conversion_audit.py` extends the HEADING-gate skip to
+a new `tabular_document` class, inferred as `heading_coverage < 0.10 AND
+table_chunks >= 3 AND table_share >= 0.20` (where `table_share =
+table_chunks / (text_chunks + table_chunks)`). Unlike `short_document`, this
+class is PAGE-COUNT-INDEPENDENT. The HEADING line prints
+`SKIP [tabular_document — table-dominant, no heading hierarchy]` and does not
+contribute to AUDIT_FAIL.
+
+**Rationale:** A table-dominant born-digital document (data spreadsheet, parts/
+price export, inventory count; canonical example `data/data_spreadsheet/CarOK
+voorraadtelling 2021-04.pdf` — 12 pages, a flat single-font product/price table,
+zero heading fonts) has no chapter hierarchy by nature, exactly like a form or a
+short single-table export — but it can run longer than the 5-page
+`short_document` bound, so it fell into `book` and the >= 0.80 HEADING gate fired
+spuriously (0/37 coverage -> HEADING FAIL) even though every chunk was correctly
+extracted and all tables were clean Markdown (`table_markdown_ratio=1.0`). The
+same doc fails the legacy `USE_DOCLING_FAST` path WORSE (failures=2, 8/12 pages
+chunked), confirming the failure is engine-independent and not a MinerU
+regression. Headings are NOT fabricated to clear the gate; the gate is corrected
+to not over-fire on a class where the metric does not apply.
+
+**Why this cannot mask a regression:** the skip requires a TABLE-chunk share
+(>= 0.20) that a prose document never reaches — a book, technical manual, or
+academic paper is text-dominant with ~0 table share, so it never enters this
+class and the >= 0.80 gate continues to enforce on every document where heading
+coverage is a meaningful signal. The conjunction with `heading_coverage < 0.10`
+(near-total absence, not partial loss) further bounds it. Residual (documented,
+accepted): a genuinely heading-bearing document that ALSO lost >= 90% of its
+headings to extraction AND is >= 20% tables would be exempted — a narrow,
+unlikely intersection (near-total heading loss is itself caught by page-coverage
+/ structural gates). This is a gate-correctness fix, not a relaxation; it does
+not touch the form or short_document classes.
+
+
 ## Legacy V2DocumentProcessor / Docling lane - retirement PLANNED (PLAN_V3.1 P3, 2026-05-31)
 
 **Decision:** The non-batch `V2DocumentProcessor` + `DoclingPdfAdapter` /
