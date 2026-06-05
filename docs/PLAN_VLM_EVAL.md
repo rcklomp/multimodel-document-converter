@@ -316,3 +316,35 @@ promised win through the production CLI.
 **Remaining (not yet done):** make MinerU the DEFAULT route (today it is opt-in
 via USE_MINERU_ENGINE; the router/HybridEngine still defaults to Qwen-VLM/
 Docling); broader corpus soak; the merge_prev reading-order pass (inert today).
+
+## 14. Broader corpus soak via the DEFAULT route (2026-06-05)
+
+Ran 7 cross-category real docs from data/ (49 pages) through the NEW DEFAULT
+route (MINERU_ENDPOINT set, NO USE_* flag -> exercises increment 6's MinerU
+default) -> GX10 MinerU server, strict-gated each (qa_full_conversion
+--source-pdf). Harness: scripts/mineru_corpus_soak.sh.
+
+| doc | pages | chunks | gate |
+|---|---|---|---|
+| betwistingsformulier (form) | 1 | 3 | QA_PASS |
+| Bevestigingsmiddelen (mixed) | 2 | 6 | QA_PASS |
+| Recent_Trends_in_Transportation (academic) | 5 | 17 | QA_PASS |
+| ATZ Effizientere Software (German technical) | 6 | 30 | QA_PASS |
+| IRJET solar PV (academic + charts) | 7 | 31 | QA_PASS |
+| CarOK voorraadtelling (dense spreadsheet) | 12 | 49 | QA_FAIL (HEADING) |
+| Hybrid_electric_vehicles (academic tables) | 16 | 93 | QA_PASS |
+
+**6/7 QA_PASS.** The lone QA_FAIL (CarOK voorraadtelling, a pure data
+spreadsheet) is NOT a MinerU regression and NOT a table problem
+(table_markdown_ratio=1.0000 - all 12 tables clean Markdown via the transcode):
+it fails the qa_conversion_audit HEADING gate at 0/37 coverage because a raw data
+spreadsheet has no section headings. Verified engine-independent: the same doc
+via the legacy USE_DOCLING_FAST path ALSO QA_FAILs HEADING 0/37, and WORSE
+(failures=2, only 8/12 pages chunked vs MinerU's full 12/12, failures=1). The
+recovery_scan/recovery_gap_fill chunks (which carry no bbox/heading) are
+batch_processor's engine-independent recovery net, identical on both paths.
+
+Conclusion: MinerU is validated across the corpus and outperforms the legacy path
+on the one hard doc. Open (pre-existing, NOT MinerU): the HEADING gate has no
+exemption for genuinely headingless docs (data spreadsheets) - a doc-class gate
+policy question, tracked separately; do NOT weaken the gate.
