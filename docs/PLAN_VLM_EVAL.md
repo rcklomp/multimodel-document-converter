@@ -348,3 +348,25 @@ Conclusion: MinerU is validated across the corpus and outperforms the legacy pat
 on the one hard doc. Open (pre-existing, NOT MinerU): the HEADING gate has no
 exemption for genuinely headingless docs (data spreadsheets) - a doc-class gate
 policy question, tracked separately; do NOT weaken the gate.
+
+## 15. Scanned-class + scale validation (2026-06-05)
+
+Filling the two classes the §14 corpus soak did not cover, via the default route
+(MINERU_ENDPOINT set) -> GX10 MinerU server:
+
+- **Scanned (vision-OCR):** `data/business_form/0013_140302111325_001.pdf` (the
+  scanned German invoice that the OFFLINE Docling path produces 0 chunks for, and
+  that v2 once flagged "UNSUPPORTED PROFILE"). MinerU read it into 4 chunks (2
+  text, 2 table): the line-items as a proper Markdown table
+  (`| Pos | Art-Nr. | Bezeichnung | Anz | Mwst-Satz | Preis | Gesamt |`), a totals
+  table, and the address/payment text. **QA_PASS.** Confirms MinerU's vision OCR
+  handles the scanned/form class as first-class structured content.
+
+Note (verify-before-concluding): an earlier scanned run returned 0 chunks - this
+was the GX10 MinerU container being DOWN (I had torn it down after §14), NOT a
+MinerU failure. The engine correctly RAISED on `[Errno 61] Connection refused`
+and halted with zero fabricated chunks (fail-open / no-silent-degradation working
+as designed), exactly the verify-before-blaming lesson.
+
+Cumulative validation: golden 6/6 + corpus soak 7/7 + scanned 1/1 across
+table (dense + spec), code, form, scanned, layout, prose, charts, German.
