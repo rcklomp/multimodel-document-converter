@@ -233,6 +233,42 @@ def test_already_fenced_code_is_not_double_fenced():
     assert el.content.count("```") == 2  # not 4
 
 
+def test_code_typed_equation_is_demoted_to_plain_text():
+    # A misrecognized equation can ride MinerU's `code` type. Positive code-ID
+    # demotes it to plain TEXT so it never enters the code lane (semantically
+    # wrong as code; the R3 indentation false-fail class). Not promoted, not
+    # fenced. Same fixture the gate's metric excludes
+    # (tests/test_code_quality_metric.py), keeping the two in sync.
+    eq = "V_oc = a + b × DOD + (c + d × DOD)T"
+    el = _mineru_element_to_element(
+        {"type": "code", "bbox": [0.1, 0.1, 0.9, 0.2], "content": eq}, 0
+    )
+    assert el.type is ElementType.TEXT
+    assert el.metadata is None or not el.metadata.get("promoted_modality")
+    assert not el.content.startswith("```")
+    assert eq in el.content
+
+
+def test_code_typed_chemistry_equation_is_demoted():
+    eq = "Pb+PbO₂+2H₂SO₄ ↔ 2PbSO₄+2H₂O"
+    el = _mineru_element_to_element(
+        {"type": "code", "bbox": [0.1, 0.1, 0.9, 0.2], "content": eq}, 0
+    )
+    assert el.type is ElementType.TEXT
+    assert el.metadata is None or not el.metadata.get("promoted_modality")
+    assert not el.content.startswith("```")
+
+
+def test_genuine_code_still_promoted_after_math_guard():
+    # Guard must not demote real code: keywords/punctuation keep it in the lane.
+    el = _mineru_element_to_element(
+        {"type": "code", "bbox": [0.1, 0.1, 0.9, 0.9], "content": "x = compute(y)\nreturn x"},
+        0,
+    )
+    assert el.metadata["promoted_modality"] == "code"
+    assert el.content.startswith("```")
+
+
 def test_non_code_text_is_not_fenced():
     el = _mineru_element_to_element(
         {"type": "text", "bbox": [0.1, 0.1, 0.9, 0.2], "content": "plain prose"}, 0

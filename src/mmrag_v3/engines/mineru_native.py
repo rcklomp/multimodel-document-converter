@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
@@ -75,6 +76,54 @@ logger = logging.getLogger(__name__)
 _TABLE_TYPES = frozenset({"table"})
 _IMAGE_TYPES = frozenset({"image"})
 _CODE_TYPES = frozenset({"code"})
+
+# Keep extractor-mislabelled math out of the code lane. MinerU normally routes
+# equations to ``interline_equation`` (-> TEXT), but a misrecognized formula can
+# ride the ``code`` type, and an equation promoted to Modality.CODE is both
+# semantically wrong and the R3 indentation false-fail class. The gate metric
+# (``scripts/_code_quality``) is the backstop for any extractor; here the
+# converter demotes a ``code``-typed element to plain TEXT ONLY on positive math
+# evidence AND absence of code structure — never on mere absence of code
+# structure, because a bare assignment (``x = 1``) is indistinguishable from an
+# equation (``V_oc = a``) by surface form and must NOT be demoted. (The V3 engine
+# firewall in tests/test_v3_security.py forbids importing the QA layer, so the
+# code-ID signal is duplicated; tests/test_mineru_native.py and
+# tests/test_code_quality_metric.py pin shared fixtures so they cannot diverge.)
+
+# Positive code-ID: keywords / code punctuation / a ``>>>`` REPL prompt.
+_CODE_STRUCTURE_RE = re.compile(
+    r"\b(?:def|class|import|from|return|yield|lambda|self|async|await|try|"
+    r"except|finally|with|elif|raise|assert|print|for|while|if|else|None|"
+    r"True|False)\b"
+    r"|\(\)|\)\s*:|->|=>|==|!=|<=|>=|:=|\+=|-=|::|\bself\.|>>>"
+)
+# Positive math evidence: unicode math operators/arrows, sub/superscripts, or
+# LaTeX math control words / brace scripts. Equations and chemistry
+# (``V_oc = a + b × DOD``, ``Pb+PbO₂ ↔ ...``, ``\frac{a}{b}``, ``V_{fc}``) match;
+# ordinary code does not.
+_MATH_MARKER_RE = re.compile(
+    r"[×÷→←↔⇌≤≥≠±∓∑∏√∫≈≅≡∝∞·∇∂]"
+    r"|[₀-₉₊₋]|[⁰-⁹⁺⁻ⁿ]"
+    r"|\\(?:frac|sum|prod|int|ln|log|cdot|times|div|sqrt|alpha|beta|gamma|"
+    r"delta|theta|lambda|mu|sigma|omega|le|ge|ne|pm|leftrightarrow|"
+    r"rightarrow|leftarrow|equiv|approx|partial|nabla)\b"
+    r"|[_^]\{"
+)
+
+
+def _has_code_structure(content: str) -> bool:
+    """True if ``content`` positively reads as code (not math/prose)."""
+    return bool(content.strip()) and bool(_CODE_STRUCTURE_RE.search(content))
+
+
+def _is_mislabelled_equation(content: str) -> bool:
+    """True if a ``code``-typed element is actually a math equation.
+
+    Conservative: requires positive math evidence AND no code structure, so
+    genuine code is never demoted.
+    """
+    return bool(_MATH_MARKER_RE.search(content)) and not _has_code_structure(content)
+
 
 # MinerU does not emit a per-element confidence; use the same default the VLM
 # adapter applies to elements with no confidence field.
@@ -230,22 +279,25 @@ def _mineru_element_metadata(
 def _mineru_element_to_element(raw: Dict[str, Any], index: int) -> Element:
     """Convert one MinerU element dict into a UIR ``Element``."""
     mtype = str(raw.get("type") or "text").strip().lower()
+    content = str(raw.get("content") or "")
     promoted_modality: Optional[str] = None
     original_vlm_type: Optional[str] = None
     if mtype in _TABLE_TYPES:
         element_type = ElementType.TABLE
     elif mtype in _IMAGE_TYPES:
         element_type = ElementType.IMAGE
-    elif mtype in _CODE_TYPES:
-        # Charter §7.1 smuggle: code rides as TEXT, promoted to Modality.CODE
-        # by the chunker.
+    elif mtype in _CODE_TYPES and not _is_mislabelled_equation(content):
+        # Charter §7.1 smuggle: genuine code rides as TEXT, promoted to
+        # Modality.CODE by the chunker.
         element_type = ElementType.TEXT
         promoted_modality = "code"
         original_vlm_type = "code"
     else:
+        # Prose, captions, headers — and a ``code``-typed element whose content
+        # is actually math (a mislabelled equation): keep it as plain TEXT so it
+        # never enters the code lane.
         element_type = ElementType.TEXT
 
-    content = str(raw.get("content") or "")
     # MinerU emits tables as HTML; the pipeline contract (R2) + QA gates
     # require Markdown grids. Transcode HTML tables; keep the original on a
     # parse miss so content is never lost.
@@ -253,16 +305,16 @@ def _mineru_element_to_element(raw: Dict[str, Any], index: int) -> Element:
         markdown = _html_table_to_markdown(content)
         if markdown:
             content = markdown
-    # Collapse degenerate generation loops on everything but code (which must
-    # stay verbatim). MinerU has built-in anti-repetition; this is defense in
-    # depth shared with the VLM adapter.
-    if mtype not in _CODE_TYPES:
-        content = _collapse_degenerate_repeats(content)
-    else:
+    if promoted_modality == "code":
         # MinerU emits code unfenced; wrap it in a Markdown fence (R3) so the
         # indentation-fidelity gate can read it and downstream rendering is
         # consistent with the VLM path. Content stays verbatim inside the fence.
         content = _fence_code(content)
+    else:
+        # Collapse degenerate generation loops on every non-code element (code
+        # must stay verbatim). MinerU has built-in anti-repetition; this is
+        # defense in depth shared with the VLM adapter.
+        content = _collapse_degenerate_repeats(content)
 
     raw_bbox = raw.get("bbox")
     normalized_bbox = _mineru_bbox_to_uir(raw_bbox) if raw_bbox is not None else None
