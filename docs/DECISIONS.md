@@ -2713,3 +2713,40 @@ page's primary (non-recovery) chunks; recovery on VLM-dropped pages and
 genuinely-new recovery text survive. Live (AIOS via Qwen): recovery chunks
 31 -> 0, page coverage 35/35 (nothing lost). The 0.85 floor is measured (every
 spurious AIOS duplicate scored 0.92-1.00). `tests/test_recovery_vs_primary_dedup.py`.
+
+## MinerU+Qwen-for-code hybrid is the default extraction route (2026-06-06)
+
+**Decision.** The default V3 route (when `MINERU_ENDPOINT` is set) is now
+`MineruQwenHybridEngine`: code-dense pages (monospace-char ratio >= 0.10) extract
+through the Qwen VLM, every other page through MinerU2.5. Pure MinerU remains
+available via `USE_MINERU_ENGINE=1`; explicit hybrid via `USE_MINERU_QWEN_HYBRID=1`.
+
+**Why.** Neither engine is sufficient alone on a code-heavy academic document.
+Measured live on AIOS (`AIOS LLM Agent Operating System.pdf`, 35 pages):
+
+| engine | code (R3 fidelity) | tables (markdown ratio) | doc verdict |
+|---|---|---|---|
+| MinerU2.5-1.2B alone | 0.44 FAIL | 100% PASS | AUDIT_FAIL (CODE) |
+| Qwen3-VL-8B alone | 1.00 PASS | 50% FAIL | AUDIT_FAIL (TABLE) |
+| **hybrid (default)** | **1.00 PASS** | **100% PASS** | **QA_PASS (35/35)** |
+
+MinerU's 1.2B recognizer mangles dense code indentation; Qwen preserves it but
+empties dense tables. Routing code pages to Qwen and the rest to MinerU gets
+both. The routing signal is the object-independent monospace ratio the legacy
+`HybridEngine` already used; AIOS measured a clean separation (non-code pages
+<= 0.017, code pages 0.19-0.98), so the shared 0.10 floor splits them with wide
+margin. A no-code document routes every page to MinerU — behaviourally identical
+to the prior pure-MinerU default — so the flip is safe for non-code corpora.
+
+**Failure handling.** Transport/endpoint failures on the Qwen subset trip the
+circuit breaker (raise, no silent MinerU fallback — same fail-fast contract as
+`HybridEngine`); single-page SEMANTIC Qwen failures demote that one page to
+MinerU and are recorded in the routing-decision log.
+
+**Validation.** Live: GX10 vLLM MinerU + M5 Qwen on AIOS -> `QA_PASS` (failures=0,
+35/35 pages, code 1.00, tables 100%). The recovery-dedup fix (60fc77c) holds on
+this path (0 recovery duplicates). Offline `SMOKE_PRODUCTION_PASS`; V3 firewall
+green. Note: the M5 mlx MinerU build hit a `broadcast_shapes` generation 500 on
+some pages — the GX10 vLLM MinerU (the golden-6/6 + soak-7/7 server) is the
+reliable MinerU backend. Contract: `tests/test_mineru_qwen_hybrid.py` +
+`tests/test_mineru_native.py` route tests.
