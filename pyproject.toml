@@ -77,6 +77,14 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.5.0",
 ]
+# MinerU2.5 extractor (USE_MINERU_ENGINE) — drives a remote MinerU server over
+# HTTP. Base extra only: pure-python client (httpx/pillow/pydantic/loguru/
+# aiofiles), NO torch/mlx/vllm. The MinerU model runs in an ISOLATED server
+# (mlx on the M5 / vLLM on the GX10), never in this env. Lazy-imported by
+# src/mmrag_v3/engines/mineru_native.py, so the package is optional at runtime.
+mineru = [
+    "mineru-vl-utils>=1.0.3",
+]
 
 [project.scripts]
 # Let op: ik heb het pad aangepast naar je nieuwe structuur src/mmrag_v2
