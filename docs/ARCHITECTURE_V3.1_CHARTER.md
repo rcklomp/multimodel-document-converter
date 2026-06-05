@@ -124,8 +124,28 @@ to Docling. `[PROPOSED]` Hardening signal: text-block count / column detection v
 smoke (Section 9) shows residual code/layout loss.
 
 ### 3.3 Vision-Native Extraction `[SHIPPED]`
+
+**Default extractor: MinerU2.5 (`MineruNativeEngine`, 2026-06-05).** After the
+VLM evaluation (`docs/PLAN_VLM_EVAL.md`), MinerU2.5 (`opendatalab/MinerU2.5-*-1.2B`)
+replaced Qwen3-VL-8B as the default extraction engine. It is a two-stage document
+VLM (global layout detector -> per-region recognition) whose detector bboxes are
+reliable - structurally resolving Blocker B crop drift (§9.1) and reading dense
+tables Qwen emptied. `MineruNativeEngine` (`src/mmrag_v3/engines/mineru_native.py`)
+renders each page with PyMuPDF and drives a MinerU server over HTTP via the light,
+lazy-imported `mineru_vl_utils` http-client (the model stays in an ISOLATED server
+- mlx on the M5 / vLLM on the GX10 - never in the mmrag-v2 env). It emits a flat
+element list `{type, bbox[0,1], content, merge_prev}`; the converter projects bbox
+to `[0,1000]`, maps MinerU's 13-type vocabulary onto the 3-value `ElementType`
+(code smuggled as TEXT per B3), folds `merge_prev` continuations, and transcodes
+MinerU's HTML tables into Markdown grids (the pipeline R2 contract). Selected by
+default when `MINERU_ENDPOINT` is set (else the legacy `HybridEngine`); forced via
+`USE_MINERU_ENGINE=1`. Corpus-validated 7/7 QA_PASS (`PLAN_VLM_EVAL` §13-14).
+
+The Qwen vision-native path below is RETAINED as an alternative
+(`USE_VLM_ENGINE=1`) and inside the `HybridEngine` per-page router:
+
 `VlmNativeEngine` (`src/mmrag_v3/engines/vlm_native.py`) renders each routed page
-to PNG and prompts a VLM (default Qwen3-VL-8B) for strict UIR JSON. The prompt
+to PNG and prompts a VLM (Qwen3-VL-8B) for strict UIR JSON. The prompt
 mandates: per-element type incl. `code`/`form`, exact indentation preservation for
 code (markdown fences), key-value/markdown for forms, and chart-to-data
 transcription for data visualizations.
@@ -265,8 +285,8 @@ modality-switched rubric matrix is design intent `[PROPOSED]`.
 
 | Risk | Severity | Mitigation / decision needed |
 |---|---|---|
-| VLM JSON invalid on dense pages (NEW, 2026-06-02 soak) | High - BLOCKER | Whole-page strict-JSON truncates/malforms on dense layouts (Combat Aircraft magazine: ~25/43 pages -> Docling fallback). No `finish_reason=length` detection today. Fix: raise/handle `max_completion_tokens`, guided/constrained JSON decoding, or per-region extraction. The "one JSON per page" design has a density ceiling. |
-| VLM bbox crop drift / interior misplacement (3.3) | High - MEASURED 40-50% | Confirmed in the 2026-06-02 soak: `QA_WARN_CROP_DRIFT` fired on 5 of 8 docs (forms/scans/tables). crop-audit flags it but extraction produces it. No longer "accept-and-monitor" - a confirmed blocker. Needs bbox-fidelity work (higher-fidelity coords / per-region crops) or a semantic crop-vs-description check. |
+| VLM JSON invalid on dense pages (NEW, 2026-06-02 soak) | RESOLVED for the default path (MinerU, 2026-06-05) | Was: whole-page strict-JSON truncates/malforms on dense layouts. MinerU2.5 (now default, §3.3) does NOT emit whole-page JSON - it emits per-element structured output with built-in anti-repetition, so the density ceiling does not apply; the dense CarOK spreadsheet Qwen emptied now yields a full Markdown table. The A1-A4 scaffolding remains for the retained Qwen path. |
+| VLM bbox crop drift / interior misplacement (3.3) | RESOLVED for the default path (MinerU, 2026-06-05) | Was: MEASURED 40-50% drift on the 2026-06-02 soak. MinerU2.5's two-stage layout DETECTOR emits reliable region bboxes (the §5 research precedent), structurally fixing the crop drift; the 7/7 corpus soak passed crop-audit (`PLAN_VLM_EVAL` §14). The semantic in-range-but-wrong-crop residual (3.3) still applies in principle but was not observed. |
 | Router misroute residue (3.2) | Med | Monospace closes code; broad layout complexity open. Measure via AIOS smoke before building a heuristic. |
 | Docling-lane debt (3.6) | Med | Decide: retire the lane (route everything to VLM, eat the cost) OR harden it (fold `postprocess_markdown` into the engine + add a per-page-consistency check). Currently a band-aid. |
 | Grand Soak (5) | High - RUN + HALTED 2026-06-02 | Stopped at doc 9/17: pipeline does not meet requirements on dense docs (JSON-invalid -> Docling fallback; 40-50% crop drift). The long tail (~20 books) was excluded by `--max-pages 200`. Do not re-run until the two extraction blockers above are fixed. See `docs/paper/FINDINGS_LOG.md` 2026-06-02. |

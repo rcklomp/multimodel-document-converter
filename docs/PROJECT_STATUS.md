@@ -1,6 +1,42 @@
 # Project Status
 
-Last updated: 2026-06-04 (PIVOT: VLM evaluation workstream; main code PAUSED)
+Last updated: 2026-06-05 (MinerU2.5 SHIPPED as the default extractor; corpus-validated)
+
+## Current state (2026-06-05) - MinerU2.5 integrated, default, and corpus-validated
+
+The 2026-06-04 VLM-evaluation pivot CONCLUDED: **MinerU2.5 is the chosen
+extractor** and is now integrated into the V3 pipeline as a selectable, and
+default, engine. It resolves the §9.1 blockers structurally (two-stage layout
+detector -> per-region recognition: reliable detector bboxes fix Blocker B crop
+drift; structured per-element output fixes Blocker A) rather than via more Qwen
+scaffolding. Full eval + decision record: `docs/PLAN_VLM_EVAL.md` §10-14.
+
+Shipped this cycle (branch `v3.1-extraction-hardening`, all gated per commit -
+full suite, firewall, repo-integrity, ruff+black, SMOKE_PRODUCTION_PASS):
+- `src/mmrag_v3/engines/mineru_native.py` - pure MinerU-element-JSON -> UIR
+  converter (bbox [0,1]->[0,1000], 13-type vocab -> 3-value ElementType + code
+  smuggle, merge_prev continuation-fold, HTML-table -> Markdown transcode) +
+  `MineruNativeEngine` (renders pages, drives a MinerU server via the light lazy
+  `mineru_vl_utils` http-client; model stays in an isolated server). `b3b5b9b`,
+  `e6afa93`, `6ff83b3`.
+- `USE_MINERU_ENGINE` route + the **default flip**: `mmrag_v3.processor` defaults
+  to MinerU when `MINERU_ENDPOINT` is set (else legacy `HybridEngine`; never hard-
+  breaks), plus a `USE_HYBRID_ENGINE` escape hatch. `1b9e650`, `600e055`.
+- pyproject `[mineru]` optional extra (light: mineru-vl-utils, no torch/mlx/vllm).
+  `8179f3a`.
+- HEADING-gate correctness: a `tabular_document` skip for genuinely-headingless
+  table-dominant docs (data spreadsheets), with a non-leak guard. `2799dd0`.
+
+**Validation:** 6/6 golden docs QA_PASS (table/code/form/layout/prose), and a
+7-doc cross-category corpus soak through the DEFAULT route = **7/7 QA_PASS**
+(after the HEADING fix). The dense CarOK spreadsheet Qwen EMPTIED now yields a
+45-row Markdown table on the V3 path. Topology measured: M5 wins single-page
+latency (6.8s vs GX10 13.4s), GX10 vLLM wins batched throughput 2.3x (vLLM
+batches; mlx is sequential) - so M5 for latency, GX10/Config F for throughput.
+
+**Not yet:** MinerU validated on the SCANNED class (vision-OCR) at the CLI;
+broader/large-doc soak; the recovery_scan/gap_fill chunks (batch_processor's
+engine-independent net) carry no bbox - pre-existing, out of MinerU scope.
 
 ## PIVOT (2026-06-04): evaluate the extraction VLM before more scaffolding
 
