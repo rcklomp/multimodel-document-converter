@@ -125,6 +125,36 @@ def is_code_population(chunk: Dict[str, Any]) -> bool:
     return False
 
 
+def _norm_ws(text: str) -> str:
+    """Whitespace-stripped content key for duplicate detection."""
+    return re.sub(r"\s+", "", text or "")
+
+
+def _duplicates_primary(norm: str, primary: List[str], window: int = 40) -> bool:
+    """True if ``norm`` (a whitespace-stripped text-as-code chunk) duplicates a
+    cleanly-extracted ``modality=code`` chunk.
+
+    The production pipeline can emit a code listing TWICE — once as a clean,
+    fully-indented ``modality=code`` chunk (the VLM's code element) and again as
+    redundant flush-left ``modality=text`` fragments that a downstream text
+    classifier stamps ``content_classification=code``. Such a fragment is NOT an
+    independent code-indentation failure (the code WAS extracted with
+    indentation, in the code chunk) — it is output redundancy, a separate
+    concern. Detect it by a long contiguous overlap (tolerant of a leaked page
+    header prefixing the fragment).
+    """
+    if not norm:
+        return False
+    if len(norm) <= window:
+        return any(norm in p for p in primary)
+    step = max(1, (len(norm) - window) // 4)
+    for i in range(0, len(norm) - window + 1, step):
+        w = norm[i : i + window]
+        if any(w in p for p in primary):
+            return True
+    return False
+
+
 @dataclass
 class CodeQuality:
     n_population: int = 0  # code-typed chunks (either seam)
@@ -132,6 +162,7 @@ class CodeQuality:
     n_math_excluded: int = 0  # code-typed but no code structure (equations)
     n_repl: int = 0  # REPL transcripts (auto-pass, exempt)
     n_flat_exempt: int = 0  # structural but not judgeable (no nesting)
+    n_duplicate_excluded: int = 0  # text-as-code that duplicates clean code
     n_judgeable: int = 0
     n_judgeable_fail: int = 0
     degraded_ids: List[str] = field(default_factory=list)
@@ -157,11 +188,20 @@ def code_quality(chunks: Sequence[Dict[str, Any]]) -> CodeQuality:
     already be filtered out by the caller).
     """
     cq = CodeQuality(total_chunks=len(chunks))
+    # Clean primary code (the VLM's authoritative code elements), normalized, so
+    # redundant text-as-code fragments duplicating it are not scored as failures.
+    primary = [_norm_ws(ch.get("content") or "") for ch in chunks if ch.get("modality") == "code"]
+    primary = [p for p in primary if p]
     for ch in chunks:
         if not is_code_population(ch):
             continue
-        cq.n_population += 1
         content = ch.get("content") or ""
+        # A modality=text chunk that duplicates a cleanly-extracted code chunk is
+        # output redundancy, not an independent code-indentation failure.
+        if ch.get("modality") == "text" and _duplicates_primary(_norm_ws(content), primary):
+            cq.n_duplicate_excluded += 1
+            continue
+        cq.n_population += 1
         if not has_code_structure(content):
             cq.n_math_excluded += 1
             continue

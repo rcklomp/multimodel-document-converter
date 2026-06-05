@@ -132,6 +132,55 @@ def test_mangled_python_fails_fidelity():
     assert set(r.degraded_ids) == {"f1", "f2"}
 
 
+# --- duplicate text-as-code exclusion --------------------------------------
+
+
+def test_duplicate_text_code_excluded_from_metric():
+    # The production pipeline can emit a listing twice: a clean modality=code
+    # chunk + a flush-left modality=text duplicate stamped content_classification
+    # =code. The duplicate is output redundancy, not an independent indentation
+    # failure — the code WAS extracted with indentation. It must be excluded so
+    # it does not drag down fidelity. (Observed live on AIOS via Qwen.)
+    clean_src = (
+        "class Scheduler:\n"
+        "    def __init__(self, llm, memory_manager, storage_manager):\n"
+        "        self.llm = llm\n"
+        "        self.memory_manager = memory_manager\n"
+        "    def stop(self):\n"
+        "        self.active = False\n"
+        "        return None"
+    )
+    clean = _code_chunk("c", clean_src, modality="code")
+    # Flush-left duplicate with a leaked page header prefixing it.
+    dup = {
+        "chunk_id": "d",
+        "modality": "text",
+        "content": "AIOS: LLM Agent Operating System\n"
+        + "\n".join(ln.lstrip() for ln in clean_src.splitlines()),
+        "metadata": {"chunk_type": "paragraph", "content_classification": "code"},
+    }
+    r = cq.code_quality([clean, dup])
+    assert r.n_duplicate_excluded == 1
+    assert r.n_judgeable == 1  # only the clean code chunk is scored
+    assert r.indentation_fidelity == 1.0
+
+
+def test_text_only_mangled_code_with_no_clean_twin_still_fails():
+    # ANTI-WEAKENING GUARD: a flush-left code block with NO clean modality=code
+    # twin is a genuine extraction failure and must still be counted/failed.
+    frag = {
+        "chunk_id": "f",
+        "modality": "text",
+        "content": "class Z:\ndef go(self):\nself.run()",
+        "metadata": {"chunk_type": "code"},
+    }
+    r = cq.code_quality([frag])
+    assert r.n_duplicate_excluded == 0
+    assert r.n_judgeable == 1
+    assert r.n_judgeable_fail == 1
+    assert r.indentation_fidelity == 0.0
+
+
 # --- Policy B verdict ------------------------------------------------------
 
 

@@ -872,6 +872,7 @@ def print_report(r: AuditResult, path: Path) -> bool:
         print(
             f"    code_population: {cq.n_population}  struct: {cq.n_struct}  "
             f"math_excluded: {cq.n_math_excluded}  repl/flat_exempt: {cq.n_repl + cq.n_flat_exempt}"
+            f"  dup_excluded: {cq.n_duplicate_excluded}"
         )
         print(
             f"    judgeable: {cq.n_judgeable}  degraded: {cq.n_judgeable_fail}  "
