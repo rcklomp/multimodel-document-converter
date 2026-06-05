@@ -1,7 +1,16 @@
 # PLAN — Redesign the R3 Code-Quality Gate for the V3 / MinerU Pipeline
 
-Status: DRAFT for user sign-off (2026-06-05). Branch `v3.1-extraction-hardening`.
+Status: SIGNED + IMPLEMENTED (2026-06-05). Branch `v3.1-extraction-hardening`.
 Author: architecture session following the brief in the session prompt.
+
+**Decisions taken (user-signed 2026-06-05):** §6 policy = **Option B**
+(per-chunk flag + density-gated hard-fail). Extraction (Thread 2) = **deferred to
+separate sign-off**. Threads 1 (metric) + the policy are SHIPPED:
+`scripts/_code_quality.py`, gate wiring in `qa_conversion_audit.py` (hard) and
+`qa_semantic_fidelity.py` (advisory), `tests/test_code_quality_metric.py` +
+`tests/test_code_indentation_audit_gate.py`, and the `DECISIONS.md` entry "R3
+Code-Indentation Gate Redesign". Thread 2 (Qwen-for-code route + optional upstream
+equation guard) remains open.
 
 This plan supersedes the "Proposed fix (needs sign-off)" stub in
 `docs/PLAN_VLM_EVAL.md` §16.2. It is the deliberate requirement-change record the

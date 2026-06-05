@@ -385,19 +385,19 @@ Three distinct findings:
    transcode-to-contract pattern as the HTML-table fix. Verified on the AIOS
    re-run: the 18 `modality=code` chunks are now fenced + indented.
 
-2. **OPEN (deferred - QA-gate architecture, NOT weakened autonomously):**
-   `scripts/qa_semantic_fidelity.py` measures `code_indentation_fidelity` only
-   over `modality=="text"` chunks with `chunk_type=="code"` (line 117/131). But
-   the V3 pipeline PROMOTES code to `modality=="code"` - so the real code blocks
-   (now fenced+indented) are INVISIBLE to the metric. The 0.00 it reports is
-   computed over 9 `modality=text` chunks the chunker's `_looks_like_code`
-   heuristic caught - short flush-left fragments (`self.memory_blocks[aid]=...`)
-   that are genuinely unindented. The metric predates the `modality=code`
-   promotion. Proposed fix (needs sign-off): include `modality=="code"` chunks in
-   `code_chunks`. NOTE this would NOT make AIOS pass (see #3); it makes the metric
-   measure the right population. Deferred because changing a semantic-fidelity
-   gate autonomously is the make-the-failing-run-pass risk; needs deliberate
-   review + threshold re-calibration against #3.
+2. **RESOLVED 2026-06-05 (R3 gate redesign, user-signed):** the dead metric was
+   far deeper than "include `modality=="code"` chunks". Both gate scripts scored
+   only `modality=="text"` code, and in `qa_conversion_audit.py` that same
+   blindness mis-routed the doc (`code_ratio` collapsed below 0.15 ->
+   `mixed_prose` -> the hard gate dropped to `warn`), so even the 0.00 it saw
+   only WARNed. Redesigned, not patched: a shared `scripts/_code_quality.py`
+   measures the full population, positively identifies code (equations excluded),
+   judges only judgeable nested blocks, and applies a density-gated Policy B
+   verdict. AIOS-MinerU now hard-`AUDIT_FAIL`s on CODE (fidelity 0.33), exactly
+   per #3 — the metric is honest, not loosened. See
+   `docs/PLAN_R3_CODE_GATE_REDESIGN.md` and `docs/DECISIONS.md` "R3
+   Code-Indentation Gate Redesign". The extraction fix (#3 / F5 Qwen-for-code
+   route) is the deferred Thread 2.
 
 3. **MinerU model-quality residual (not converter-fixable):** some AIOS pseudocode
    has recognition errors - `self.` read as `self(`, `self/response`, a typo

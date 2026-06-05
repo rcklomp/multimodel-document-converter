@@ -8,6 +8,26 @@
 - QA-CHECK-05: image/table chunks must have `asset_ref`.
 - REQ-COORD-02: `page_width`/`page_height` present for spatial metadata.
 
+## R3 — Code-Indentation Fidelity (redesigned 2026-06-05)
+
+R3 ("indentation fidelity + syntax preservation") is enforced by the shared
+metric in `scripts/_code_quality.py`, imported by `qa_conversion_audit.py` (the
+authoritative HARD gate) and `qa_semantic_fidelity.py` (advisory). It measures
+code over the FULL population (`modality=="code"` + legacy `modality=="text"`
+code), POSITIVELY identifies code (keywords / code punctuation / `>>>` REPL) so
+extractor-mislabelled equations are excluded, and scores indentation ONLY on
+judgeable code (multi-line `:`-suite / brace blocks; flat/single-statement and
+REPL transcripts are exempt — no nesting to assess).
+
+**Fidelity floor:** `0.90` (unchanged). **Gate verdict (Policy B):** at/above the
+floor, or fewer than 3 judgeable chunks → PASS. Below the floor → each degraded
+chunk is flagged, and the document hard-fails ONLY when judgeable-code density
+`>= 0.04`; below that density it is an advisory WARN (code is always minority
+content, so a prose document is not discarded over incidental mangled code).
+The verdict is INDEPENDENT of `content_type`. Full rationale, anti-weakening
+note, and the rejected alternatives: `docs/DECISIONS.md` "R3 Code-Indentation
+Gate Redesign" and `docs/PLAN_R3_CODE_GATE_REDESIGN.md`.
+
 ## QA-CHECK-01 Tolerance Policy (Pass/Fail Source)
 
 | Scope | Tolerance | Gate Decision |
@@ -145,7 +165,7 @@ Allowed advisory codes and their rationale (per `docs/DECISIONS.md`
 |---|---|---|
 | `ASSET_TINY` | Publisher icon-class assets (<1 KB). Per the Retrieval-Value Test these are low-retrieval-value but valid; their presence in the JSONL is informational. | No |
 | `PAGE_COUNT_UNKNOWN` | EPUB documents have no PDF-style page count. The EPUB lane provides a virtual page mapping via chunk order. | No |
-| `SCRIPT_ADVISORY_FAIL` | `qa_semantic_fidelity.py` exit 0 indicates the script itself classified the issue as advisory only (e.g., `code_indentation_fidelity` below 0.90 on a doc whose profile makes that floor inappropriate). | No |
+| `SCRIPT_ADVISORY_FAIL` | `qa_semantic_fidelity.py` is advisory by design (exit 0); the authoritative R3 hard gate is `qa_conversion_audit.py` (Policy B, see "R3 — Code-Indentation Fidelity" above). A `SEMANTIC_FAIL` it prints — e.g. `code_indentation_fidelity` below 0.90 — is informational; the hard verdict comes from the audit. | No |
 | `MISSING_CHAPTERS` | EPUB spine coverage found missing chapters, but every missing chapter is a contiguous leading/trailing low-content structural item (for example title page, cover, copyright/colophon stub, or blank wrapper) that Docling's HTML parser stripped before chunk emission. Internal gaps or content-bearing edge chapters remain `FAIL`. | Yes (edge + low-content structural only) |
 | `VISION_HARD_FALLBACK_RATE` | Hard-fallback rate > 5 % when ALL hard_fallbacks have the F4 sentinel — documented "VLM legitimately can't describe this" cases (complex assets with terse responses after the Phase 3 detail-retry). | Yes (F4 condition above) |
 

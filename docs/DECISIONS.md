@@ -2587,3 +2587,85 @@ timeout. Batch-size blast-radius insurance is moot once pages stop failing.
 raise `VlmInfraError`, so the B4 circuit-breaker contract is unchanged, not
 amended). 600s is a ceiling, not a target: fast cloud endpoints still return in
 seconds. Slower-decode / very text-dense workloads can raise it via the env.
+
+## R3 Code-Indentation Gate Redesign (2026-06-05)
+
+**Problem.** The R3 code-indentation gate was DEAD. Both gate scripts
+(`qa_conversion_audit.py` hard, `qa_semantic_fidelity.py` advisory) scored only
+`modality=="text"` chunks tagged `chunk_type=="code"`, but the V3 pipeline
+promotes real code to `modality=="code"`. The actual code bodies were invisible.
+Worse, in `qa_conversion_audit.py` the same blindness drove
+`_classify_content_type` (`code_ratio = code_chunks / text_chunks`), so a
+code-bearing doc collapsed below the `0.15` ratio, was classed `mixed_prose`,
+and its code gate dropped to `warn`. Net: on AIOS the audit printed
+`indentation_fidelity: 0.00` and only WARNed; the doc `AUDIT_FAIL`ed on HEADING
+alone. R3 (a HARD pipeline contract — "indentation fidelity + syntax
+preservation", CHARTER §276) was silently unenforced.
+
+**What was rejected (with evidence).**
+- Raising/lowering the `0.15` `code_heavy` threshold to pass AIOS: no threshold
+  separates AIOS (paper with code) from FluentPython (code book) — they overlap
+  on count-ratio and char-ratio, and by *judgeable-code* density AIOS (0.055) is
+  denser than FluentPython (0.027, mostly REPL doctests). The classification is
+  not reliably makeable, so the redesign does not depend on it.
+- Labelling AIOS "pseudocode" for loose rules: AIOS is real Python
+  (`class SysCall(Thread)`, `def __init__`, `threading.Event()`) recognized
+  imperfectly by MinerU2.5-1.2B (the smallest variant). Its measured judgeable
+  fidelity is 0.33 — a GENUINE failure that must not be hidden.
+- Fixing only one script: the seam (and content-type blindness) is in both.
+
+**Decision.** A single shared metric module (`scripts/_code_quality.py`) imported
+by both scripts, with three properties:
+1. **Right population** — `modality=="code"` + legacy `modality=="text"` code.
+2. **Positive code-ID** — code = keywords OR code punctuation OR `>>>` REPL.
+   Equations/formulas that an extractor VLM mislabels as `code` (verified: they
+   carry `original_vlm_type: code`) have none of these and are EXCLUDED. A prior
+   "exclude unicode math" heuristic was falsified (missed LaTeX); positive ID is
+   robust. Validated: Hybrid-EV's 15 equation chunks -> 0 in the code metric.
+3. **Judge only judgeable** — indentation is scored ONLY on multi-line code that
+   syntactically requires nesting (a Python `:` suite header or a brace block).
+   Flat/single-statement code and REPL transcripts are exempt (no nesting to
+   assess). This subsumes "language/style-aware" judging without a brittle
+   language classifier, and (corpus-validated) still FAILS AIOS at 0.33 — so
+   "ignore flat code" alone does not excuse it.
+
+The R3 indent verdict is now INDEPENDENT of `content_type` (which the honest
+metric makes unnecessary; it survives only as a cosmetic label and to gate the
+secondary flat/fragmentation metrics).
+
+**Gating policy (Policy B, user-signed 2026-06-05).** When judgeable-code
+fidelity is below the `0.90` floor:
+- each degraded judgeable chunk is flagged (surfaced in the audit issue list);
+- the DOCUMENT hard-fails ONLY when judgeable-code density >= `0.04`
+  (`DEFAULT_HARDFAIL_DENSITY`); below that floor it is an advisory WARN.
+
+Rationale: code is ALWAYS minority content by character (even FluentPython is
+6-19% code chars), so a whole-document hard-fail over one or two incidental
+mangled snippets would discard good prose/tables/figures. The density floor
+reserves the hard verdict for documents where broken code is non-incidental,
+WITHOUT the impossible "is this a code book" classification (it is a measured
+fraction, not a content-type guess). The `0.04` floor sits just below the one
+empirical failing case (AIOS, 0.074 with the dual-seam population) and is
+combined with a `>= 3` judgeable-chunk meaningfulness floor; it will be
+re-anchored if an incidental-code failure surfaces.
+
+**Anti-weakening note.** This is strictly MORE enforcement, not a relaxation:
+the prior hard gate fired on nothing (dead). The metric now reports the failure
+honestly (AIOS 0.33 FAIL, degraded chunks named) in every case; only the
+document-level escalation (hard vs advisory) is density-gated. AIOS-MinerU now
+`AUDIT_FAIL`s on CODE (density 0.074 >= 0.04); the proportionate remediation is
+the deferred Thread-2 extraction fix (route code-dense pages to the Qwen lane,
+which extracted the same AIOS code at fidelity 1.00 — `PLAN_VLM_EVAL` F5).
+
+**Threshold unchanged:** the `0.90` fidelity floor is preserved — the
+population and method were fixed, not the bar.
+
+**Contracts:** `tests/test_code_quality_metric.py` (19 unit contracts: positive
+code-ID, equation/LaTeX exclusion, judge-only-judgeable, Policy B verdict) and
+`tests/test_code_indentation_audit_gate.py` (subprocess end-to-end:
+above-density hard-fail, equation exclusion, clean-code pass, below-density
+WARN). Design + resolved architecture questions: `docs/PLAN_R3_CODE_GATE_REDESIGN.md`.
+
+**Deferred (separate sign-off):** Thread 2 — MinerU-default + Qwen-for-code-pages
+extraction route, measured by this metric; and an optional upstream guard in
+`mineru_native.py` to retype VLM-mislabelled math out of the code lane.
