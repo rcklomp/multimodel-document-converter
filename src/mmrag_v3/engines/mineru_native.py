@@ -41,6 +41,8 @@ from __future__ import annotations
 
 import logging
 import os
+from html import unescape
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -77,6 +79,81 @@ _CODE_TYPES = frozenset({"code"})
 # MinerU does not emit a per-element confidence; use the same default the VLM
 # adapter applies to elements with no confidence field.
 _DEFAULT_CONFIDENCE = 0.9
+
+
+class _TableHTMLParser(HTMLParser):
+    """Collect ``<tr>``/``<td>``/``<th>`` cells from a MinerU HTML table.
+
+    MinerU2.5's recognition stage emits tables as HTML (``<table><tr><td>``),
+    but the pipeline contract (R2) and the QA gates require Markdown grids.
+    Tolerant by design — MinerU HTML is well-formed, but a stray tag must not
+    raise. colspan fills blank trailing cells (Markdown has no cell merging);
+    rowspan collapses to the row it appears on (Markdown cannot span rows).
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.rows: List[List[str]] = []
+        self._row: Optional[List[str]] = None
+        self._cell: Optional[List[str]] = None
+        self._colspan = 1
+
+    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+        if tag == "tr":
+            self._row = []
+        elif tag in ("td", "th") and self._row is not None:
+            self._cell = []
+            self._colspan = 1
+            for key, value in attrs:
+                if key == "colspan" and value:
+                    try:
+                        self._colspan = max(1, int(value))
+                    except ValueError:
+                        self._colspan = 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("td", "th") and self._cell is not None and self._row is not None:
+            text = unescape("".join(self._cell))
+            text = " ".join(text.split())  # collapse internal newlines/runs
+            text = text.replace("|", r"\|")  # pipes would break the grid
+            self._row.append(text)
+            self._row.extend([""] * (self._colspan - 1))
+            self._cell = None
+        elif tag == "tr" and self._row is not None:
+            self.rows.append(self._row)
+            self._row = None
+
+    def handle_data(self, data: str) -> None:
+        if self._cell is not None:
+            self._cell.append(data)
+
+
+def _looks_like_html_table(content: str) -> bool:
+    lowered = content.lower()
+    return "<table" in lowered or "<tr" in lowered
+
+
+def _html_table_to_markdown(content: str) -> Optional[str]:
+    """Transcode a MinerU HTML table into a Markdown grid (None if not parseable).
+
+    First row becomes the header, followed by a ``| --- |`` separator and the
+    body rows. Ragged rows are right-padded to the widest row so the grid is
+    rectangular.
+    """
+    parser = _TableHTMLParser()
+    try:
+        parser.feed(content)
+        parser.close()
+    except Exception:  # pragma: no cover - defensive: malformed HTML
+        return None
+    rows = [r for r in parser.rows if r]
+    if not rows:
+        return None
+    width = max(len(r) for r in rows)
+    rows = [r + [""] * (width - len(r)) for r in rows]
+    lines = ["| " + " | ".join(rows[0]) + " |", "| " + " | ".join(["---"] * width) + " |"]
+    lines.extend("| " + " | ".join(r) + " |" for r in rows[1:])
+    return "\n".join(lines)
 
 
 def _mineru_bbox_to_uir(bbox: Sequence[float]) -> List[int]:
@@ -153,6 +230,13 @@ def _mineru_element_to_element(raw: Dict[str, Any], index: int) -> Element:
         element_type = ElementType.TEXT
 
     content = str(raw.get("content") or "")
+    # MinerU emits tables as HTML; the pipeline contract (R2) + QA gates
+    # require Markdown grids. Transcode HTML tables; keep the original on a
+    # parse miss so content is never lost.
+    if element_type is ElementType.TABLE and _looks_like_html_table(content):
+        markdown = _html_table_to_markdown(content)
+        if markdown:
+            content = markdown
     # Collapse degenerate generation loops on everything but code (which must
     # stay verbatim). MinerU has built-in anti-repetition; this is defense in
     # depth shared with the VLM adapter.

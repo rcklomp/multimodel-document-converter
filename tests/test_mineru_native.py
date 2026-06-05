@@ -27,6 +27,7 @@ from mmrag_v2.universal.intermediate import ElementType, UniversalDocument
 from mmrag_v3.engines.mineru_native import (
     MineruConfigError,
     MineruNativeEngine,
+    _html_table_to_markdown,
     _mineru_bbox_to_uir,
     _mineru_element_to_element,
     mineru_page_to_universal_page,
@@ -62,7 +63,12 @@ def _dense_table_page():
             "type": "table",
             "bbox": [0.5, 0.34, 0.95, 0.74],
             "angle": 0,
-            "content": "| Model | Cal |\n| --- | --- |\n| Ruger | .44 |",
+            # MinerU emits tables as HTML (the real CarOK shape, with empty cells).
+            "content": (
+                "<table><tr><td>Model</td><td>Cal</td></tr>"
+                "<tr><td>Ruger 44 Carbine</td><td>.44</td></tr>"
+                "<tr><td>Mini-14</td><td></td></tr></table>"
+            ),
         }
     )
     elements.append(
@@ -110,6 +116,53 @@ def test_bbox_degenerate_point_satisfies_strict_invariants():
     box2 = _mineru_bbox_to_uir([1.0, 1.0, 1.0, 1.0])
     assert box2[2] == 1000 and box2[0] == 999
     assert box2[3] == 1000 and box2[1] == 999
+
+
+def test_html_table_transcoded_to_markdown_grid():
+    html = (
+        "<table><tr><td>aant</td><td>merk</td><td>ink.ex.BTW</td></tr>"
+        "<tr><td></td><td>Castrol</td><td>6,55</td></tr>"
+        "<tr><td>3</td><td>Castrol</td><td>26,85</td></tr></table>"
+    )
+    md = _html_table_to_markdown(html)
+    lines = md.splitlines()
+    assert lines[0] == "| aant | merk | ink.ex.BTW |"
+    assert lines[1] == "| --- | --- | --- |"  # the separator the gate requires
+    assert lines[2] == "|  | Castrol | 6,55 |"  # empty cell preserved as blank
+    assert lines[3] == "| 3 | Castrol | 26,85 |"
+
+
+def test_html_table_colspan_and_pipe_escaping():
+    html = (
+        "<table><tr><th>A</th><th colspan='2'>B</th></tr>"
+        "<tr><td>a|b</td><td>c</td><td>d</td></tr></table>"
+    )
+    md = _html_table_to_markdown(html)
+    lines = md.splitlines()
+    # colspan=2 -> header padded to 3 columns; separator has 3 dashes.
+    assert lines[0] == "| A | B |  |"
+    assert lines[1] == "| --- | --- | --- |"
+    # a literal pipe in a cell is escaped so it cannot break the grid.
+    assert r"a\|b" in lines[2]
+
+
+def test_html_table_unparseable_returns_none():
+    assert _html_table_to_markdown("no table here") is None
+
+
+def test_table_element_content_becomes_markdown():
+    el = _mineru_element_to_element(
+        {
+            "type": "table",
+            "bbox": [0.1, 0.1, 0.9, 0.9],
+            "content": "<table><tr><td>x</td><td>y</td></tr><tr><td>1</td><td>2</td></tr></table>",
+        },
+        0,
+    )
+    assert el.type is ElementType.TABLE
+    assert "<table>" not in el.content
+    assert "| x | y |" in el.content
+    assert "| --- | --- |" in el.content
 
 
 def test_type_mapping_table_image_text():
