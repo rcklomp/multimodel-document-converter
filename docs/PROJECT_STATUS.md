@@ -34,9 +34,24 @@ full suite, firewall, repo-integrity, ruff+black, SMOKE_PRODUCTION_PASS):
 latency (6.8s vs GX10 13.4s), GX10 vLLM wins batched throughput 2.3x (vLLM
 batches; mlx is sequential) - so M5 for latency, GX10/Config F for throughput.
 
-**Not yet:** MinerU validated on the SCANNED class (vision-OCR) at the CLI;
-broader/large-doc soak; the recovery_scan/gap_fill chunks (batch_processor's
-engine-independent net) carry no bbox - pre-existing, out of MinerU scope.
+**Also validated (2026-06-05):** SCANNED class - MinerU reads the scanned invoice
+0013 (0 chunks on the offline Docling path) into structured Markdown tables ->
+QA_PASS (`PLAN_VLM_EVAL` §15). SCALE - AIOS 35pg academic+pseudocode: surfaced and
+FIXED the code-fencing gap (`a47f0c4`: MinerU emits code unfenced; converter now
+fences it, R3) (`PLAN_VLM_EVAL` §16).
+
+**Open / deferred (none a default ship-blocker):**
+- `qa_semantic_fidelity.py` code-indentation metric seam: it measures only
+  `modality=="text"` chunks, but V3 promotes code to `modality=="code"`, so the
+  real fenced+indented code is invisible to the gate (it scores the unindented
+  text fragments instead). DEFERRED - a semantic-gate change needs sign-off, NOT
+  done autonomously (`PLAN_VLM_EVAL` §16; [[project_open_issues]]).
+- MinerU2.5-1.2B recognition-quality limit on dense academic pseudocode (the
+  smallest variant) - larger variant / code re-extraction lane if it matters.
+- The recovery_scan/gap_fill chunks (batch_processor's engine-independent net)
+  carry no bbox - pre-existing, out of MinerU scope.
+- AIOS HEADING 79.7% (just under 0.80) - a genuine borderline coverage signal,
+  left as-is (not over-firing; the doc has real headings).
 
 ## PIVOT (2026-06-04): evaluate the extraction VLM before more scaffolding
 
