@@ -9,8 +9,10 @@ separate sign-off**. Threads 1 (metric) + the policy are SHIPPED:
 `scripts/_code_quality.py`, gate wiring in `qa_conversion_audit.py` (hard) and
 `qa_semantic_fidelity.py` (advisory), `tests/test_code_quality_metric.py` +
 `tests/test_code_indentation_audit_gate.py`, and the `DECISIONS.md` entry "R3
-Code-Indentation Gate Redesign". Thread 2 (Qwen-for-code route + optional upstream
-equation guard) remains open.
+Code-Indentation Gate Redesign". The optional upstream equation guard in
+`mineru_native.py` (demote VLM-mislabelled math out of the code lane) is also
+SHIPPED (e4196bf). Thread 2 PROPER — the Qwen-for-code extraction route
+(AIOS 0.33 -> ~1.00, F5) — remains open for separate sign-off.
 
 This plan supersedes the "Proposed fix (needs sign-off)" stub in
 `docs/PLAN_VLM_EVAL.md` §16.2. It is the deliberate requirement-change record the

@@ -2666,6 +2666,15 @@ code-ID, equation/LaTeX exclusion, judge-only-judgeable, Policy B verdict) and
 above-density hard-fail, equation exclusion, clean-code pass, below-density
 WARN). Design + resolved architecture questions: `docs/PLAN_R3_CODE_GATE_REDESIGN.md`.
 
-**Deferred (separate sign-off):** Thread 2 — MinerU-default + Qwen-for-code-pages
-extraction route, measured by this metric; and an optional upstream guard in
-`mineru_native.py` to retype VLM-mislabelled math out of the code lane.
+**Upstream guard SHIPPED 2026-06-05 (e4196bf):** `mineru_native.py` now demotes a
+`code`-typed element to plain TEXT when it is a mislabelled equation — gated on
+POSITIVE math evidence (unicode math/scripts or LaTeX) AND absence of code
+structure, so a bare assignment (`x = 1`, indistinguishable from `V_oc = a` by
+surface form) is never demoted. Self-contained per the V3 engine firewall; the
+gate metric stays the cross-extractor backstop. Verified: 0/18 AIOS real-code
+chunks demoted, 15/15 Hybrid-EV equations demoted as math.
+`tests/test_mineru_native.py` pins it against the shared fixtures.
+
+**Still deferred (separate sign-off):** Thread 2 proper — the MinerU-default +
+Qwen-for-code-pages extraction ROUTE that raises AIOS's code fidelity from 0.33
+to ~1.00 (F5), measured by this metric.
