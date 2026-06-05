@@ -1817,6 +1817,10 @@ class BatchProcessor:
         all_chunks = self._filter_no_visual_images(all_chunks)
         all_chunks = self._filter_repetition_garbage(all_chunks)
         all_chunks = self._apply_table_recovery_highlander_dedup(all_chunks)
+        # Drop recovery text chunks that duplicate the primary VLM extraction on
+        # the same page (the scout re-pulls VLM-captured code from the flush-left
+        # PDF text layer, polluting output + the R3 code-indentation metric).
+        all_chunks = self._apply_recovery_vs_primary_dedup(all_chunks)
 
         # v2.16 Phase 4: VLM-table IoU dedup — suppress flat-prose text chunks
         # that spatially overlap a VLM-extracted table on the same page above
@@ -8182,6 +8186,92 @@ class BatchProcessor:
                 flush=True,
             )
 
+        return kept
+
+    def _apply_recovery_vs_primary_dedup(
+        self,
+        chunks: List[IngestionChunk],
+    ) -> List[IngestionChunk]:
+        """Drop recovery text chunks that re-extract content the primary (VLM)
+        extraction already captured on the same page.
+
+        The TextIntegrityScout pulls whole-page text from the PDF text layer to
+        rescue genuinely-missing text. On code/dense pages the VLM already
+        extracted the content cleanly (with indentation), but the scout re-adds
+        it from the flush-left text layer, producing mangled duplicates — output
+        bloat plus R3 code-indentation pollution (the same code appears once
+        clean as ``modality=code`` and again flush-left as recovery text). The
+        Highlander pass above handles recovery-vs-TABLE; this handles
+        recovery-vs-TEXT/CODE.
+
+        A recovery chunk is dropped only when >=85% of its unique tokens are
+        already present in the primary chunks on its page. A recovery chunk on a
+        page with NO primary chunk (a page the VLM dropped entirely) is always
+        kept — that is the scout's legitimate purpose — and a recovery chunk with
+        substantial genuinely-new content stays below the threshold and survives.
+        The 0.85 floor was set from measured data: every spurious AIOS recovery
+        duplicate scored 0.92-1.00 against the primary, while genuinely-missing
+        prose (introducing new content words) scores far lower.
+        """
+        overlap_floor = 0.85
+        import re
+
+        recovery_methods = {
+            "recovery_gap_fill",
+            "recovery_scan",
+            "recovery_subsurface",
+            "recovery_frontpage",
+        }
+
+        def _tokens(text: str) -> set:
+            return set(re.findall(r"[A-Za-z0-9]{3,}", (text or "").lower()))
+
+        primary_tokens_by_page: Dict[int, set] = {}
+        for chunk in chunks:
+            method = str(getattr(chunk.metadata, "extraction_method", "") or "").lower()
+            if method in recovery_methods:
+                continue
+            if chunk.modality in (Modality.TEXT, Modality.CODE) and chunk.content:
+                page_no = int(getattr(chunk.metadata, "page_number", 0) or 0)
+                if page_no > 0:
+                    primary_tokens_by_page.setdefault(page_no, set()).update(_tokens(chunk.content))
+
+        if not primary_tokens_by_page:
+            return chunks
+
+        kept: List[IngestionChunk] = []
+        dropped = 0
+        for chunk in chunks:
+            method = str(getattr(chunk.metadata, "extraction_method", "") or "").lower()
+            page_no = int(getattr(chunk.metadata, "page_number", 0) or 0)
+            if (
+                chunk.modality == Modality.TEXT
+                and method in recovery_methods
+                and page_no in primary_tokens_by_page
+                and chunk.content
+            ):
+                rec = _tokens(chunk.content)
+                if rec:
+                    overlap = len(rec & primary_tokens_by_page[page_no]) / len(rec)
+                    if overlap >= overlap_floor:
+                        dropped += 1
+                        logger.info(
+                            f"[RECOVERY-DEDUP] Drop recovery chunk {chunk.chunk_id} "
+                            f"(page={page_no}, method={method}, primary_overlap={overlap:.2f})"
+                        )
+                        continue
+            kept.append(chunk)
+
+        if dropped:
+            print(
+                f"\n🧹 [RECOVERY-DEDUP] Dropped {dropped} recovery chunk(s) duplicating "
+                f"primary VLM extraction",
+                flush=True,
+            )
+            logger.info(
+                f"[RECOVERY-DEDUP] Dropped {dropped} recovery text chunk(s) already "
+                f"present in the primary extraction"
+            )
         return kept
 
     def _apply_vlm_table_iou_dedup(
