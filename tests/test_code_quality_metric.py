@@ -1,0 +1,160 @@
+"""Contract tests for the shared R3 code-quality metric (scripts/_code_quality).
+
+These pin the redesign in docs/PLAN_R3_CODE_GATE_REDESIGN.md:
+  - the right population (modality=code + legacy text-code),
+  - positive code-ID excluding equations/LaTeX (the false-fail class),
+  - judge-only-judgeable (flat/REPL exempt; flattened blocks FAIL),
+  - Policy B verdict (warn vs density-gated hard-fail).
+
+They are executable requirements, not fixture-fits. AIOS-class mangled Python
+must FAIL the metric; equations must never enter the code population.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+
+import _code_quality as cq  # noqa: E402
+
+# --- positive code-ID ------------------------------------------------------
+
+
+def test_python_code_has_structure():
+    assert cq.has_code_structure("def f(x):\n    return x")
+    assert cq.has_code_structure("class A(B):\n    pass")
+    assert cq.has_code_structure("import os")
+    assert cq.has_code_structure(">>> 1 + 1\n2")
+
+
+@pytest.mark.parametrize(
+    "math",
+    [
+        "Pb+PbO₂+2H₂SO₄ ↔ 2PbSO₄+2H₂O",
+        "V_oc = a + b × DOD + (c + d × DOD)T",
+        "V_{fc} = E_{cell}",
+        r"\frac{a}{b} = \ln(x)",
+        "Anode:\nH₂ → 2H⁺ + 2e⁻",
+    ],
+)
+def test_equations_have_no_code_structure(math):
+    # The false-fail class: extractor VLMs mislabel these as code. Positive
+    # code-ID must drop them so they never enter the indentation metric.
+    assert not cq.has_code_structure(math)
+
+
+# --- judgeable classification ---------------------------------------------
+
+
+def test_flat_single_statement_not_judgeable():
+    assert not cq.is_judgeable("import threading")
+    assert not cq.is_judgeable("x = compute(y)")
+
+
+def test_repl_not_judgeable():
+    assert not cq.is_judgeable(">>> def f(x):\n...     return x\n")
+
+
+def test_multiline_suite_is_judgeable():
+    assert cq.is_judgeable("def f(x):\n    return x + 1")
+    assert cq.is_judgeable("class A:\n    def m(self):\n        return 1")
+
+
+def test_brace_block_is_judgeable():
+    assert cq.is_judgeable("int main() {\n    return 0;\n}")
+
+
+# --- indentation_ok --------------------------------------------------------
+
+
+def test_nested_block_indentation_ok():
+    assert cq.indentation_ok("def f(x):\n    return x + 1")
+
+
+def test_flattened_block_indentation_fails():
+    # AIOS shape: a multi-line class whose body indentation was stripped, so
+    # every line sits at column 0 (one depth) — the mangling R3 must catch.
+    flat = "class Scheduler:\ndef __init__(self, llm):\nself.llm = llm"
+    assert not cq.indentation_ok(flat)
+
+
+# --- population + aggregate metric ----------------------------------------
+
+
+def _code_chunk(cid, content, modality="code"):
+    c = {"chunk_id": cid, "modality": modality, "content": content}
+    if modality == "text":
+        c["metadata"] = {"chunk_type": "code"}
+    return c
+
+
+def test_population_covers_both_seams():
+    chunks = [
+        _code_chunk("a", "def f():\n    return 1", modality="code"),
+        _code_chunk("b", "def g():\n    return 2", modality="text"),
+        {"chunk_id": "c", "modality": "text", "content": "prose", "metadata": {}},
+    ]
+    r = cq.code_quality(chunks)
+    assert r.n_population == 2
+    assert r.n_judgeable == 2
+
+
+def test_equations_excluded_from_population_metric():
+    chunks = [
+        _code_chunk("e1", "V_oc = a + b × DOD"),
+        _code_chunk("e2", "Pb+PbO₂ ↔ 2PbSO₄"),
+    ]
+    r = cq.code_quality(chunks)
+    assert r.n_population == 2
+    assert r.n_struct == 0
+    assert r.n_math_excluded == 2
+    assert r.n_judgeable == 0
+    assert r.indentation_fidelity == 1.0  # nothing judgeable -> no false fail
+
+
+def test_mangled_python_fails_fidelity():
+    good = "def a():\n    return 1"
+    flat1 = "class X:\ndef __init__(self):\nself.a = 1"
+    flat2 = "class Y:\ndef run(self):\nself.go()"
+    chunks = [
+        _code_chunk("g", good),
+        _code_chunk("f1", flat1),
+        _code_chunk("f2", flat2),
+    ]
+    r = cq.code_quality(chunks)
+    assert r.n_judgeable == 3
+    assert r.n_judgeable_fail == 2
+    assert r.indentation_fidelity == pytest.approx(1 / 3)
+    assert set(r.degraded_ids) == {"f1", "f2"}
+
+
+# --- Policy B verdict ------------------------------------------------------
+
+
+def test_verdict_pass_when_too_few_judgeable():
+    r = cq.CodeQuality(n_judgeable=2, n_judgeable_fail=2, total_chunks=100)
+    assert cq.gate_verdict(r) == "pass"
+
+
+def test_verdict_pass_when_fidelity_ok():
+    r = cq.CodeQuality(n_judgeable=10, n_judgeable_fail=0, total_chunks=100)
+    assert cq.gate_verdict(r) == "pass"
+
+
+def test_verdict_warn_below_density_floor():
+    # 3 mangled judgeable blocks in a 300-chunk prose doc: incidental -> warn.
+    r = cq.CodeQuality(n_judgeable=3, n_judgeable_fail=3, total_chunks=300)
+    assert r.judgeable_density < cq.DEFAULT_HARDFAIL_DENSITY
+    assert cq.gate_verdict(r) == "warn"
+
+
+def test_verdict_hardfail_above_density_floor():
+    # AIOS-class: 9 judgeable, 5 broken, 163 chunks -> density 0.055 -> fail.
+    r = cq.CodeQuality(n_judgeable=9, n_judgeable_fail=5, total_chunks=163)
+    assert r.judgeable_density >= cq.DEFAULT_HARDFAIL_DENSITY
+    assert r.indentation_fidelity < cq.DEFAULT_INDENT_FIDELITY_FLOOR
+    assert cq.gate_verdict(r) == "fail"
