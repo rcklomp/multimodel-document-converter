@@ -326,3 +326,47 @@ def test_engine_without_endpoint_raises_config_error(monkeypatch):
     engine = MineruNativeEngine()  # no client injected, no endpoint
     with pytest.raises(MineruConfigError):
         _ = engine.client
+
+
+# ---------------------------------------------------------------------------
+# Processor routing (USE_MINERU_ENGINE)
+# ---------------------------------------------------------------------------
+
+
+def test_use_mineru_engine_flag_detected(monkeypatch):
+    from mmrag_v3 import processor
+
+    monkeypatch.setenv("USE_MINERU_ENGINE", "1")
+    assert processor.is_mineru_route_enabled() is True
+    monkeypatch.setenv("USE_MINERU_ENGINE", "0")
+    assert processor.is_mineru_route_enabled() is False
+    monkeypatch.delenv("USE_MINERU_ENGINE", raising=False)
+    assert processor.is_mineru_route_enabled() is False
+
+
+def test_mineru_route_takes_precedence_and_calls_engine(monkeypatch):
+    from mmrag_v3 import processor
+
+    monkeypatch.setenv("USE_MINERU_ENGINE", "1")
+    # Even with other flags set, MinerU wins.
+    monkeypatch.setenv("USE_DOCLING_FAST", "1")
+    monkeypatch.setenv("USE_VLM_ENGINE", "1")
+
+    seen = {}
+
+    class _SpyEngine:
+        def extract(self, file_path):
+            seen["file_path"] = file_path
+            return "SENTINEL_UIR"
+
+    def _no(*_a, **_k):  # other engines must NOT be constructed
+        raise AssertionError("non-MinerU engine constructed despite USE_MINERU_ENGINE=1")
+
+    monkeypatch.setattr(processor, "MineruNativeEngine", lambda: _SpyEngine())
+    monkeypatch.setattr(processor, "VlmNativeEngine", _no)
+    monkeypatch.setattr(processor, "DoclingFastEngine", _no)
+    monkeypatch.setattr(processor, "HybridEngine", _no)
+
+    result = processor.extract("/some/doc.pdf")
+    assert result == "SENTINEL_UIR"
+    assert seen["file_path"] == "/some/doc.pdf"

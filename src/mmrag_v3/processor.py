@@ -23,12 +23,18 @@ from typing import Union
 from mmrag_v2.universal.intermediate import UniversalDocument
 
 from .engines.docling_fast import DoclingFastEngine
+from .engines.mineru_native import MineruNativeEngine
 from .engines.router import HybridEngine
 from .engines.vlm_native import VlmNativeEngine
 
 
 def _env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip() in {"1", "true", "TRUE", "yes"}
+
+
+def is_mineru_route_enabled() -> bool:
+    """Return True when the MinerU2.5 engine is force-selected via env."""
+    return _env_flag("USE_MINERU_ENGINE")
 
 
 def is_vlm_route_enabled() -> bool:
@@ -45,10 +51,13 @@ def extract(file_path: Union[str, "os.PathLike[str]"]) -> UniversalDocument:
     """Run the Phase C pipeline and return a v2-UIR document.
 
     Routing precedence:
+        * ``USE_MINERU_ENGINE=1``   → all pages through ``MineruNativeEngine``
         * ``USE_VLM_ENGINE=1``      → all pages through ``VlmNativeEngine``
         * ``USE_DOCLING_FAST=1``    → all pages through ``DoclingFastEngine``
         * default                   → ``HybridEngine`` (cost-optimizer router)
     """
+    if is_mineru_route_enabled():
+        return MineruNativeEngine().extract(str(file_path))
     if is_vlm_route_enabled():
         return VlmNativeEngine().extract(str(file_path))
     if is_docling_fast_route_enabled():
