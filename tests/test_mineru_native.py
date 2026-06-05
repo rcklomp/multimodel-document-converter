@@ -54,8 +54,9 @@ def _dense_table_page():
                 "type": "text",
                 "bbox": [0.085, round(y, 3), 0.473, round(y + 0.015, 3)],
                 "angle": 0,
+                # Distinct spreadsheet rows are NOT continuations of each other.
                 "content": f"Ruger 44 Carbine {120 + i}",
-                "merge_prev": i % 2 == 1,
+                "merge_prev": False,
             }
         )
     elements.append(
@@ -242,6 +243,61 @@ def test_degenerate_repeat_collapsed_on_prose_not_code():
         {"type": "code", "bbox": [0.1, 0.1, 0.9, 0.2], "content": code_loop}, 0
     )
     assert code.content == code_loop  # code is never collapsed
+
+
+def test_merge_prev_folds_continuation_into_previous_text():
+    raw = [
+        {"type": "text", "bbox": [0.1, 0.1, 0.5, 0.15], "content": "The quick brown fox jumps"},
+        {
+            "type": "text",
+            "bbox": [0.5, 0.1, 0.9, 0.15],
+            "content": "over the lazy dog.",
+            "merge_prev": True,
+        },
+        {"type": "text", "bbox": [0.1, 0.2, 0.9, 0.25], "content": "A new paragraph."},
+    ]
+    page = mineru_page_to_universal_page(raw, page_number=1, dimensions=(1000, 1000))
+    # Continuation folded -> 2 text elements, not 3.
+    assert len(page.elements) == 2
+    # Joined with a space (no spurious newline mid-sentence).
+    assert page.elements[0].content == "The quick brown fox jumps over the lazy dog."
+    # bbox unioned across the two fragments.
+    assert page.elements[0].bbox.to_list() == [100, 100, 900, 150]
+    assert page.elements[1].content == "A new paragraph."
+
+
+def test_merge_prev_does_not_cross_into_table_or_image():
+    raw = [
+        {
+            "type": "table",
+            "bbox": [0.1, 0.1, 0.9, 0.3],
+            "content": "<table><tr><td>a</td></tr></table>",
+        },
+        {
+            "type": "text",
+            "bbox": [0.1, 0.35, 0.9, 0.4],
+            "content": "caption-ish",
+            "merge_prev": True,
+        },
+        {"type": "image", "bbox": [0.1, 0.5, 0.9, 0.8], "content": "photo"},
+        {
+            "type": "text",
+            "bbox": [0.1, 0.85, 0.9, 0.9],
+            "content": "after image",
+            "merge_prev": True,
+        },
+    ]
+    page = mineru_page_to_universal_page(raw, page_number=1, dimensions=(1000, 1000))
+    # merge_prev must NOT fold a text fragment into a table/image; all 4 survive.
+    assert len(page.elements) == 4
+    assert [e.type.value for e in page.elements] == ["table", "text", "image", "text"]
+
+
+def test_merge_prev_on_first_element_is_safe():
+    raw = [{"type": "text", "bbox": [0.1, 0.1, 0.9, 0.2], "content": "orphan", "merge_prev": True}]
+    page = mineru_page_to_universal_page(raw, page_number=1, dimensions=(1000, 1000))
+    assert len(page.elements) == 1
+    assert page.elements[0].content == "orphan"
 
 
 def test_reading_order_preserved_as_element_index():

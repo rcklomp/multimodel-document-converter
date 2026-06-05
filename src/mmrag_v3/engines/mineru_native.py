@@ -261,6 +261,46 @@ def _mineru_element_to_element(raw: Dict[str, Any], index: int) -> Element:
     )
 
 
+def _is_text_lane(mtype: str) -> bool:
+    """True for MinerU types that ride the TEXT lane (not table/image/code)."""
+    return mtype not in _TABLE_TYPES and mtype not in _IMAGE_TYPES and mtype not in _CODE_TYPES
+
+
+def _merge_continuations(elements_raw: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Fold MinerU ``merge_prev`` text continuations into their predecessor.
+
+    MinerU sets ``merge_prev`` on a fragment that continues the previous
+    element (e.g. a paragraph broken across a column/line). The chunker joins
+    adjacent TEXT elements with a newline, which would insert a spurious break
+    mid-paragraph; merging the continuation here (content joined with a space,
+    bbox unioned) makes the downstream newline land only at real element
+    boundaries. Only TEXT-lane -> TEXT-lane merges (never into/from a table,
+    image, or code block). Input dicts are not mutated.
+    """
+    merged: List[Dict[str, Any]] = []
+    for raw in elements_raw:
+        mtype = str(raw.get("type") or "text").strip().lower()
+        if raw.get("merge_prev") and merged and _is_text_lane(mtype):
+            prev = merged[-1]
+            if _is_text_lane(str(prev.get("type") or "text").strip().lower()):
+                prev_content = str(prev.get("content") or "").strip()
+                cur_content = str(raw.get("content") or "").strip()
+                prev["content"] = " ".join(p for p in (prev_content, cur_content) if p)
+                pb, cb = prev.get("bbox"), raw.get("bbox")
+                if pb and cb and len(pb) == 4 and len(cb) == 4:
+                    prev["bbox"] = [
+                        min(pb[0], cb[0]),
+                        min(pb[1], cb[1]),
+                        max(pb[2], cb[2]),
+                        max(pb[3], cb[3]),
+                    ]
+                elif cb and not pb:
+                    prev["bbox"] = list(cb)
+                continue
+        merged.append(dict(raw))
+    return merged
+
+
 def mineru_page_to_universal_page(
     elements_raw: Sequence[Dict[str, Any]],
     page_number: int,
@@ -272,8 +312,10 @@ def mineru_page_to_universal_page(
     onto the page so the chunker can stamp ``page_width``/``page_height`` on
     each Locator (a null page dim is a hard TABLE-structural QA failure).
     Classification is left to the factory's text-volume auto-classifier;
-    MinerU does not emit a page-level digital/scanned label.
+    MinerU does not emit a page-level digital/scanned label. ``merge_prev``
+    text continuations are folded in first.
     """
+    elements_raw = _merge_continuations(elements_raw)
     elements = [_mineru_element_to_element(raw, i) for i, raw in enumerate(elements_raw)]
     return create_page(
         page_number=int(page_number),
