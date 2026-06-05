@@ -156,6 +156,22 @@ def _html_table_to_markdown(content: str) -> Optional[str]:
     return "\n".join(lines)
 
 
+def _fence_code(content: str) -> str:
+    """Wrap MinerU code content in a Markdown code fence (idempotent).
+
+    MinerU emits ``code`` elements as raw text WITHOUT fences; the pipeline
+    contract (R3) and the indentation-fidelity gate expect fenced code
+    (```...```), like the VLM path whose prompt mandates fences. Wrapping
+    preserves the body — and its leading-whitespace indentation — verbatim
+    (only surrounding blank lines are trimmed). Already-fenced or empty content
+    is returned unchanged, so the transform is idempotent.
+    """
+    body = content.strip("\n")
+    if not body.strip() or body.lstrip().startswith("```"):
+        return content
+    return f"```\n{body}\n```"
+
+
 def _mineru_bbox_to_uir(bbox: Sequence[float]) -> List[int]:
     """Project a MinerU normalized [0, 1] bbox into the UIR [0, 1000] frame.
 
@@ -242,6 +258,11 @@ def _mineru_element_to_element(raw: Dict[str, Any], index: int) -> Element:
     # depth shared with the VLM adapter.
     if mtype not in _CODE_TYPES:
         content = _collapse_degenerate_repeats(content)
+    else:
+        # MinerU emits code unfenced; wrap it in a Markdown fence (R3) so the
+        # indentation-fidelity gate can read it and downstream rendering is
+        # consistent with the VLM path. Content stays verbatim inside the fence.
+        content = _fence_code(content)
 
     raw_bbox = raw.get("bbox")
     normalized_bbox = _mineru_bbox_to_uir(raw_bbox) if raw_bbox is not None else None

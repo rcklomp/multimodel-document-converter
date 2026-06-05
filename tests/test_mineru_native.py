@@ -207,8 +207,37 @@ def test_code_is_smuggled_as_text_with_promotion_metadata():
     assert el.metadata["promoted_modality"] == "code"
     assert el.metadata["original_vlm_type"] == "code"
     assert el.source_label == "code"
-    # Code content must stay verbatim (exact indentation preserved).
-    assert el.content == code_src
+    # Code body stays verbatim (exact indentation preserved) inside a Markdown
+    # fence (the fencing transform; see test_code_is_wrapped_in_markdown_fence).
+    assert code_src in el.content
+    assert el.content.startswith("```")
+
+
+def test_code_is_wrapped_in_markdown_fence_preserving_indentation():
+    src = "class A:\n    def f(self):\n        return 1"
+    el = _mineru_element_to_element(
+        {"type": "code", "bbox": [0.1, 0.1, 0.9, 0.9], "content": src}, 0
+    )
+    assert el.content.startswith("```")
+    assert el.content.rstrip().endswith("```")
+    # Indentation inside the fence is preserved verbatim.
+    assert "    def f(self):" in el.content
+    assert "        return 1" in el.content
+
+
+def test_already_fenced_code_is_not_double_fenced():
+    src = "```python\nx = 1\n```"
+    el = _mineru_element_to_element(
+        {"type": "code", "bbox": [0.1, 0.1, 0.9, 0.9], "content": src}, 0
+    )
+    assert el.content.count("```") == 2  # not 4
+
+
+def test_non_code_text_is_not_fenced():
+    el = _mineru_element_to_element(
+        {"type": "text", "bbox": [0.1, 0.1, 0.9, 0.2], "content": "plain prose"}, 0
+    )
+    assert "```" not in el.content
 
 
 def test_source_label_preserves_mineru_type():
@@ -242,7 +271,9 @@ def test_degenerate_repeat_collapsed_on_prose_not_code():
     code = _mineru_element_to_element(
         {"type": "code", "bbox": [0.1, 0.1, 0.9, 0.2], "content": code_loop}, 0
     )
-    assert code.content == code_loop  # code is never collapsed
+    # Code is never collapsed; its body survives verbatim inside the fence.
+    assert code_loop.strip("\n") in code.content
+    assert code.content.count("x = 1") == 40
 
 
 def test_merge_prev_folds_continuation_into_previous_text():
