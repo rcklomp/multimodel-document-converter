@@ -370,3 +370,47 @@ as designed), exactly the verify-before-blaming lesson.
 
 Cumulative validation: golden 6/6 + corpus soak 7/7 + scanned 1/1 across
 table (dense + spec), code, form, scanned, layout, prose, charts, German.
+
+## 16. Scale validation (AIOS 35pg) + code findings (2026-06-05)
+
+Ran `data/academic_journal/AIOS LLM Agent Operating System.pdf` (35 pages, dense
+academic pseudocode + tables) through the default route. 163 chunks (138 text, 7
+table, 18 code). QA_FAIL (failures=1) - investigated; NOT a default ship-blocker.
+Three distinct findings:
+
+1. **FIXED (commit a47f0c4): MinerU code is now fenced.** MinerU emits `code`
+   elements UNFENCED; the indentation gate measures fenced blocks, so it scored
+   0.00 despite the indentation being PRESENT (verified: `    def __init__`).
+   `_fence_code` wraps code-type content in a ``` fence (body verbatim). Same
+   transcode-to-contract pattern as the HTML-table fix. Verified on the AIOS
+   re-run: the 18 `modality=code` chunks are now fenced + indented.
+
+2. **OPEN (deferred - QA-gate architecture, NOT weakened autonomously):**
+   `scripts/qa_semantic_fidelity.py` measures `code_indentation_fidelity` only
+   over `modality=="text"` chunks with `chunk_type=="code"` (line 117/131). But
+   the V3 pipeline PROMOTES code to `modality=="code"` - so the real code blocks
+   (now fenced+indented) are INVISIBLE to the metric. The 0.00 it reports is
+   computed over 9 `modality=text` chunks the chunker's `_looks_like_code`
+   heuristic caught - short flush-left fragments (`self.memory_blocks[aid]=...`)
+   that are genuinely unindented. The metric predates the `modality=code`
+   promotion. Proposed fix (needs sign-off): include `modality=="code"` chunks in
+   `code_chunks`. NOTE this would NOT make AIOS pass (see #3); it makes the metric
+   measure the right population. Deferred because changing a semantic-fidelity
+   gate autonomously is the make-the-failing-run-pass risk; needs deliberate
+   review + threshold re-calibration against #3.
+
+3. **MinerU model-quality residual (not converter-fixable):** some AIOS pseudocode
+   has recognition errors - `self.` read as `self(`, `self/response`, a typo
+   `createed_time`, and one `class Scheduler` block flattened to a single line.
+   This is MinerU2.5-1.2B's quality limit on dense academic pseudocode (the
+   smallest variant). Options if it matters: the larger MinerU variant, or a
+   code-specific re-extraction lane. A finding, not a regression.
+
+Also re-confirmed: the AIOS HEADING gate WARN/FAIL at 110/138 = 79.7% (just under
+0.80) - a genuine borderline coverage signal on an academic paper with reference/
+caption chunks lacking headings; not the tabular_document class (it has real
+headings). Left as-is (a real signal, not over-firing).
+
+**Net:** the MinerU default is validated across golden 6/6 + soak 7/7 + scanned;
+AIOS is the one hard doc that surfaces a real model-quality limit (#3) and a
+pre-existing QA metric seam (#2), neither a blocker for the default.
