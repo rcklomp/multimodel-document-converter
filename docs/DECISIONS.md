@@ -2702,9 +2702,14 @@ chunk whose content duplicates a clean `modality=code` chunk. Qwen AIOS ->
 anti-weakening guard pinned by `test_text_only_mangled_code_with_no_clean_twin_still_fails`).
 The 0.90 floor is untouched.
 
-**OPEN — pipeline output-redundancy bug (logged, not yet fixed):** the shipping
-CLI duplicates every code listing as redundant flush-left `modality=text`
-fragments (with leaked page headers). This bloats output and adds retrieval
-noise on all code docs; it is a `batch_processor` chunking/classification defect,
-distinct from R3, and did NOT occur on the crucible/sandbox path (the "two
-pipeline realities", `project_v3_pipeline_reconvergence`). Needs its own fix.
+**RESOLVED 2026-06-06 (60fc77c) — pipeline output-redundancy bug.** Root cause:
+the `TextIntegrityScout` token-balance recovery. The VLM extracts a code page
+cleanly (page 18 returns the full indented class as ONE element), but the scout
+re-pulls the whole page from the flush-left PDF text layer to rescue a token
+shortfall, re-adding code the VLM already captured. The existing Highlander
+dedup only handled recovery-vs-TABLE. New `_apply_recovery_vs_primary_dedup`
+drops a recovery text chunk when >=85% of its unique tokens are already in the
+page's primary (non-recovery) chunks; recovery on VLM-dropped pages and
+genuinely-new recovery text survive. Live (AIOS via Qwen): recovery chunks
+31 -> 0, page coverage 35/35 (nothing lost). The 0.85 floor is measured (every
+spurious AIOS duplicate scored 0.92-1.00). `tests/test_recovery_vs_primary_dedup.py`.
