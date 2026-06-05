@@ -563,15 +563,40 @@ def _route_spies(monkeypatch):
     monkeypatch.setattr(processor, "VlmNativeEngine", _spy("vlm"))
     monkeypatch.setattr(processor, "DoclingFastEngine", _spy("docling"))
     monkeypatch.setattr(processor, "HybridEngine", _spy("hybrid"))
-    for var in ("USE_MINERU_ENGINE", "USE_VLM_ENGINE", "USE_DOCLING_FAST", "USE_HYBRID_ENGINE"):
+    monkeypatch.setattr(processor, "MineruQwenHybridEngine", _spy("mineru_qwen_hybrid"))
+    for var in (
+        "USE_MINERU_ENGINE",
+        "USE_VLM_ENGINE",
+        "USE_DOCLING_FAST",
+        "USE_HYBRID_ENGINE",
+        "USE_MINERU_QWEN_HYBRID",
+    ):
         monkeypatch.delenv(var, raising=False)
     return processor
 
 
-def test_default_route_is_mineru_when_endpoint_configured(monkeypatch):
+def test_default_route_is_mineru_qwen_hybrid_when_endpoint_configured(monkeypatch):
+    # The default route is the MinerU+Qwen-for-code hybrid (2026-06-06): MinerU
+    # mangles dense code, Qwen extracts it cleanly, so code pages go to Qwen and
+    # everything else to MinerU. A no-code doc routes every page to MinerU,
+    # identical to the prior pure-MinerU default.
     proc = _route_spies(monkeypatch)
     monkeypatch.setenv("MINERU_ENDPOINT", "http://10.0.10.239:8001")
+    assert proc.extract("/d.pdf") == "mineru_qwen_hybrid"
+
+
+def test_pure_mineru_is_opt_in_via_flag(monkeypatch):
+    # The escape hatch: USE_MINERU_ENGINE=1 forces pure MinerU (no per-page Qwen).
+    proc = _route_spies(monkeypatch)
+    monkeypatch.setenv("MINERU_ENDPOINT", "http://10.0.10.239:8001")
+    monkeypatch.setenv("USE_MINERU_ENGINE", "1")
     assert proc.extract("/d.pdf") == "mineru"
+
+
+def test_explicit_mineru_qwen_hybrid_flag(monkeypatch):
+    proc = _route_spies(monkeypatch)
+    monkeypatch.setenv("USE_MINERU_QWEN_HYBRID", "1")
+    assert proc.extract("/d.pdf") == "mineru_qwen_hybrid"
 
 
 def test_default_route_falls_back_to_hybrid_without_endpoint(monkeypatch):

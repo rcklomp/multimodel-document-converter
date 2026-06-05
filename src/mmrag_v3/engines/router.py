@@ -38,6 +38,7 @@ from mmrag_v2.universal.intermediate import (
 )
 
 from .docling_fast import DoclingFastEngine
+from .mineru_native import MineruNativeEngine, mineru_page_to_universal_page
 from .vlm_native import (
     VlmNativeEngine,
     _build_schema_prompt,
@@ -110,6 +111,31 @@ def _mono_ratio_threshold() -> float:
         return DEFAULT_MONO_RATIO_THRESHOLD
 
 
+def page_mono_char_ratio(page: "fitz.Page") -> float:
+    """Fraction of glyphs on the page set in a monospace font.
+
+    Char-weighted (not span-weighted) so a single long mono run counts more than
+    many short proportional spans. Returns 0.0 on empty or unreadable pages. The
+    object-independent code signal shared by ``HybridEngine`` and
+    ``MineruQwenHybridEngine``.
+    """
+    try:
+        text_dict = page.get_text("dict")
+    except Exception:  # pragma: no cover - defensive: PyMuPDF API drift
+        return 0.0
+    total = 0
+    mono = 0
+    for block in text_dict.get("blocks", []):
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                n = len(span.get("text", ""))
+                total += n
+                font = span.get("font", "").lower()
+                if any(token in font for token in MONO_FONT_TOKENS):
+                    mono += n
+    return mono / total if total else 0.0
+
+
 class HybridEngine:
     """Cost-optimizer router fulfilling ``extract(str) -> UniversalDocument``."""
 
@@ -162,27 +188,7 @@ class HybridEngine:
         )
 
     def _mono_char_ratio(self, page: "fitz.Page") -> float:
-        """Fraction of glyphs on the page set in a monospace font.
-
-        Char-weighted (not span-weighted) so a single long mono run counts
-        more than many short proportional spans. Returns 0.0 on empty or
-        unreadable pages.
-        """
-        try:
-            text_dict = page.get_text("dict")
-        except Exception:  # pragma: no cover - defensive: PyMuPDF API drift
-            return 0.0
-        total = 0
-        mono = 0
-        for block in text_dict.get("blocks", []):
-            for line in block.get("lines", []):
-                for span in line.get("spans", []):
-                    n = len(span.get("text", ""))
-                    total += n
-                    font = span.get("font", "").lower()
-                    if any(token in font for token in MONO_FONT_TOKENS):
-                        mono += n
-        return mono / total if total else 0.0
+        return page_mono_char_ratio(page)
 
     # ------------------------------------------------------------------
     # Public contract
@@ -320,6 +326,135 @@ class HybridEngine:
         buffer = io.BytesIO()
         buffer.write(pixmap.tobytes("png"))
         return buffer.getvalue(), pixmap.width, pixmap.height
+
+
+class MineruQwenHybridEngine:
+    """Per-page hybrid: Qwen VLM for code-dense pages, MinerU for everything else.
+
+    MinerU2.5 is the strong default (tables, layout, scanned OCR) but its 1.2B
+    recognizer mangles DENSE code indentation — measured R3 fidelity 0.44 on AIOS
+    vs Qwen3-VL-8B's 1.00 on the same listings (live F5 validation, 2026-06-06).
+    This engine routes ONLY code-dense pages (monospace-char ratio >= threshold)
+    to the Qwen VLM and keeps every other page on MinerU, so a code-heavy academic
+    doc gets clean, indentation-preserving code AND MinerU-quality tables/prose.
+
+    Page classification is object-independent (monospace ratio), the same signal
+    HybridEngine uses; AIOS measured a clean split (non-code pages <= 0.02, code
+    pages 0.19-0.98), so the shared 0.10 floor separates them with wide margin.
+    Transport/endpoint failures on the Qwen subset trip the circuit breaker
+    (raise, no silent MinerU fallback); single-page SEMANTIC VLM failures demote
+    that one page to MinerU and are recorded in the decision log.
+    """
+
+    def __init__(
+        self,
+        mineru_engine: Optional[MineruNativeEngine] = None,
+        vlm_engine: Optional[VlmNativeEngine] = None,
+        mono_ratio_threshold: Optional[float] = None,
+    ) -> None:
+        self.mineru_engine = mineru_engine or MineruNativeEngine()
+        self.vlm_engine = vlm_engine or VlmNativeEngine()
+        self.mono_ratio_threshold = (
+            mono_ratio_threshold if mono_ratio_threshold is not None else _mono_ratio_threshold()
+        )
+        # Populated by extract(); (page_number, "qwen_code"|"mineru"|..., reason).
+        self.last_routing_decisions: List[Tuple[int, str, str]] = []
+
+    def extract(self, file_path: str) -> UniversalDocument:
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Source file not found: {file_path}")
+
+        doc = fitz.open(str(path))
+        try:
+            decisions: List[Tuple[int, str, str]] = []
+            code_indices: List[int] = []
+            mineru_indices: List[int] = []
+            for i in range(doc.page_count):
+                ratio = page_mono_char_ratio(doc[i])
+                if ratio >= self.mono_ratio_threshold:
+                    code_indices.append(i)
+                    decisions.append((i + 1, "qwen_code", f"mono_ratio={ratio:.2f}"))
+                else:
+                    mineru_indices.append(i)
+                    decisions.append((i + 1, "mineru", f"mono_ratio={ratio:.2f}"))
+            self.last_routing_decisions = decisions
+
+            pages_by_number: Dict[int, UniversalPage] = {}
+
+            # Qwen subset runs FIRST against a clean process (same ordering
+            # rationale as HybridEngine: heavy native runtimes loaded later must
+            # not poison outbound HTTP). A semantic failure demotes that page to
+            # MinerU; a transport failure trips the circuit breaker.
+            fallback_indices: List[int] = []
+            if code_indices:
+                provider = HybridEngine._provider_from_engine(self.vlm_engine)
+                for i in code_indices:
+                    page_number = i + 1
+                    try:
+                        image_bytes, pw, ph = HybridEngine._render_page_png(doc[i])
+                        prompt = _build_schema_prompt(pw, ph)
+                        payload = _describe_and_parse(
+                            provider,
+                            image_bytes,
+                            prompt,
+                            max_tokens=estimate_output_budget(doc[i]),
+                        )
+                        pages_by_number[page_number] = VlmNativeEngine._page_from_payload(
+                            payload,
+                            fallback_page_number=page_number,
+                            pixel_width=pw,
+                            pixel_height=ph,
+                        )
+                    except VlmInfraError:
+                        logger.error(
+                            "VLM INFRASTRUCTURE FAILURE on code page %d - circuit "
+                            "breaker tripped; halting (no MinerU fallback for "
+                            "transport/endpoint outages)",
+                            page_number,
+                        )
+                        raise
+                    except Exception as exc:
+                        logger.warning(
+                            "Qwen failed on code page %d (%s); falling back to MinerU",
+                            page_number,
+                            exc,
+                        )
+                        fallback_indices.append(i)
+                        for idx, (pn, _, _) in enumerate(decisions):
+                            if pn == page_number:
+                                decisions[idx] = (
+                                    pn,
+                                    "mineru_fallback",
+                                    f"qwen_failed: {type(exc).__name__}: {exc}",
+                                )
+                                break
+                self.last_routing_decisions = decisions
+
+            # MinerU subset — planned-prose/table pages plus any Qwen fallbacks.
+            for i in sorted(set(mineru_indices + fallback_indices)):
+                page_number = i + 1
+                image, pw, ph = self.mineru_engine._render_page(doc[i])
+                elements = self.mineru_engine.client.two_step_extract(image)
+                pages_by_number[page_number] = mineru_page_to_universal_page(
+                    list(elements), page_number, (pw, ph)
+                )
+        finally:
+            doc.close()
+
+        ordered_pages = [pages_by_number[n] for n in sorted(pages_by_number.keys())]
+        metadata = DocumentMetadata(
+            page_count=len(ordered_pages),
+            file_size_bytes=path.stat().st_size,
+            has_text_layer=any(p.text_elements for p in ordered_pages),
+            has_images=any(p.image_elements for p in ordered_pages),
+        )
+        return create_document(
+            file_path=path,
+            file_type="pdf",
+            pages=ordered_pages,
+            metadata=metadata,
+        )
 
 
 def extract(file_path: str) -> UniversalDocument:

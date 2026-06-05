@@ -26,7 +26,7 @@ from mmrag_v2.universal.intermediate import UniversalDocument
 
 from .engines.docling_fast import DoclingFastEngine
 from .engines.mineru_native import MineruNativeEngine
-from .engines.router import HybridEngine
+from .engines.router import HybridEngine, MineruQwenHybridEngine
 from .engines.vlm_native import VlmNativeEngine
 
 
@@ -54,6 +54,11 @@ def is_hybrid_route_enabled() -> bool:
     return _env_flag("USE_HYBRID_ENGINE")
 
 
+def is_mineru_qwen_hybrid_route_enabled() -> bool:
+    """Return True when the MinerU+Qwen-for-code hybrid is force-selected."""
+    return _env_flag("USE_MINERU_QWEN_HYBRID")
+
+
 def _default_route_is_mineru() -> bool:
     """The default route is MinerU2.5 whenever a MinerU server is configured.
 
@@ -70,12 +75,20 @@ def extract(file_path: Union[str, "os.PathLike[str]"]) -> UniversalDocument:
     """Run the Phase C pipeline and return a v2-UIR document.
 
     Routing precedence (first match wins):
-        * ``USE_MINERU_ENGINE=1``   → all pages through ``MineruNativeEngine``
-        * ``USE_VLM_ENGINE=1``      → all pages through ``VlmNativeEngine``
-        * ``USE_DOCLING_FAST=1``    → all pages through ``DoclingFastEngine``
-        * ``USE_HYBRID_ENGINE=1``   → legacy ``HybridEngine`` (explicit)
-        * default                   → ``MineruNativeEngine`` when
+        * ``USE_MINERU_ENGINE=1``        → all pages through ``MineruNativeEngine``
+          (pure MinerU, no per-page Qwen — the escape hatch).
+        * ``USE_VLM_ENGINE=1``           → all pages through ``VlmNativeEngine``
+        * ``USE_DOCLING_FAST=1``         → all pages through ``DoclingFastEngine``
+        * ``USE_HYBRID_ENGINE=1``        → legacy ``HybridEngine`` (explicit)
+        * ``USE_MINERU_QWEN_HYBRID=1``   → ``MineruQwenHybridEngine`` (explicit)
+        * default                        → ``MineruQwenHybridEngine`` when
           ``MINERU_ENDPOINT`` is configured, else legacy ``HybridEngine``.
+
+    The default route is the MinerU+Qwen-for-code hybrid: MinerU mangles dense
+    code indentation (R3 0.44 on AIOS) while Qwen extracts it cleanly (1.00, live
+    F5 validation 2026-06-06), so code-dense pages go to Qwen and everything else
+    stays on MinerU. A doc with no code routes every page to MinerU — identical
+    to the prior pure-MinerU default. ``USE_MINERU_ENGINE=1`` forces pure MinerU.
     """
     if is_mineru_route_enabled():
         return MineruNativeEngine().extract(str(file_path))
@@ -85,6 +98,8 @@ def extract(file_path: Union[str, "os.PathLike[str]"]) -> UniversalDocument:
         return DoclingFastEngine().extract(str(file_path))
     if is_hybrid_route_enabled():
         return HybridEngine().extract(str(file_path))
+    if is_mineru_qwen_hybrid_route_enabled():
+        return MineruQwenHybridEngine().extract(str(file_path))
     if _default_route_is_mineru():
-        return MineruNativeEngine().extract(str(file_path))
+        return MineruQwenHybridEngine().extract(str(file_path))
     return HybridEngine().extract(str(file_path))
