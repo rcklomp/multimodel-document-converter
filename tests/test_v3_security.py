@@ -37,6 +37,7 @@ V3_ENGINE_FILES: List[Path] = [
     V3_ROOT / "engines" / "vlm_native.py",
     V3_ROOT / "engines" / "vlm_provider.py",
     V3_ROOT / "engines" / "router.py",
+    V3_ROOT / "engines" / "mineru_native.py",
 ]
 
 # Files explicitly authorized to import docling (single boundary).
