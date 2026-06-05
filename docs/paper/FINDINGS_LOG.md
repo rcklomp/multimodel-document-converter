@@ -844,6 +844,80 @@ next axis).
 
 ---
 
+## 2026-06-05 - MinerU2.5 replaces Qwen3-VL as the default extractor: the model mismatch was real  `[Results][Architecture][Lessons]`
+
+The 2026-06-04 finding (VLM table FORMAT is the next wall) led to a model
+evaluation instead of more scaffolding around Qwen3-VL-8B. The conclusion: the
+"next wall" was a model mismatch. **MinerU2.5 (1.2B, two-stage layout detector ->
+per-region recognition) is now the default extractor**, integrated and
+corpus-validated.
+
+**The A/B that decided it** (15-page golden set, deterministic scorer):
+
+| candidate | fmt | bbox% | tbl_struct% | rep% | med s/page |
+|---|---|---|---|---|---|
+| mineru_mlx (M5 native) | json | 100 | 67 | 7 | 6.8 |
+| granite_docling (M5 MLX) | doctags | 100 | 83 | 7 | 2.1 (but EMPTIES dense tables) |
+| qwen_baseline (the incumbent) | markdown | 93 | 0 | 27 | 25.3 |
+
+Qwen scored **tbl_struct 0%** (tables -> prose/empty) and **rep 27%** (loops) -
+exactly the failure modes the last cycle scaffolded around. MinerU's two-stage
+design emits per-element JSON with reliable DETECTOR bboxes, reading the dense
+CarOK spreadsheet Qwen emptied. Granite-Docling is faster but its 258M model
+EMPTIES the dense table (re-introduces the #1 failure) - benchmarks (TEDS 0.97)
+did NOT show this; only our pages did.
+
+**Topology measurement (the latency/throughput inversion):**
+
+| metric | M5 (mlx) | GX10 (vLLM c=8) | winner |
+|---|---|---|---|
+| single-page latency | 6.8s | 13.4s | M5 (=the 546 vs 273 GB/s bandwidth ratio) |
+| batched throughput | 0.147 p/s | 0.34 p/s | GX10 2.3x (vLLM continuous-batches; mlx is sequential) |
+
+"Extract on the bandwidth-king M5" is a LATENCY rule, not a throughput rule.
+Config F (M5+GX10 parallel) ~0.49 p/s = 3.3x M5-alone.
+
+**Integration** (5 increments + default flip, all gated): pure converter
+(bbox [0,1]->[0,1000], 13-type vocab -> 3-value ElementType, code smuggle) ->
+engine (renders + light lazy `mineru_vl_utils` http-client; model in an isolated
+server) -> `USE_MINERU_ENGINE` route + conditional default (MinerU when
+`MINERU_ENDPOINT` set). **Validation: golden 6/6 + corpus soak 7/7 + scanned 1/1.**
+The dense CarOK spreadsheet -> a 45-row Markdown table on the V3 path.
+
+**Two transcode-to-contract fixes** (MinerU emits formats the pipeline contract
+doesn't expect; the converter transcodes, the gate stays strict):
+1. MinerU emits tables as **HTML** `<table>`; the R2 contract wants Markdown grids
+   -> HTML->Markdown transcode (stdlib html.parser). Found by the live smoke.
+2. MinerU emits code **unfenced**; the R3 indentation gate measures fenced blocks
+   -> wrap code in ``` fences (body verbatim). Found by the AIOS scale run.
+
+**Dead-ends / lessons:**
+- **Verify-before-blaming, twice.** (a) A scanned-doc run returned 0 chunks -
+  NOT a MinerU failure: the GX10 container was DOWN (I'd torn it down), the engine
+  correctly RAISED on connection-refused and halted with no fabrication (fail-open
+  working). (b) The corpus soak's lone QA_FAIL (CarOK) looked like a MinerU
+  problem - it was a PRE-EXISTING engine-independent HEADING-gate issue (the
+  legacy Docling path fails the same doc WORSE: 8/12 pages vs 12/12). Both echo
+  the 2026-06-01 crucible lesson (a 0/18 loss blamed on an M5 outage was a schema
+  bug).
+- **Gate-correctness vs gate-weakening.** CarOK (headingless data spreadsheet)
+  failed the prose-calibrated HEADING gate at 0%. Fixed by a page-count-independent
+  `tabular_document` skip gated on TABLE-dominance (which prose never reaches) -
+  NOT a threshold relaxation; verified genuinely-headingless (flat single-font
+  layout, zero heading fonts) so it's not hiding a missed-heading extraction bug.
+- **A metric seam, DEFERRED not weakened.** AIOS code `indentation_fidelity=0.00`
+  even after fencing: `qa_semantic_fidelity` measures code only over
+  `modality=="text"` chunks, but V3 promotes code to `modality=="code"` -> the
+  real fenced+indented code is invisible to the gate (it scores unindented text
+  fragments instead). The proposed fix (include `modality=="code"`) has real blast
+  radius (could flip passing docs) -> deferred for sign-off rather than changed on
+  an unattended run.
+- **MinerU2.5-1.2B has a recognition-quality floor** on dense academic pseudocode
+  (`self.` read as `self(`, one block flattened) - the smallest variant; a finding,
+  not a regression.
+
+---
+
 ## Backfill backlog (remaining threads — to expand when drafting)
 
 *Covered above as of 2026-05-30:* V1→V2 lineage · V2 metrics trajectory · V2
