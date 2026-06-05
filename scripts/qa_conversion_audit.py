@@ -33,6 +33,13 @@ try:
 except ImportError:
     CURRENT_VERSION = "unknown"
 
+# Shared R3 code-indentation metric (single source of truth; see
+# docs/PLAN_R3_CODE_GATE_REDESIGN.md). The script's own directory is on
+# sys.path[0] when run directly / via subprocess; insert it explicitly so the
+# sibling import is robust regardless of how the module is loaded.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _code_quality as code_quality_mod  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Patterns (ported from qa_ingestion_hygiene, evaluate_technical_manual_gates,
@@ -265,6 +272,10 @@ class AuditResult:
     code_with_indent: int = 0
     code_like_total: int = 0
     code_fragment_micro: int = 0
+
+    # R3 code-indentation metric (shared module, all-modality population).
+    # Replaces the dead modality=text-only indentation gate.
+    cq: object = None  # code_quality_mod.CodeQuality
 
     # Label quality
     label_chunks: int = 0
@@ -578,6 +589,11 @@ def audit(jsonl_path: Path) -> AuditResult:
         r.wrong_version = f"metadata={r.schema_version}, chunks={versions}"
         r.add_issue("SCHEMA", f"Version mismatch: {r.wrong_version}")
 
+    # R3 code-indentation metric over the FULL chunk population (the legacy
+    # per-chunk loop above counts only modality=text code; the V3 pipeline
+    # promotes real code to modality=code, so it must be measured here).
+    r.cq = code_quality_mod.code_quality(all_chunks)
+
     return r
 
 
@@ -800,38 +816,70 @@ def print_report(r: AuditResult, path: Path) -> bool:
         fails.append("TEXT")
 
     # --- CODE ---
+    # R3 indentation fidelity is measured by the shared module
+    # (scripts/_code_quality.py) over the FULL code population (modality=code +
+    # legacy modality=text code) with positive code-ID (equations excluded) and
+    # judge-only-judgeable scoring. This is the authoritative R3 gate and is
+    # INDEPENDENT of content_type — Policy B escalates to a hard FAIL only above
+    # the judgeable-code density floor (see docs/PLAN_R3_CODE_GATE_REDESIGN.md
+    # and docs/DECISIONS.md "R3 Code-Indentation Gate Redesign"). The legacy
+    # modality=text-only flat/fragmentation checks below are retained as
+    # secondary, content-type-gated metrics; they are NOT the R3 indent gate.
+    cq = r.cq
     code_flat_ratio = (r.code_flat / r.code_chunks) if r.code_chunks else 0.0
-    code_indent_fidelity = (r.code_with_indent / r.code_chunks) if r.code_chunks else 1.0
     code_frag_ratio = (r.code_fragment_micro / r.code_like_total) if r.code_like_total else 0.0
     code_ok = True
     code_warnings: list = []
-    code_gate = th.get("code_indent_gate")  # "hard", "warn", or None
-    # Only gate code metrics when there are enough code chunks to be meaningful
+    code_gate = th.get("code_indent_gate")  # "hard"/"warn"/None (flat/frag only)
+
+    # R3 indentation gate (Policy B) — content-type independent, density-gated.
+    indent_floor = code_quality_mod.DEFAULT_INDENT_FIDELITY_FLOOR
+    indent_verdict = code_quality_mod.gate_verdict(cq)
+    if indent_verdict == "fail":
+        code_ok = False
+        for cid in cq.degraded_ids[:5]:
+            r.add_issue("CODE", f"degraded code indentation: {cid}")
+    elif indent_verdict == "warn":
+        code_warnings.append(
+            f"indent_fidelity={cq.indentation_fidelity:.2f} (<{indent_floor:.2f}; "
+            f"density {cq.judgeable_density:.3f} below hard-fail floor)"
+        )
+        for cid in cq.degraded_ids[:5]:
+            r.add_issue("CODE", f"degraded code indentation (advisory): {cid}")
+
+    # Secondary text-only metrics (flat / fragmentation), content-type gated.
     if r.code_chunks >= 3:
         if th["code_flat_ratio"] is not None and code_flat_ratio > th["code_flat_ratio"]:
             if code_gate == "hard":
                 code_ok = False
             else:
                 code_warnings.append(f"flat_ratio={code_flat_ratio:.2f} (>{th['code_flat_ratio']})")
-        if th["code_indent_fidelity"] is not None and code_indent_fidelity < th["code_indent_fidelity"]:
-            if code_gate == "hard":
-                code_ok = False
-            else:
-                code_warnings.append(f"indent_fidelity={code_indent_fidelity:.2f} (<{th['code_indent_fidelity']})")
     # Require at least 3 code-like occurrences before gating on fragmentation
     if r.code_like_total >= 3 and th["code_frag_ratio"] is not None and code_frag_ratio > th["code_frag_ratio"]:
         if code_gate == "hard":
             code_ok = False
         else:
             code_warnings.append(f"frag_ratio={code_frag_ratio:.3f} (>{th['code_frag_ratio']})")
-    if code_warnings:
+
+    if not code_ok:
+        code_label = "FAIL"
+    elif code_warnings:
         code_label = "WARN"
     else:
-        code_label = "PASS" if code_ok else "FAIL"
+        code_label = "PASS"
     print(f"  CODE:        {code_label} [{content_type}]")
+    if cq.n_population > 0:
+        print(
+            f"    code_population: {cq.n_population}  struct: {cq.n_struct}  "
+            f"math_excluded: {cq.n_math_excluded}  repl/flat_exempt: {cq.n_repl + cq.n_flat_exempt}"
+        )
+        print(
+            f"    judgeable: {cq.n_judgeable}  degraded: {cq.n_judgeable_fail}  "
+            f"indentation_fidelity: {cq.indentation_fidelity:.2f}  "
+            f"judgeable_density: {cq.judgeable_density:.3f}"
+        )
     if r.code_chunks > 0:
-        print(f"    code_chunks: {r.code_chunks}  flat: {r.code_flat}  flat_ratio: {code_flat_ratio:.2f}")
-        print(f"    indentation_fidelity: {code_indent_fidelity:.2f}")
+        print(f"    (legacy text-code) chunks: {r.code_chunks}  flat: {r.code_flat}  flat_ratio: {code_flat_ratio:.2f}")
     if r.code_like_total > 0:
         print(f"    code_like_total: {r.code_like_total}  fragment_micro: {r.code_fragment_micro}  frag_ratio: {code_frag_ratio:.3f}")
     if code_warnings:
