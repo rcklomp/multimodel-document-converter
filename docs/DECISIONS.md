@@ -2827,3 +2827,41 @@ extraction loops were collapsed into the shared `extract_page_vlm` /
 (GX10 vLLM MinerU + M5 Qwen) reproduced `QA_PASS` (failures=0, 35/35 pages,
 24 judgeable code chunks at indentation_fidelity 1.00, tables 100%) — confirming
 the refactor is behaviour-identical on the live path, not just offline.
+
+
+## Block-aware routing for sub-threshold code blocks (2026-06-06)
+
+**Context.** The shipped hybrid routes a page to Qwen on PAGE-AVERAGE monospace
+ratio (`>= 0.10`). Investigating the deferred sparse-code residual found that a
+real multi-line code block on a mostly-prose page can sit BELOW that average
+(its monospace diluted by surrounding prose) and route to MinerU, whose 1.2B
+recognizer then COLLAPSES it. Measured live on a 5-page Fluent Python probe:
+p111's nested `for/if` block (page-average 0.096) went to MinerU and came back as
+the single jammed line `for n in needles: if n in haystack: found += 1`.
+
+**Decision.** Add a second, object-independent routing trigger:
+`page_has_code_block` — a contiguous run of >= 4 lines that are each >= 60%
+monospace. A page below the average threshold but carrying such a block routes to
+Qwen. This is precise, not a threshold drop: it fires on a real code BLOCK
+(consecutive mono lines) and stays quiet on scattered inline monospace (method-
+name lists, a URL) that never forms a run — verified on the probe corpus (p87/
+p111 fire; p40/p46, which only mention code inline, do not).
+
+**Table guard.** The block trigger is suppressed when PyMuPDF detects a table on
+the page (`page_has_table`): Qwen empties dense tables, so a code block sharing a
+page with a table is never traded for the table — that page stays on MinerU and
+the block's residual R3 risk is caught by the gate metric's collapsed-suite
+detection instead. (The pre-existing average-based trigger is unchanged, so this
+is purely additive; the page-average path remains threshold-driven.)
+
+**Live validation.** Re-running the same probe with the block trigger: p111 now
+routes to Qwen and the block comes back PROPERLY NESTED
+(`found = 0 / for n in needles: /     if n in haystack: /         found += 1`),
+R3 fidelity 1.00 on that chunk (was a collapsed, math-artifacted line). Pure
+MinerU stays available via `USE_MINERU_ENGINE=1`. Contracts:
+`tests/test_mineru_qwen_hybrid.py` (block fires/quiet, sub-threshold-block ->
+Qwen, table-guard -> MinerU). Full suite 1511 pass; SMOKE_PRODUCTION_PASS.
+
+Together with the metric blind-spot fix (entry "R3 Code-Indentation Gate
+Redesign" -> collapsed-suite addendum), the gate now CATCHES a collapse when it
+happens and the router PREVENTS it at the source for code-block pages.

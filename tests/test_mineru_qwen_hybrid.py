@@ -18,6 +18,7 @@ from mmrag_v2.universal.intermediate import (
     create_element,
     create_page,
 )
+from mmrag_v3.engines import router as R
 from mmrag_v3.engines import vlm_native as V
 from mmrag_v3.engines.router import MineruQwenHybridEngine
 from mmrag_v3.engines.vlm_native import VlmNativeEngine
@@ -119,11 +120,14 @@ def test_code_page_routes_to_qwen_prose_to_mineru(tmp_path, monkeypatch):
 
 
 def test_high_threshold_sends_everything_to_mineru(tmp_path, monkeypatch):
-    # With the threshold above 1.0, even a pure-code page stays on MinerU — the
-    # pure-MinerU behavior, proving the routing is threshold-driven.
+    # With the page-average threshold above 1.0, the AVERAGE routing path sends
+    # every page to MinerU — proving that path is threshold-driven. The
+    # block-signal path is a SEPARATE trigger (tested above); disable it here to
+    # isolate the average path.
     path = _make_pdf(tmp_path)
     mineru = _FakeMinerUEngine()
     vlm = _install_vlm_mocks(monkeypatch)
+    monkeypatch.setattr(R, "page_has_code_block", lambda p: False)
     eng = MineruQwenHybridEngine(mineru_engine=mineru, vlm_engine=vlm, mono_ratio_threshold=1.5)
 
     ud = eng.extract(path)
@@ -153,3 +157,69 @@ def test_semantic_vlm_failure_falls_back_to_mineru(tmp_path, monkeypatch):
     assert routes[1] == "mineru_fallback"  # code page demoted after Qwen failure
     assert mineru.client.calls == 2  # both pages ended up on MinerU
     assert all("FROM_MINERU" in _page_text(p) for p in ud.pages)
+
+
+# --- block-aware routing for sub-threshold code blocks ---------------------
+
+
+def test_page_has_code_block_fires_on_mono_run(tmp_path):
+    from mmrag_v3.engines.router import page_has_code_block
+
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text(
+        (72, 72),
+        "\n".join(["def f(x):", "    if x:", "        return x", "    return 0", "# end"]),
+        fontname="courier",
+        fontsize=9,
+    )
+    assert page_has_code_block(page)  # 5 consecutive monospace lines = a block
+    doc.close()
+
+
+def test_page_has_code_block_quiet_on_prose(tmp_path):
+    from mmrag_v3.engines.router import page_has_code_block
+
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "The quick brown fox jumps. " * 40, fontname="helv", fontsize=11)
+    assert not page_has_code_block(page)
+    doc.close()
+
+
+def test_subthreshold_code_block_routes_to_qwen(tmp_path, monkeypatch):
+    # A page BELOW the mono-ratio threshold but carrying a real code block routes
+    # to Qwen via the block signal (the sparse-code residual fix). Page 1 has a
+    # block, page 2 does not.
+    path = _make_pdf(tmp_path)
+    mineru = _FakeMinerUEngine()
+    vlm = _install_vlm_mocks(monkeypatch)
+    monkeypatch.setattr(R, "page_mono_char_ratio", lambda p: 0.05)  # sub-threshold
+    monkeypatch.setattr(R, "page_has_code_block", lambda p: p.number == 0)
+    monkeypatch.setattr(R, "page_has_table", lambda p: False)
+    eng = MineruQwenHybridEngine(mineru_engine=mineru, vlm_engine=vlm)
+
+    ud = eng.extract(path)
+
+    routes = {pn: choice for pn, choice, _ in eng.last_routing_decisions}
+    assert routes[1] == "qwen_code_block"  # block page -> Qwen
+    assert routes[2] == "mineru"  # no block -> MinerU
+    assert "FROM_QWEN" in {p.page_number: _page_text(p) for p in ud.pages}[1]
+
+
+def test_code_block_with_table_stays_on_mineru(tmp_path, monkeypatch):
+    # Table guard: a sub-threshold page with BOTH a code block and a table stays
+    # on MinerU — Qwen empties dense tables, so a block is never traded for a
+    # table (the block's R3 risk is caught by the gate metric instead).
+    path = _make_pdf(tmp_path)
+    mineru = _FakeMinerUEngine()
+    vlm = _install_vlm_mocks(monkeypatch)
+    monkeypatch.setattr(R, "page_mono_char_ratio", lambda p: 0.05)
+    monkeypatch.setattr(R, "page_has_code_block", lambda p: True)
+    monkeypatch.setattr(R, "page_has_table", lambda p: True)  # table present
+    eng = MineruQwenHybridEngine(mineru_engine=mineru, vlm_engine=vlm)
+
+    eng.extract(path)
+
+    assert all(choice == "mineru" for _, choice, _ in eng.last_routing_decisions)
+    assert mineru.client.calls == 2

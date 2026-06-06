@@ -130,6 +130,59 @@ def page_mono_char_ratio(page: "fitz.Page") -> float:
     return mono / total if total else 0.0
 
 
+# A real code BLOCK is a contiguous run of monospace-dominant lines. Page-average
+# mono ratio (above) can fall below the routing threshold when a genuine code
+# block is diluted by surrounding prose (Fluent Python p111: a nested for/if
+# block at page-average 0.096), so MinerU-1.2B gets the page and can COLLAPSE the
+# block. This run-based signal recovers exactly those pages while ignoring
+# scattered inline monospace (method-name lists, a URL) which never forms a run.
+DEFAULT_CODE_BLOCK_MIN_LINES = 4
+DEFAULT_CODE_BLOCK_LINE_MONO = 0.6
+
+
+def page_has_code_block(
+    page: "fitz.Page",
+    min_lines: int = DEFAULT_CODE_BLOCK_MIN_LINES,
+    line_mono_floor: float = DEFAULT_CODE_BLOCK_LINE_MONO,
+) -> bool:
+    """True if the page has a contiguous run of >= ``min_lines`` lines that are
+    each predominantly (>= ``line_mono_floor``) monospace — a code block that the
+    page-average mono ratio can miss when diluted by prose."""
+    try:
+        text_dict = page.get_text("dict")
+    except Exception:  # pragma: no cover - defensive: PyMuPDF API drift
+        return False
+    run = 0
+    for block in text_dict.get("blocks", []):
+        for line in block.get("lines", []):
+            spans = line.get("spans", [])
+            tot = sum(len(s.get("text", "")) for s in spans)
+            if tot == 0:
+                continue
+            mono = sum(
+                len(s.get("text", ""))
+                for s in spans
+                if any(token in s.get("font", "").lower() for token in MONO_FONT_TOKENS)
+            )
+            if mono / tot >= line_mono_floor:
+                run += 1
+                if run >= min_lines:
+                    return True
+            else:
+                run = 0
+    return False
+
+
+def page_has_table(page: "fitz.Page") -> bool:
+    """True if PyMuPDF detects a table on the page. Used to keep table-bearing
+    pages on MinerU (its strength) even when a code block is also present — Qwen
+    empties dense tables, so a code block is never traded for a table."""
+    try:
+        return len(page.find_tables().tables) > 0
+    except Exception:  # pragma: no cover - defensive: PyMuPDF API drift
+        return False
+
+
 class HybridEngine:
     """Cost-optimizer router fulfilling ``extract(str) -> UniversalDocument``."""
 
@@ -336,6 +389,17 @@ class MineruQwenHybridEngine:
                 if ratio >= self.mono_ratio_threshold:
                     code_indices.append(i)
                     decisions.append((i + 1, "qwen_code", f"mono_ratio={ratio:.2f}"))
+                elif page_has_code_block(doc[i]) and not page_has_table(doc[i]):
+                    # Sub-threshold page-average but a real contiguous code block
+                    # diluted by prose (a nested suite MinerU-1.2B can collapse).
+                    # Route to Qwen to preserve indentation. Table-guarded: a page
+                    # with a table stays on MinerU (Qwen empties dense tables; the
+                    # block's R3 risk is caught by the gate metric's collapsed-
+                    # suite detection).
+                    code_indices.append(i)
+                    decisions.append(
+                        (i + 1, "qwen_code_block", f"mono_ratio={ratio:.2f} code_block")
+                    )
                 else:
                     mineru_indices.append(i)
                     decisions.append((i + 1, "mineru", f"mono_ratio={ratio:.2f}"))
