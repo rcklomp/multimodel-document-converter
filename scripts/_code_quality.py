@@ -142,6 +142,11 @@ def _duplicates_primary(norm: str, primary: List[str], window: int = 40) -> bool
     indentation, in the code chunk) — it is output redundancy, a separate
     concern. Detect it by a long contiguous overlap (tolerant of a leaked page
     header prefixing the fragment).
+
+    DUAL-LAYER NOTE: the production pipeline also drops these at extraction time
+    (``BatchProcessor._apply_recovery_vs_primary_dedup``). This is the AUDIT-time
+    backstop so files already on disk, or any other producer's output, are scored
+    correctly regardless. Two layers, one domain fact — keep them consistent.
     """
     if not norm:
         return False

@@ -8212,9 +8212,14 @@ class BatchProcessor:
         The 0.85 floor was set from measured data: every spurious AIOS recovery
         duplicate scored 0.92-1.00 against the primary, while genuinely-missing
         prose (introducing new content words) scores far lower.
+
+        DUAL-LAYER NOTE: this drops the duplicates at PRODUCTION time so they
+        never reach the JSONL. The R3 gate metric defends the same fact
+        independently at AUDIT time (``scripts/_code_quality._duplicates_primary``)
+        so files already on disk, or any other producer's output, are still
+        scored correctly. Two layers, one domain fact — keep them consistent.
         """
         overlap_floor = 0.85
-        import re
 
         recovery_methods = {
             "recovery_gap_fill",
