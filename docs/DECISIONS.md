@@ -2697,6 +2697,24 @@ extracted the same AIOS code at fidelity 1.00, `PLAN_VLM_EVAL` F5), SHIPPED
 **Threshold unchanged:** the `0.90` fidelity floor is preserved — the
 population and method were fixed, not the bar.
 
+**Blind-spot fix — collapsed nested suites (2026-06-06).** Live measurement of
+the sparse-code residual (a code block on a mostly-prose page whose page-average
+monospace ratio sits below the 0.10 router threshold, so it routes to MinerU)
+found a real metric gap: MinerU-1.2B can FLATTEN a nested suite onto one line
+(Fluent Python p111: `found = 0 / for n in needles: / if n in haystack: / found
++= 1` rendered as the single jammed line `for n in needles: if n in haystack:
+found += 1`). The WORST extraction outcome — total collapse — evaded
+`is_judgeable` because the suite `:` was no longer at end-of-line, so the chunk
+was mis-scored as "flat" (exempt) and slipped through. Added `_COLLAPSED_NESTED`
+(a line carrying TWO block-keyword suite colons = flattened nesting) to
+`is_judgeable`; such a chunk is now judgeable and fails `indentation_ok`
+(single indent depth). This is strengthening, not weakening — it catches a
+real failure the gate was blind to. The two-colon requirement avoids
+false-positives on legitimate one-line compound statements (`if x: return y`),
+comprehensions, and lambdas (verified by parametrized contract tests). No
+regression: AIOS-Qwen stays 24 judgeable / fidelity 1.00. Contracts added to
+`tests/test_code_quality_metric.py`.
+
 **Contracts:** `tests/test_code_quality_metric.py` (19 unit contracts: positive
 code-ID, equation/LaTeX exclusion, judge-only-judgeable, Policy B verdict) and
 `tests/test_code_indentation_audit_gate.py` (subprocess end-to-end:

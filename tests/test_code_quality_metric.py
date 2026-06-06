@@ -68,6 +68,52 @@ def test_brace_block_is_judgeable():
     assert cq.is_judgeable("int main() {\n    return 0;\n}")
 
 
+def test_collapsed_nested_suite_is_judgeable_and_degraded():
+    # The WORST extraction outcome: a nested suite flattened onto ONE line so the
+    # ``:`` is no longer at end-of-line. Measured live: MinerU-1.2B rendered
+    # Fluent Python p111's
+    #     found = 0
+    #     for n in needles:
+    #         if n in haystack:
+    #             found += 1
+    # as a single jammed line. This must be judgeable (so it is scored) AND fail
+    # indentation_ok (the nesting was destroyed) — not slip through as "flat".
+    collapsed = "found = 0\nfor n in needles: if n in haystack: found += 1"
+    assert cq.is_judgeable(collapsed)
+    assert not cq.indentation_ok(collapsed)
+    # The exact on-disk shape (fenced + MinerU math-artifacted operators).
+    p111 = "```\nfound \\(= 0\\)\nfor n in needles: if n in haystack: found \\(+ = 1\\)\n```"
+    assert cq.is_judgeable(p111)
+    assert not cq.indentation_ok(p111)
+
+
+@pytest.mark.parametrize(
+    "legit",
+    [
+        "x = compute()\nif x: return y",  # single one-line compound stmt
+        "data = load()\nfor x in y: print(x)",  # single one-line for
+        "result = [x for x in items if x > 0]\nprint(result)",  # comprehension
+        "f = lambda x: x + 1\ng = lambda y: y * 2",  # lambda (one expr colon)
+    ],
+)
+def test_collapsed_detector_no_false_positive(legit):
+    # A LEGITIMATE one-line compound statement (a single suite colon),
+    # comprehension, or lambda is NOT a collapsed nested block — it must not be
+    # flagged judgeable-via-collapse. The detector requires TWO block-keyword
+    # suite colons on one line (flattened nesting) precisely to avoid this.
+    assert not cq.is_judgeable(legit)
+
+
+def test_collapsed_blocks_drive_doc_hardfail():
+    # When collapsed nested blocks are non-incidental (>= min_judgeable, above the
+    # density floor) the document hard-fails — the blind spot previously let them
+    # pass invisibly. Three collapsed chunks, nothing else.
+    rows = [_code_chunk(f"c{i}", "a = 0\nfor i in xs: if i in ys: a += i") for i in range(3)]
+    m = cq.code_quality(rows)
+    assert m.n_judgeable == 3 and m.n_judgeable_fail == 3
+    assert cq.gate_verdict(m) == "fail"
+
+
 # --- indentation_ok --------------------------------------------------------
 
 

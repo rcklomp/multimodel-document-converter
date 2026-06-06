@@ -56,6 +56,17 @@ _BLOCK_OPENER = re.compile(
     r"finally|with)\b.*:\s*$"
 )
 
+# Collapsed nested suite: a multi-line block flattened ONTO ONE LINE so the
+# suite ``:`` is no longer at end-of-line and ``_BLOCK_OPENER`` misses it — the
+# WORST extraction outcome (e.g. MinerU-1.2B on a sub-threshold code page renders
+# ``for n in needles:\n    if n in haystack:\n        found += 1`` as the single
+# line ``for n in needles: if n in haystack: found += 1``). Detected by TWO
+# block-keyword suite colons on one line (flattened nesting). Requires two so a
+# legitimate one-line compound statement (``if x: return y``) is NOT flagged;
+# dict literals / comprehensions / lambda carry no block-keyword suite colon.
+_SUITE_COLON = r"(?:def|class|if|elif|for|while|try|except|with)\b[^:\n]*:"
+_COLLAPSED_NESTED = re.compile(r"(?m)^\s*(?:async\s+)?" + _SUITE_COLON + r".*?" + _SUITE_COLON)
+
 # R3 floor (unchanged from the legacy gate — the population/method is what is
 # fixed, not the threshold).
 DEFAULT_INDENT_FIDELITY_FLOOR = 0.90
@@ -86,7 +97,10 @@ def is_judgeable(text: str) -> bool:
 
     REPL transcripts are excluded (flush-left by design). Flat/single-statement
     code and free-form pseudocode (no ``:`` suite, no brace block) are excluded
-    because they have no nesting to assess.
+    because they have no nesting to assess. A nested suite FLATTENED onto one
+    line (``_COLLAPSED_NESTED``) IS judgeable — it is mangled code whose nesting
+    was destroyed, so it must be scored (and will fail ``indentation_ok``), not
+    slip through as "flat".
     """
     s = text or ""
     if is_repl(s):
@@ -95,6 +109,8 @@ def is_judgeable(text: str) -> bool:
     if len(lines) < 2:
         return False
     if _BLOCK_OPENER.search(s):
+        return True
+    if _COLLAPSED_NESTED.search(s):
         return True
     return "{" in s and "}" in s
 
