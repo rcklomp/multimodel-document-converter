@@ -298,17 +298,26 @@ modality-switched rubric matrix is design intent `[PROPOSED]`.
 
 ## 9. Roadmap & Definition of Done
 
-Cycle status: the AIOS code-extraction smoke PASSED (clean born-digital code doc),
-but the 2026-06-02 Grand Soak was HALTED at doc 9/17 - the pipeline does not meet
-requirements on dense magazines and forms/scans (the two §8 blockers; see
-`docs/paper/FINDINGS_LOG.md` 2026-06-02). The roadmap therefore leads with
-remediation, and the soak re-run is gated behind it.
+Cycle status (UPDATED 2026-06-06): the 2026-06-02 Grand Soak HALTED at doc 9/17 on
+the two §8 blockers (dense magazines + forms/scans; see `docs/paper/FINDINGS_LOG.md`
+2026-06-02). The 2026-06-04 VLM-eval pivot then **resolved both blockers
+structurally** by replacing the prose/visual extractor: **MinerU2.5 is the chosen
+extractor** (two-stage layout detector -> per-region recognition: reliable detector
+bboxes fix Blocker B crop drift; structured per-element JSON fixes Blocker A
+malformation), shipped as the default `MineruQwenHybridEngine` route. So §9.1 below
+is **SUPERSEDED** (kept for history), and the roadmap now leads with **§9.2**: the
+remaining gate is re-running the FULL crucible (18 docs, long tail) on the MinerU
+default to confirm the pivot holds at corpus scale. Validated so far: 6/6 golden +
+7/7 cross-category corpus soak QA_PASS (default route). Full eval/decision record:
+`docs/PLAN_VLM_EVAL.md` §10-16.
 
-### 9.1 Remediation plan for the two blockers (PROPOSED, immediate priority)
+### 9.1 Remediation plan for the two blockers (SUPERSEDED 2026-06-06 by the MinerU pivot - history)
 
-All items are PROPOSED (not built). Each restores the fail-open invariant (§2) at
-the boundary that failed. Sequence cheap -> structural -> design; re-validate on
-the crucible subset before any Grand Soak.
+**SUPERSEDED:** these items targeted the OLD Docling+Qwen path; the MinerU pivot
+(above) resolved Blockers A and B structurally, so none of A1-A5 / B1-B3 were
+built as written. Retained as the design reasoning that justified the pivot
+(A5's per-region precedent IS MinerU's two-stage design). Items below are
+historical, not active work.
 
 **Blocker A - VLM emits invalid JSON on dense pages** (truncation + malformation
 -> mass Docling fallback; ~58% of pages on the one magazine reached):

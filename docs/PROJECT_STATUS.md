@@ -60,10 +60,14 @@ fences it, R3) (`PLAN_VLM_EVAL` §16).
   gate/assertion weakened. See `DECISIONS.md` "PR #4 code-review hardening".
 
 **Open / deferred (none a default ship-blocker):**
-- Sparse-code residual: inline code on a mostly-prose page stays under the 0.10
-  mono-ratio router threshold and goes to MinerU-1.2B, which can mangle it. The R3
-  gate flags it; the extraction fix (lower threshold / per-region code lane) is
-  unbuilt ([[project_open_issues]]).
+- Sparse-code residual (NARROWED 2026-06-06): a CODE BLOCK on a mostly-prose page
+  whose page-average mono ratio sits under the 0.10 router threshold now routes to
+  Qwen via block-aware routing (`page_has_code_block`, commit `16dc097`; table-
+  guarded; DECISIONS "Block-aware routing for sub-threshold code blocks"). The
+  remaining residual is only SCATTERED INLINE code (no contiguous mono run) on a
+  sub-threshold page, which still goes to MinerU-1.2B and can be mangled; the R3
+  gate (incl. the single-line-collapse fix) flags it. A per-region code lane for
+  the inline case is unbuilt ([[project_open_issues]]).
 - The recovery_scan/gap_fill chunks (batch_processor's engine-independent net)
   carry no bbox - pre-existing, out of MinerU scope.
 - AIOS HEADING 79.7% (just under 0.80) - a genuine borderline coverage signal,
