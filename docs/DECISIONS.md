@@ -2746,6 +2746,19 @@ circuit breaker (raise, no silent MinerU fallback — same fail-fast contract as
 `HybridEngine`); single-page SEMANTIC Qwen failures demote that one page to
 MinerU and are recorded in the routing-decision log.
 
+**Operational envelope (CHANGED by this default flip).** This is a deliberate
+correctness-over-availability trade and it widens the default's dependency
+surface: the prior pure-MinerU default needed only the MinerU server, but the
+hybrid default sends any code-dense page to Qwen, so a document containing code
+now requires BOTH servers (GX10 MinerU + M5 Qwen) to be reachable. Because a
+transport outage on the Qwen subset trips the circuit breaker (no MinerU
+fallback), a single code-dense page with the Qwen server down HALTS the whole
+document rather than emitting mangled-but-present code. For an unattended batch
+this means a Qwen outage fails fast and loud instead of silently degrading R3
+quality. Operators who need MinerU-only availability (one server, accept the
+code-indentation ceiling) force it with `USE_MINERU_ENGINE=1`; a no-code corpus
+is unaffected (every page routes to MinerU regardless).
+
 **Validation.** Live: GX10 vLLM MinerU + M5 Qwen on AIOS -> `QA_PASS` (failures=0,
 35/35 pages, code 1.00, tables 100%). The recovery-dedup fix (60fc77c) holds on
 this path (0 recovery duplicates). Offline `SMOKE_PRODUCTION_PASS`; V3 firewall

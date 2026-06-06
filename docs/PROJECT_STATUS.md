@@ -299,6 +299,12 @@ visual-dense queries.
 - No filename- or document-specific rules; profile overrides are debug-only.
 - Acceptance requires `GATE_PASS` + `UNIVERSAL_PASS` across the smoke matrix, and
   `SMOKE_PRODUCTION_PASS` for any V3 extraction-path change.
+- Default-route dependency: the hybrid default needs BOTH servers (GX10 MinerU +
+  M5 Qwen) for any code-bearing doc; a Qwen transport outage trips the circuit
+  breaker and HALTS the doc (correctness over availability, no MinerU fallback).
+  Use `USE_MINERU_ENGINE=1` for MinerU-only availability. See `DECISIONS.md`
+  "MinerU+Qwen-for-code hybrid is the default extraction route" -> Operational
+  envelope.
 
 ## Test command
 
