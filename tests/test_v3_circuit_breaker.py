@@ -126,9 +126,9 @@ def _one_page_pdf(tmp_path):
 
 
 def _force_vlm_route(monkeypatch):
-    """Route every page to the VLM branch and stub the renderer."""
+    """Route every page to the VLM branch (the blank test page renders for real;
+    the injected provider raises before the payload is ever parsed)."""
     monkeypatch.setattr(HybridEngine, "_classify_page", lambda self, page: ("vlm", "forced"))
-    monkeypatch.setattr(HybridEngine, "_render_page_png", staticmethod(lambda page: (b"x", 10, 10)))
 
 
 def test_router_infra_error_trips_breaker_without_docling(tmp_path, monkeypatch):

@@ -22,7 +22,6 @@ auditable as engine-agnostic glue.
 
 from __future__ import annotations
 
-import io
 import logging
 import os
 from pathlib import Path
@@ -38,14 +37,9 @@ from mmrag_v2.universal.intermediate import (
 )
 
 from .docling_fast import DoclingFastEngine
-from .mineru_native import MineruNativeEngine, mineru_page_to_universal_page
-from .vlm_native import (
-    VlmNativeEngine,
-    _build_schema_prompt,
-    _describe_and_parse,
-    estimate_output_budget,
-)
-from .vlm_provider import VlmInfraError, VlmProvider, VlmProviderConfig
+from .mineru_native import MineruNativeEngine, extract_page_mineru
+from .vlm_native import VlmNativeEngine, extract_page_vlm
+from .vlm_provider import VlmInfraError
 
 logger = logging.getLogger(__name__)
 
@@ -225,25 +219,12 @@ class HybridEngine:
             # avoids that interaction.
             fallback_indices: List[int] = []
             if vlm_page_indices:
-                provider = self._provider_from_engine(self.vlm_engine)
                 for i in vlm_page_indices:
                     page_number = i + 1
                     try:
-                        image_bytes, pw, ph = self._render_page_png(doc[i])
-                        prompt = _build_schema_prompt(pw, ph)
-                        payload = _describe_and_parse(
-                            provider,
-                            image_bytes,
-                            prompt,
-                            max_tokens=estimate_output_budget(doc[i]),
+                        pages_by_number[page_number] = extract_page_vlm(
+                            self.vlm_engine, doc[i], page_number
                         )
-                        universal_page = VlmNativeEngine._page_from_payload(
-                            payload,
-                            fallback_page_number=page_number,
-                            pixel_width=pw,
-                            pixel_height=ph,
-                        )
-                        pages_by_number[page_number] = universal_page
                     except VlmInfraError:
                         # CIRCUIT BREAKER. An infrastructure/transport failure
                         # (node offline, connection refused, connect/read
@@ -307,26 +288,6 @@ class HybridEngine:
             metadata=metadata,
         )
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _provider_from_engine(engine: VlmNativeEngine) -> VlmProvider:
-        """Return the underlying provider (lazy-construct if needed)."""
-        if engine._provider is None:
-            engine._provider = VlmProvider(VlmProviderConfig.from_env())
-        return engine._provider
-
-    @staticmethod
-    def _render_page_png(page: "fitz.Page") -> Tuple[bytes, int, int]:
-        zoom = VlmNativeEngine().render_dpi / 72.0
-        matrix = fitz.Matrix(zoom, zoom)
-        pixmap = page.get_pixmap(matrix=matrix, alpha=False)
-        buffer = io.BytesIO()
-        buffer.write(pixmap.tobytes("png"))
-        return buffer.getvalue(), pixmap.width, pixmap.height
-
 
 class MineruQwenHybridEngine:
     """Per-page hybrid: Qwen VLM for code-dense pages, MinerU for everything else.
@@ -388,23 +349,11 @@ class MineruQwenHybridEngine:
             # MinerU; a transport failure trips the circuit breaker.
             fallback_indices: List[int] = []
             if code_indices:
-                provider = HybridEngine._provider_from_engine(self.vlm_engine)
                 for i in code_indices:
                     page_number = i + 1
                     try:
-                        image_bytes, pw, ph = HybridEngine._render_page_png(doc[i])
-                        prompt = _build_schema_prompt(pw, ph)
-                        payload = _describe_and_parse(
-                            provider,
-                            image_bytes,
-                            prompt,
-                            max_tokens=estimate_output_budget(doc[i]),
-                        )
-                        pages_by_number[page_number] = VlmNativeEngine._page_from_payload(
-                            payload,
-                            fallback_page_number=page_number,
-                            pixel_width=pw,
-                            pixel_height=ph,
+                        pages_by_number[page_number] = extract_page_vlm(
+                            self.vlm_engine, doc[i], page_number
                         )
                     except VlmInfraError:
                         logger.error(
@@ -434,10 +383,8 @@ class MineruQwenHybridEngine:
             # MinerU subset — planned-prose/table pages plus any Qwen fallbacks.
             for i in sorted(set(mineru_indices + fallback_indices)):
                 page_number = i + 1
-                image, pw, ph = self.mineru_engine._render_page(doc[i])
-                elements = self.mineru_engine.client.two_step_extract(image)
-                pages_by_number[page_number] = mineru_page_to_universal_page(
-                    list(elements), page_number, (pw, ph)
+                pages_by_number[page_number] = extract_page_mineru(
+                    self.mineru_engine, doc[i], page_number
                 )
         finally:
             doc.close()

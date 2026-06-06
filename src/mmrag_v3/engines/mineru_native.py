@@ -437,6 +437,20 @@ PAGE_RENDER_DPI = 200
 DEFAULT_MINERU_MODEL = "MinerU2.5-2509-1.2B"
 
 
+def extract_page_mineru(
+    mineru_engine: "MineruNativeEngine", page: "fitz.Page", page_number: int
+) -> UniversalPage:
+    """Extract ONE rendered PDF page via MinerU into a ``UniversalPage``.
+
+    The single per-page MinerU path shared by ``MineruNativeEngine.extract`` and
+    ``MineruQwenHybridEngine`` — render, two-step extract, project to UIR. Keeps
+    callers off the engine's private surface (``_render_page``, ``client``).
+    """
+    image, pixel_w, pixel_h = mineru_engine._render_page(page)
+    elements = mineru_engine.client.two_step_extract(image)
+    return mineru_page_to_universal_page(list(elements), page_number, (pixel_w, pixel_h))
+
+
 class MineruConfigError(RuntimeError):
     """Raised when the MinerU engine is asked to run with no endpoint configured."""
 

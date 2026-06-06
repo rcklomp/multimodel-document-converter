@@ -346,6 +346,55 @@ Rules:
 UIR_SCHEMA_PROMPT = _build_schema_prompt(0, 0)
 
 
+def render_page_png(
+    page: "fitz.Page", render_dpi: int = PAGE_RENDER_DPI
+) -> "tuple[bytes, int, int]":
+    """Render a PDF page to PNG bytes + pixel (width, height).
+
+    The single source of truth for VLM page rendering, shared by
+    ``VlmNativeEngine``, ``HybridEngine`` and ``MineruQwenHybridEngine``.
+    """
+    zoom = render_dpi / 72.0
+    matrix = fitz.Matrix(zoom, zoom)
+    pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+    buffer = io.BytesIO()
+    buffer.write(pixmap.tobytes("png"))
+    return buffer.getvalue(), pixmap.width, pixmap.height
+
+
+def extract_page_vlm(
+    vlm_engine: "VlmNativeEngine", page: "fitz.Page", page_number: int
+) -> UniversalPage:
+    """Extract ONE rendered PDF page via the VLM into a ``UniversalPage``.
+
+    The single per-page VLM path shared by ``VlmNativeEngine.extract``,
+    ``HybridEngine`` and ``MineruQwenHybridEngine`` — render, prompt, describe,
+    project to UIR. Exceptions PROPAGATE: the caller owns the circuit-breaker /
+    fallback policy (a ``VlmInfraError`` must halt the batch; a semantic failure
+    may demote the page to another engine). ``vlm_engine`` need only expose
+    ``_provider`` (lazy-built from env when ``None``) and, optionally,
+    ``render_dpi`` — so a lightweight stand-in is injectable in tests.
+    """
+    provider = vlm_engine._provider
+    if provider is None:
+        provider = vlm_engine._provider = VlmProvider(VlmProviderConfig.from_env())
+    render_dpi = getattr(vlm_engine, "render_dpi", PAGE_RENDER_DPI)
+    image_bytes, pixel_w, pixel_h = render_page_png(page, render_dpi)
+    prompt = _build_schema_prompt(pixel_w, pixel_h)
+    payload = _describe_and_parse(
+        provider,
+        image_bytes,
+        prompt,
+        max_tokens=estimate_output_budget(page),
+    )
+    return VlmNativeEngine._page_from_payload(
+        payload,
+        fallback_page_number=page_number,
+        pixel_width=pixel_w,
+        pixel_height=pixel_h,
+    )
+
+
 class VlmNativeEngine:
     """Vision-native UIR extraction adapter.
 
@@ -379,23 +428,7 @@ class VlmNativeEngine:
         try:
             pages: List[UniversalPage] = []
             for page_index in range(doc.page_count):
-                page = doc[page_index]
-                page_number = page_index + 1
-                image_bytes, pixel_w, pixel_h = self._render_page_png(page)
-                prompt = _build_schema_prompt(pixel_w, pixel_h)
-                payload = _describe_and_parse(
-                    self.provider,
-                    image_bytes,
-                    prompt,
-                    max_tokens=estimate_output_budget(page),
-                )
-                universal_page = self._page_from_payload(
-                    payload,
-                    fallback_page_number=page_number,
-                    pixel_width=pixel_w,
-                    pixel_height=pixel_h,
-                )
-                pages.append(universal_page)
+                pages.append(extract_page_vlm(self, doc[page_index], page_index + 1))
         finally:
             doc.close()
 
@@ -411,14 +444,6 @@ class VlmNativeEngine:
             pages=pages,
             metadata=metadata,
         )
-
-    def _render_page_png(self, page: "fitz.Page") -> "tuple[bytes, int, int]":
-        zoom = self.render_dpi / 72.0
-        matrix = fitz.Matrix(zoom, zoom)
-        pixmap = page.get_pixmap(matrix=matrix, alpha=False)
-        buffer = io.BytesIO()
-        buffer.write(pixmap.tobytes("png"))
-        return buffer.getvalue(), pixmap.width, pixmap.height
 
     @staticmethod
     def _project_bbox_to_uir(raw_bbox: List[int], pixel_width: int, pixel_height: int) -> List[int]:

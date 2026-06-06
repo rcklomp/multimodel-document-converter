@@ -18,7 +18,7 @@ from mmrag_v2.universal.intermediate import (
     create_element,
     create_page,
 )
-from mmrag_v3.engines import router as R
+from mmrag_v3.engines import vlm_native as V
 from mmrag_v3.engines.router import MineruQwenHybridEngine
 from mmrag_v3.engines.vlm_native import VlmNativeEngine
 
@@ -83,14 +83,14 @@ def _fake_page_from_payload(payload, fallback_page_number, pixel_width, pixel_he
 
 def _install_vlm_mocks(monkeypatch):
     vlm = VlmNativeEngine.__new__(VlmNativeEngine)
-    vlm._provider = object()  # so _provider_from_engine returns it without network
+    vlm._provider = object()  # extract_page_vlm uses this provider without network
     monkeypatch.setattr(
-        R,
+        V,
         "_describe_and_parse",
         lambda *a, **k: {"elements": [{"type": "text", "content": "FROM_QWEN"}]},
     )
     monkeypatch.setattr(
-        R.VlmNativeEngine, "_page_from_payload", staticmethod(_fake_page_from_payload)
+        VlmNativeEngine, "_page_from_payload", staticmethod(_fake_page_from_payload)
     )
     return vlm
 
@@ -144,7 +144,7 @@ def test_semantic_vlm_failure_falls_back_to_mineru(tmp_path, monkeypatch):
     def _boom(*a, **k):
         raise ValueError("malformed VLM JSON")
 
-    monkeypatch.setattr(R, "_describe_and_parse", _boom)
+    monkeypatch.setattr(V, "_describe_and_parse", _boom)
     eng = MineruQwenHybridEngine(mineru_engine=mineru, vlm_engine=vlm)
 
     ud = eng.extract(path)

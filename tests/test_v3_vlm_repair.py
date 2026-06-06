@@ -128,9 +128,6 @@ def test_vlm_engine_repairs_truncated_page(tmp_path):
 def test_router_repairs_truncation_without_docling_fallback(tmp_path, monkeypatch):
     """A truncated VLM page is repaired in-place; Docling is never invoked."""
     monkeypatch.setattr(HybridEngine, "_classify_page", lambda self, page: ("vlm", "forced"))
-    monkeypatch.setattr(
-        HybridEngine, "_render_page_png", staticmethod(lambda page: (b"x", 100, 100))
-    )
 
     class _DoclingMustNotRun:
         def extract(self, *a, **k):
