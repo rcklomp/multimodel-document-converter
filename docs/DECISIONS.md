@@ -2429,6 +2429,42 @@ now-orphaned bridge methods are dead-code cleanup candidates for a later pass;
 this change is scoped to the revert + test deletion the evidence supports.
 
 
+## Orphaned boundary-repair bridge deleted; infix step-number repair re-homed (2026-06-06)
+
+**Context.** The "later pass" the entry above anticipated. After the P4 revert,
+the spatial boundary-repair bridge had ZERO production callers (`self.`-call count
+0) but remained DEFINED, and a wiring test still asserted it by reading the dead
+method's source — masking that infix step-number repair no longer ran anywhere.
+
+**Decision.**
+1. **Deleted** the 5 dead spatial/front-matter methods (~280 lines):
+   `_apply_final_boundary_repairs`, `_merge_hungry_operators`,
+   `_strip_trailing_headings`, `_vision_gate_headings`,
+   `_apply_vision_aided_front_matter_detection`. These are exactly the
+   spatial-proximity merging P4 rejected as a VLM-native anti-pattern; their
+   guarding tests were already deleted by that decision. (The interleaved live
+   methods `_dedup_intra_chunk_repeats`, `_merge_mid_sentence_chunks`,
+   `_remove_near_duplicate_chunks`, `_deduplicate_chunk_overlap` were preserved.)
+2. **Re-homed** `_repair_infix_step_numbers` into the live `_apply_quality_filters`
+   finalize sequence (Step 3a1a, before the mid-sentence merge). It is a
+   CONTENT-level repair (insert a newline between jammed numbered steps), the same
+   family as the live Step 3a2 `_repair_cross_chunk_hyphenation` — NOT spatial
+   merging. P4 rejected spatial merging, not content repair; cutting the whole
+   bridge disabled infix-repair as COLLATERAL, leaving it production-dead despite
+   9 passing unit tests. Re-homing restores intended coverage on the V3 path.
+3. The wiring test was repointed from the deleted bridge to assert the LIVE
+   `_apply_quality_filters` path (a stronger contract than the prior dead-method
+   source check).
+
+**Anti-weakening note.** This is not weakening: a tested capability that had
+silently stopped running is restored to the live path, and the rejected
+spatial code is removed (not its enforcement). Gates: full suite 1501 pass / 99
+skip (infix-repair now exercised live via the smoke docs too), ruff on
+batch_processor 33 -> 32 (one pre-existing error removed with the dead code, none
+added), SMOKE_PRODUCTION_PASS (offline). Pre-existing file-level black/ruff drift
+left untouched (surgical, no mass-reformat).
+
+
 ## Fail-Fast Infrastructure Rule for unattended VLM batches (2026-06-01)
 
 **Decision:** Any unattended batch script that depends on a network/VLM endpoint

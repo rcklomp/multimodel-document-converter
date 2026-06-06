@@ -327,15 +327,16 @@ def test_production_repair_handles_python_cookbook_code_comment_shape(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_repair_is_called_from_apply_final_boundary_repairs() -> None:
-    """The repair must run as part of the final boundary repair pass
-    (before hierarchy inference / heading propagation), not as an
-    ad-hoc downstream step.
+def test_repair_is_called_from_apply_quality_filters() -> None:
+    """The repair must run in the live production finalize pass
+    (``_apply_quality_filters``), before the mid-sentence merge so the merge
+    sees corrected paragraph boundaries. It was re-homed here when the dead
+    spatial boundary-repair bridge (its former host) was deleted; this is a
+    LIVE-path contract, not the prior dead-method source check.
     """
     import inspect
 
-    method_source = inspect.getsource(BatchProcessor._apply_final_boundary_repairs)
+    method_source = inspect.getsource(BatchProcessor._apply_quality_filters)
     assert "_repair_infix_step_numbers(" in method_source, (
-        "Expected _apply_final_boundary_repairs to invoke "
-        "_repair_infix_step_numbers"
+        "Expected _apply_quality_filters to invoke _repair_infix_step_numbers"
     )

@@ -1829,21 +1829,22 @@ class BatchProcessor:
         # picked the prose chunk 29/30 times.
         all_chunks = self._apply_vlm_table_iou_dedup(all_chunks)
 
-        # PLAN_V3.1 P4 (2026-06-01): the final-boundary-repair bridge
-        # (_apply_final_boundary_repairs -> hungry-operator / trailing-heading /
-        # mid-sentence merges + _apply_vision_aided_front_matter_detection) is
-        # DEPRECATED for the VLM-native path and NOT wired here. The P4 targeted
-        # retrieval probe proved spatial/geometric merging overrides the VLM's
-        # semantic chunk boundaries: on dense academic text it over-merged
-        # distinct concepts (equations, references, conclusion+bibliography) into
-        # oversized blobs and DILUTED retrieval vectors (focused fragments
-        # out-retrieved the merged chunk on 2 of 4 probed boundaries; only ~1 of
-        # 7 merges was a clean split-sentence win). The bridge was a geometric
-        # fix for an OCR/Docling problem (sentences physically split across
-        # bboxes) that VLM-native extraction does not have. See DECISIONS.md
-        # "Spatial proximity boundary-repair bridge DEPRECATED for VLM-native".
-        # NOTE: _merge_mid_sentence_chunks remains live via _apply_quality_filters
-        # and _apply_spatial_refiner remains live via _sanitize_technical_manual_final
+        # PLAN_V3.1 P4 (2026-06-01): the spatial final-boundary-repair bridge
+        # (_apply_final_boundary_repairs + _merge_hungry_operators +
+        # _strip_trailing_headings + _apply_vision_aided_front_matter_detection)
+        # is DEPRECATED for the VLM-native path: the P4 probe proved
+        # spatial/geometric merging overrides the VLM's semantic chunk boundaries,
+        # over-merging distinct concepts into oversized blobs and diluting
+        # retrieval vectors. The bridge was a geometric fix for an OCR/Docling
+        # problem (sentences physically split across bboxes) that VLM-native
+        # extraction does not have. Those 5 methods were DELETED 2026-06-06 (R3
+        # review follow-up; dead since P4). See DECISIONS.md "Spatial proximity
+        # boundary-repair bridge DEPRECATED for VLM-native" + "Orphaned
+        # boundary-repair bridge deleted; infix step-number repair re-homed".
+        # NOTE: _merge_mid_sentence_chunks remains live via _apply_quality_filters,
+        # _apply_spatial_refiner remains live via _sanitize_technical_manual_final,
+        # and _repair_infix_step_numbers (a content repair collaterally cut with the
+        # bridge) was re-homed into _apply_quality_filters Step 3a1a.
         # (AGENT-SPATIAL-20) - those are separate paths, not this bridge.
 
         # Selective OCR patching for encoding-corrupted chunks.
@@ -4767,242 +4768,6 @@ class BatchProcessor:
             )
         return chunks
 
-    def _apply_final_boundary_repairs(
-        self, chunks: List[IngestionChunk]
-    ) -> List[IngestionChunk]:
-        """Apply final cross-chunk boundary repairs before hierarchy inference.
-
-        This is the batch-finalization bridge for semantic stitching. Keep this
-        order explicit: heading stripping can expose orphan operators, operator
-        stitching must happen before mid-sentence merging, and deduplication
-        should see the final stitched text.
-        """
-        # Phase 6 (PLAN_V2.10) audit follow-up: repair embedded
-        # step-number boundaries before any other text-level repair so
-        # downstream merge / dedup passes see the corrected paragraph
-        # boundaries. Pure content-level edit; same chunk count.
-        chunks = self._repair_infix_step_numbers(chunks)
-
-        # Strip trailing section headings that Docling appended to paragraphs.
-        # Digital PDFs often have "...end of paragraph. preface" where "preface"
-        # is the next section heading concatenated by the layout parser.
-        chunks = self._strip_trailing_headings(chunks)
-
-        # POS Boundary Logic: merge orphan prepositions into next chunk.
-        # "BY" at end of chunk + "Mary GrandPré" at start of next → merge.
-        # "END" stays (it's a noun, not a hungry preposition).
-        chunks = self._merge_hungry_operators(chunks)
-
-        # Final cross-batch mid-sentence merge + dedup.
-        # Per-batch processing can't merge sentences split across batch boundaries.
-        chunks = self._merge_mid_sentence_chunks(chunks)
-        chunks = self._deduplicate_chunk_overlap(chunks)
-        return chunks
-
-    def _vision_gate_headings(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
-        """Compatibility wrapper for the v2.7 front-matter detector."""
-        return self._apply_vision_aided_front_matter_detection(chunks)
-
-    def _apply_vision_aided_front_matter_detection(
-        self, chunks: List[IngestionChunk]
-    ) -> List[IngestionChunk]:
-        """Demote non-structural front-matter headings to ``Front Matter``.
-
-        Front matter is detected by combining layout/vision evidence with a
-        structural boundary: pages before the first chapter-like heading that
-        contain Docling/shadow image extractions are treated as front matter.
-        Numbered/chapter headings are preserved so real body sections are not
-        flattened.
-        """
-        import re as _re
-
-        chapter_re = _re.compile(
-            r"(^|\b)(chapter|chapitre|hoofdstuk|teil)\s+[A-Za-z0-9ivxlcdm]+"
-            r"|^\s*\d+(?:\.\d+)*\s+\S",
-            _re.IGNORECASE,
-        )
-        numbered_section_re = _re.compile(r"^\s*\d+(?:\.\d+)+\s+\S")
-        front_visual_re = _re.compile(
-            r"cover|logo|publisher|portrait|illustration|sketch|ornament|decoration|title page",
-            _re.IGNORECASE,
-        )
-
-        def _heading_text(ch: IngestionChunk) -> str:
-            try:
-                ph = ch.metadata.hierarchy.parent_heading
-                if ph:
-                    return ph.strip()
-            except Exception:
-                pass
-            if ch.content:
-                return ch.content.strip().splitlines()[0].strip()
-            return ""
-
-        def _is_chapter_like(text: str) -> bool:
-            return bool(text and chapter_re.search(text))
-
-        def _is_numbered_section(text: str) -> bool:
-            return bool(text and numbered_section_re.search(text))
-
-        visual_pages: set[int] = set()
-        strong_visual_pages: set[int] = set()
-        for ch in chunks:
-            if ch.modality != Modality.IMAGE or not ch.metadata:
-                continue
-            page_no = ch.metadata.page_number or 0
-            if page_no <= 0:
-                continue
-            method = str(getattr(ch.metadata, "extraction_method", "") or "").lower()
-            if method not in {"docling", "shadow"}:
-                continue
-            visual_pages.add(page_no)
-            vd = ch.metadata.visual_description or ch.content or ""
-            if front_visual_re.search(vd):
-                strong_visual_pages.add(page_no)
-
-        if not visual_pages:
-            return chunks
-
-        first_chapter_page: Optional[int] = None
-        for ch in chunks:
-            if ch.modality != Modality.TEXT or not ch.metadata:
-                continue
-            heading = _heading_text(ch)
-            if not _is_chapter_like(heading):
-                continue
-            page_no = ch.metadata.page_number or 0
-            if page_no <= 0:
-                continue
-            first_chapter_page = (
-                page_no if first_chapter_page is None else min(first_chapter_page, page_no)
-            )
-
-        demoted = 0
-        for ch in chunks:
-            if ch.modality != Modality.TEXT or not ch.metadata or not ch.metadata.hierarchy:
-                continue
-            page_no = ch.metadata.page_number or 0
-            if page_no not in visual_pages:
-                continue
-            if first_chapter_page is not None and page_no >= first_chapter_page:
-                continue
-
-            heading = _heading_text(ch)
-            if not heading or _is_chapter_like(heading) or _is_numbered_section(heading):
-                continue
-
-            # A plain image extraction is sufficient on true pre-chapter pages.
-            # If no chapter boundary was detected, require an explicit visual
-            # front-matter cue to avoid demoting arbitrary illustrated documents.
-            if first_chapter_page is None and page_no not in strong_visual_pages:
-                continue
-
-            ch.metadata.hierarchy.parent_heading = "Front Matter"
-            bp = ch.metadata.hierarchy.breadcrumb_path
-            if bp:
-                doc_name = bp[0]
-                leaf = bp[-1] if bp[-1] != "Front Matter" else f"Page {page_no}"
-                ch.metadata.hierarchy.breadcrumb_path = [doc_name, "Front Matter", leaf]
-                ch.metadata.hierarchy.level = min(len(ch.metadata.hierarchy.breadcrumb_path), 5)
-            else:
-                ch.metadata.hierarchy.breadcrumb_path = ["Document", "Front Matter", f"Page {page_no}"]
-                ch.metadata.hierarchy.level = 3
-            demoted += 1
-
-        if demoted:
-            logger.info(
-                f"[VISION-FRONT-MATTER] Demoted {demoted} pre-chapter headings to 'Front Matter'"
-            )
-
-        return chunks
-
-    def _merge_hungry_operators(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
-        """Merge trailing prepositions into the next chunk using POS logic.
-
-        Prepositions (BY, FOR, OF, WITH, FROM) are syntactically incomplete
-        without their object. When a chunk ends with one and the next chunk
-        starts with a proper noun, merge the preposition into the next chunk.
-
-        "END", "VOID", "N/A" are nouns — they stay where they are.
-        Language-agnostic: prepositions exist in all European languages.
-        """
-        # Prepositions that are syntactically "hungry" for a following noun
-        _HUNGRY = {
-            # English
-            "by", "for", "of", "with", "from", "to", "in", "at", "on",
-            # German
-            "von", "für", "mit", "aus", "bei", "nach", "zu",
-            # Dutch
-            "van", "voor", "met", "uit", "bij", "naar", "door",
-            # French
-            "par", "pour", "de", "avec",
-        }
-
-        def _strip_boundary_punct(value: str) -> str:
-            return value.strip().strip(".,;:!?").lower()
-
-        def _display_without_boundary_punct(value: str) -> str:
-            return value.strip().strip(".,;:!?")
-
-        merged = 0
-        text_indices = [i for i, ch in enumerate(chunks)
-                        if ch.modality == Modality.TEXT and ch.content]
-        emptied_indices: set[int] = set()
-
-        for ti in range(len(text_indices) - 1):
-            cur_idx = text_indices[ti]
-            nxt_idx = text_indices[ti + 1]
-            cur = chunks[cur_idx]
-            nxt = chunks[nxt_idx]
-
-            # Get last word of current chunk
-            last_line = cur.content.rstrip().split("\n")[-1].strip()
-            last_word = _strip_boundary_punct(last_line.split()[-1]) if last_line.split() else ""
-
-            if last_word not in _HUNGRY:
-                continue
-
-            # Only merge on same or adjacent pages — cross-page merges create garbage
-            cur_pg = cur.metadata.page_number if cur.metadata else 0
-            nxt_pg = nxt.metadata.page_number if nxt.metadata else 0
-            if abs(nxt_pg - cur_pg) > 1:
-                continue
-
-            # The preposition must be the ONLY word on the last line (true orphan)
-            if len(last_line.split()) > 1:
-                continue
-
-            # Check if next chunk starts with a proper noun (capitalized)
-            first_word = nxt.content.lstrip().split()[0] if nxt.content.strip() else ""
-            if not first_word or not first_word[0].isupper():
-                continue
-
-            # Pull the preposition line from current chunk to next chunk
-            lines = cur.content.rstrip().split("\n")
-            if lines and _strip_boundary_punct(lines[-1]) in _HUNGRY:
-                prep = lines.pop()
-                cur.content = "\n".join(lines).rstrip()
-                prep_text = _display_without_boundary_punct(prep)
-                nxt.content = prep_text + " " + nxt.content.lstrip()
-                if cur.metadata and cur.metadata.refined_content:
-                    rc_lines = cur.metadata.refined_content.rstrip().split("\n")
-                    if rc_lines and _strip_boundary_punct(rc_lines[-1]) in _HUNGRY:
-                        rc_lines.pop()
-                        cur.metadata.refined_content = "\n".join(rc_lines).rstrip()
-                if nxt.metadata and nxt.metadata.refined_content:
-                    nxt.metadata.refined_content = prep_text + " " + nxt.metadata.refined_content.lstrip()
-                if not cur.content.strip():
-                    emptied_indices.add(cur_idx)
-                merged += 1
-
-        if merged:
-            logger.info(f"[POS-MERGE] Merged {merged} orphan prepositions into next chunk")
-
-        if emptied_indices:
-            return [ch for idx, ch in enumerate(chunks) if idx not in emptied_indices]
-
-        return chunks
-
     def _dedup_intra_chunk_repeats(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
         """Remove repeated paragraphs within a single chunk.
 
@@ -5099,51 +4864,6 @@ class BatchProcessor:
                 fixed += 1
         if fixed:
             logger.info(f"[INTRA-DEDUP] Removed repeated paragraphs in {fixed} chunks")
-        return chunks
-
-    def _strip_trailing_headings(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
-        """Strip section headings that Docling appended to the end of paragraphs.
-
-        Docling sometimes concatenates the next section heading to the end of
-        the previous paragraph: "...end of text. preface" or "...text contents".
-        Detect these by collecting all known headings from the document and
-        checking if any chunk ends with one.
-        """
-        import re as _re
-
-        # Collect all headings used in the document
-        known_headings: set[str] = set()
-        for ch in chunks:
-            if ch.metadata and ch.metadata.hierarchy:
-                ph = ch.metadata.hierarchy.parent_heading
-                if ph and len(ph) > 2:
-                    known_headings.add(ph.lower().strip())
-
-        if not known_headings:
-            return chunks
-
-        stripped = 0
-        for ch in chunks:
-            if ch.modality != Modality.TEXT or not ch.content:
-                continue
-            text = ch.content.rstrip()
-            # Check if the last line matches a known heading
-            lines = text.split("\n")
-            if len(lines) < 2:
-                continue
-            last_line = lines[-1].strip().lower()
-            if last_line in known_headings and len(last_line) < 40:
-                # Remove the trailing heading
-                ch.content = "\n".join(lines[:-1]).rstrip()
-                if ch.metadata and ch.metadata.refined_content:
-                    rc_lines = ch.metadata.refined_content.rstrip().split("\n")
-                    if rc_lines and rc_lines[-1].strip().lower() in known_headings:
-                        ch.metadata.refined_content = "\n".join(rc_lines[:-1]).rstrip()
-                stripped += 1
-
-        if stripped:
-            logger.info(f"[TRAILING-HEADING] Stripped {stripped} appended section headings")
-
         return chunks
 
     def _merge_mid_sentence_chunks(self, chunks: List[IngestionChunk]) -> List[IngestionChunk]:
@@ -7014,6 +6734,14 @@ class BatchProcessor:
         # flat code chunks. Without this, academic papers with code snippets produce
         # unreadable single-line output (e.g., "class Foo: def __init__(self):...").
         valid_chunks = self._apply_code_hygiene(valid_chunks)
+
+        # Step 3a1a: Repair embedded step-number boundaries (a content-level fix:
+        # insert a newline between jammed numbered steps so downstream merge/dedup
+        # see corrected paragraph boundaries). Re-homed here (PLAN_V3.1 follow-up
+        # 2026-06-06) from the deleted spatial boundary-repair bridge, where it was
+        # collaterally disabled when P4 cut the bridge; it is a content repair in
+        # the same family as Step 3a2 hyphenation, NOT spatial merging.
+        valid_chunks = self._repair_infix_step_numbers(valid_chunks)
 
         # Step 3a1b: Merge mid-sentence chunk boundaries.
         # Layout-aware OCR creates one chunk per region. When a sentence spans
