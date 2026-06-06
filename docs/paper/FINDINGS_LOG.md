@@ -918,6 +918,52 @@ doesn't expect; the converter transcodes, the gate stays strict):
 
 ---
 
+## 2026-06-06 - PR #4 code-review pass: a refactor broke a tool and two "fixed" blind spots had residual gaps  `[Method][Lessons]`
+
+A high-recall review of the 9-commit PR #4 (the 4 review findings + governance +
+live-validation + 3 deferred-item commits) surfaced five findings, fixed across
+four changes (findings 1 and 2 are two breakages in the SAME diagnostic script,
+closed by a single repoint - enumerated together as item 1 below). The lesson
+thread: a clean shared-helper refactor and two "blind-spot fixed" claims each
+left a smaller gap that only a caller-trace / boundary-case pass catches.
+
+1. **A refactor silently broke a diagnostic tool.** Collapsing the triplicated
+   per-page extraction into shared helpers deleted `HybridEngine._render_page_png`
+   and dropped router's re-export of `_build_schema_prompt`. `scripts/`
+   `measure_vlm_page_latency.py` imported both -> ImportError at module load
+   (not a runtime path, so the test suite never exercised it). Fix: repoint the
+   script to the new `vlm_native` helpers (`render_page_png`, `_build_schema_prompt`).
+   Lesson: a symbol-move refactor must grep ALL callers including scripts, not
+   just src/tests.
+2. **The collapsed-suite blind-spot fix had a residual single-line gap.** The new
+   `_COLLAPSED_NESTED` detector made `is_judgeable` catch a flattened nested suite,
+   but a `len(lines) < 2` guard ran FIRST and dropped a chunk whose ENTIRE content
+   is one collapsed line (`def f(x): if x: return x`) as "flat". Fix: check
+   `_COLLAPSED_NESTED` before the line-count guard (a collapse is judgeable
+   regardless of line count). The two-colon requirement still rejects legit
+   one-liners / comprehensions / lambdas.
+3. **Re-homing infix step-number repair left recovery chunks uncovered.** The
+   repair was re-homed into `_apply_quality_filters`, which runs BEFORE the
+   TextIntegrityScout appends recovery chunks - so recovery output bypassed it.
+   Fix: one idempotent re-apply on the post-recovery set (the repair's prev->num
+   separator becomes `\n` after a hit, so already-repaired primary chunks cannot
+   re-match). Lesson: when re-homing a pass, check it still covers every chunk
+   source feeding the finalize stage, not just the primary one.
+4. **Efficiency:** sub-threshold pages parsed `page.get_text("dict")` twice
+   (`page_mono_char_ratio` + `page_has_code_block`). Fix: optional `text_dict=`
+   kwarg (default None = unchanged) so the hybrid loop shares one parse - additive,
+   keeps the page-only public API and monkeypatchability.
+
+Production-path changes verified clean otherwise: the 5 deleted boundary-repair
+methods have zero live callers, the re-home is single-call, `import re` removal
+is safe (module-level import present), and the shared-helper provider/render_dpi
+semantics match the old `provider` property. Gates after fixes: full suite 1513
+pass / 99 skip; ruff clean on authored files; SMOKE_PRODUCTION_PASS (offline).
+Pre-existing file-wide black/ruff drift in `batch_processor.py` left untouched
+(surgical).
+
+---
+
 ## Backfill backlog (remaining threads — to expand when drafting)
 
 *Covered above as of 2026-05-30:* V1→V2 lineage · V2 metrics trajectory · V2

@@ -340,3 +340,18 @@ def test_repair_is_called_from_apply_quality_filters() -> None:
     assert "_repair_infix_step_numbers(" in method_source, (
         "Expected _apply_quality_filters to invoke _repair_infix_step_numbers"
     )
+
+
+def test_repair_also_covers_recovery_chunks_post_scout() -> None:
+    """Recovery chunks (TextIntegrityScout output) are appended AFTER
+    ``_apply_quality_filters`` runs, so they bypass its Step 3a1a repair. The
+    finalize path must re-apply the (idempotent) repair on the post-recovery
+    chunk set so rescued text also gets corrected step-number boundaries.
+    """
+    import inspect
+
+    process_source = inspect.getsource(BatchProcessor.process_pdf)
+    assert "_repair_infix_step_numbers(" in process_source, (
+        "Expected process_pdf to re-apply _repair_infix_step_numbers on the "
+        "post-recovery chunk set so recovery chunks are covered"
+    )

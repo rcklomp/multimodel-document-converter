@@ -2464,6 +2464,15 @@ batch_processor 33 -> 32 (one pre-existing error removed with the dead code, non
 added), SMOKE_PRODUCTION_PASS (offline). Pre-existing file-level black/ruff drift
 left untouched (surgical, no mass-reformat).
 
+**Review follow-up (2026-06-06, PR #4):** `_apply_quality_filters` runs BEFORE the
+TextIntegrityScout appends recovery chunks, so the re-homed repair covered only
+primary chunks - recovery output bypassed it. Closed with one idempotent re-apply
+of `_repair_infix_step_numbers` on the post-recovery chunk set in `process_pdf`
+(placed before the semchunk re-split). Idempotent because a repaired hit's
+prev->num separator is `\n` (no longer `[ \t]+`), so already-repaired primary
+chunks cannot re-match. Wiring pinned by `test_repair_also_covers_recovery_chunks_post_scout`.
+See "PR #4 code-review hardening" entry below.
+
 
 ## Fail-Fast Infrastructure Rule for unattended VLM batches (2026-06-01)
 
@@ -2715,6 +2724,15 @@ comprehensions, and lambdas (verified by parametrized contract tests). No
 regression: AIOS-Qwen stays 24 judgeable / fidelity 1.00. Contracts added to
 `tests/test_code_quality_metric.py`.
 
+**Review follow-up (2026-06-06, PR #4):** the first cut still had a residual gap -
+a `len(lines) < 2` guard in `is_judgeable` ran BEFORE the `_COLLAPSED_NESTED`
+check, so a chunk whose ENTIRE content is one fully-collapsed line
+(`def f(x): if x: return x`) was dropped as "flat" and slipped through. Fixed by
+checking `_COLLAPSED_NESTED` before the line-count guard (a collapse is judgeable
+regardless of line count). The two-colon requirement still rejects legit one-line
+compound statements / comprehensions / lambdas. Pinned by
+`test_single_line_collapsed_suite_is_judgeable_and_degraded`.
+
 **Contracts:** `tests/test_code_quality_metric.py` (19 unit contracts: positive
 code-ID, equation/LaTeX exclusion, judge-only-judgeable, Policy B verdict) and
 `tests/test_code_indentation_audit_gate.py` (subprocess end-to-end:
@@ -2865,3 +2883,52 @@ Qwen, table-guard -> MinerU). Full suite 1511 pass; SMOKE_PRODUCTION_PASS.
 Together with the metric blind-spot fix (entry "R3 Code-Indentation Gate
 Redesign" -> collapsed-suite addendum), the gate now CATCHES a collapse when it
 happens and the router PREVENTS it at the source for code-block pages.
+
+
+## PR #4 code-review hardening (2026-06-06)
+
+**Context.** A high-recall code review of PR #4 (the 9 commits above:
+block-aware router, R3 collapsed-suite metric, infix re-home, the shared-helper
+refactors, plus governance/live-validation/docs) surfaced five findings - none in
+the validated production behavior itself, all at the edges a caller-trace and
+boundary-case pass catches.
+
+**Decision (all five findings fixed across four changes - findings 1 and 2 are
+two breakages in the same script, closed by one repoint; surgical):**
+1. **Broken diagnostic tool (findings 1 and 2 - two breakages, one file).**
+   Collapsing triplicated per-page extraction into shared helpers (`73fbad9`)
+   deleted `HybridEngine._render_page_png` (finding 2) and dropped router's
+   re-export of `_build_schema_prompt` (finding 1); `scripts/measure_vlm_page_latency.py`
+   imported both -> ImportError at module load. Repointed to the new `vlm_native`
+   helpers (`render_page_png`, `_build_schema_prompt`). It is a runtime-only tool,
+   so the suite never caught it - a symbol-move refactor must grep ALL callers
+   (scripts included).
+2. **R3 single-line collapse gap** - see the "R3 Code-Indentation Gate Redesign"
+   collapsed-suite addendum (check `_COLLAPSED_NESTED` before the line-count guard).
+3. **Infix repair recovery-path gap** - see the "Orphaned boundary-repair bridge
+   ... infix step-number repair re-homed" review-follow-up addendum (idempotent
+   re-apply on the post-recovery set).
+4. **Redundant page parse.** Sub-threshold pages ran `page.get_text("dict")` twice
+   (`page_mono_char_ratio` + `page_has_code_block`). Added an optional `text_dict=`
+   kwarg (default None = unchanged behavior) so the `MineruQwenHybridEngine` loop
+   shares one parse per page. Additive: the page-only public API and the
+   monkeypatch-based tests are preserved (the affected mocks became
+   signature-agnostic, `lambda p, **k:` - more robust, no assertion touched).
+
+**Verified-clean (no change needed).** The 5 deleted boundary-repair methods have
+zero live callers; infix repair now runs as two idempotent live calls
+(`_apply_quality_filters` for primary chunks + `process_pdf` post-recovery, per
+fix 3) with no double-application risk; the local `import re`
+removal is safe (module-level `import re` at line 35); `extract_page_vlm`'s
+`_provider` lazy-init and `render_dpi` getattr match the old `provider` property
+and `_render_page_png`; `page_has_table` uses the correct `find_tables().tables`;
+the block-run counter and circuit-breaker paths are sound.
+
+**Anti-weakening note.** No gate or assertion was relaxed. Two fixes CLOSE blind
+spots (single-line collapse now scored; recovery chunks now repaired), one
+restores a broken tool, one is a pure efficiency win behind an unchanged default.
+New contracts: `test_single_line_collapsed_suite_is_judgeable_and_degraded`,
+`test_repair_also_covers_recovery_chunks_post_scout`. Gates: full suite 1513 pass
+/ 99 skip; ruff clean on authored files; SMOKE_PRODUCTION_PASS (offline).
+Pre-existing file-wide black/ruff drift in `batch_processor.py` and the absent
+`mypy` in the env were left as-is (out of scope, flagged for follow-up).

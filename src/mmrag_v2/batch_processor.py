@@ -1735,6 +1735,15 @@ class BatchProcessor:
         else:
             all_chunks = filtered_chunks
 
+        # Recovery chunks are appended AFTER _apply_quality_filters (which hosts the
+        # Step 3a1a infix step-number repair), so they have not been through it.
+        # Re-apply here so rescued text gets the same corrected paragraph
+        # boundaries before the semchunk re-split / dedup passes see it. Idempotent:
+        # already-repaired primary chunks have a ``\n`` separator (not ``[ \t]+``)
+        # and cannot re-match. (PLAN_V3.1 follow-up: closes the recovery-path gap
+        # left by re-homing the repair into _apply_quality_filters.)
+        all_chunks = self._repair_infix_step_numbers(all_chunks)
+
         # Re-split oversize recovery chunks using semchunk (sentence-aware).
         # Recovery creates large text blobs; our custom splitter cuts mid-sentence.
         try:

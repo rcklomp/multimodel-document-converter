@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-06-06 (MinerU+Qwen-for-code hybrid SHIPPED as the default route; corpus-validated)
+Last updated: 2026-06-06 (PR #4 code-review hardening: 5 review findings fixed; MinerU+Qwen-for-code hybrid SHIPPED as the default route; corpus-validated)
 
 ## Current state (2026-06-06) - MinerU+Qwen-for-code hybrid is the default route, corpus-validated
 
@@ -53,6 +53,11 @@ fences it, R3) (`PLAN_VLM_EVAL` §16).
   `DECISIONS.md` "R3 Code-Indentation Gate Redesign".
 - MinerU dense-code ceiling resolved on the default route by the MinerU+Qwen-for-code
   hybrid (code-dense pages -> Qwen at fidelity 1.00).
+- PR #4 code-review hardening (5 findings, 4 fixes - findings 1-2 are two breakages
+  in one diagnostic script): `measure_vlm_page_latency.py` repointed to the new
+  shared helpers; R3 single-line-collapse blind spot closed; recovery chunks now
+  get infix step-number repair; redundant per-page text parse removed. No
+  gate/assertion weakened. See `DECISIONS.md` "PR #4 code-review hardening".
 
 **Open / deferred (none a default ship-blocker):**
 - Sparse-code residual: inline code on a mostly-prose page stays under the 0.10

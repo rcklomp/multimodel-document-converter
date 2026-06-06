@@ -28,8 +28,12 @@ from pathlib import Path
 
 import fitz
 
-from mmrag_v3.engines.router import HybridEngine, _build_schema_prompt
-from mmrag_v3.engines.vlm_native import estimate_output_budget
+from mmrag_v3.engines.router import HybridEngine
+from mmrag_v3.engines.vlm_native import (
+    _build_schema_prompt,
+    estimate_output_budget,
+    render_page_png,
+)
 from mmrag_v3.engines.vlm_provider import (
     VlmInfraError,
     VlmProvider,
@@ -74,7 +78,7 @@ def main() -> int:
             "text_chars": len(page.get_text("text")),
         }
         if choice == "vlm":
-            img, pw, ph = HybridEngine._render_page_png(page)
+            img, pw, ph = render_page_png(page)
             prompt = _build_schema_prompt(pw, ph)
             t0 = time.time()
             status, out_chars = "ok", 0

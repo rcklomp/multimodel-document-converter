@@ -127,7 +127,7 @@ def test_high_threshold_sends_everything_to_mineru(tmp_path, monkeypatch):
     path = _make_pdf(tmp_path)
     mineru = _FakeMinerUEngine()
     vlm = _install_vlm_mocks(monkeypatch)
-    monkeypatch.setattr(R, "page_has_code_block", lambda p: False)
+    monkeypatch.setattr(R, "page_has_code_block", lambda p, **k: False)
     eng = MineruQwenHybridEngine(mineru_engine=mineru, vlm_engine=vlm, mono_ratio_threshold=1.5)
 
     ud = eng.extract(path)
@@ -194,8 +194,8 @@ def test_subthreshold_code_block_routes_to_qwen(tmp_path, monkeypatch):
     path = _make_pdf(tmp_path)
     mineru = _FakeMinerUEngine()
     vlm = _install_vlm_mocks(monkeypatch)
-    monkeypatch.setattr(R, "page_mono_char_ratio", lambda p: 0.05)  # sub-threshold
-    monkeypatch.setattr(R, "page_has_code_block", lambda p: p.number == 0)
+    monkeypatch.setattr(R, "page_mono_char_ratio", lambda p, **k: 0.05)  # sub-threshold
+    monkeypatch.setattr(R, "page_has_code_block", lambda p, **k: p.number == 0)
     monkeypatch.setattr(R, "page_has_table", lambda p: False)
     eng = MineruQwenHybridEngine(mineru_engine=mineru, vlm_engine=vlm)
 
@@ -214,8 +214,8 @@ def test_code_block_with_table_stays_on_mineru(tmp_path, monkeypatch):
     path = _make_pdf(tmp_path)
     mineru = _FakeMinerUEngine()
     vlm = _install_vlm_mocks(monkeypatch)
-    monkeypatch.setattr(R, "page_mono_char_ratio", lambda p: 0.05)
-    monkeypatch.setattr(R, "page_has_code_block", lambda p: True)
+    monkeypatch.setattr(R, "page_mono_char_ratio", lambda p, **k: 0.05)
+    monkeypatch.setattr(R, "page_has_code_block", lambda p, **k: True)
     monkeypatch.setattr(R, "page_has_table", lambda p: True)  # table present
     eng = MineruQwenHybridEngine(mineru_engine=mineru, vlm_engine=vlm)
 

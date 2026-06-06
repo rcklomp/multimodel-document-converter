@@ -87,6 +87,20 @@ def test_collapsed_nested_suite_is_judgeable_and_degraded():
     assert not cq.indentation_ok(p111)
 
 
+def test_single_line_collapsed_suite_is_judgeable_and_degraded():
+    # The WHOLE chunk is one fully-collapsed line (no surrounding lines). The
+    # line-count guard must NOT drop it as "flat": its nesting was destroyed, so
+    # it must still be scored AND fail indentation_ok.
+    one_line = "def f(x): if x: return x"
+    assert cq.is_judgeable(one_line)
+    assert not cq.indentation_ok(one_line)
+    # And it must drive a doc hard-fail when non-incidental.
+    rows = [_code_chunk(f"c{i}", "for i in xs: if i in ys: a += i") for i in range(3)]
+    m = cq.code_quality(rows)
+    assert m.n_judgeable == 3 and m.n_judgeable_fail == 3
+    assert cq.gate_verdict(m) == "fail"
+
+
 @pytest.mark.parametrize(
     "legit",
     [

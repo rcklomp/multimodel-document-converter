@@ -105,12 +105,18 @@ def is_judgeable(text: str) -> bool:
     s = text or ""
     if is_repl(s):
         return False
+    # A collapsed nested suite is judgeable regardless of line count: flattening
+    # destroyed its nesting, so a block mangled onto a SINGLE line
+    # (``def f(x): if x: return x``) must still be scored — it cannot pass
+    # ``indentation_ok``. Checked before the line-count guard, which would
+    # otherwise drop it as "flat". The regex requires TWO block-keyword suite
+    # colons, so a legitimate one-line compound stmt is not flagged here.
+    if _COLLAPSED_NESTED.search(s):
+        return True
     lines = [ln for ln in s.splitlines() if ln.strip()]
     if len(lines) < 2:
         return False
     if _BLOCK_OPENER.search(s):
-        return True
-    if _COLLAPSED_NESTED.search(s):
         return True
     return "{" in s and "}" in s
 

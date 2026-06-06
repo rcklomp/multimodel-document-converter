@@ -105,18 +105,20 @@ def _mono_ratio_threshold() -> float:
         return DEFAULT_MONO_RATIO_THRESHOLD
 
 
-def page_mono_char_ratio(page: "fitz.Page") -> float:
+def page_mono_char_ratio(page: "fitz.Page", text_dict: Optional[dict] = None) -> float:
     """Fraction of glyphs on the page set in a monospace font.
 
     Char-weighted (not span-weighted) so a single long mono run counts more than
     many short proportional spans. Returns 0.0 on empty or unreadable pages. The
     object-independent code signal shared by ``HybridEngine`` and
-    ``MineruQwenHybridEngine``.
+    ``MineruQwenHybridEngine``. ``text_dict`` (a precomputed ``page.get_text("dict")``)
+    can be passed to avoid re-parsing when the caller also runs ``page_has_code_block``.
     """
-    try:
-        text_dict = page.get_text("dict")
-    except Exception:  # pragma: no cover - defensive: PyMuPDF API drift
-        return 0.0
+    if text_dict is None:
+        try:
+            text_dict = page.get_text("dict")
+        except Exception:  # pragma: no cover - defensive: PyMuPDF API drift
+            return 0.0
     total = 0
     mono = 0
     for block in text_dict.get("blocks", []):
@@ -144,14 +146,18 @@ def page_has_code_block(
     page: "fitz.Page",
     min_lines: int = DEFAULT_CODE_BLOCK_MIN_LINES,
     line_mono_floor: float = DEFAULT_CODE_BLOCK_LINE_MONO,
+    text_dict: Optional[dict] = None,
 ) -> bool:
     """True if the page has a contiguous run of >= ``min_lines`` lines that are
     each predominantly (>= ``line_mono_floor``) monospace — a code block that the
-    page-average mono ratio can miss when diluted by prose."""
-    try:
-        text_dict = page.get_text("dict")
-    except Exception:  # pragma: no cover - defensive: PyMuPDF API drift
-        return False
+    page-average mono ratio can miss when diluted by prose. ``text_dict`` (a
+    precomputed ``page.get_text("dict")``) can be passed to avoid re-parsing when
+    the caller also runs ``page_mono_char_ratio``."""
+    if text_dict is None:
+        try:
+            text_dict = page.get_text("dict")
+        except Exception:  # pragma: no cover - defensive: PyMuPDF API drift
+            return False
     run = 0
     for block in text_dict.get("blocks", []):
         for line in block.get("lines", []):
@@ -385,11 +391,19 @@ class MineruQwenHybridEngine:
             code_indices: List[int] = []
             mineru_indices: List[int] = []
             for i in range(doc.page_count):
-                ratio = page_mono_char_ratio(doc[i])
+                # Parse the page text once and share it across both mono signals
+                # (page_has_code_block only runs on the sub-threshold branch).
+                try:
+                    page_text_dict = doc[i].get_text("dict")
+                except Exception:  # pragma: no cover - defensive: PyMuPDF API drift
+                    page_text_dict = None
+                ratio = page_mono_char_ratio(doc[i], text_dict=page_text_dict)
                 if ratio >= self.mono_ratio_threshold:
                     code_indices.append(i)
                     decisions.append((i + 1, "qwen_code", f"mono_ratio={ratio:.2f}"))
-                elif page_has_code_block(doc[i]) and not page_has_table(doc[i]):
+                elif page_has_code_block(doc[i], text_dict=page_text_dict) and not page_has_table(
+                    doc[i]
+                ):
                     # Sub-threshold page-average but a real contiguous code block
                     # diluted by prose (a nested suite MinerU-1.2B can collapse).
                     # Route to Qwen to preserve indentation. Table-guarded: a page
