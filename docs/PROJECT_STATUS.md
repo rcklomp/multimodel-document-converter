@@ -45,14 +45,20 @@ QA_PASS (`PLAN_VLM_EVAL` §15). SCALE - AIOS 35pg academic+pseudocode: surfaced 
 FIXED the code-fencing gap (`a47f0c4`: MinerU emits code unfenced; converter now
 fences it, R3) (`PLAN_VLM_EVAL` §16).
 
+**Resolved since (2026-06-06):**
+- R3 code-indentation gate redesign SHIPPED + signed: the dead
+  `modality=="text"`-only seam in BOTH gate scripts is replaced by the shared
+  `scripts/_code_quality.py` (`qa_conversion_audit.py` hard, `qa_semantic_fidelity.py`
+  advisory). Strictly more enforcement; AIOS now correctly FAILs on CODE. See
+  `DECISIONS.md` "R3 Code-Indentation Gate Redesign".
+- MinerU dense-code ceiling resolved on the default route by the MinerU+Qwen-for-code
+  hybrid (code-dense pages -> Qwen at fidelity 1.00).
+
 **Open / deferred (none a default ship-blocker):**
-- `qa_semantic_fidelity.py` code-indentation metric seam: it measures only
-  `modality=="text"` chunks, but V3 promotes code to `modality=="code"`, so the
-  real fenced+indented code is invisible to the gate (it scores the unindented
-  text fragments instead). DEFERRED - a semantic-gate change needs sign-off, NOT
-  done autonomously (`PLAN_VLM_EVAL` §16; [[project_open_issues]]).
-- MinerU2.5-1.2B recognition-quality limit on dense academic pseudocode (the
-  smallest variant) - larger variant / code re-extraction lane if it matters.
+- Sparse-code residual: inline code on a mostly-prose page stays under the 0.10
+  mono-ratio router threshold and goes to MinerU-1.2B, which can mangle it. The R3
+  gate flags it; the extraction fix (lower threshold / per-region code lane) is
+  unbuilt ([[project_open_issues]]).
 - The recovery_scan/gap_fill chunks (batch_processor's engine-independent net)
   carry no bbox - pre-existing, out of MinerU scope.
 - AIOS HEADING 79.7% (just under 0.80) - a genuine borderline coverage signal,
