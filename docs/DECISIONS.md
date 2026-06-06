@@ -2766,3 +2766,10 @@ green. Note: the M5 mlx MinerU build hit a `broadcast_shapes` generation 500 on
 some pages — the GX10 vLLM MinerU (the golden-6/6 + soak-7/7 server) is the
 reliable MinerU backend. Contract: `tests/test_mineru_qwen_hybrid.py` +
 `tests/test_mineru_native.py` route tests.
+
+**Re-validated post-refactor 2026-06-06 (73fbad9):** after the per-page
+extraction loops were collapsed into the shared `extract_page_vlm` /
+`extract_page_mineru` helpers, a live AIOS run through the default hybrid
+(GX10 vLLM MinerU + M5 Qwen) reproduced `QA_PASS` (failures=0, 35/35 pages,
+24 judgeable code chunks at indentation_fidelity 1.00, tables 100%) — confirming
+the refactor is behaviour-identical on the live path, not just offline.
