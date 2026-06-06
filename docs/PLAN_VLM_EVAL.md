@@ -397,7 +397,8 @@ Three distinct findings:
    per #3 — the metric is honest, not loosened. See
    `docs/PLAN_R3_CODE_GATE_REDESIGN.md` and `docs/DECISIONS.md` "R3
    Code-Indentation Gate Redesign". The extraction fix (#3 / F5 Qwen-for-code
-   route) is the deferred Thread 2.
+   route) shipped 2026-06-06 as the default `MineruQwenHybridEngine` (DECISIONS.md
+   "MinerU+Qwen-for-code hybrid is the default extraction route").
 
 3. **MinerU model-quality residual (not converter-fixable):** some AIOS pseudocode
    has recognition errors - `self.` read as `self(`, `self/response`, a typo

@@ -1,8 +1,8 @@
 # Project Status
 
-Last updated: 2026-06-05 (MinerU2.5 SHIPPED as the default extractor; corpus-validated)
+Last updated: 2026-06-06 (MinerU+Qwen-for-code hybrid SHIPPED as the default route; corpus-validated)
 
-## Current state (2026-06-05) - MinerU2.5 integrated, default, and corpus-validated
+## Current state (2026-06-06) - MinerU+Qwen-for-code hybrid is the default route, corpus-validated
 
 The 2026-06-04 VLM-evaluation pivot CONCLUDED: **MinerU2.5 is the chosen
 extractor** and is now integrated into the V3 pipeline as a selectable, and
@@ -26,6 +26,11 @@ full suite, firewall, repo-integrity, ruff+black, SMOKE_PRODUCTION_PASS):
   `8179f3a`.
 - HEADING-gate correctness: a `tabular_document` skip for genuinely-headingless
   table-dominant docs (data spreadsheets), with a non-leak guard. `2799dd0`.
+- **MinerU+Qwen-for-code hybrid default (2026-06-06):** `MineruQwenHybridEngine`
+  supersedes the pure-MinerU default - code-dense pages (monospace ratio >= 0.10)
+  route to Qwen (clean indentation, R3 1.00), every other page to MinerU
+  (tables/layout). Live AIOS QA_PASS 35/35. `2be91a4`, `cfd3709`. Record:
+  `DECISIONS.md` "MinerU+Qwen-for-code hybrid is the default extraction route".
 
 **Validation:** 6/6 golden docs QA_PASS (table/code/form/layout/prose), and a
 7-doc cross-category corpus soak through the DEFAULT route = **7/7 QA_PASS**
@@ -279,8 +284,11 @@ visual-dense queries.
 
 | Env var | Effect |
 |---|---|
-| (none) | HybridEngine cost-optimizer routing (default) |
+| (none) | `MineruQwenHybridEngine` when `MINERU_ENDPOINT` set (Qwen for code-dense pages, MinerU elsewhere); else legacy `HybridEngine` |
+| `USE_MINERU_QWEN_HYBRID=1` | force the MinerU+Qwen-for-code hybrid |
+| `USE_MINERU_ENGINE=1` | all pages through `MineruNativeEngine` (pure MinerU escape hatch) |
 | `USE_VLM_ENGINE=1` | all pages through `VlmNativeEngine` |
+| `USE_HYBRID_ENGINE=1` | force the legacy cost-optimizer `HybridEngine` |
 | `USE_DOCLING_FAST=1` | all pages through `DoclingFastEngine` (offline, deterministic) |
 | `VLM_DRAWINGS_THRESHOLD=N` | router treats `> N` drawings as visual (default 10) |
 

@@ -1,18 +1,22 @@
 # PLAN — Redesign the R3 Code-Quality Gate for the V3 / MinerU Pipeline
 
-Status: SIGNED + IMPLEMENTED (2026-06-05). Branch `v3.1-extraction-hardening`.
+Status: SIGNED + IMPLEMENTED (Threads 1+3 + equation guard 2026-06-05; Thread 2
+extraction route 2026-06-06). Branch `v3.1-extraction-hardening`.
 Author: architecture session following the brief in the session prompt.
 
-**Decisions taken (user-signed 2026-06-05):** §6 policy = **Option B**
-(per-chunk flag + density-gated hard-fail). Extraction (Thread 2) = **deferred to
-separate sign-off**. Threads 1 (metric) + the policy are SHIPPED:
-`scripts/_code_quality.py`, gate wiring in `qa_conversion_audit.py` (hard) and
-`qa_semantic_fidelity.py` (advisory), `tests/test_code_quality_metric.py` +
-`tests/test_code_indentation_audit_gate.py`, and the `DECISIONS.md` entry "R3
-Code-Indentation Gate Redesign". The optional upstream equation guard in
-`mineru_native.py` (demote VLM-mislabelled math out of the code lane) is also
-SHIPPED (e4196bf). Thread 2 PROPER — the Qwen-for-code extraction route
-(AIOS 0.33 -> ~1.00, F5) — remains open for separate sign-off.
+**Decisions taken (user-signed):** §6 policy = **Option B** (per-chunk flag +
+density-gated hard-fail), signed 2026-06-05. Extraction (Thread 2) = the
+MinerU-default + Qwen-for-code route, signed and **SHIPPED 2026-06-06** as the
+default route (`MineruQwenHybridEngine`, commits 2be91a4 / cfd3709). Threads 1
+(metric) + the policy shipped 2026-06-05: `scripts/_code_quality.py`, gate wiring
+in `qa_conversion_audit.py` (hard) and `qa_semantic_fidelity.py` (advisory),
+`tests/test_code_quality_metric.py` + `tests/test_code_indentation_audit_gate.py`,
+and the `DECISIONS.md` entry "R3 Code-Indentation Gate Redesign". The optional
+upstream equation guard in `mineru_native.py` (demote VLM-mislabelled math out of
+the code lane) also shipped 2026-06-05 (e4196bf). Thread 2 proper (the
+Qwen-for-code extraction route, F5) shipped 2026-06-06 as `MineruQwenHybridEngine`;
+record: `DECISIONS.md` "MinerU+Qwen-for-code hybrid is the default extraction
+route".
 
 This plan supersedes the "Proposed fix (needs sign-off)" stub in
 `docs/PLAN_VLM_EVAL.md` §16.2. It is the deliberate requirement-change record the
@@ -264,6 +268,12 @@ Wiring:
 
 ### Thread 2 — EXTRACTION (do second, measured by Thread 1)
 
+**STATUS: SHIPPED 2026-06-06** as `MineruQwenHybridEngine`, the default route
+(the primary candidate below was the one taken). Record + live validation:
+`DECISIONS.md` "MinerU+Qwen-for-code hybrid is the default extraction route"
+(AIOS QA_PASS 35/35). The fallback paragraph below is retained as historical
+design rationale.
+
 Primary candidate (F5): a **MinerU-default + Qwen-for-code per-page route**. The
 `router.py` monospace-ratio code signal (threshold 0.10) already identifies
 code-dense pages; today the MinerU default bypasses the per-page router (every
@@ -347,8 +357,9 @@ option is chosen is recorded in `DECISIONS.md` with this rationale.
 4. Wire `qa_semantic_fidelity.py` to the module (advisory parity).
 5. `DECISIONS.md` entry for the §6 policy; update `docs/QUALITY_GATES.md` R3
    description and `PLAN_VLM_EVAL.md` §16.2 (close the stub).
-6. (Thread 2, separate sign-off) MinerU+Qwen code routing; optional upstream
-   equation guard. Validated by the metric on a live AIOS re-run.
+6. (Thread 2, SHIPPED 2026-06-06) MinerU+Qwen code routing as the default
+   (`MineruQwenHybridEngine`); upstream equation guard shipped 2026-06-05.
+   Validated by the metric on a live AIOS re-run (QA_PASS 35/35).
 
 ---
 

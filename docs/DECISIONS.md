@@ -2654,8 +2654,9 @@ the prior hard gate fired on nothing (dead). The metric now reports the failure
 honestly (AIOS 0.33 FAIL, degraded chunks named) in every case; only the
 document-level escalation (hard vs advisory) is density-gated. AIOS-MinerU now
 `AUDIT_FAIL`s on CODE (density 0.074 >= 0.04); the proportionate remediation is
-the deferred Thread-2 extraction fix (route code-dense pages to the Qwen lane,
-which extracted the same AIOS code at fidelity 1.00 — `PLAN_VLM_EVAL` F5).
+the Thread-2 extraction fix (route code-dense pages to the Qwen lane, which
+extracted the same AIOS code at fidelity 1.00, `PLAN_VLM_EVAL` F5), SHIPPED
+2026-06-06 as the default `MineruQwenHybridEngine` (see the entry below).
 
 **Threshold unchanged:** the `0.90` fidelity floor is preserved — the
 population and method were fixed, not the bar.
@@ -2675,9 +2676,11 @@ gate metric stays the cross-extractor backstop. Verified: 0/18 AIOS real-code
 chunks demoted, 15/15 Hybrid-EV equations demoted as math.
 `tests/test_mineru_native.py` pins it against the shared fixtures.
 
-**Still deferred (separate sign-off):** Thread 2 proper — the MinerU-default +
-Qwen-for-code-pages extraction ROUTE that raises AIOS's code fidelity from 0.33
-to ~1.00 (F5), measured by this metric.
+**Thread 2 SHIPPED 2026-06-06 (user-signed):** the MinerU-default +
+Qwen-for-code-pages extraction ROUTE that raises AIOS's code fidelity to 1.00
+(F5), measured by this metric, shipped as the default `MineruQwenHybridEngine`.
+Record: the entry "MinerU+Qwen-for-code hybrid is the default extraction route"
+below.
 
 ### Live F5 validation + dedup precision fix (2026-06-06, d4c3648)
 
