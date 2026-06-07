@@ -1,8 +1,67 @@
 # Project Status
 
-Last updated: 2026-06-06 (PR #4 code-review hardening: 5 review findings fixed; MinerU+Qwen-for-code hybrid SHIPPED as the default route; corpus-validated)
+Last updated: 2026-06-08 (full-crucible Grand Soak: 5 gate fails / 4 clusters fixed + corpus-validated 16/16 clean QA_PASS; multimodal no-VLM image policy + local enrichment lane; code-review hardening)
 
-## Current state (2026-06-06) - MinerU+Qwen-for-code hybrid is the default route, corpus-validated
+## Current state (2026-06-08) - full 16-doc crucible CLEAN; clusters A/C/B/D fixed; multimodal image policy shipped
+
+The full-crucible Grand Soak (16 docs) that closed the MinerU+Qwen cycle surfaced
+5 gate failures in 4 root-cause clusters. All four are fixed, corpus-validated,
+and committed on branch `fix/crucible-clusters-acd-b` (7 commits, NOT yet pushed;
+each gated `SMOKE_PRODUCTION_PASS`). Final result: the full 16-doc crucible is
+**16/16 clean QA_PASS** post-enrichment, `leak=0`, 0 hard fallbacks. Each fix was
+a SYSTEMIC bug, not a one-doc patch:
+
+- **A - asset-render fail-open** (`7b1871b`): a MuPDF PNG crash during cosmetic
+  crop materialization discarded the whole batch's extracted text (Kimothi
+  HEADING 20%->92%). Crop encode now falls back to a full-page render and asset
+  rendering can never abort a batch. Hardened (`de1af9d`): asset-less IMAGE/TABLE
+  chunks are dropped before `from_uir` so no render-fail path discards the batch.
+- **C - engine-agnostic table separator** (`b032a29`): MinerU AND Qwen emit
+  separator-less pipe tables (FluentPython table 0.75->1.00). Repair lives at the
+  engine-agnostic chunker chokepoint (`universal/table_markdown.py`). Hardened
+  (`de1af9d`): escaped-pipe split, ragged-bail (no silent column-shift), leading-
+  title/trailing-caption tolerance, single-dash-data-not-a-separator.
+- **B - cross-batch heading carry-forward** (`71aeed1`): heading assignment reset
+  per batch, so a batch whose chapter title was only a glued running header went
+  null (HarryPotter 62%->98%, CombatAircraft 79%->100%). The last heading is
+  threaded across batch boundaries; a real in-page/TOC heading still overrides it.
+- **D - multimodal no-VLM image policy** (`dd4a758`): a TOC-cell sanitizer was
+  silently deleting EVERY image chunk crucible-wide (image content has no text),
+  orphaning image-only pages into MISSING_PAGES. Fixed, and the converter's no-VLM
+  behavior is now defined (below).
+
+**Multimodal image policy (locked - see `DECISIONS.md`):** images are always
+retained. With `--vision-provider none` they ship as documented ID-only fallbacks
+(`vision_status=no_vlm`, asset filename as description), treated by the strict
+gate as a documented advisory (`IMAGE_NO_VLM`) not a failure; a run-time warning
+fires for image-dense no-VLM runs. Image DESCRIPTION is a separate POST-conversion
+step (`scripts/enrich_image_chunks_v29.py`), now env-pointable at a LOCAL VLM
+(`MMRAG_ENRICH_PROVIDER` / `MMRAG_ENRICH_MODEL` / `MMRAG_ENRICH_BASE_URL`; the
+DashScope cloud default is unchanged). Validated end-to-end: ~237 images across 16
+docs described by the local M5 Qwen, 0 hard fallbacks, all -> clean QA_PASS.
+
+**Chunk hygiene added (cluster D + hardening):** `_filter_tiny_icon_images` drops
+icon/glyph-class image regions (rendered <96px in BOTH dims AND <1.5KB) behind a
+page-coverage guard; `_promote_or_drop_empty_tables` drops empty-content tables
+but PROMOTES the only-chunk-on-page case to IMAGE (keeps the crop, no
+MISSING_PAGES, no TABLE_CORRUPTION).
+
+**Next iteration (plans written, not started):** the same crucible passed every
+gate yet a manual content audit found gate-INVISIBLE defects (furniture as
+chunks/headings, text-as-image survivors, CJK garbage headings, cover garble).
+- `docs/PLAN_GATE_QUALITY_V1.md` - spatial-first advisory metrics paired with
+  extraction-side fixes (fix-and-guard), the `AGENT-GATE-PROGRESSION` advisory-to-
+  hard protocol (now in AGENTS.md), crucible-calibrated regression fixtures.
+- `docs/PLAN_OMNIDOCBENCH_EVAL.md` - ground-truth fidelity benchmark (the gate
+  plan measures retrieval value on OUR docs; this measures transcription fidelity
+  vs labeled ground truth - 1651 annotated pages, TEDS/edit-distance). Wired as a
+  two-axis acceptance with a Phase-0 fidelity floor.
+
+**Harnesses:** `scripts/mineru_crucible_soak.sh` (leak-metric corrected to a
+whitelist) and `scripts/crucible_vlm_pipeline.sh` (soak -> M5 enrichment ->
+revalidate). Deferred review follow-ups #8/#9/#10 tracked in `[[project_open_issues]]`.
+
+## Prior state (2026-06-06) - MinerU+Qwen-for-code hybrid is the default route, corpus-validated
 
 The 2026-06-04 VLM-evaluation pivot CONCLUDED: **MinerU2.5 is the chosen
 extractor** and is now integrated into the V3 pipeline as a selectable, and

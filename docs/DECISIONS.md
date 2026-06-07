@@ -2932,3 +2932,70 @@ New contracts: `test_single_line_collapsed_suite_is_judgeable_and_degraded`,
 / 99 skip; ruff clean on authored files; SMOKE_PRODUCTION_PASS (offline).
 Pre-existing file-wide black/ruff drift in `batch_processor.py` and the absent
 `mypy` in the env were left as-is (out of scope, flagged for follow-up).
+
+## Full-crucible cluster fixes + multimodal no-VLM image policy (2026-06-08)
+
+The full 16-doc Grand Soak that closed the MinerU+Qwen cycle surfaced 5 gate
+failures in 4 root-cause clusters. Each was a SYSTEMIC bug, not a one-doc patch;
+all are fixed and corpus-validated (16/16 clean QA_PASS post-enrichment, leak=0,
+0 hard fallbacks). Branch `fix/crucible-clusters-acd-b`, 7 commits.
+
+- **A - asset-render fail-open** (`7b1871b`, hardened `de1af9d`). A MuPDF PNG
+  band-writer crash during cosmetic crop materialization propagated to the
+  per-batch handler and discarded the whole batch's extracted text (Kimothi
+  HEADING 20%->92%). A crop encode failure now falls back to a full-page render;
+  `_render_visual_assets` can never abort a batch; and `_process_single_batch`
+  drops any IMAGE/TABLE chunk left with no `asset_ref` BEFORE `from_uir` so no
+  render/encode failure path can re-trigger the QA-CHECK-05 batch-discard.
+- **C - engine-agnostic table separator** (`b032a29`, hardened `de1af9d`). MinerU
+  AND Qwen emit separator-less pipe tables; repair lives at the engine-agnostic
+  chunker chokepoint (`universal/table_markdown.py`, `ensure_table_separator`).
+  Guards: split on UNESCAPED pipes only; bail on a ragged column count (ambiguous
+  pipe-in-cell) rather than padding data into the wrong columns and shipping a
+  gate-passing corrupt grid; tolerate a leading title / trailing caption line;
+  detect an existing separator only at the canonical row, aligned to the gate's
+  `-{2,}` rule so a single-dash N/A data row is repaired, not mistaken for one.
+- **B - cross-batch heading carry-forward** (`71aeed1`). Heading assignment runs
+  per batch, so a batch whose chapter title was only a glued running header went
+  null (HarryPotter 62%->98%, CombatAircraft 79%->100%). The last active heading
+  is threaded across batch boundaries; a real in-page/TOC heading still overrides
+  the carry, so it only fills would-be-null chunks. (Known edge, deferred to the
+  gate-quality F3 work: front matter opening a later batch can inherit the prior
+  chapter's heading - narrow, low-harm; a naive guard risks re-breaking B.)
+- **D - multimodal no-VLM image policy** (`dd4a758`). A TOC-cell sanitizer was
+  silently dropping every empty-content chunk, which deleted ALL image chunks
+  crucible-wide (image content has no text) and orphaned image-only pages into
+  MISSING_PAGES. The sanitizer now preserves non-text chunks, and the converter's
+  no-VLM behavior is now a locked contract (below).
+
+**Multimodal no-VLM image policy (LOCKED).** This is a multimodal converter:
+IMAGE chunks are always retained, never silently dropped. Image DESCRIPTION is a
+POST-conversion step (`scripts/enrich_image_chunks_v29.py`), NOT conversion-time
+(the conversion path only uses the VLM for full-page-guard verification). With
+`--vision-provider none` an image ships as a documented ID-only fallback
+(`vision_status=no_vlm`, asset filename as `visual_description`); the strict gate
+treats `no_vlm` as a documented advisory (`IMAGE_NO_VLM` in the allowed-advisory
+set, `QUALITY_GATES.md`) rather than a `VISION_PENDING`/`IMAGE_DESCRIPTION_UNUSABLE`
+failure - but ONLY when a real `asset_ref` exists (a broken asset-less image still
+fails). A run-time `[MULTIMODAL]` warning fires for image-dense no-VLM runs. The
+enrichment lane is now env-pointable at a LOCAL OpenAI-compatible VLM
+(`MMRAG_ENRICH_PROVIDER` / `MMRAG_ENRICH_MODEL` / `MMRAG_ENRICH_BASE_URL`); the
+DashScope cloud default is unchanged. Validated: ~237 images across 16 docs
+described by the local M5 Qwen3-VL, 0 hard fallbacks, all -> clean QA_PASS.
+
+**Chunk hygiene.** `_filter_tiny_icon_images` drops icon/glyph-class regions
+(rendered <96px in BOTH dims AND <1.5KB) and `_promote_or_drop_empty_tables`
+drops empty-content tables - BOTH behind a page-coverage guard (the empty-table
+case PROMOTES the only-chunk-on-page table to IMAGE, keeping the rendered crop, so
+neither filter can manufacture MISSING_PAGES, and they compose safely in sequence).
+
+**Code fencing contract (resolves PLAN_GATE_QUALITY_V1 F4).** `modality=code`
+chunks MUST be Markdown-fenced (downstream generation models need explicit code
+boundaries; parity with the MinerU `_fence_code` path). The VLM-promoted code lane
+fence fix is scheduled in the gate-quality workstream.
+
+**Anti-weakening note.** No gate or assertion was relaxed. `IMAGE_NO_VLM` is a
+documented advisory class governed by `QUALITY_GATES.md`, added per the
+two-tier/advisory-first protocol (`AGENTS.md` AGENT-GATE-PROGRESSION), not a
+threshold relaxation. Review follow-ups #8/#9/#10 are dispositioned deferrals in
+the project backlog, not silent drops.
