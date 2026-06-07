@@ -389,8 +389,39 @@ def materialize_visual_assets(
             fname = f"{doc_hash or 'doc'}_{abs_page:04d}_{mod}_{idx:03d}.png"
             out_path = assets_dir / fname
 
-            png_bytes = pix.tobytes("png")
-            mean_lum, std_lum = _luminance_from_png(png_bytes)
+            try:
+                png_bytes = pix.tobytes("png")
+                mean_lum, std_lum = _luminance_from_png(png_bytes)
+            except Exception as exc:  # pragma: no cover - defensive encode guard
+                # MuPDF's PNG band-writer raises (code=4: Invalid bandwriter
+                # header dimensions/setup) on a degenerate crop pixmap. The crop
+                # is cosmetic, but the chunk's asset_ref is NOT: an IMAGE/TABLE
+                # chunk with no asset_ref fails the QA-CHECK-05 contract in
+                # from_uir, which discards the whole batch's text. Fall back to a
+                # full-page render (an honest degraded asset) so the chunk still
+                # gets a valid asset_ref instead of poisoning the batch.
+                logger.warning(
+                    "[V3-ASSET] crop PNG encode failed (page %d): %s; "
+                    "falling back to full-page render",
+                    local_page,
+                    exc,
+                )
+                try:
+                    png_bytes = page.get_pixmap(
+                        matrix=fitz.Matrix(zoom, zoom), clip=None
+                    ).tobytes("png")
+                    mean_lum, std_lum = _luminance_from_png(png_bytes)
+                except Exception as exc2:  # pragma: no cover - page unrenderable
+                    logger.warning(
+                        "[V3-ASSET] full-page fallback render also failed "
+                        "(page %d): %s; skipping crop",
+                        local_page,
+                        exc2,
+                    )
+                    continue
+                is_full_page_fallback = True
+                is_edge_clamped = False
+                crop_source = "full_page"
             is_low_information = _is_low_information(mean_lum, std_lum)
 
             # B2: crop-audit as a re-extraction trigger (fail-open). The audit

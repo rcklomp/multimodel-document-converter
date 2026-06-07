@@ -1164,13 +1164,27 @@ class BatchProcessor:
         """
         from .universal.asset_materializer import materialize_visual_assets
 
-        materialize_visual_assets(
-            uir_chunks,
-            batch_path,
-            self.assets_dir,
-            doc_hash=self._doc_hash or "doc",
-            page_offset=page_offset,
-        )
+        # Asset rendering is cosmetic enrichment (region crops for IMAGE/TABLE
+        # chunks). It must NEVER abort the batch: a render failure here would
+        # bubble to the per-batch handler in process_pdf and discard the entire
+        # batch's already-extracted text chunks, forcing the recovery net to
+        # rebuild them heading-less (observed on Kimothi: a MuPDF PNG encode
+        # crash discarded 151 extracted elements). Fail open - keep the text.
+        try:
+            materialize_visual_assets(
+                uir_chunks,
+                batch_path,
+                self.assets_dir,
+                doc_hash=self._doc_hash or "doc",
+                page_offset=page_offset,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[V3-ASSET] visual asset rendering failed for %s; continuing "
+                "with extracted text chunks (some asset_refs may be missing): %s",
+                batch_path.name,
+                exc,
+            )
 
     def _toc_for_batch(self, page_offset: int) -> Optional[Dict[Any, Any]]:
         """Project the document-wide PyMuPDF TOC into a batch's LOCAL page space.
