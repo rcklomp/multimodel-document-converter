@@ -227,6 +227,71 @@ def test_precedence_in_page_heading_wins() -> None:
     assert body[0].parent_heading == "5.2 Local Section Title"
 
 
+def test_carry_in_heading_seeds_null_body_chunks() -> None:
+    """Cluster B (2026-06-07): heading assignment runs per batch. A batch whose
+    chunks have no heading of their own must inherit the last heading from the
+    previous batch via carry_in_heading (HarryPotter ch.1 batch 3)."""
+    doc = _doc(
+        [
+            _page(
+                21,
+                [
+                    create_element(
+                        ElementType.TEXT,
+                        "Albus Dumbledore did not seem to realize, and went on smiling.",
+                        bbox=[50, 100, 950, 300],
+                        element_index=0,
+                    ),
+                    create_element(
+                        ElementType.TEXT,
+                        "It certainly seems so, said Dumbledore, with much to be thankful for.",
+                        bbox=[50, 320, 950, 540],
+                        element_index=1,
+                    ),
+                ],
+            )
+        ]
+    )
+    chunks = chunk_universal_document(
+        doc,
+        carry_in_heading="THE BOY WHO LIVED",
+        carry_in_breadcrumb=["Harry Potter", "THE BOY WHO LIVED", "Page 20"],
+    )
+    body = [c for c in chunks if c.modality == Modality.TEXT]
+    assert body, "expected body chunks"
+    assert all(c.parent_heading == "THE BOY WHO LIVED" for c in body)
+
+
+def test_carry_in_heading_overridden_by_own_heading() -> None:
+    """A real in-page heading on the batch overrides the carried heading
+    (precedence 1 still beats the carry seed)."""
+    doc = _doc(
+        [
+            _page(
+                30,
+                [
+                    create_element(
+                        ElementType.TEXT,
+                        "CHAPTER TWO The Vanishing Glass",
+                        bbox=[50, 40, 950, 80],
+                        element_index=0,
+                        source_label="section_header",
+                    ),
+                    create_element(
+                        ElementType.TEXT,
+                        "Nearly ten years had passed since the Dursleys had woken up.",
+                        bbox=[50, 100, 950, 300],
+                        element_index=1,
+                    ),
+                ],
+            )
+        ]
+    )
+    chunks = chunk_universal_document(doc, carry_in_heading="THE BOY WHO LIVED")
+    body = [c for c in chunks if c.modality == Modality.TEXT and "Nearly ten" in c.content]
+    assert body and body[0].parent_heading != "THE BOY WHO LIVED"
+
+
 def test_precedence_toc_for_page_beats_stale_carry() -> None:
     """When a page has no in-page heading but the TOC has an entry for that
     exact page, the per-page TOC wins over a heading carried from earlier

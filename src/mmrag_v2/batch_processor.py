@@ -483,6 +483,11 @@ class BatchProcessor:
         self._doc_hash: Optional[str] = None
         self._image_hash_registry: Optional[ImageHashRegistry] = None
         self._token_validator: Optional[TokenValidator] = None
+        # Cluster B: last active heading carried across batch boundaries so a
+        # chapter heading propagates into a later batch whose chunks have no
+        # heading of their own (reset per document in process_pdf).
+        self._carry_heading: Optional[str] = None
+        self._carry_breadcrumb: Optional[List[str]] = None
 
         # REQ-OCR-01: Profile parameters for OCR hints and dynamic DPI
         self._profile_params: Optional["ProfileParameters"] = None
@@ -1259,7 +1264,22 @@ class BatchProcessor:
             universal_doc,
             profile_type=profile_type,
             toc_headings=local_toc,
+            # Cluster B (2026-06-07): heading assignment runs per batch, so seed
+            # it with the last active heading from the previous batch. Without
+            # this, a batch whose chapter title appears only as a glued running
+            # header (HarryPotter ch.1, batch 3) starts with no heading context
+            # and every chunk goes null. A real in-page heading/TOC leaf on this
+            # batch still overrides the carry.
+            carry_in_heading=self._carry_heading,
+            carry_in_breadcrumb=self._carry_breadcrumb,
         )
+        # Capture carry-out: the last text chunk that received a heading becomes
+        # the seed for the next batch.
+        for _uir in reversed(uir_chunks):
+            if _uir.modality == Modality.TEXT and _uir.parent_heading:
+                self._carry_heading = _uir.parent_heading
+                self._carry_breadcrumb = list(_uir.breadcrumb_path or [])
+                break
 
         # Vision-native extraction describes image/table regions but emits no
         # binary asset. Render the region crops here (batch_processor owns the
@@ -1334,6 +1354,11 @@ class BatchProcessor:
         # v2.9 Phase 1: reset per-document chunk position counter so chunk_id
         # collisions cannot accumulate across documents in batch CLI runs.
         self._chunk_position = 0
+
+        # Cluster B: reset cross-batch heading carry so one document's last
+        # heading never bleeds into the next document in a batch CLI run.
+        self._carry_heading = None
+        self._carry_breadcrumb = None
 
         # Workstream B: legacy callers still get the cheap pre-pass here.
         # Canonical CLI paths pass a PdfConversionPlan with this decision already made.
