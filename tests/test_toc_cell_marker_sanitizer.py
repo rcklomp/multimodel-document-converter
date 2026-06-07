@@ -3,6 +3,8 @@ from mmrag_v2.schema.ingestion_schema import (
     ChunkType,
     FileType,
     HierarchyMetadata,
+    Modality,
+    create_image_chunk,
     create_text_chunk,
 )
 
@@ -40,9 +42,32 @@ def test_toc_cell_marker_sanitizer_keeps_chunk_and_strips_markers() -> None:
     assert sanitized[0].metadata.search_priority == "low"
 
 
-def test_toc_cell_marker_sanitizer_still_drops_empty_chunks() -> None:
+def test_toc_cell_marker_sanitizer_preserves_empty_text_chunk() -> None:
+    # The sanitizer's sole job is stripping TOC markers from TEXT; it must NOT
+    # drop chunks (that silently deleted empty-content IMAGE chunks ->
+    # MISSING_PAGES). Empty TEXT is removed at the canonical boundary by
+    # _drop_empty_text_chunks_before_metadata, not here.
     processor = BatchProcessor(output_dir="/tmp/mmrag-test", vision_provider="none")
-    assert processor._sanitize_toc_cell_markers([_chunk("   ")]) == []
+    assert len(processor._sanitize_toc_cell_markers([_chunk("   ")])) == 1
+
+
+def test_toc_cell_marker_sanitizer_preserves_image_chunk() -> None:
+    # Regression (Cluster D, 2026-06-06): an IMAGE chunk carries no text
+    # content; the sanitizer must keep it so image-only pages are not orphaned.
+    processor = BatchProcessor(output_dir="/tmp/mmrag-test", vision_provider="none")
+    img = create_image_chunk(
+        doc_id="doc",
+        content="",  # offline/MinerU image: no visual description
+        source_file="photos.pdf",
+        file_type=FileType.PDF,
+        page_number=6,
+        asset_path="assets/doc_0006_image_000.png",
+        bbox=[100, 100, 900, 900],
+        position=0,
+    )
+    out = processor._sanitize_toc_cell_markers([img])
+    assert len(out) == 1
+    assert out[0].modality == Modality.IMAGE
 
 
 def test_toc_cell_marker_sanitizer_does_not_demote_plain_chunks() -> None:

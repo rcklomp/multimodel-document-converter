@@ -1017,6 +1017,91 @@ class BatchProcessor:
             )
         return surviving
 
+    def _filter_tiny_icon_images(
+        self, chunks: List[IngestionChunk]
+    ) -> List[IngestionChunk]:
+        """Drop icon/glyph-class IMAGE chunks (sub-content regions).
+
+        The V3 path emits every detected image region; the geometric crop (B1)
+        can isolate a tiny embedded raster - a page icon, bullet glyph, small
+        logo, or inline mark - that is not retrievable content and only adds
+        IMAGE_NO_VLM / ASSET_TINY noise. An image is icon-class when its
+        RENDERED asset is small in BOTH dimensions AND has a tiny file. The bbox
+        is NOT used: a large (often hallucinated) VLM bbox can resolve to a
+        23x23px geometric crop, so the rendered asset is the only reliable size
+        signal. Triple-AND is conservative - a small real figure survives via
+        one larger dimension or a detailed (>=1.5KB) file. Assets render at
+        DEFAULT_CROP_ZOOM=2.0, so <96px == <48pt in source space.
+
+        A page-coverage guard never drops the only content on a page, so an
+        image-only page cannot become MISSING_PAGES.
+        """
+        if not getattr(self, "_drop_tiny_icon_images", True):
+            return chunks
+        from PIL import Image
+
+        MAX_ICON_PX = 96
+        MAX_ICON_BYTES = 1500
+
+        def _page(c: IngestionChunk) -> Optional[int]:
+            return c.metadata.page_number if c.metadata else None
+
+        icon_ids: set[int] = set()
+        info: Dict[int, Tuple[str, int, int, int, Path]] = {}
+        for c in chunks:
+            if c.modality != Modality.IMAGE:
+                continue
+            asset_ref = getattr(c, "asset_ref", None)
+            asset_path = getattr(asset_ref, "file_path", None) if asset_ref else None
+            if not asset_path:
+                continue
+            full = self.output_dir / asset_path
+            if not full.exists():
+                continue
+            try:
+                sz = full.stat().st_size
+                with Image.open(full) as im:
+                    w, h = im.size
+            except Exception:
+                continue
+            if w < MAX_ICON_PX and h < MAX_ICON_PX and sz < MAX_ICON_BYTES:
+                icon_ids.add(id(c))
+                info[id(c)] = (asset_path, w, h, sz, full)
+
+        if not icon_ids:
+            return chunks
+
+        # Page-coverage guard: keep an icon-class image when it is the only
+        # content on its page (do not manufacture a MISSING_PAGES failure).
+        pages_with_other = {
+            _page(c)
+            for c in chunks
+            if id(c) not in icon_ids and _page(c) is not None
+        }
+
+        surviving: List[IngestionChunk] = []
+        dropped = 0
+        for c in chunks:
+            if id(c) in icon_ids and _page(c) in pages_with_other:
+                asset_path, w, h, sz, full = info[id(c)]
+                dropped += 1
+                logger.info(
+                    f"[TINY-ICON] Dropping icon-class image {asset_path} "
+                    f"({w}x{h}px, {sz}B)"
+                )
+                try:
+                    full.unlink()
+                except Exception:
+                    pass
+                continue
+            surviving.append(c)
+        if dropped:
+            logger.info(
+                f"[FINALIZE] Dropped {dropped} icon-class image chunk(s) "
+                f"(sub-content regions)"
+            )
+        return surviving
+
     def _enrich_asset_ref_from_disk(self, chunk: IngestionChunk) -> None:
         """Populate missing asset metadata (width/height/file size) from saved file."""
         asset_ref = getattr(chunk, "asset_ref", None)
@@ -2009,6 +2094,10 @@ class BatchProcessor:
             # Drop/promote blank image/table assets.
             export_chunks = self._filter_blank_assets(export_chunks)
 
+            # Drop icon/glyph-class image regions (sub-content tiny rasters that
+            # only add retrieval noise + IMAGE_NO_VLM/ASSET_TINY advisories).
+            export_chunks = self._filter_tiny_icon_images(export_chunks)
+
             # Re-apply oversize breaker: TABLE→TEXT promotion may create
             # text chunks exceeding the 1500-char gate.
             export_chunks = self._apply_oversize_breaker(export_chunks, max_chars=1500)
@@ -2028,6 +2117,25 @@ class BatchProcessor:
             # empty_text_chunks invariant (UNIVERSAL_FAIL) cannot tolerate
             # even one such chunk; this catches every upstream path at once.
             export_chunks = self._drop_empty_text_chunks_before_metadata(export_chunks)
+
+            # Drop TABLE chunks with no markdown content. A table carries its
+            # value in the grid; an empty-content table (DOCLING_FAST/offline
+            # layout miss) is a corrupt placeholder that fails the table-format
+            # gate. Online extraction always yields table markdown, so this only
+            # culls genuine empties. IMAGE chunks are intentionally NOT dropped
+            # (multimodal: retained with an ID-only fallback when no VLM ran).
+            _pre_tbl = len(export_chunks)
+            export_chunks = [
+                c
+                for c in export_chunks
+                if c.modality != Modality.TABLE or (c.content and c.content.strip())
+            ]
+            _empty_tbl = _pre_tbl - len(export_chunks)
+            if _empty_tbl:
+                logger.info(
+                    f"[FINALIZE] Dropped {_empty_tbl} empty-content TABLE chunk(s) "
+                    f"(no markdown to retrieve)"
+                )
 
             # V3.0 Phase A Step 5: canonical heading propagation + vision-aided
             # front-matter detection are STRIPPED — the UIR chunker carries
@@ -2290,7 +2398,23 @@ class BatchProcessor:
                                 if vd.startswith("[VLM_FAILED"):
                                     meta["vision_error"] = vd
                             else:
-                                meta["vision_status"] = "pending"
+                                # No vision provider: terminal, documented no-VLM
+                                # state (NOT awaiting a VLM). This is a multimodal
+                                # converter - retain the image as an ID-only
+                                # fallback (asset filename) so the asset still
+                                # ships; the strict gate treats no_vlm as advisory,
+                                # not a VISION_PENDING failure.
+                                _ar = chunk_dict.get("asset_ref") or {}
+                                _fn = (_ar.get("file_path") or "").split("/")[-1]
+                                meta["vision_status"] = "no_vlm"
+                                meta["vision_provider_used"] = "none"
+                                meta["vision_error"] = (
+                                    "no vision provider configured (--vision-provider none)"
+                                )
+                                if not meta.get("visual_description"):
+                                    meta["visual_description"] = (
+                                        f"[image: {_fn}]" if _fn else "[image: no VLM description]"
+                                    )
                         elif "extraction unavailable" in vd.lower():
                             meta["vision_status"] = "pending"
                         else:
@@ -2432,6 +2556,32 @@ class BatchProcessor:
         print(f"   Total chunks written: {written_chunks}", flush=True)
         print(f"   Time: {elapsed:.1f}s", flush=True)
         print(f"   Output: {output_jsonl}", flush=True)
+
+        # Multimodal notice: this is a multimodal converter. If it ran without a
+        # vision provider on an image-bearing document, the images shipped as
+        # ID-only fallbacks (no descriptions) - of little retrieval value. Warn
+        # loudly so the user knows the run was, for the image content, a waste of
+        # time/resources and should be re-run with a VLM.
+        # no_vlm is stamped onto the export dict during serialization, not the
+        # chunk object - so derive the count from the same trigger condition
+        # (no vision provider) over the image chunks actually written.
+        _vp = (self.vision_provider or "none").strip().lower()
+        _no_vlm_imgs = (
+            sum(1 for c in export_chunks if c.modality == Modality.IMAGE)
+            if _vp == "none"
+            else 0
+        )
+        if _no_vlm_imgs:
+            _share = _no_vlm_imgs / max(written_chunks, 1)
+            warn = (
+                f"[MULTIMODAL] {_no_vlm_imgs} image chunk(s) "
+                f"({_share:.0%} of output) shipped as ID-only fallbacks WITHOUT "
+                f"descriptions because no vision provider was configured "
+                f"(--vision-provider none). For an image-bearing document this "
+                f"conversion has limited multimodal value - re-run with a VLM."
+            )
+            logger.warning(warn)
+            print(f"\n⚠️  {warn}\n", flush=True)
 
         return BatchProcessingResult(
             success=len(errors) == 0,
@@ -3243,6 +3393,12 @@ class BatchProcessor:
         changed = 0
         for ch in chunks:
             if not ch.content or not ch.content.strip():
+                # Preserve - this sanitizer only strips TOC cell markers from
+                # TEXT. IMAGE/TABLE chunks carry no text content and must not be
+                # dropped here (that silently deleted every image on image-only
+                # pages -> MISSING_PAGES); empty TEXT chunks are removed at the
+                # canonical boundary by _drop_empty_text_chunks_before_metadata.
+                sanitized.append(ch)
                 continue
             if ch.modality == Modality.TEXT and has_marker_noise(ch.content):
                 cleaned = marker.sub(" ", ch.content)
