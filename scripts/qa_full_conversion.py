@@ -874,7 +874,12 @@ def _image_issues(
         # description. This is a terminal, user-chosen state - NOT a chunk awaiting
         # a VLM (pending) and NOT a defect. Tally it as an advisory and skip the
         # description/placeholder/pending gates that assume a VLM was meant to run.
-        if vision_status == "no_vlm":
+        # Guard: only advisory when the asset actually rendered. A no_vlm image
+        # with no asset_ref is a broken extraction masquerading as the documented
+        # state; let it fall through to be flagged (IMAGE_DESCRIPTION_UNUSABLE).
+        if vision_status == "no_vlm" and (
+            (meta.get("asset_ref") or chunk.get("asset_ref") or {}).get("file_path")
+        ):
             no_vlm += 1
             continue
         # F4 hard-fallback exemption: a chunk with vision_status="hard_fallback"

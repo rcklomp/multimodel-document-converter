@@ -1102,6 +1102,67 @@ class BatchProcessor:
             )
         return surviving
 
+    def _promote_or_drop_empty_tables(
+        self, chunks: List[IngestionChunk]
+    ) -> List[IngestionChunk]:
+        """Drop empty-content TABLE chunks; promote the page's-only-content case.
+
+        A TABLE carries its value in the markdown grid; an empty-content table
+        (DOCLING_FAST/offline layout miss) is a corrupt placeholder that fails
+        the table-format gate. Online extraction always yields markdown, so this
+        only culls genuine empties.
+
+        Page-coverage guard (composes with _filter_tiny_icon_images, which runs
+        earlier in the export chain): never drop the only surviving chunk on a
+        page. An empty TABLE still carries its rendered crop (asset_ref), so when
+        it is the page's only content, PROMOTE it to IMAGE rather than drop -
+        preserving page coverage (no MISSING_PAGES) without leaving a corrupt
+        empty TABLE (no TABLE_CORRUPTION). pages_with_other is computed on the
+        CURRENT (post-tiny-icon) list so the two filters cannot together orphan a
+        page. IMAGE chunks are never dropped here (multimodal).
+        """
+
+        def _has_text(c: IngestionChunk) -> bool:
+            return bool(c.content and c.content.strip())
+
+        empty_ids = {
+            id(c)
+            for c in chunks
+            if c.modality == Modality.TABLE and not _has_text(c)
+        }
+        if not empty_ids:
+            return chunks
+
+        pages_with_other = {
+            c.metadata.page_number
+            for c in chunks
+            if id(c) not in empty_ids and c.metadata and c.metadata.page_number
+        }
+        kept: List[IngestionChunk] = []
+        dropped = promoted = 0
+        for c in chunks:
+            if id(c) in empty_ids:
+                pg = c.metadata.page_number if c.metadata else None
+                if pg in pages_with_other:
+                    dropped += 1
+                    continue
+                if getattr(c, "asset_ref", None):
+                    c.modality = Modality.IMAGE  # keep the crop, page stays covered
+                    if c.metadata:
+                        c.metadata.chunk_type = None
+                    promoted += 1
+                    kept.append(c)
+                else:
+                    dropped += 1  # no asset to fall back to
+                continue
+            kept.append(c)
+        if dropped or promoted:
+            logger.info(
+                f"[FINALIZE] empty-content TABLE: dropped {dropped}, promoted "
+                f"{promoted} to IMAGE (page-coverage guard)"
+            )
+        return kept
+
     def _enrich_asset_ref_from_disk(self, chunk: IngestionChunk) -> None:
         """Populate missing asset metadata (width/height/file size) from saved file."""
         asset_ref = getattr(chunk, "asset_ref", None)
@@ -1374,6 +1435,27 @@ class BatchProcessor:
         self._render_visual_assets(
             uir_chunks, batch_info.batch_path, batch_info.page_offset
         )
+
+        # Fail-open guard: a render OR encode failure inside the materializer
+        # (degenerate clip get_pixmap raise; full-page fallback itself failing)
+        # leaves an IMAGE/TABLE chunk with no asset_ref. That chunk would raise
+        # QA-CHECK-05 in from_uir below and the per-batch handler would discard
+        # this batch's extracted TEXT (the Kimothi-class loss via a different
+        # MuPDF entry point). Drop the un-renderable visual chunk instead -
+        # losing one crop beats losing the page's text.
+        _pre_render = len(uir_chunks)
+        uir_chunks = [
+            uir
+            for uir in uir_chunks
+            if uir.modality not in (Modality.IMAGE, Modality.TABLE)
+            or getattr(uir, "asset_ref", None)
+        ]
+        if len(uir_chunks) != _pre_render:
+            logger.warning(
+                "[V3-ASSET] dropped %d IMAGE/TABLE chunk(s) with no rendered "
+                "asset (QA-CHECK-05) to keep the batch's text",
+                _pre_render - len(uir_chunks),
+            )
 
         chunks: List[IngestionChunk] = []
         for uir in uir_chunks:
@@ -2118,24 +2200,9 @@ class BatchProcessor:
             # even one such chunk; this catches every upstream path at once.
             export_chunks = self._drop_empty_text_chunks_before_metadata(export_chunks)
 
-            # Drop TABLE chunks with no markdown content. A table carries its
-            # value in the grid; an empty-content table (DOCLING_FAST/offline
-            # layout miss) is a corrupt placeholder that fails the table-format
-            # gate. Online extraction always yields table markdown, so this only
-            # culls genuine empties. IMAGE chunks are intentionally NOT dropped
-            # (multimodal: retained with an ID-only fallback when no VLM ran).
-            _pre_tbl = len(export_chunks)
-            export_chunks = [
-                c
-                for c in export_chunks
-                if c.modality != Modality.TABLE or (c.content and c.content.strip())
-            ]
-            _empty_tbl = _pre_tbl - len(export_chunks)
-            if _empty_tbl:
-                logger.info(
-                    f"[FINALIZE] Dropped {_empty_tbl} empty-content TABLE chunk(s) "
-                    f"(no markdown to retrieve)"
-                )
+            # Drop/repair empty-content TABLE chunks (no markdown to retrieve),
+            # with a page-coverage guard so they cannot manufacture MISSING_PAGES.
+            export_chunks = self._promote_or_drop_empty_tables(export_chunks)
 
             # V3.0 Phase A Step 5: canonical heading propagation + vision-aided
             # front-matter detection are STRIPPED — the UIR chunker carries

@@ -50,9 +50,34 @@ def test_pipe_table_normalizer_ignores_non_pipe_content():
     assert normalize_pipe_table("<table><tr><td>x</td></tr></table>") is None
 
 
-def test_ragged_pipe_rows_padded_rectangular():
-    grid = normalize_pipe_table("| a | b | c |\n| x |")
-    assert grid.splitlines()[-1] == "| x |  |  |"
+def test_ragged_pipe_rows_bail_not_reshaped():
+    # A ragged column count signals an unescaped pipe inside a cell; reshaping
+    # would shift data into the wrong columns AND pass the format gate (silent
+    # corruption). The normalizer must bail and keep the original verbatim.
+    assert normalize_pipe_table("| a | b | c |\n| x |") is None
+
+
+def test_literal_pipe_in_cell_not_oversplit():
+    # An escaped pipe (\|) is a cell value, not a column boundary - rows stay
+    # rectangular and the table is repaired without corruption.
+    grid = normalize_pipe_table("| a | b |\n| c \\| d | e |")
+    assert grid is not None and "| --- | --- |" in grid
+    assert "c \\| d" in grid
+
+
+def test_table_with_title_line_is_repaired():
+    # A leading non-pipe title must not block repair (FluentPython-p17 variant).
+    grid = normalize_pipe_table("Spec Table\n| A | B |\n| 1 | 2 |")
+    lines = grid.splitlines()
+    assert lines[0] == "Spec Table"
+    assert lines[2] == "| --- | --- |"
+
+
+def test_single_dash_data_row_is_not_a_separator():
+    # | - | - | is N/A data (the gate needs 2+ dashes), so the table is missing a
+    # real separator and must be repaired, not treated as already-separated.
+    grid = normalize_pipe_table("| Q1 | Q2 |\n| - | - |")
+    assert grid is not None and "| --- | --- |" in grid
 
 
 def test_ensure_table_separator_is_noop_on_valid_and_empty():
