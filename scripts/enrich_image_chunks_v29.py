@@ -56,9 +56,15 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
 # v2.10: re-evaluate local NuMarkdown-8B endpoint reachability.
-_CLOUD_PROVIDER = "openai"  # qwen3-vl-plus is OpenAI-compatible via DashScope
-_CLOUD_MODEL = "qwen3-vl-plus"
-_CLOUD_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+# Endpoint is env-overridable so the lane can target a LOCAL OpenAI-compatible
+# VLM (e.g. the M5 Qwen3-VL at http://10.0.10.235:8000/v1) instead of DashScope
+# cloud. Defaults stay on the cloud qwen3-vl-plus. For a local no-auth endpoint
+# set MMRAG_REFINER_API_KEY to any non-empty placeholder.
+_CLOUD_PROVIDER = os.environ.get("MMRAG_ENRICH_PROVIDER", "openai")
+_CLOUD_MODEL = os.environ.get("MMRAG_ENRICH_MODEL", "qwen3-vl-plus")
+_CLOUD_BASE_URL = os.environ.get(
+    "MMRAG_ENRICH_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+)
 
 _PLACEHOLDER_PREFIX = "[Figure on page"
 _FSYNC_EVERY = 50  # fsync the tmp file every N enrichments
