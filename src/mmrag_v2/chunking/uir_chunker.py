@@ -39,6 +39,7 @@ from ..universal.intermediate import (
     UniversalDocument,
     UniversalPage,
 )
+from ..universal.table_markdown import ensure_table_separator
 
 logger = logging.getLogger(__name__)
 
@@ -581,12 +582,18 @@ def _table_element_to_uirchunk(
     extraction_engine_version: str,
     reading_order: int,
 ) -> UIRChunk:
-    """Convert a TABLE Element to a UIRChunk."""
+    """Convert a TABLE Element to a UIRChunk.
+
+    Engine-agnostic separator repair: MinerU and Qwen both occasionally emit a
+    pipe table WITHOUT the Markdown ``|---|`` separator row (FluentPython p17),
+    which fails the table-format gate. ``ensure_table_separator`` injects it and
+    is a no-op on already-valid grids and non-pipe (HTML/prose) content.
+    """
     bbox = _element_bbox_list(element)
     pw, ph = _page_dims_px(page)
     return UIRChunk(
         modality=Modality.TABLE,
-        content=element.content or "",
+        content=ensure_table_separator(element.content or ""),
         locator=Locator(
             type=LocatorType.BBOX,
             bbox=bbox,
