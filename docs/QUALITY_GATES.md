@@ -45,6 +45,19 @@ bringing both tested magazines (PCWorld, Combat Aircraft) from ~-20% to under -9
 - There is no single hard global min/max that applies to every document type.
 - Use acceptance metrics to decide whether a change improved conversion quality.
 
+### Multimodal Image/Table Hygiene (2026-06-08)
+- This is a multimodal converter: IMAGE chunks are always retained. With
+  `--vision-provider none` they ship as documented ID-only fallbacks
+  (`vision_status=no_vlm`); the `IMAGE_NO_VLM` advisory (below) covers this.
+  Image DESCRIPTION is a POST-conversion enrichment step, not conversion-time.
+- Icon/glyph-class image regions (rendered <96px in BOTH dims AND <1.5KB) and
+  empty-content tables are culled, but ALWAYS behind a page-coverage guard so no
+  filter can manufacture `MISSING_PAGES`. An empty-content table that is the only
+  chunk on its page is PROMOTED to IMAGE (its rendered crop) rather than dropped.
+- New CONTENT-quality signals (furniture, garble, non-visual images, etc.) follow
+  `AGENTS.md` AGENT-GATE-PROGRESSION: advisory-first, crucible-calibrated, frozen
+  fixture, promoted to a hard gate only when earned. See `docs/PLAN_GATE_QUALITY_V1.md`.
+
 ### Recommended Evaluation Signals
 - `text_short_<30` and `text_long_>1500` from `scripts/qa_ingestion_hygiene.py` for shape anomalies.
 - `micro_non_label_ratio` for short-chunk fragmentation with label/code exclusions.
@@ -168,6 +181,7 @@ Allowed advisory codes and their rationale (per `docs/DECISIONS.md`
 | `SCRIPT_ADVISORY_FAIL` | `qa_semantic_fidelity.py` is advisory by design (exit 0); the authoritative R3 hard gate is `qa_conversion_audit.py` (Policy B, see "R3 — Code-Indentation Fidelity" above). A `SEMANTIC_FAIL` it prints — e.g. `code_indentation_fidelity` below 0.90 — is informational; the hard verdict comes from the audit. | No |
 | `MISSING_CHAPTERS` | EPUB spine coverage found missing chapters, but every missing chapter is a contiguous leading/trailing low-content structural item (for example title page, cover, copyright/colophon stub, or blank wrapper) that Docling's HTML parser stripped before chunk emission. Internal gaps or content-bearing edge chapters remain `FAIL`. | Yes (edge + low-content structural only) |
 | `VISION_HARD_FALLBACK_RATE` | Hard-fallback rate > 5 % when ALL hard_fallbacks have the F4 sentinel — documented "VLM legitimately can't describe this" cases (complex assets with terse responses after the Phase 3 detail-retry). | Yes (F4 condition above) |
+| `IMAGE_NO_VLM` | The converter ran with `--vision-provider none`, so image chunks are retained as ID-only fallbacks (asset filename, no description). This is a multimodal converter — the image asset still ships; the missing description is a documented, user-chosen no-VLM state, not a defect. The CLI warns at run time that an image-bearing document converted without a VLM has limited multimodal retrieval value. | No |
 
 The PASS variant is parallel to the SCAN0013 form-aware variant
 (`GATE_PASS [form: ...]`) — both are explicit governance allowances

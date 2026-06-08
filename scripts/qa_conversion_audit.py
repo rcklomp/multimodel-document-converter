@@ -361,8 +361,12 @@ def audit(jsonl_path: Path) -> AuditResult:
                 r.text_chunks += 1
             elif modality == "image":
                 r.image_chunks += 1
+                # A documented no-VLM ID-only fallback (--vision-provider none)
+                # is not a placeholder defect - the converter ran without a VLM
+                # by choice. Excluded from the placeholder ratio.
+                _no_vlm = meta.get("vision_status") == "no_vlm"
                 # Image description coverage
-                if _is_placeholder(content):
+                if _is_placeholder(content) and not _no_vlm:
                     r.image_placeholders += 1
                 vd = obj.get("visual_description") or (meta.get("visual_description"))
                 if vd:

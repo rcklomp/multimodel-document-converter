@@ -39,6 +39,7 @@ from ..universal.intermediate import (
     UniversalDocument,
     UniversalPage,
 )
+from ..universal.table_markdown import ensure_table_separator
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +136,8 @@ def chunk_universal_document(
     extraction_engine_version: str = EXTRACTION_ENGINE_VERSION_DEFAULT,
     profile_type: Optional[str] = None,
     toc_headings: Optional[Dict[Any, Any]] = None,
+    carry_in_heading: Optional[str] = None,
+    carry_in_breadcrumb: Optional[List[str]] = None,
 ) -> List[UIRChunk]:
     """Chunk a UniversalDocument into UIRChunks — pure UIR-native.
 
@@ -156,6 +159,13 @@ def chunk_universal_document(
             carry-forward + breadcrumb_path (PLAN_V3.1 P2). ``None`` for
             docs with no bookmarks (heading assignment then relies only on
             in-page heading elements + carry-forward).
+        carry_in_heading: The last active heading from the PREVIOUS batch
+            (Cluster B, 2026-06-07). Heading assignment runs per batch, so
+            without this the first chunks of a batch whose chapter title is
+            only present as a glued running header (HarryPotter ch.1) go null.
+            Seeds carry-forward so a chapter heading propagates across batch
+            boundaries. ``None`` for the first batch.
+        carry_in_breadcrumb: Breadcrumb paired with ``carry_in_heading``.
 
     Returns:
         List of UIRChunk objects ready for ingestion.
@@ -195,7 +205,13 @@ def chunk_universal_document(
     #   2. carry-forward of the last active heading from earlier pages;
     #   3. TOC entry whose page covers the chunk;
     # and build breadcrumb_path from the TOC hierarchy.
-    _assign_headings(chunks, toc_headings, doc_title=doc_title)
+    _assign_headings(
+        chunks,
+        toc_headings,
+        doc_title=doc_title,
+        carry_in_heading=carry_in_heading,
+        carry_in_breadcrumb=carry_in_breadcrumb,
+    )
 
     return chunks
 
@@ -215,6 +231,8 @@ def _assign_headings(
     toc_headings: Optional[Dict[Any, Any]],
     *,
     doc_title: Optional[str] = None,
+    carry_in_heading: Optional[str] = None,
+    carry_in_breadcrumb: Optional[List[str]] = None,
 ) -> None:
     """Assign parent_heading + breadcrumb_path to text chunks in place.
 
@@ -278,8 +296,12 @@ def _assign_headings(
             crumb = [crumb[0]] + crumb[-4:]
         return crumb
 
-    last_heading: Optional[str] = None
-    last_breadcrumb: List[str] = []
+    # Seed carry-forward from the previous batch so a chapter heading survives
+    # the batch boundary (Cluster B). A real in-page heading or TOC leaf on this
+    # batch still overrides it (precedence 1/3 below), so a stale carry can only
+    # fill chunks that would otherwise be null.
+    last_heading: Optional[str] = _normalize_heading(carry_in_heading) if carry_in_heading else None
+    last_breadcrumb: List[str] = list(carry_in_breadcrumb) if carry_in_breadcrumb else []
 
     for ch in chunks:
         if ch.modality != Modality.TEXT:
@@ -581,12 +603,18 @@ def _table_element_to_uirchunk(
     extraction_engine_version: str,
     reading_order: int,
 ) -> UIRChunk:
-    """Convert a TABLE Element to a UIRChunk."""
+    """Convert a TABLE Element to a UIRChunk.
+
+    Engine-agnostic separator repair: MinerU and Qwen both occasionally emit a
+    pipe table WITHOUT the Markdown ``|---|`` separator row (FluentPython p17),
+    which fails the table-format gate. ``ensure_table_separator`` injects it and
+    is a no-op on already-valid grids and non-pipe (HTML/prose) content.
+    """
     bbox = _element_bbox_list(element)
     pw, ph = _page_dims_px(page)
     return UIRChunk(
         modality=Modality.TABLE,
-        content=element.content or "",
+        content=ensure_table_separator(element.content or ""),
         locator=Locator(
             type=LocatorType.BBOX,
             bbox=bbox,

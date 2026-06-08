@@ -87,6 +87,9 @@ _ALLOWED_ADVISORY_WARN_CODES = frozenset(
         "PAGE_COUNT_UNKNOWN",
         "SCRIPT_ADVISORY_FAIL",
         "VISION_HARD_FALLBACK_RATE",  # conditional: all hard_fallbacks must carry the F4 sentinel
+        # No vision provider configured (--vision-provider none): image chunks are
+        # retained as ID-only fallbacks. A documented, user-chosen no-VLM state.
+        "IMAGE_NO_VLM",
         # v2.10 Phase 7: EPUB lane. Allowed only for WARN-severity
         # MISSING_CHAPTERS raised by _epub_chapter_coverage_issues when
         # every missing chapter is an edge-only low-content structural
@@ -856,6 +859,7 @@ def _image_issues(
     missing_visual = 0
     hard_fallback = 0
     pending = 0
+    no_vlm = 0
     examples: list[str] = []
 
     for chunk in images:
@@ -865,6 +869,19 @@ def _image_issues(
             meta.get("visual_description") or chunk.get("visual_description") or ""
         )
         vision_status = meta.get("vision_status") or chunk.get("vision_status")
+        # Documented no-VLM state: the converter ran with --vision-provider none,
+        # so the image is retained as an ID-only fallback (asset filename) with no
+        # description. This is a terminal, user-chosen state - NOT a chunk awaiting
+        # a VLM (pending) and NOT a defect. Tally it as an advisory and skip the
+        # description/placeholder/pending gates that assume a VLM was meant to run.
+        # Guard: only advisory when the asset actually rendered. A no_vlm image
+        # with no asset_ref is a broken extraction masquerading as the documented
+        # state; let it fall through to be flagged (IMAGE_DESCRIPTION_UNUSABLE).
+        if vision_status == "no_vlm" and (
+            (meta.get("asset_ref") or chunk.get("asset_ref") or {}).get("file_path")
+        ):
+            no_vlm += 1
+            continue
         # F4 hard-fallback exemption: a chunk with vision_status="hard_fallback"
         # AND both vision_error and vision_provider_used recorded is a
         # documented no-VLM-signal state, NOT a placeholder row. Skip the
@@ -893,6 +910,18 @@ def _image_issues(
     if pending:
         issues.append(
             Issue("FAIL", "VISION_PENDING", f"{pending} image chunk(s) still pending VLM.")
+        )
+
+    if no_vlm:
+        issues.append(
+            Issue(
+                "WARN",
+                "IMAGE_NO_VLM",
+                f"{no_vlm}/{len(images)} image chunk(s) retained as ID-only fallback "
+                f"(no vision provider configured; --vision-provider none). Image "
+                f"descriptions were not generated - run with a VLM for usable "
+                f"multimodal retrieval.",
+            )
         )
 
     hard_ratio = hard_fallback / len(images)

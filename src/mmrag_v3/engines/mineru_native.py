@@ -60,6 +60,7 @@ from mmrag_v2.universal.intermediate import (
     create_element,
     create_page,
 )
+from mmrag_v2.universal.table_markdown import rows_to_markdown_grid
 
 # Single-source the degenerate-repeat collapse (a unit repeated >= 8x in a
 # row) from the VLM adapter so both vision-native engines share one detector.
@@ -186,8 +187,9 @@ def _html_table_to_markdown(content: str) -> Optional[str]:
     """Transcode a MinerU HTML table into a Markdown grid (None if not parseable).
 
     First row becomes the header, followed by a ``| --- |`` separator and the
-    body rows. Ragged rows are right-padded to the widest row so the grid is
-    rectangular.
+    body rows (see ``rows_to_markdown_grid``). HTML is MinerU-specific, so the
+    transcode lives here; separator repair for pipe tables (either engine) is
+    handled engine-agnostically in the UIR chunker.
     """
     parser = _TableHTMLParser()
     try:
@@ -195,14 +197,7 @@ def _html_table_to_markdown(content: str) -> Optional[str]:
         parser.close()
     except Exception:  # pragma: no cover - defensive: malformed HTML
         return None
-    rows = [r for r in parser.rows if r]
-    if not rows:
-        return None
-    width = max(len(r) for r in rows)
-    rows = [r + [""] * (width - len(r)) for r in rows]
-    lines = ["| " + " | ".join(rows[0]) + " |", "| " + " | ".join(["---"] * width) + " |"]
-    lines.extend("| " + " | ".join(r) + " |" for r in rows[1:])
-    return "\n".join(lines)
+    return rows_to_markdown_grid(parser.rows)
 
 
 def _fence_code(content: str) -> str:

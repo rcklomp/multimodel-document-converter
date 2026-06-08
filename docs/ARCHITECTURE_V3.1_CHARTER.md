@@ -75,6 +75,11 @@ drop. Each boundary is enforced by an executable contract test.
 | B5 | empty-content asset chunk | text chunks always carry content | guard empty-content asset chunks before qdrant ingest | (regression for `b44724b`) | `[SHIPPED]` |
 | B6 | VLM bbox accuracy | coordinates are trustworthy | adapter projects raw px -> `[0,1000]` and clamps; crop-audit flags edge-overflow + blank crops | `test_v3_asset_materializer.py` (crop-audit) | `[SHIPPED]`, residual risk in 3.3 |
 | B7 | router code blind spot | object presence implies visual complexity | monospace-ratio >= 0.10 routes code-as-text to the VLM | router monospace guard | `[SHIPPED]` (`2a60a99`) |
+| B8 | per-batch heading reset (cluster B) | heading context is per-call | carry the last active heading across batch boundaries; a real in-page/TOC heading still overrides the carry | `test_chunk_universal_document_contract.py` | `[SHIPPED]` (`71aeed1`) |
+| B9 | TOC-cell sanitizer drops empty-content chunks (cluster D) | only text chunks reach it | preserve non-text / empty-content chunks (it deleted ALL images); empty-text dropped at the canonical boundary | `test_toc_cell_marker_sanitizer.py` | `[SHIPPED]` (`dd4a758`) |
+| B10 | asset render/encode failure discards the batch (cluster A) | the crop always renders | crop encode -> full-page fallback; drop any asset-less IMAGE/TABLE BEFORE `from_uir` so no render-fail re-triggers the QA-CHECK-05 batch-discard | `test_v3_b2_reextraction.py` | `[SHIPPED]` (`7b1871b`, `de1af9d`) |
+| B11 | separator-less / corrupt pipe table (cluster C) | the extractor emits valid grids | repair at the engine-agnostic chunker chokepoint; guarded (escaped-pipe, ragged-bail, title-tolerance, single-dash) so it never ships a gate-passing corrupt grid | `test_table_markdown.py` | `[SHIPPED]` (`b032a29`, `de1af9d`) |
+| B12 | no-VLM image (cluster D) | every image is described inline | retain as a documented ID-only fallback (`vision_status=no_vlm`); describe POST-conversion via `enrich_image_chunks_v29.py`; gate advisory, not failure | `test_qa_image_gate_calibration.py`, `test_tiny_icon_filter.py` | `[SHIPPED]` (`dd4a758`) |
 
 ### 2.2 Vocabulary migration (Charter §7.1)
 
@@ -99,8 +104,11 @@ doc.
 ## 3. As-Built Architecture
 
 Canonical flow (V3 default for `BatchProcessor.process_pdf`):
-`HybridEngine.extract()` -> `UniversalDocument` (UIR) -> `chunk_universal_document()`
--> `materialize_visual_assets()` -> `IngestionChunk.from_uir()` -> JSONL.
+`mmrag_v3.extract()` (the router picks the engine: `MineruQwenHybridEngine` by
+default when `MINERU_ENDPOINT` is set, else the legacy `HybridEngine`) ->
+`UniversalDocument` (UIR) -> `chunk_universal_document()` (heading carry-forward
+across batches, B8) -> `materialize_visual_assets()` -> `IngestionChunk.from_uir()`
+-> JSONL. Image DESCRIPTION is a separate POST-conversion enrichment step (3.5a).
 
 ### 3.1 Universal Intermediate Representation (UIR) `[SHIPPED]`
 Engines are pure mappers that emit a `UniversalDocument` (`src/mmrag_v2/universal/
@@ -137,9 +145,19 @@ lazy-imported `mineru_vl_utils` http-client (the model stays in an ISOLATED serv
 element list `{type, bbox[0,1], content, merge_prev}`; the converter projects bbox
 to `[0,1000]`, maps MinerU's 13-type vocabulary onto the 3-value `ElementType`
 (code smuggled as TEXT per B3), folds `merge_prev` continuations, and transcodes
-MinerU's HTML tables into Markdown grids (the pipeline R2 contract). Selected by
-default when `MINERU_ENDPOINT` is set (else the legacy `HybridEngine`); forced via
-`USE_MINERU_ENGINE=1`. Corpus-validated 7/7 QA_PASS (`PLAN_VLM_EVAL` §13-14).
+MinerU's HTML tables into Markdown grids (the pipeline R2 contract).
+
+**Default route is the MinerU+Qwen-for-code hybrid (`MineruQwenHybridEngine`,
+2026-06-06)**, not pure MinerU: when `MINERU_ENDPOINT` is set, code-dense pages
+(monospace ratio >= 0.10) route to Qwen (clean indentation, R3 1.00) and every
+other page to MinerU2.5 (tables/layout) - neither engine alone passes a code-heavy
+doc. Pure MinerU via `USE_MINERU_ENGINE=1`; the legacy Docling+VLM `HybridEngine`
+is the no-`MINERU_ENDPOINT` fallback. Corpus-validated: the full 16-doc crucible is
+16/16 clean QA_PASS post-enrichment, `leak=0` (2026-06-08).
+
+Separator-less / corrupt pipe tables from EITHER engine are repaired at the
+engine-agnostic chunker chokepoint (`universal/table_markdown.py`, B11), not per
+adapter, so the MinerU HTML transcode and the Qwen pipe-markdown both converge.
 
 The Qwen vision-native path below is RETAINED as an alternative
 (`USE_VLM_ENGINE=1`) and inside the `HybridEngine` per-page router:
@@ -172,6 +190,20 @@ sets `asset_ref`. Crop-audit emits per-crop `CropHealth` signals
 (`is_full_page_fallback`, `is_edge_clamped`, `is_low_information` - the last reuses
 the v2.9 blank definition `std<10 and (mean>250 or mean<5)`) and raises
 `QA_WARN_CROP_DRIFT` above a 15% document drift rate, recorded in `meta.json`.
+
+### 3.5a Multimodal Image Policy + Enrichment Lane `[SHIPPED]` (2026-06-08)
+Image DESCRIPTION is a POST-conversion step, not conversion-time (the conversion
+path only uses the VLM for full-page-guard verification). IMAGE chunks are always
+retained: with `--vision-provider none` they ship as documented ID-only fallbacks
+(`vision_status=no_vlm`, asset filename), which the strict gate treats as an
+advisory (`IMAGE_NO_VLM`), not a failure - but only with a real `asset_ref` (B12).
+Descriptions are produced by `scripts/enrich_image_chunks_v29.py`, now
+env-pointable at a LOCAL OpenAI-compatible VLM (`MMRAG_ENRICH_PROVIDER/MODEL/
+BASE_URL`; DashScope cloud is the unchanged default). Two hygiene filters run in
+the export chain, BOTH behind a page-coverage guard so neither can manufacture
+`MISSING_PAGES`: `_filter_tiny_icon_images` (icon/glyph regions, rendered <96px
+both dims AND <1.5KB) and `_promote_or_drop_empty_tables` (empty-content tables;
+the only-chunk-on-page case is PROMOTED to IMAGE, keeping the rendered crop).
 
 ### 3.6 The Docling Lane `[SHIPPED]` + retained debt `[PARTIAL]`
 `DoclingFastEngine` (`src/mmrag_v3/engines/docling_fast.py`, the sole V3 docling

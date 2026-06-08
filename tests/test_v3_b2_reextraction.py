@@ -109,6 +109,45 @@ def test_reextraction_surfaces_in_meta_json(tmp_path):
     assert suspects and suspects[0]["reextracted"] is True
 
 
+def test_crop_encode_failure_falls_back_to_full_page(tmp_path, monkeypatch):
+    """A crop whose PNG encode raises must not poison the batch.
+
+    MuPDF's PNG band-writer raises (code=4: Invalid bandwriter header
+    dimensions/setup) on a degenerate crop pixmap. An IMAGE/TABLE chunk left
+    without an asset_ref fails the QA-CHECK-05 contract in from_uir, which
+    discards the WHOLE batch's extracted text (observed on Kimothi: 151
+    elements lost, rebuilt heading-less by the recovery net). The encode
+    failure must fall back to a full-page render so the chunk keeps a valid,
+    on-disk asset_ref.
+    """
+    pdf = _pdf_with_block(tmp_path)
+    chunk = _image_uir(bbox=CONTENT_BBOX)
+
+    orig_tobytes = fitz.Pixmap.tobytes
+    calls = {"n": 0}
+
+    def flaky_tobytes(self, *args, **kwargs):
+        # Fail the first encode (the crop); let the full-page fallback succeed.
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("code=4: Invalid bandwriter header dimensions/setup")
+        return orig_tobytes(self, *args, **kwargs)
+
+    monkeypatch.setattr(fitz.Pixmap, "tobytes", flaky_tobytes)
+
+    report = materialize_visual_assets([chunk], pdf, tmp_path / "assets", doc_hash="enc")
+
+    # The crop encode failed, but the chunk still carries a valid on-disk asset
+    # (full-page fallback) - never a None asset_ref that would fail QA-CHECK-05.
+    assert calls["n"] >= 2  # crop encode tried, then the full-page fallback
+    assert chunk.asset_ref is not None
+    on_disk = tmp_path / chunk.asset_ref
+    assert on_disk.exists()
+    health = report.crops[0]
+    assert health.is_full_page_fallback is True
+    assert health.crop_source == "full_page"
+
+
 def test_geometric_crop_is_never_reextracted(tmp_path):
     """A trusted geometric crop (B1) is not subject to the B2 re-render."""
 

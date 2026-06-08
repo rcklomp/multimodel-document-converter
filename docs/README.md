@@ -37,6 +37,8 @@ history. The only definition of done lives in `docs/V3_EXECUTION_MANDATE.md`.
 ### Layer 2: Execution
 
 - `docs/TESTING.md`
+- `docs/PLAN_GATE_QUALITY_V1.md` (next iteration): close the proxy-vs-outcome gap in the gate suite (spatial-first advisory metrics, fix-and-guard, `AGENT-GATE-PROGRESSION`).
+- `docs/PLAN_OMNIDOCBENCH_EVAL.md` (next iteration): ground-truth fidelity benchmark (the fidelity axis paired with the gate-quality retrieval-value axis).
 
 ## Historical reference
 

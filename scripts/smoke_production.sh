@@ -204,8 +204,11 @@ run_lane() {
   # cost-optimizer on the mixed/prose lanes so per-page routing is exercised.
   local rc
   if [ "$FULL" -eq 0 ]; then
+    # Offline CI has no VLM reachable, so be honest about it: --vision-provider
+    # none stamps image chunks as the documented no-VLM ID-only fallback
+    # (advisory), not "failed" (which means a configured VLM erred).
     USE_DOCLING_FAST=1 "$MMRAG_CLI" process "$doc" \
-      --batch-size 10 --output-dir "$out" >"$cli_log" 2>&1
+      --batch-size 10 --output-dir "$out" --vision-provider none >"$cli_log" 2>&1
     rc=$?
   else
     if [ "$expect" = "vlm_route_doc" ]; then

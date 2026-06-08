@@ -280,6 +280,11 @@ def test_allowed_advisory_codes_match_expected_set() -> None:
         "SCRIPT_ADVISORY_FAIL",
         "VISION_HARD_FALLBACK_RATE",
         "MISSING_CHAPTERS",
+        # Cluster D (2026-06-06): images retained as ID-only fallbacks when no
+        # vision provider was configured (--vision-provider none). Multimodal
+        # converter keeps the asset; the missing description is a documented,
+        # user-chosen no-VLM state, advisory not FAIL.
+        "IMAGE_NO_VLM",
     })
 
 

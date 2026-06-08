@@ -233,3 +233,48 @@ def test_sem_placeholder_complete_status_not_exempt(qa_sem):
         },
     }
     assert qa_sem.is_placeholder_image_or_table(chunk["content"], chunk=chunk)
+
+
+# ---------------------------------------------------------------------------
+# Cluster D (2026-06-06): no-VLM image fallback is advisory, not a failure.
+# A multimodal converter keeps image chunks even with --vision-provider none,
+# retaining them as ID-only fallbacks (vision_status="no_vlm"). The strict gate
+# must treat these as a documented advisory (IMAGE_NO_VLM WARN), never as
+# VISION_PENDING / IMAGE_DESCRIPTION_UNUSABLE failures.
+# ---------------------------------------------------------------------------
+
+
+def _no_vlm_image(page: int, fname: str) -> dict:
+    return {
+        "modality": "image",
+        "content": "",
+        "asset_ref": {"file_path": f"assets/{fname}"},
+        "visual_description": f"[image: {fname}]",
+        "metadata": {
+            "page_number": page,
+            "vision_status": "no_vlm",
+            "vision_provider_used": "none",
+            "vision_error": "no vision provider configured (--vision-provider none)",
+        },
+    }
+
+
+def test_no_vlm_images_are_advisory_not_failure(qa_full):
+    issues = qa_full._image_issues(
+        [_no_vlm_image(1, "a.png"), _no_vlm_image(2, "b.png")],
+        max_hard_fallback_ratio=0.5,
+        require_image_descriptions=True,
+    )
+    codes = {(i.severity, i.code) for i in issues}
+    assert ("WARN", "IMAGE_NO_VLM") in codes
+    # The no-VLM state must NOT raise the description/pending hard failures.
+    assert not any(
+        i.severity == "FAIL"
+        and i.code in {"VISION_PENDING", "IMAGE_DESCRIPTION_UNUSABLE"}
+        for i in issues
+    )
+
+
+def test_image_no_vlm_is_documented_advisory(qa_full):
+    warn = qa_full.Issue("WARN", "IMAGE_NO_VLM", "2/2 image chunk(s) ID-only fallback")
+    assert qa_full._warn_is_documented_advisory(warn, []) is True
