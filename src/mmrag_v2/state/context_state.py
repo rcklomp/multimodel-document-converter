@@ -216,6 +216,24 @@ def is_valid_heading(text: str) -> bool:
     if not any(c.isalpha() for c in text):
         return False
 
+    # F3 (PLAN_GATE_QUALITY_V1) heading sanity: reject extracted furniture/garble
+    # the layout model labels a "title".
+    # URL / email / bare-domain headings (mastheads, subscription/shop lines:
+    # "SCAN THE QR CODE ... shop.keypubliking.com", "editor@...com",
+    # "www.Key.Aero"). 5.1-style numbered headings have no domain TLD and pass.
+    if _re.search(
+        r"https?://|www\.|@[\w.-]+\.[A-Za-z]{2,}"
+        r"|\b[\w-]+\.(?:com|org|net|aero|edu|gov)\b",
+        text,
+        _re.IGNORECASE,
+    ):
+        return False
+    # Mixed-script garble: a CJK glyph (U+4E00-U+9FFF) adjacent to a Latin
+    # letter within one token (a hallucinated CJK-prefixed garble heading).
+    # Pure-Latin and pure-CJK headings are unaffected.
+    if _re.search("[\u4e00-\u9fff][A-Za-z]|[A-Za-z][\u4e00-\u9fff]", text):
+        return False
+
     return True
 
 

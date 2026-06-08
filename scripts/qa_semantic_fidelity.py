@@ -101,6 +101,34 @@ def is_markdown_table(content: str) -> bool:
 
 
 _FURNITURE_MASTHEAD_RE = re.compile(r"https?://|www\.|\.com\b|\.aero\b|\.org\b", re.I)
+_INSANE_HEADING_RE = re.compile(
+    r"https?://|www\.|@[\w.-]+\.[A-Za-z]{2,}"
+    r"|\b[\w-]+\.(?:com|org|net|aero|edu|gov)\b",
+    re.I,
+)
+_CJK_LATIN_MIX_RE = re.compile("[\u4e00-\u9fff][A-Za-z]|[A-Za-z][\u4e00-\u9fff]")
+
+
+def count_insane_headings(texts: List[Dict[str, Any]]) -> int:
+    """Count chunks whose parent_heading is content-garbage (F3 regression net).
+
+    Mirrors the F3 additions to `is_valid_heading` on the resulting strings:
+    URL/email/bare-domain mastheads, CJK-Latin mixed garble, or folio-shaped
+    (page-number + separator) headings. After F3 this should be ~0; a rising
+    ratio means garbage headings are leaking in (e.g. via carry-forward or TOC).
+    """
+    n = 0
+    for r in texts:
+        h = ((r.get("metadata") or {}).get("hierarchy") or {}).get("parent_heading")
+        if not h:
+            continue
+        if (
+            _INSANE_HEADING_RE.search(h)
+            or _CJK_LATIN_MIX_RE.search(h)
+            or re.match(r"^\d+\s*[|/]\s", h.strip())
+        ):
+            n += 1
+    return n
 
 
 def count_running_furniture(texts: List[Dict[str, Any]]) -> int:
@@ -145,6 +173,7 @@ def main() -> int:
     parser.add_argument("--min-code-indentation-fidelity", type=float, default=0.90)
     parser.add_argument("--max-cross-page-label-anchor-risk", type=float, default=0.10)
     parser.add_argument("--max-furniture-chunk-ratio", type=float, default=0.05)
+    parser.add_argument("--max-heading-sanity-ratio", type=float, default=0.02)
     args = parser.parse_args()
 
     rows: List[Dict[str, Any]] = []
@@ -217,6 +246,17 @@ def main() -> int:
     furniture_chunks = count_running_furniture(texts)
     furniture_chunk_ratio = (furniture_chunks / len(texts)) if texts else 0.0
 
+    # F3: garbage parent_heading strings (URL/email/masthead, CJK-Latin garble,
+    # folio-shaped) surviving into the final output.
+    texts_with_heading = [
+        r for r in texts
+        if ((r.get("metadata") or {}).get("hierarchy") or {}).get("parent_heading")
+    ]
+    insane_headings = count_insane_headings(texts)
+    heading_sanity_ratio = (
+        insane_headings / len(texts_with_heading) if texts_with_heading else 0.0
+    )
+
     print(
         f"images={len(images)} image_placeholder_ratio={image_placeholder_ratio:.4f} "
         f"image_description_coverage={image_description_coverage:.4f}"
@@ -238,6 +278,10 @@ def main() -> int:
     print(
         f"furniture_chunks={furniture_chunks} "
         f"furniture_chunk_ratio={furniture_chunk_ratio:.4f}"
+    )
+    print(
+        f"insane_headings={insane_headings} "
+        f"heading_sanity_ratio={heading_sanity_ratio:.4f}"
     )
 
     fails: List[str] = []
@@ -288,6 +332,11 @@ def main() -> int:
         fails.append(
             f"furniture_chunk_ratio={furniture_chunk_ratio:.3f} "
             f"(>{args.max_furniture_chunk_ratio:.2f})"
+        )
+    if heading_sanity_ratio > args.max_heading_sanity_ratio:
+        fails.append(
+            f"heading_sanity_ratio={heading_sanity_ratio:.3f} "
+            f"(>{args.max_heading_sanity_ratio:.2f})"
         )
 
     if fails:
