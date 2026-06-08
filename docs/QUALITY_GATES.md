@@ -58,6 +58,25 @@ bringing both tested magazines (PCWorld, Combat Aircraft) from ~-20% to under -9
   `AGENTS.md` AGENT-GATE-PROGRESSION: advisory-first, crucible-calibrated, frozen
   fixture, promoted to a hard gate only when earned. See `docs/PLAN_GATE_QUALITY_V1.md`.
 
+### Content-Quality Advisory Metrics (PLAN_GATE_QUALITY_V1, 2026-06-08)
+All ADVISORY (emitted by `qa_semantic_fidelity.py`, which rolls up to the
+documented `SCRIPT_ADVISORY_FAIL` class; not hard gates). Each is paired with an
+extraction-side fix (fix-and-guard) and a frozen regression fixture; each fires
+on its pre-fix crucible output and reads ~0 after the fix.
+
+| Metric | Catches | Default |
+|---|---|---|
+| `furniture_chunk_ratio` | F1: running-header/footer/folio furniture (margin + repeat/masthead) | warn > 0.05 |
+| `heading_sanity_ratio` | F3: URL/email/CJK-garble/folio-shaped headings | warn > 0.02 |
+| `non_visual_image_ratio` | F2: text regions misclassified as images ("no distinct non-text visuals") | warn > 0.05 |
+| `blank_image_ratio` | F7: deterministically blank/low-info image assets | warn > 0.02 |
+| `cross_page_dupe_ratio` | F6: TEXT repeated verbatim across pages (captions/VLM loops; TABLE/FORM excluded) | warn > 0.03 |
+| `code_fence_consistency` | F4: fraction of `modality=code` chunks Markdown-fenced | warn < 1.0 |
+
+F5 (cover-page garble) has no metric: the intended `corruption_score` /
+`ocr_confidence` reuse is infeasible (both `None` in the V3 path) and the garble
+is word-shaped; deferred-and-accepted (see the plan's Status section).
+
 ### Recommended Evaluation Signals
 - `text_short_<30` and `text_long_>1500` from `scripts/qa_ingestion_hygiene.py` for shape anomalies.
 - `micro_non_label_ratio` for short-chunk fragmentation with label/code exclusions.

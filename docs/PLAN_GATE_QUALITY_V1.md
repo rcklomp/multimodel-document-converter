@@ -1,9 +1,39 @@
 # PLAN_GATE_QUALITY_V1 - Content-Quality Gate Workstream
 
-Status: PROPOSED (2026-06-07, rev. 2 - incorporates two external review rounds)
+Status: IN PROGRESS (2026-06-08) - F1, F2, F3, F4, F6, F7 SHIPPED on branch
+`feat/gate-quality-v1`; F5 deferred-and-accepted (below). Was PROPOSED
+(2026-06-07, rev. 2 - incorporated two external review rounds).
 Owner: extraction + QA
 Scope: close the proxy-vs-outcome gap in the QA gate suite exposed by the
 2026-06-07 16-doc crucible content audit.
+
+## Status (2026-06-08)
+
+Each finding was a fix-and-guard pair, validated end-to-end (SMOKE_PRODUCTION_PASS
++ the named doc re-run; the advisory metric verified to fire on the pre-fix output
+and read ~0 after):
+- **F1 furniture** SHIPPED (`ad3d2ba`): `_filter_running_furniture` +
+  `furniture_chunk_ratio`. CombatAircraft/FluentPython ratio -> 0, no regression.
+- **F3 heading sanity** SHIPPED (`6f51169`): `is_valid_heading` rejects
+  URL/email/CJK-garble + `heading_sanity_ratio`. CombatAircraft/HarryPotter -> 0.
+- **F2 text-as-image + F7 blank pre-flight** SHIPPED (`2b917d5`): post-enrichment
+  non-visual drop + pre-VLM blank skip + `non_visual_image_ratio`/`blank_image_ratio`.
+  DigitaleFotografie -> clean QA_PASS.
+- **F6 cross-page dedup** SHIPPED (`b9d15aa`): `_dedup_cross_page_repeats` (TEXT
+  only, TABLE/FORM excluded) + `cross_page_dupe_ratio`. AIOS -> 0, HEADING 79.7%
+  -> 100%.
+- **F4 code fencing** SHIPPED (`eeffcff`): engine-agnostic `_fence_code` in the
+  chunker + `code_fence_consistency`. FluentPython 0/29 -> 29/29 fenced, R3 held.
+- **F5 cover garble** DEFERRED-AND-ACCEPTED: the FIX was always "genuinely hard /
+  accept" (extraction limit). The GUARD's intended reuse of `corruption_score` /
+  `ocr_confidence` is INFEASIBLE in the V3 path - both fields are `None` for every
+  VLM-extracted chunk (OCR-era fields the MinerU/VLM path does not populate). The
+  garbled cover tokens (`DOWING`, `HARORYPOWERS`) are word-shaped (have vowels),
+  so a cheap heuristic cannot reliably catch them without a dictionary/LM, which
+  the plan explicitly deprioritized ("rather than a new tokenizer heuristic"). No
+  gate-invisible regression risk (narrow, cover-only, acknowledged). Revisit only
+  if a populated text-quality signal becomes available (e.g. OmniDocBench fidelity
+  or an LLM sampling auditor).
 
 Review amendments folded in (2026-06-07): spatial-first signals (furniture by
 bbox Y-position, verified); cross-page dedup hard-excludes table/form (multi-page
