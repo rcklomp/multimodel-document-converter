@@ -100,6 +100,41 @@ def is_markdown_table(content: str) -> bool:
     return any(re.search(r"\|\s*-{2,}", ln) for ln in lines[1:3])
 
 
+_FURNITURE_MASTHEAD_RE = re.compile(r"https?://|www\.|\.com\b|\.aero\b|\.org\b", re.I)
+
+
+def count_running_furniture(texts: List[Dict[str, Any]]) -> int:
+    """Count running-header/footer/folio furniture in the FINAL output.
+
+    Mirrors `batch_processor._filter_running_furniture` (PLAN_GATE_QUALITY_V1 F1)
+    as the regression net: a short TEXT chunk in the top/bottom page margin whose
+    digit-normalized text repeats across >= 3 pages, or that matches a masthead/
+    URL folio pattern. After F1 this should be ~0; a rising ratio means furniture
+    is leaking back into the index.
+    """
+    norm_pages: Dict[str, set] = {}
+    band: Dict[int, str] = {}
+    for i, r in enumerate(texts):
+        content = (r.get("content") or "").strip()
+        if not content or len(content) > 70:
+            continue
+        md = r.get("metadata") or {}
+        bb = (md.get("spatial") or {}).get("bbox")
+        if not bb or len(bb) != 4:
+            continue
+        y0, y1 = bb[1], bb[3]
+        if not (y0 > 920 or y1 < 80):
+            continue
+        nz = re.sub(r"\d+", "#", re.sub(r"\s+", " ", content)).lower()
+        norm_pages.setdefault(nz, set()).add(md.get("page_number"))
+        band[i] = nz
+    furniture = {i for i, nz in band.items() if len(norm_pages[nz]) >= 3}
+    for i in band:
+        if _FURNITURE_MASTHEAD_RE.search((texts[i].get("content") or "")):
+            furniture.add(i)
+    return len(furniture)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("ingestion_jsonl", type=Path)
@@ -109,6 +144,7 @@ def main() -> int:
     parser.add_argument("--max-code-flat-ratio", type=float, default=0.35)
     parser.add_argument("--min-code-indentation-fidelity", type=float, default=0.90)
     parser.add_argument("--max-cross-page-label-anchor-risk", type=float, default=0.10)
+    parser.add_argument("--max-furniture-chunk-ratio", type=float, default=0.05)
     args = parser.parse_args()
 
     rows: List[Dict[str, Any]] = []
@@ -177,6 +213,10 @@ def main() -> int:
         cross_page_anchor_risk / len(text_rows) if text_rows else 0.0
     )
 
+    # F1: running-header/footer/folio furniture surviving into the final output.
+    furniture_chunks = count_running_furniture(texts)
+    furniture_chunk_ratio = (furniture_chunks / len(texts)) if texts else 0.0
+
     print(
         f"images={len(images)} image_placeholder_ratio={image_placeholder_ratio:.4f} "
         f"image_description_coverage={image_description_coverage:.4f}"
@@ -194,6 +234,10 @@ def main() -> int:
     print(
         "cross_page_label_anchor_risk="
         f"{cross_page_anchor_risk} ratio={cross_page_anchor_risk_ratio:.4f}"
+    )
+    print(
+        f"furniture_chunks={furniture_chunks} "
+        f"furniture_chunk_ratio={furniture_chunk_ratio:.4f}"
     )
 
     fails: List[str] = []
@@ -239,6 +283,11 @@ def main() -> int:
         fails.append(
             f"cross_page_label_anchor_risk_ratio={cross_page_anchor_risk_ratio:.3f} "
             f"(>{args.max_cross_page_label_anchor_risk:.2f})"
+        )
+    if furniture_chunk_ratio > args.max_furniture_chunk_ratio:
+        fails.append(
+            f"furniture_chunk_ratio={furniture_chunk_ratio:.3f} "
+            f"(>{args.max_furniture_chunk_ratio:.2f})"
         )
 
     if fails:
