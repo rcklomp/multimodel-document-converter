@@ -1163,6 +1163,177 @@ class BatchProcessor:
             )
         return kept
 
+    # Running-furniture filter (PLAN_GATE_QUALITY_V1 F1). Folio/masthead detector.
+    # TLD set kept in sync with context_state.is_valid_heading (F3); F1 needs no
+    # path requirement because a folio chunk IS the standalone masthead.
+    _FURNITURE_MASTHEAD_RE = re.compile(
+        r"https?://|www\.|\.(?:com|org|net|aero|edu|gov)\b", re.I
+    )
+    _FURNITURE_MAX_CHARS = 70
+    _FURNITURE_TOP_BAND = 80  # bbox y1 < 80 -> top ~8% of the [0,1000] page
+    _FURNITURE_BOTTOM_BAND = 920  # bbox y0 > 920 -> bottom ~8%
+    _FURNITURE_MIN_REPEATS = 3
+
+    def _filter_running_furniture(
+        self, chunks: List[IngestionChunk]
+    ) -> List[IngestionChunk]:
+        """Drop running-header / footer / folio furniture (PLAN_GATE_QUALITY_V1 F1).
+
+        Page furniture (running headers, page folios, mastheads) is junk for
+        retrieval, not content, yet it passes the structural gates. Detection is
+        SPATIAL-FIRST (bbox Y-position is decisive - verified on the crucible: the
+        CombatAircraft folio sits at y=960-975) plus cross-page repetition: a
+        short TEXT chunk in the top/bottom page margin whose DIGIT-NORMALIZED text
+        repeats across >= 3 pages (so the page number varies but the masthead/
+        chapter line is constant), OR that matches a masthead/URL folio pattern.
+
+        The repetition rule protects real headings (a section heading does not
+        repeat 3+ times) and the spatial band protects content (a real heading
+        sits in the content area, not the top/bottom 8% margin). A page-coverage
+        guard never drops the only surviving chunk on a page.
+        """
+        if not getattr(self, "_drop_running_furniture", True):
+            return chunks
+
+        def _bbox(c: IngestionChunk):
+            sp = c.metadata.spatial if c.metadata else None
+            return sp.bbox if sp and sp.bbox else None
+
+        def _normz(text: str) -> str:
+            return re.sub(r"\d+", "#", re.sub(r"\s+", " ", text.strip())).lower()
+
+        # Pass 1: collect band-positioned short chunks + digit-normalized repeats.
+        # id(chunk) is a safe identity key here: every chunk is held alive in
+        # `chunks` for this method's lifetime, so no GC/id-reuse window exists
+        # (review #5). Do not lift these sets across a generator boundary.
+        norm_pages: Dict[str, set] = {}
+        band: Dict[int, str] = {}
+        for c in chunks:
+            if c.modality != Modality.TEXT:
+                continue
+            content = (c.content or "").strip()
+            bb = _bbox(c)
+            if not content or len(content) > self._FURNITURE_MAX_CHARS:
+                continue
+            if not bb or len(bb) != 4:
+                continue
+            y0, y1 = bb[1], bb[3]
+            if not (y0 > self._FURNITURE_BOTTOM_BAND or y1 < self._FURNITURE_TOP_BAND):
+                continue
+            nz = _normz(content)
+            pg = c.metadata.page_number if c.metadata else None
+            norm_pages.setdefault(nz, set()).add(pg)
+            band[id(c)] = nz
+
+        furniture_ids = {
+            cid
+            for cid, nz in band.items()
+            if len(norm_pages[nz]) >= self._FURNITURE_MIN_REPEATS
+        }
+        # masthead/URL folios fire even on a single (OCR-garbled) occurrence.
+        for c in chunks:
+            if id(c) in band and self._FURNITURE_MASTHEAD_RE.search((c.content or "")):
+                furniture_ids.add(id(c))
+        if not furniture_ids:
+            return chunks
+
+        pages_with_other = {
+            c.metadata.page_number
+            for c in chunks
+            if id(c) not in furniture_ids and c.metadata and c.metadata.page_number
+        }
+        kept: List[IngestionChunk] = []
+        dropped = 0
+        for c in chunks:
+            pg = c.metadata.page_number if c.metadata else None
+            if id(c) in furniture_ids and pg in pages_with_other:
+                dropped += 1
+                continue
+            kept.append(c)
+        if dropped:
+            logger.info(
+                f"[FINALIZE] Dropped {dropped} running-furniture chunk(s) "
+                f"(folio/header/masthead; F1)"
+            )
+        return kept
+
+    _CROSS_PAGE_DUPE_MIN_LEN = 20
+    _CROSS_PAGE_DUPE_MIN_REPEATS = 3
+
+    def _dedup_cross_page_repeats(
+        self, chunks: List[IngestionChunk]
+    ) -> List[IngestionChunk]:
+        """Collapse exact TEXT content repeated across PAGE boundaries (F6).
+
+        Captions/headers that F1 misses because they sit in the CONTENT area (not
+        the margin) get repeated verbatim across pages (AIOS "(a) Normalized
+        throughput..." x5), as do VLM degenerate-repetition loops (the CarOK
+        class). Keep the FIRST occurrence in reading order; drop later exact
+        duplicates. Requires >= 3 distinct-page occurrences and >= 20 chars so a
+        short recurring label is not collapsed.
+
+        TEXT ONLY: TABLE/FORM legitimately repeat their column-header row on every
+        page (the multi-page-table trap), and IMAGE descriptions can legitimately
+        be similar across distinct figures - both are excluded. A page-coverage
+        guard never drops the only surviving chunk on a page.
+        """
+        norm = lambda t: re.sub(r"\s+", " ", (t or "").strip()).lower()  # noqa: E731
+        page_occ: Dict[str, set] = {}
+        for c in chunks:
+            if c.modality != Modality.TEXT:
+                continue
+            content = (c.content or "").strip()
+            if len(content) < self._CROSS_PAGE_DUPE_MIN_LEN:
+                continue
+            page_occ.setdefault(norm(content), set()).add(
+                c.metadata.page_number if c.metadata else None
+            )
+        repeated = {
+            n
+            for n, pgs in page_occ.items()
+            if len(pgs) >= self._CROSS_PAGE_DUPE_MIN_REPEATS
+        }
+        if not repeated:
+            return chunks
+
+        # Which chunks are drop CANDIDATES (a repeated content, not its first
+        # occurrence). First occurrence is always kept. id(chunk) is a safe
+        # identity key (chunks held alive in `chunks` for this scope; review #5).
+        seen: set = set()
+        candidate_ids: set = set()
+        for c in chunks:
+            if c.modality != Modality.TEXT:
+                continue
+            content = (c.content or "").strip()
+            n = norm(content)
+            if n not in repeated:
+                continue
+            if n in seen:
+                candidate_ids.add(id(c))  # a later duplicate
+            else:
+                seen.add(n)
+        if not candidate_ids:
+            return chunks
+        pages_with_other = {
+            c.metadata.page_number
+            for c in chunks
+            if id(c) not in candidate_ids and c.metadata and c.metadata.page_number
+        }
+        kept: List[IngestionChunk] = []
+        dropped = 0
+        for c in chunks:
+            pg = c.metadata.page_number if c.metadata else None
+            if id(c) in candidate_ids and pg in pages_with_other:
+                dropped += 1
+                continue
+            kept.append(c)
+        if dropped:
+            logger.info(
+                f"[FINALIZE] Dropped {dropped} cross-page duplicate TEXT chunk(s) "
+                f"(captions/headers/VLM-loop; F6)"
+            )
+        return kept
+
     def _enrich_asset_ref_from_disk(self, chunk: IngestionChunk) -> None:
         """Populate missing asset metadata (width/height/file size) from saved file."""
         asset_ref = getattr(chunk, "asset_ref", None)
@@ -2203,6 +2374,16 @@ class BatchProcessor:
             # Drop/repair empty-content TABLE chunks (no markdown to retrieve),
             # with a page-coverage guard so they cannot manufacture MISSING_PAGES.
             export_chunks = self._promote_or_drop_empty_tables(export_chunks)
+
+            # Drop running-header/footer/folio furniture (retrieval noise that
+            # passes the structural gates). PLAN_GATE_QUALITY_V1 F1. Runs last in
+            # the hygiene sequence so its page-coverage guard sees the final set.
+            export_chunks = self._filter_running_furniture(export_chunks)
+
+            # Collapse exact TEXT repeated across page boundaries (captions/
+            # headers F1 missed in the content area; VLM repetition loops).
+            # PLAN_GATE_QUALITY_V1 F6. TEXT only (TABLE/FORM repeat headers).
+            export_chunks = self._dedup_cross_page_repeats(export_chunks)
 
             # V3.0 Phase A Step 5: canonical heading propagation + vision-aided
             # front-matter detection are STRIPPED — the UIR chunker carries

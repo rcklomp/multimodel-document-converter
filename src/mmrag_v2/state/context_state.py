@@ -216,6 +216,31 @@ def is_valid_heading(text: str) -> bool:
     if not any(c.isalpha() for c in text):
         return False
 
+    # F3 (PLAN_GATE_QUALITY_V1) heading sanity: reject extracted furniture/garble
+    # the layout model labels a "title".
+    # URL / email / mastheads (subscription/shop lines: "SCAN THE QR CODE ...
+    # shop.keypubliking.com/casubs", "editor@...com", "www.Key.Aero").
+    # A bare domain must carry a PATH ("domain.com/...") to fire, so a technical
+    # heading like "ASP.NET Core" / "asp.net Core" (a domain-shaped token with NO
+    # path) is not false-rejected (review #2). Every audit masthead has
+    # http/www/@/path; 5.1-style numbered headings have no domain TLD. NB: keep
+    # this TLD set in sync with `batch_processor._FURNITURE_MASTHEAD_RE` (F1).
+    if _re.search(
+        r"https?://|www\.|@[\w.-]+\.[A-Za-z]{2,}"
+        r"|\b[\w.-]+\.(?:com|org|net|aero|edu|gov)/",
+        text,
+        _re.IGNORECASE,
+    ):
+        return False
+    # Mixed-script garble: a CJK glyph (U+4E00-U+9FFF) adjacent to a Latin letter
+    # within one token (a hallucinated CJK-prefixed garble heading like the
+    # crucible's CJK case). ASSUMES a Latin-script corpus (review #1): a
+    # legitimately bilingual heading (e.g. "ABC\u516c\u53f8") would also be rejected. The
+    # current corpus is Latin (EN/DE/NL); revisit / gate on document language
+    # before CJK content (OmniDocBench) flows through this validator.
+    if _re.search("[\u4e00-\u9fff][A-Za-z]|[A-Za-z][\u4e00-\u9fff]", text):
+        return False
+
     return True
 
 

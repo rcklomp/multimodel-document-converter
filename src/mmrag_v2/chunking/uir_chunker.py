@@ -630,6 +630,22 @@ def _table_element_to_uirchunk(
     )
 
 
+def _fence_code(content: str) -> str:
+    """Wrap code in a Markdown fence (idempotent), engine-agnostically (F4).
+
+    Downstream generation models rely on explicit ```...``` boundaries to switch
+    from prose to syntax. The MinerU adapter fences its code; the VLM-promoted
+    code lane did not, so mixed-route docs had inconsistent code formatting. This
+    chunker-level fence covers BOTH engines: indentation INSIDE is preserved
+    verbatim (only surrounding blank lines are trimmed), and already-fenced (the
+    MinerU lane) or empty content is returned unchanged.
+    """
+    body = content.strip("\n")
+    if not body.strip() or body.lstrip().startswith("```"):
+        return content
+    return "```\n" + body + "\n```"
+
+
 def _code_element_to_uirchunk(
     element: Element,
     page: UniversalPage,
@@ -638,15 +654,16 @@ def _code_element_to_uirchunk(
 ) -> UIRChunk:
     """Convert a CODE Element to a UIRChunk.
 
-    Content is preserved VERBATIM (no strip, no whitespace normalization) so
-    code indentation survives - the whole reason vision-native handles code
-    instead of letting it fall back to Docling.
+    Indentation is preserved VERBATIM (no per-line strip/normalization) so code
+    structure survives - the whole reason vision-native handles code. The body is
+    Markdown-fenced engine-agnostically (F4); the fence is idempotent so the
+    already-fenced MinerU lane is unaffected.
     """
     bbox = _element_bbox_list(element)
     pw, ph = _page_dims_px(page)
     return UIRChunk(
         modality=Modality.CODE,
-        content=element.content or "",
+        content=_fence_code(element.content or ""),
         locator=Locator(
             type=LocatorType.BBOX,
             bbox=bbox,
