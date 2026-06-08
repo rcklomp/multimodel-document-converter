@@ -8397,7 +8397,12 @@ class BatchProcessor:
         never reach the JSONL. The R3 gate metric defends the same fact
         independently at AUDIT time (``scripts/_code_quality._duplicates_primary``)
         so files already on disk, or any other producer's output, are still
-        scored correctly. Two layers, one domain fact — keep them consistent.
+        scored correctly. Two layers, one domain fact — keep them consistent. The
+        two use DIFFERENT algorithms by design (this: token-overlap; audit:
+        substring-window), so they need not agree on every edge case; the shared
+        contract (both must catch the canonical recovery-duplicate, and keep a
+        VLM-dropped-page rescue) is enforced by
+        ``tests/test_dual_layer_recovery_dedup.py`` (PR #4 Finding 4 follow-up).
         """
         overlap_floor = 0.85
 

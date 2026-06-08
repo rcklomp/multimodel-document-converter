@@ -168,7 +168,11 @@ def _duplicates_primary(norm: str, primary: List[str], window: int = 40) -> bool
     DUAL-LAYER NOTE: the production pipeline also drops these at extraction time
     (``BatchProcessor._apply_recovery_vs_primary_dedup``). This is the AUDIT-time
     backstop so files already on disk, or any other producer's output, are scored
-    correctly regardless. Two layers, one domain fact — keep them consistent.
+    correctly regardless. Two layers, one domain fact — keep them consistent. The
+    two use DIFFERENT algorithms by design (this: substring-window; production:
+    token-overlap), so they are not required to agree on every edge case; the
+    shared contract (both must catch the canonical recovery-duplicate) is enforced
+    by ``tests/test_dual_layer_recovery_dedup.py`` (PR #4 Finding 4 follow-up).
     """
     if not norm:
         return False
