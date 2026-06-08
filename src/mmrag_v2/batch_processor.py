@@ -1164,7 +1164,11 @@ class BatchProcessor:
         return kept
 
     # Running-furniture filter (PLAN_GATE_QUALITY_V1 F1). Folio/masthead detector.
-    _FURNITURE_MASTHEAD_RE = re.compile(r"https?://|www\.|\.com\b|\.aero\b|\.org\b", re.I)
+    # TLD set kept in sync with context_state.is_valid_heading (F3); F1 needs no
+    # path requirement because a folio chunk IS the standalone masthead.
+    _FURNITURE_MASTHEAD_RE = re.compile(
+        r"https?://|www\.|\.(?:com|org|net|aero|edu|gov)\b", re.I
+    )
     _FURNITURE_MAX_CHARS = 70
     _FURNITURE_TOP_BAND = 80  # bbox y1 < 80 -> top ~8% of the [0,1000] page
     _FURNITURE_BOTTOM_BAND = 920  # bbox y0 > 920 -> bottom ~8%
@@ -1199,6 +1203,9 @@ class BatchProcessor:
             return re.sub(r"\d+", "#", re.sub(r"\s+", " ", text.strip())).lower()
 
         # Pass 1: collect band-positioned short chunks + digit-normalized repeats.
+        # id(chunk) is a safe identity key here: every chunk is held alive in
+        # `chunks` for this method's lifetime, so no GC/id-reuse window exists
+        # (review #5). Do not lift these sets across a generator boundary.
         norm_pages: Dict[str, set] = {}
         band: Dict[int, str] = {}
         for c in chunks:
@@ -1290,7 +1297,8 @@ class BatchProcessor:
             return chunks
 
         # Which chunks are drop CANDIDATES (a repeated content, not its first
-        # occurrence). First occurrence is always kept.
+        # occurrence). First occurrence is always kept. id(chunk) is a safe
+        # identity key (chunks held alive in `chunks` for this scope; review #5).
         seen: set = set()
         candidate_ids: set = set()
         for c in chunks:

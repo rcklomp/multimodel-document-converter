@@ -36,7 +36,24 @@ KEEP = [
     "What Is an AI Agent?",
     "KREATIVE AKTFOTOGRAFIE",
     "Durchgangige Prozesskette von der Spezifikation bis zum Test",
+    # Tech headings: domain-shaped tokens with NO path must NOT be rejected
+    # (review #2 - the bare-domain rule requires a path now).
+    "ASP.NET Core",
+    "asp.net Core",
+    "Node.js Internals",
 ]
+
+
+def test_masthead_with_path_still_rejected():
+    # The audit mastheads carry a path/www/@ and must still be rejected, so the
+    # #2 path-requirement did not open a hole.
+    for h in [
+        "SCAN THE QR CODE TO ORDER ... shop.keypubliking.com/casubs",
+        "Order from our online shop... shop.keypublishing.com/a400matlas",
+        "www.Key.Aero",
+        "editor@combataircraftjournal.com",
+    ]:
+        assert not is_valid_heading(h), f"should reject: {h!r}"
 
 
 def test_is_valid_heading_rejects_garbage():
@@ -68,10 +85,11 @@ def test_heading_sanity_metric_counts_garbage():
     qa = _load_qa_sem()
     rows = [
         _chunk("THE BOY WHO LIVED"),  # ok
-        _chunk("shop.keypubliking.com"),  # url
+        _chunk("shop.keypubliking.com/casubs"),  # masthead url (with path, #2)
         _chunk("合DANCGING-WIITH"),  # cjk garble
         _chunk("36 | Chapter 2"),  # folio-shaped
         _chunk("Introduction"),  # ok
+        _chunk("ASP.NET Core"),  # tech heading, must NOT be counted (#2)
     ]
     assert qa.count_insane_headings(rows) == 3
 

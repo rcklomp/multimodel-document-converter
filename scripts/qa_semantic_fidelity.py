@@ -100,10 +100,16 @@ def is_markdown_table(content: str) -> bool:
     return any(re.search(r"\|\s*-{2,}", ln) for ln in lines[1:3])
 
 
-_FURNITURE_MASTHEAD_RE = re.compile(r"https?://|www\.|\.com\b|\.aero\b|\.org\b", re.I)
+# Mirrors of the production heuristics (kept in sync): F1 furniture masthead
+# (batch_processor._FURNITURE_MASTHEAD_RE) and F3 heading sanity
+# (context_state.is_valid_heading). The F3 bare-domain requires a path so tech
+# headings ("ASP.NET Core") are not flagged (review #2).
+_FURNITURE_MASTHEAD_RE = re.compile(
+    r"https?://|www\.|\.(?:com|org|net|aero|edu|gov)\b", re.I
+)
 _INSANE_HEADING_RE = re.compile(
     r"https?://|www\.|@[\w.-]+\.[A-Za-z]{2,}"
-    r"|\b[\w-]+\.(?:com|org|net|aero|edu|gov)\b",
+    r"|\b[\w.-]+\.(?:com|org|net|aero|edu|gov)/",
     re.I,
 )
 _CJK_LATIN_MIX_RE = re.compile("[\u4e00-\u9fff][A-Za-z]|[A-Za-z][\u4e00-\u9fff]")
@@ -176,7 +182,14 @@ def count_blank_images(images: List[Dict[str, Any]], output_dir: Path) -> int:
 def count_cross_page_dupes(texts: List[Dict[str, Any]]) -> int:
     """F6 regression net: EXCESS exact-duplicate TEXT chunks repeated across page
     boundaries (captions/headers/VLM loops). Counts occurrences beyond the first
-    of any content >= 20 chars appearing on >= 3 distinct pages. TEXT only."""
+    of any content >= 20 chars appearing on >= 3 distinct pages. TEXT only.
+
+    NB (review #4): this counts ALL excess occurrences, whereas the production
+    fix (`_dedup_cross_page_repeats`) KEEPS a duplicate when dropping it would
+    orphan its page (the page-coverage guard). So on such a doc the metric can
+    read slightly > 0 while the fix behaved correctly - this is expected and is
+    why the default threshold is 0.03, not 0. Do not "fix" a small residual.
+    """
     page_occ: Dict[str, set] = {}
     total: Dict[str, int] = {}
     for r in texts:
