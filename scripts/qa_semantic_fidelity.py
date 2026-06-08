@@ -173,6 +173,26 @@ def count_blank_images(images: List[Dict[str, Any]], output_dir: Path) -> int:
     return n
 
 
+def count_cross_page_dupes(texts: List[Dict[str, Any]]) -> int:
+    """F6 regression net: EXCESS exact-duplicate TEXT chunks repeated across page
+    boundaries (captions/headers/VLM loops). Counts occurrences beyond the first
+    of any content >= 20 chars appearing on >= 3 distinct pages. TEXT only."""
+    page_occ: Dict[str, set] = {}
+    total: Dict[str, int] = {}
+    for r in texts:
+        content = (r.get("content") or "").strip()
+        if len(content) < 20:
+            continue
+        n = re.sub(r"\s+", " ", content).lower()
+        page_occ.setdefault(n, set()).add(
+            (r.get("metadata") or {}).get("page_number")
+        )
+        total[n] = total.get(n, 0) + 1
+    return sum(
+        total[n] - 1 for n, pgs in page_occ.items() if len(pgs) >= 3
+    )
+
+
 def count_running_furniture(texts: List[Dict[str, Any]]) -> int:
     """Count running-header/footer/folio furniture in the FINAL output.
 
@@ -218,6 +238,7 @@ def main() -> int:
     parser.add_argument("--max-heading-sanity-ratio", type=float, default=0.02)
     parser.add_argument("--max-non-visual-image-ratio", type=float, default=0.05)
     parser.add_argument("--max-blank-image-ratio", type=float, default=0.02)
+    parser.add_argument("--max-cross-page-dupe-ratio", type=float, default=0.03)
     args = parser.parse_args()
 
     rows: List[Dict[str, Any]] = []
@@ -307,6 +328,10 @@ def main() -> int:
     blank_images = count_blank_images(images, args.ingestion_jsonl.parent)
     blank_image_ratio = (blank_images / len(images)) if images else 0.0
 
+    # F6: excess cross-page duplicate TEXT chunks (captions/headers/VLM loops).
+    cross_page_dupes = count_cross_page_dupes(texts)
+    cross_page_dupe_ratio = (cross_page_dupes / len(texts)) if texts else 0.0
+
     print(
         f"images={len(images)} image_placeholder_ratio={image_placeholder_ratio:.4f} "
         f"image_description_coverage={image_description_coverage:.4f}"
@@ -337,6 +362,10 @@ def main() -> int:
         f"non_visual_images={non_visual_images} "
         f"non_visual_image_ratio={non_visual_image_ratio:.4f} "
         f"blank_images={blank_images} blank_image_ratio={blank_image_ratio:.4f}"
+    )
+    print(
+        f"cross_page_dupes={cross_page_dupes} "
+        f"cross_page_dupe_ratio={cross_page_dupe_ratio:.4f}"
     )
 
     fails: List[str] = []
@@ -402,6 +431,11 @@ def main() -> int:
         fails.append(
             f"blank_image_ratio={blank_image_ratio:.3f} "
             f"(>{args.max_blank_image_ratio:.2f})"
+        )
+    if cross_page_dupe_ratio > args.max_cross_page_dupe_ratio:
+        fails.append(
+            f"cross_page_dupe_ratio={cross_page_dupe_ratio:.3f} "
+            f"(>{args.max_cross_page_dupe_ratio:.2f})"
         )
 
     if fails:

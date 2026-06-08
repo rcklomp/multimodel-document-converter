@@ -1250,6 +1250,82 @@ class BatchProcessor:
             )
         return kept
 
+    _CROSS_PAGE_DUPE_MIN_LEN = 20
+    _CROSS_PAGE_DUPE_MIN_REPEATS = 3
+
+    def _dedup_cross_page_repeats(
+        self, chunks: List[IngestionChunk]
+    ) -> List[IngestionChunk]:
+        """Collapse exact TEXT content repeated across PAGE boundaries (F6).
+
+        Captions/headers that F1 misses because they sit in the CONTENT area (not
+        the margin) get repeated verbatim across pages (AIOS "(a) Normalized
+        throughput..." x5), as do VLM degenerate-repetition loops (the CarOK
+        class). Keep the FIRST occurrence in reading order; drop later exact
+        duplicates. Requires >= 3 distinct-page occurrences and >= 20 chars so a
+        short recurring label is not collapsed.
+
+        TEXT ONLY: TABLE/FORM legitimately repeat their column-header row on every
+        page (the multi-page-table trap), and IMAGE descriptions can legitimately
+        be similar across distinct figures - both are excluded. A page-coverage
+        guard never drops the only surviving chunk on a page.
+        """
+        norm = lambda t: re.sub(r"\s+", " ", (t or "").strip()).lower()  # noqa: E731
+        page_occ: Dict[str, set] = {}
+        for c in chunks:
+            if c.modality != Modality.TEXT:
+                continue
+            content = (c.content or "").strip()
+            if len(content) < self._CROSS_PAGE_DUPE_MIN_LEN:
+                continue
+            page_occ.setdefault(norm(content), set()).add(
+                c.metadata.page_number if c.metadata else None
+            )
+        repeated = {
+            n
+            for n, pgs in page_occ.items()
+            if len(pgs) >= self._CROSS_PAGE_DUPE_MIN_REPEATS
+        }
+        if not repeated:
+            return chunks
+
+        # Which chunks are drop CANDIDATES (a repeated content, not its first
+        # occurrence). First occurrence is always kept.
+        seen: set = set()
+        candidate_ids: set = set()
+        for c in chunks:
+            if c.modality != Modality.TEXT:
+                continue
+            content = (c.content or "").strip()
+            n = norm(content)
+            if n not in repeated:
+                continue
+            if n in seen:
+                candidate_ids.add(id(c))  # a later duplicate
+            else:
+                seen.add(n)
+        if not candidate_ids:
+            return chunks
+        pages_with_other = {
+            c.metadata.page_number
+            for c in chunks
+            if id(c) not in candidate_ids and c.metadata and c.metadata.page_number
+        }
+        kept: List[IngestionChunk] = []
+        dropped = 0
+        for c in chunks:
+            pg = c.metadata.page_number if c.metadata else None
+            if id(c) in candidate_ids and pg in pages_with_other:
+                dropped += 1
+                continue
+            kept.append(c)
+        if dropped:
+            logger.info(
+                f"[FINALIZE] Dropped {dropped} cross-page duplicate TEXT chunk(s) "
+                f"(captions/headers/VLM-loop; F6)"
+            )
+        return kept
+
     def _enrich_asset_ref_from_disk(self, chunk: IngestionChunk) -> None:
         """Populate missing asset metadata (width/height/file size) from saved file."""
         asset_ref = getattr(chunk, "asset_ref", None)
@@ -2295,6 +2371,11 @@ class BatchProcessor:
             # passes the structural gates). PLAN_GATE_QUALITY_V1 F1. Runs last in
             # the hygiene sequence so its page-coverage guard sees the final set.
             export_chunks = self._filter_running_furniture(export_chunks)
+
+            # Collapse exact TEXT repeated across page boundaries (captions/
+            # headers F1 missed in the content area; VLM repetition loops).
+            # PLAN_GATE_QUALITY_V1 F6. TEXT only (TABLE/FORM repeat headers).
+            export_chunks = self._dedup_cross_page_repeats(export_chunks)
 
             # V3.0 Phase A Step 5: canonical heading propagation + vision-aided
             # front-matter detection are STRIPPED — the UIR chunker carries
