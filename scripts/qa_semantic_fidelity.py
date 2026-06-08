@@ -239,6 +239,7 @@ def main() -> int:
     parser.add_argument("--max-non-visual-image-ratio", type=float, default=0.05)
     parser.add_argument("--max-blank-image-ratio", type=float, default=0.02)
     parser.add_argument("--max-cross-page-dupe-ratio", type=float, default=0.03)
+    parser.add_argument("--min-code-fence-consistency", type=float, default=1.0)
     args = parser.parse_args()
 
     rows: List[Dict[str, Any]] = []
@@ -332,6 +333,13 @@ def main() -> int:
     cross_page_dupes = count_cross_page_dupes(texts)
     cross_page_dupe_ratio = (cross_page_dupes / len(texts)) if texts else 0.0
 
+    # F4: modality=code chunks must be Markdown-fenced (engine-agnostic parity).
+    code_chunks = [r for r in rows if r.get("modality") == "code"]
+    code_fenced = sum(
+        1 for r in code_chunks if (r.get("content") or "").lstrip().startswith("```")
+    )
+    code_fence_consistency = (code_fenced / len(code_chunks)) if code_chunks else 1.0
+
     print(
         f"images={len(images)} image_placeholder_ratio={image_placeholder_ratio:.4f} "
         f"image_description_coverage={image_description_coverage:.4f}"
@@ -366,6 +374,10 @@ def main() -> int:
     print(
         f"cross_page_dupes={cross_page_dupes} "
         f"cross_page_dupe_ratio={cross_page_dupe_ratio:.4f}"
+    )
+    print(
+        f"code_chunks={len(code_chunks)} code_fenced={code_fenced} "
+        f"code_fence_consistency={code_fence_consistency:.4f}"
     )
 
     fails: List[str] = []
@@ -436,6 +448,11 @@ def main() -> int:
         fails.append(
             f"cross_page_dupe_ratio={cross_page_dupe_ratio:.3f} "
             f"(>{args.max_cross_page_dupe_ratio:.2f})"
+        )
+    if code_chunks and code_fence_consistency < args.min_code_fence_consistency:
+        fails.append(
+            f"code_fence_consistency={code_fence_consistency:.3f} "
+            f"(<{args.min_code_fence_consistency:.2f})"
         )
 
     if fails:
