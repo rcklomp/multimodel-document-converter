@@ -375,6 +375,29 @@ def _enrich_one(
         md["vision_provider_used"] = _CLOUD_MODEL
         return rec, False, DetailRetryResult()
 
+    # F7 (PLAN_GATE_QUALITY_V1) pre-flight blank check, BEFORE the VLM call: a
+    # deterministic low-information asset is not worth a VLM round-trip and, worse,
+    # an 8B VLM hallucinates content on a blank (the gear-on-blank-invoice case).
+    # Skip the call and mark the documented no-description state. Uses the shared
+    # blank definition (luminance) from the asset materializer.
+    try:
+        from PIL import ImageStat
+        from mmrag_v2.universal.asset_materializer import _is_low_information
+
+        _stat = ImageStat.Stat(image.convert("L"))
+        if _is_low_information(_stat.mean[0], _stat.stddev[0]):
+            logger.info(
+                "Chunk %s asset %s is blank/low-info; skipping VLM (F7 pre-flight)",
+                rec.get("chunk_id"),
+                asset_path,
+            )
+            md["vision_status"] = "hard_fallback"
+            md["vision_error"] = "blank_asset_skipped_preflight"
+            md["vision_provider_used"] = _CLOUD_MODEL
+            return rec, False, DetailRetryResult()
+    except Exception:  # pragma: no cover - never let the pre-flight abort enrichment
+        pass
+
     page_number = md.get("page_number") or rec.get("page_number") or 1
     semantic_context = rec.get("semantic_context") or {}
     prev_text = semantic_context.get("prev_text_snippet") or ""
@@ -484,6 +507,64 @@ def _retry_existing_complete_short_description(
     return rec, _maybe_retry_for_detail(rec, vision_manager, image, output_dir)
 
 
+_NON_VISUAL_SENTINEL = "no distinct non-text visuals"
+
+
+def _drop_non_visual_images(jsonl_path: Path) -> int:
+    """F2 (PLAN_GATE_QUALITY_V1): drop image chunks the VLM declared non-visual.
+
+    A text region misclassified as an image is described "...no distinct non-text
+    visuals". The description arrives post-conversion, so the conversion-time
+    `_filter_no_visual_images` misses it. This post-enrichment pass drops them,
+    behind a page-coverage guard (never the only chunk on a page). Atomic rewrite.
+    Returns the number dropped.
+    """
+
+    def _is_chunk(r: Dict[str, Any]) -> bool:
+        ot = r.get("object_type")
+        return ot is None or ot == "chunk"
+
+    def _page(r: Dict[str, Any]):
+        return (r.get("metadata") or {}).get("page_number") or r.get("page_number")
+
+    recs = list(_iter_chunks(jsonl_path))
+    drop_idx = {
+        i
+        for i, r in enumerate(recs)
+        if r.get("modality") == "image"
+        and _NON_VISUAL_SENTINEL
+        in (
+            (r.get("metadata") or {}).get("visual_description")
+            or r.get("visual_description")
+            or ""
+        ).lower()
+    }
+    if not drop_idx:
+        return 0
+    pages_with_other = {
+        _page(r)
+        for i, r in enumerate(recs)
+        if i not in drop_idx and _is_chunk(r) and _page(r) is not None
+    }
+    survivors = [
+        r
+        for i, r in enumerate(recs)
+        if not (i in drop_idx and _page(r) in pages_with_other)
+    ]
+    dropped = len(recs) - len(survivors)
+    if not dropped:
+        return 0
+    tmp = jsonl_path.with_suffix(jsonl_path.suffix + ".f2tmp")
+    with tmp.open("w") as fh:
+        for r in survivors:
+            fh.write(json.dumps(r) + "\n")
+    os.replace(tmp, jsonl_path)
+    logger.info(
+        "%s: F2 dropped %d non-visual (text-as-image) chunk(s)", jsonl_path, dropped
+    )
+    return dropped
+
+
 def _enrich_jsonl(
     jsonl_path: Path,
     vision_manager: Any,
@@ -585,6 +666,11 @@ def _enrich_jsonl(
         raise
 
     os.replace(tmp_path, jsonl_path)
+
+    # F2: drop text-as-image chunks the VLM declared non-visual (post-enrichment,
+    # since the description only exists now). Page-coverage guarded.
+    _drop_non_visual_images(jsonl_path)
+
     logger.info(
         "%s: enriched=%d hard_fallback=%d detail_retry=%d resolved=%d retry_hard_fallback=%d",
         jsonl_path,

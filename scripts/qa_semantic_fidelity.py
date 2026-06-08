@@ -131,6 +131,48 @@ def count_insane_headings(texts: List[Dict[str, Any]]) -> int:
     return n
 
 
+_NON_VISUAL_SENTINEL = "no distinct non-text visuals"
+
+
+def count_non_visual_images(images: List[Dict[str, Any]]) -> int:
+    """F2 regression net: image chunks the VLM declared non-visual (text-as-image)."""
+    return sum(
+        1
+        for r in images
+        if _NON_VISUAL_SENTINEL
+        in (
+            (r.get("metadata") or {}).get("visual_description")
+            or r.get("visual_description")
+            or ""
+        ).lower()
+    )
+
+
+def count_blank_images(images: List[Dict[str, Any]], output_dir: Path) -> int:
+    """F7 regression net: image chunks whose asset is deterministically blank/
+    low-information (independent of the VLM description). Best-effort I/O."""
+    try:
+        from PIL import Image, ImageStat
+        from mmrag_v2.universal.asset_materializer import _is_low_information
+    except Exception:
+        return 0
+    n = 0
+    for r in images:
+        fp = (r.get("asset_ref") or {}).get("file_path")
+        if not fp:
+            continue
+        p = output_dir / fp
+        if not p.exists():
+            continue
+        try:
+            st = ImageStat.Stat(Image.open(p).convert("L"))
+            if _is_low_information(st.mean[0], st.stddev[0]):
+                n += 1
+        except Exception:
+            pass
+    return n
+
+
 def count_running_furniture(texts: List[Dict[str, Any]]) -> int:
     """Count running-header/footer/folio furniture in the FINAL output.
 
@@ -174,6 +216,8 @@ def main() -> int:
     parser.add_argument("--max-cross-page-label-anchor-risk", type=float, default=0.10)
     parser.add_argument("--max-furniture-chunk-ratio", type=float, default=0.05)
     parser.add_argument("--max-heading-sanity-ratio", type=float, default=0.02)
+    parser.add_argument("--max-non-visual-image-ratio", type=float, default=0.05)
+    parser.add_argument("--max-blank-image-ratio", type=float, default=0.02)
     args = parser.parse_args()
 
     rows: List[Dict[str, Any]] = []
@@ -257,6 +301,12 @@ def main() -> int:
         insane_headings / len(texts_with_heading) if texts_with_heading else 0.0
     )
 
+    # F2/F7: text-as-image survivors + deterministically-blank image assets.
+    non_visual_images = count_non_visual_images(images)
+    non_visual_image_ratio = (non_visual_images / len(images)) if images else 0.0
+    blank_images = count_blank_images(images, args.ingestion_jsonl.parent)
+    blank_image_ratio = (blank_images / len(images)) if images else 0.0
+
     print(
         f"images={len(images)} image_placeholder_ratio={image_placeholder_ratio:.4f} "
         f"image_description_coverage={image_description_coverage:.4f}"
@@ -282,6 +332,11 @@ def main() -> int:
     print(
         f"insane_headings={insane_headings} "
         f"heading_sanity_ratio={heading_sanity_ratio:.4f}"
+    )
+    print(
+        f"non_visual_images={non_visual_images} "
+        f"non_visual_image_ratio={non_visual_image_ratio:.4f} "
+        f"blank_images={blank_images} blank_image_ratio={blank_image_ratio:.4f}"
     )
 
     fails: List[str] = []
@@ -337,6 +392,16 @@ def main() -> int:
         fails.append(
             f"heading_sanity_ratio={heading_sanity_ratio:.3f} "
             f"(>{args.max_heading_sanity_ratio:.2f})"
+        )
+    if non_visual_image_ratio > args.max_non_visual_image_ratio:
+        fails.append(
+            f"non_visual_image_ratio={non_visual_image_ratio:.3f} "
+            f"(>{args.max_non_visual_image_ratio:.2f})"
+        )
+    if blank_image_ratio > args.max_blank_image_ratio:
+        fails.append(
+            f"blank_image_ratio={blank_image_ratio:.3f} "
+            f"(>{args.max_blank_image_ratio:.2f})"
         )
 
     if fails:
