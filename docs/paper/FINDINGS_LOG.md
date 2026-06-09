@@ -1077,17 +1077,22 @@ mistaken for a model verdict.
 | granite | — | — | — | — | NO (server can't load) |
 
 **Why three engines are invalid (diagnosed directly, not assumed):**
-- **mineru / hybrid — M5 mlx MinerU2.5 serving is degraded.** 20/44 pages produced
-  ZERO chunks. Direct engine probes: the MinerU *layout* step returns rich regions
-  (header/table/text/title/list, matching GT) but the *content* step returns EMPTY
-  text per region; other pages 500 with `Generation failed: [broadcast_shapes]
-  Shapes (3,14,68,64) and (...)` — a tensor-shape bug inside the model forward pass
-  on the server (echoes the earlier "mlx-engine image_token_id" class of bug). The
-  pages are not blank: qwen3vl produced text on pages mineru returned empty. This is
-  an INFRASTRUCTURE fault on the M5 box, not MinerU2.5's fidelity. MinerU2.5 passed
-  6/6 golden docs on 2026-06-05 via a working server — so the model is fine; the
-  current M5 serving is not. **Action: fix/restart the M5 MinerU2.5 serving (or run
-  MinerU via a GX10 vLLM endpoint) and re-run before drawing any MinerU conclusion.**
+- **mineru / hybrid — M5 mlx MinerU2.5 serving throws intermittent 500s.** 20/44
+  pages produced ZERO chunks. CORRECTION (first probe was misread): an earlier note
+  here said the "content-step returns empty." That was a `getattr(e, "text")` bug in
+  the probe — `Element` stores text in `.content`, so EVERY page read as empty.
+  Reading `.content`: MinerU's content step WORKS (a page I had called empty has
+  1706 chars, "Top10 Best Seller Books..."). The real fault is INTERMITTENT
+  `Generation failed: [broadcast_shapes] Shapes (6,14,108,64) and (1,1,38,64)
+  cannot be broadcast` 500s from MinerU's two-step `batch_predict` (it sends several
+  different-sized block crops in one batch; the mlx server cannot broadcast them).
+  The SAME page returned 1706 chars on one call and 500'd on the next — non-
+  deterministic, batch-shape dependent. When the 500 fires on a single-page doc, the
+  whole extract raises and the doc → 0 chunks. Infrastructure, not MinerU2.5 fidelity
+  (passed 6/6 golden 2026-06-05). **Likely client-side mitigation: force batch
+  size 1 in mineru_vl_utils so block crops are never batched together. Until then,
+  the fail-closed fallback (below) recovers these pages offline. Re-run the bake-off
+  after either fix before drawing a MinerU conclusion.**
 - **paddleocr — engine-contract mismatch.** `VlmNativeEngine` requires a STRICT-JSON
   response (`json.loads(raw)`); PaddleOCR-VL returns plain Markdown (confirmed by a
   raw chat probe), so every page raises `unrepairable VLM JSON` → 0 chunks. PaddleOCR
@@ -1111,6 +1116,42 @@ mineru/paddle/granite "worked"; the pipeline integration is where two of them br
 
 Bake-off artifacts: `~/omnidocbench-eval/bakeoff/<engine>/{preds,score}`. Harness +
 this finding committed; the MinerU re-run is parked on the M5 serving fix.
+
+---
+
+## 2026-06-09 — Fail-closed extraction: reliability stops depending on the GPU server  `[Architecture][Lessons]`
+
+The repeated "disappointing AGAIN" failures share ONE root cause that the bake-off
+made undeniable: `mmrag_v3.extract()` trusted a remote multi-model GPU server and
+had NO safety net. When the M5 MinerU server threw an intermittent `broadcast_shapes`
+500, `batch_processor` wrote an empty document — `failed=0`, zero chunks, no error.
+Silent data loss wired to the most fragile component. The fix is architectural, not
+another model swap.
+
+**Change (`src/mmrag_v3/processor.py`):** extraction is now FAIL-CLOSED. Whatever the
+route, if the selected engine RAISES (server 500, JSON-contract mismatch, model load
+fail) or returns a page that found TEXT regions but extracted no content, that page is
+recovered from the offline `DoclingFastEngine` — keeping the primary's good pages
+(per-page swap, not whole-doc). The served lane + fallback outcome are stamped on
+`doc.metadata.extra` (`extraction_engine`, `extraction_fallback`,
+`extraction_degraded_pages`, `extraction_recovered_pages`) and logged at WARNING.
+Healthy extractions pay nothing (docling is never constructed). The VLM/MinerU
+retrieval win is kept WHEN the server is healthy; when it is not, the pipeline degrades
+gracefully and loudly instead of silently emitting empty chunks. 6 new tests
+(`tests/test_v3_fail_closed.py`); routing tests updated to assert the provenance stamp;
+full suite 1568 passed / 0 regressions; ruff clean; SMOKE_PRODUCTION_PASS.
+
+**Design stance:** the benchmark is now the decision oracle. The offline floor is
+MEASURED (full-755: text ED 0.301 / TEDS 0.563), so any "smart" lane must beat it by a
+margin worth its failure surface or it gets cut (benchmark-gated prune — start with the
+paddle/granite stretch engines and the monospace-routing hybrid). Smart-when-healthy,
+reliable-always.
+
+**Lesson:** when a pipeline keeps "disappointing," check whether reliability is wired to
+its most fragile component with no fallback. The fix is a safety net + provenance, not
+chasing the fragile component to perfection. Also: a `getattr(e, "text")` typo (the field
+is `.content`) sent me down a wrong "empty content-step" diagnosis for an hour — verify
+the attribute exists before building a theory on its value.
 
 ---
 
