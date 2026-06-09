@@ -23,7 +23,16 @@ import logging
 import os
 from typing import Union
 
-from mmrag_v2.universal.intermediate import ElementType, UniversalDocument
+from mmrag_v2.universal.intermediate import (
+    BoundingBox,
+    DocumentMetadata,
+    Element,
+    ElementType,
+    ExtractionMethod,
+    PageClassification,
+    UniversalDocument,
+    UniversalPage,
+)
 
 from .engines.docling_fast import DoclingFastEngine
 from .engines.mineru_native import MineruNativeEngine
@@ -132,6 +141,67 @@ def _stamp(doc: UniversalDocument, *, engine: str, fallback=None,
     return doc
 
 
+# --- Terminal tier: PyMuPDF native text -------------------------------------
+# The last rung of the ladder. No model, no network, no GPU server — it reads the
+# PDF's own text layer. The ONLY way it fails is an unreadable file, which is a
+# true input error (raised loudly), never a silent degrade. A page with no text
+# layer (genuine scan/blank) yields an empty-but-present page: we do NOT fabricate
+# text. Guarantee: no page that HAS extractable text is ever zeroed by an
+# engine/server/network failure.
+_TERMINAL_ENGINE_NAME = "pymupdf_terminal"
+
+
+def _pymupdf_page(fdoc, page_index: int, page_number: int) -> "tuple[UniversalPage, bool]":
+    """Build a UniversalPage from one PDF page's native text. Returns (page, has_text)."""
+    fpage = fdoc[page_index]
+    rect = fpage.rect
+    dims = (int(rect.width) or 1000, int(rect.height) or 1000)
+    text = (fpage.get_text() or "").strip()
+    if not text:
+        return UniversalPage(page_number=page_number, elements=[],
+                             classification=PageClassification.SCANNED, dimensions=dims), False
+    element = Element(
+        type=ElementType.TEXT, content=text,
+        bbox=BoundingBox(x_min=0, y_min=0, x_max=1000, y_max=1000),
+        confidence=1.0, extraction_method=ExtractionMethod.NATIVE,
+        element_index=0, source_label="pymupdf_text",
+    )
+    return UniversalPage(page_number=page_number, elements=[element],
+                         classification=PageClassification.DIGITAL, dimensions=dims), True
+
+
+def _terminal_doc(path: str) -> UniversalDocument:
+    """Whole-doc terminal extraction (used when the primary AND docling both fail)."""
+    import fitz  # lazy: PyMuPDF, already a dependency of the MinerU engine
+
+    fdoc = fitz.open(path)
+    try:
+        pages = [_pymupdf_page(fdoc, i, i + 1)[0] for i in range(fdoc.page_count)]
+    finally:
+        fdoc.close()
+    return UniversalDocument(
+        doc_id=UniversalDocument.compute_doc_id(path), source_file=str(path),
+        file_type="pdf", pages=pages, metadata=DocumentMetadata(), total_pages=len(pages),
+    )
+
+
+def _terminal_recover(doc: UniversalDocument, path: str, indices: list) -> int:
+    """Swap native-text pages in for `indices` that have a text layer. Returns count."""
+    import fitz
+
+    recovered = 0
+    fdoc = fitz.open(path)
+    try:
+        for i in indices:
+            page, has_text = _pymupdf_page(fdoc, doc.pages[i].page_number - 1, doc.pages[i].page_number)
+            if has_text:
+                doc.pages[i] = page
+                recovered += 1
+    finally:
+        fdoc.close()
+    return recovered
+
+
 def extract(file_path: Union[str, "os.PathLike[str]"]) -> UniversalDocument:
     """Run the Phase C pipeline and return a v2-UIR document, FAIL-CLOSED.
 
@@ -145,12 +215,18 @@ def extract(file_path: Union[str, "os.PathLike[str]"]) -> UniversalDocument:
           ``MINERU_ENDPOINT`` is configured, else legacy ``HybridEngine``.
 
     The default route is the MinerU+Qwen-for-code hybrid (code-dense pages to Qwen,
-    the rest to MinerU). Whatever the route, extraction is FAIL-CLOSED: an engine
-    that raises, or returns a page that found text regions but no text, has that
-    page recovered from the offline ``DoclingFastEngine`` — keeping the primary's
-    good pages. The pipeline never silently emits empty chunks because a remote GPU
-    server misbehaved. The served engine, fallback, and degraded/recovered page
-    counts are stamped on ``doc.metadata.extra`` and logged.
+    the rest to MinerU). Whatever the route, extraction is FAIL-CLOSED through a
+    three-tier ladder; each tier only serves pages the tier above could not:
+
+        tier 1  selected engine (best quality, may fail/degrade)
+        tier 2  offline ``DoclingFastEngine`` (no network; may itself fail)
+        tier 3  PyMuPDF native text layer (no model/network; only an unreadable
+                file defeats it — a true input error, raised loudly)
+
+    Guarantee: no page that HAS extractable text is ever zeroed by an engine,
+    server, or network failure. A genuinely text-less page (scan/blank) stays
+    empty — we do not fabricate. The served engine, fallback tier, and degraded/
+    recovered page counts are stamped on ``doc.metadata.extra`` and logged.
     """
     path = str(file_path)
     engine_name, engine = _select_engine()
@@ -165,10 +241,20 @@ def extract(file_path: Union[str, "os.PathLike[str]"]) -> UniversalDocument:
             "extract: %s raised %s; falling back to %s for %s",
             engine_name, type(exc).__name__, _FALLBACK_ENGINE_NAME, path,
         )
-        doc = DoclingFastEngine().extract(path)
+        try:
+            doc = DoclingFastEngine().extract(path)
+            fallback = _FALLBACK_ENGINE_NAME
+        except Exception as dexc:  # noqa: BLE001 — docling can fail too; drop to terminal
+            logger.warning(
+                "extract: %s also failed (%s); using PyMuPDF terminal for %s",
+                _FALLBACK_ENGINE_NAME, type(dexc).__name__, path,
+            )
+            doc = _terminal_doc(path)
+            fallback = _TERMINAL_ENGINE_NAME
         return _stamp(
-            doc, engine=engine_name, fallback=_FALLBACK_ENGINE_NAME,
-            degraded=len(doc.pages), recovered=len(doc.pages),
+            doc, engine=engine_name, fallback=fallback,
+            degraded=len(doc.pages),
+            recovered=sum(1 for p in doc.pages if not _page_is_degenerate(p)),
             reason=f"{type(exc).__name__}: {exc}",
         )
 
@@ -195,9 +281,17 @@ def extract(file_path: Union[str, "os.PathLike[str]"]) -> UniversalDocument:
                 recovered += 1
     except Exception as exc:  # noqa: BLE001 — keep primary if docling itself fails
         logger.warning(
-            "extract: docling fallback itself failed (%s); keeping primary for %s",
+            "extract: docling fallback itself failed (%s); trying terminal for %s",
             type(exc).__name__, path,
         )
+    # 3) Terminal tier: any page neither primary nor docling could serve falls back
+    #    to the PDF's native text layer (no model, no network — cannot lose text).
+    still = [i for i in degraded if _page_is_degenerate(doc.pages[i])]
+    if still:
+        try:
+            recovered += _terminal_recover(doc, path, still)
+        except Exception as exc:  # noqa: BLE001 — terminal only fails on unreadable file
+            logger.warning("extract: PyMuPDF terminal failed (%s) for %s", type(exc).__name__, path)
     return _stamp(
         doc, engine=engine_name, fallback=_FALLBACK_ENGINE_NAME,
         degraded=len(degraded), recovered=recovered,

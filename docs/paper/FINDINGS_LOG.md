@@ -1128,18 +1128,23 @@ had NO safety net. When the M5 MinerU server threw an intermittent `broadcast_sh
 Silent data loss wired to the most fragile component. The fix is architectural, not
 another model swap.
 
-**Change (`src/mmrag_v3/processor.py`):** extraction is now FAIL-CLOSED. Whatever the
-route, if the selected engine RAISES (server 500, JSON-contract mismatch, model load
-fail) or returns a page that found TEXT regions but extracted no content, that page is
-recovered from the offline `DoclingFastEngine` — keeping the primary's good pages
-(per-page swap, not whole-doc). The served lane + fallback outcome are stamped on
-`doc.metadata.extra` (`extraction_engine`, `extraction_fallback`,
-`extraction_degraded_pages`, `extraction_recovered_pages`) and logged at WARNING.
-Healthy extractions pay nothing (docling is never constructed). The VLM/MinerU
-retrieval win is kept WHEN the server is healthy; when it is not, the pipeline degrades
-gracefully and loudly instead of silently emitting empty chunks. 6 new tests
-(`tests/test_v3_fail_closed.py`); routing tests updated to assert the provenance stamp;
-full suite 1568 passed / 0 regressions; ruff clean; SMOKE_PRODUCTION_PASS.
+**Change (`src/mmrag_v3/processor.py`):** extraction is now FAIL-CLOSED through a
+THREE-TIER ladder, each tier serving only the pages the tier above could not:
+`tier 1` selected engine (best quality) -> `tier 2` offline `DoclingFastEngine` (no
+network; may itself fail) -> `tier 3` PyMuPDF native text layer (no model, no network
+— the only thing that defeats it is an unreadable file, a true input error raised
+loudly). A page is recovered per-page (not whole-doc swap) when the engine raises or
+returns a page that found TEXT regions but no content. The served lane + outcome are
+stamped on `doc.metadata.extra` (`extraction_engine`/`extraction_fallback`/
+`extraction_degraded_pages`/`extraction_recovered_pages`) and logged at WARNING.
+Healthy extractions pay nothing. **Guarantee: no page that HAS extractable text is
+ever zeroed by an engine/server/network failure.** A genuinely text-less page
+(scan/blank) stays empty — we do NOT fabricate. Honest limit: "never fail" is not
+achievable (corrupt input, dead hardware, a true scan when OCR also fails); the
+guarantee is content-PRESERVATION, not content-from-nothing. Terminal verified on a
+real native PDF (21,934 chars across 6/6 pages). 9 tests (`tests/test_v3_fail_closed.py`,
+incl. 3 terminal); routing tests assert the provenance stamp; full suite 1571 passed /
+0 regressions; ruff clean; SMOKE_PRODUCTION_PASS.
 
 **Design stance:** the benchmark is now the decision oracle. The offline floor is
 MEASURED (full-755: text ED 0.301 / TEDS 0.563), so any "smart" lane must beat it by a

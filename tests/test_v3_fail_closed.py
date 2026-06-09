@@ -149,3 +149,53 @@ def test_docling_primary_exception_reraises(monkeypatch):
     _route(monkeypatch, primary_env="USE_DOCLING_FAST", primary=primary, docling=primary)
     with pytest.raises(RuntimeError, match="docling boom"):
         processor.extract("/d.pdf")
+
+
+# --- Terminal tier: PyMuPDF native text (the floor that cannot lose text) ----
+def _make_pdf(path, page_texts):
+    import fitz
+
+    fdoc = fitz.open()
+    for text in page_texts:
+        page = fdoc.new_page()
+        if text:
+            page.insert_text((72, 72), text)
+    fdoc.save(str(path))
+    fdoc.close()
+
+
+def test_docling_also_fails_uses_pymupdf_terminal(tmp_path, monkeypatch):
+    pdf = tmp_path / "t.pdf"
+    _make_pdf(pdf, ["terminal recovered this page"])
+    primary = _Engine(exc=RuntimeError("ServerError 500 broadcast_shapes"))
+    docling = _Engine(exc=RuntimeError("docling boom"))  # tier 2 ALSO fails
+    _route(monkeypatch, primary_env="USE_MINERU_ENGINE", primary=primary, docling=docling)
+
+    out = processor.extract(str(pdf))
+    assert "terminal recovered this page" in out.pages[0].elements[0].content
+    assert out.metadata.extra["extraction_engine"] == "mineru"
+    assert out.metadata.extra["extraction_fallback"] == "pymupdf_terminal"
+
+
+def test_terminal_recovers_per_page_text_layer(tmp_path, monkeypatch):
+    pdf = tmp_path / "t.pdf"
+    _make_pdf(pdf, ["page one native text"])
+    primary = _Engine(doc=_doc([_page(1, [_text("")])]))   # degenerate page
+    docling = _Engine(doc=_doc([_page(1, [_text("")])]))   # docling no better
+    _route(monkeypatch, primary_env="USE_MINERU_ENGINE", primary=primary, docling=docling)
+
+    out = processor.extract(str(pdf))
+    assert "page one native text" in out.pages[0].elements[0].content
+    assert out.metadata.extra["extraction_recovered_pages"] == 1
+
+
+def test_terminal_does_not_fabricate_on_blank_page(tmp_path, monkeypatch):
+    pdf = tmp_path / "blank.pdf"
+    _make_pdf(pdf, [""])  # genuinely text-less page
+    primary = _Engine(exc=RuntimeError("boom"))
+    docling = _Engine(exc=RuntimeError("boom2"))
+    _route(monkeypatch, primary_env="USE_MINERU_ENGINE", primary=primary, docling=docling)
+
+    out = processor.extract(str(pdf))
+    assert out.metadata.extra["extraction_fallback"] == "pymupdf_terminal"
+    assert out.pages[0].elements == []  # empty, NOT fabricated
