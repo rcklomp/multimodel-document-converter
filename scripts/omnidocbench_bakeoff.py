@@ -181,8 +181,24 @@ def cmd_smoke(args: argparse.Namespace) -> int:
     man = json.loads((ws / "manifest.json").read_text())
     name = man["pages"][0]["name"]
     md = ws / "preds" / f"{name}.md"
-    print(f"\n===== SMOKE {engine}: {name} =====")
+    # Smoke-GATE: a raw /v1 probe can say an engine "works" while the pipeline
+    # integration produces zero chunks (2026-06-09: MinerU empty content-step,
+    # PaddleOCR strict-JSON mismatch). Assert the pipeline actually yielded chunks
+    # end-to-end before trusting a batch -- this is the lesson, enforced.
+    ingestion = ws / "out" / name / "ingestion.jsonl"
+    n_chunks = 0
+    if ingestion.exists():
+        n_chunks = sum(
+            1 for line in ingestion.read_text(encoding="utf-8").splitlines()
+            if line.strip() and json.loads(line).get("object_type") != "ingestion_metadata"
+        )
+    print(f"\n===== SMOKE {engine}: {name} ({n_chunks} chunks) =====")
     print(md.read_text(encoding="utf-8")[:1200] if md.exists() else "(no markdown produced)")
+    if n_chunks == 0:
+        print(f"SMOKE {engine}: FAIL -- pipeline produced 0 chunks end-to-end. "
+              f"Do NOT batch this engine; diagnose the engine/server integration first.")
+        return 1
+    print(f"SMOKE {engine}: PASS ({n_chunks} chunks)")
     return rc
 
 
