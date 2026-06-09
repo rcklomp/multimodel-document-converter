@@ -26,9 +26,12 @@ REJECT = [
     "www.Key.Aero",
     # Bare-domain mastheads with NO path: the domain is the trailing token. The
     # path-only rule false-negatived these (F3's own motivating case); the
-    # position rule catches them again.
+    # position rule catches them again. Trailing punctuation must not defeat it
+    # (\W*$ widening).
     "SCAN THE QR CODE shop.keypubliking.com",
     "shop.keypubliking.com",
+    "shop.keypubliking.com.",
+    "shop.keypubliking.com!",
 ]
 
 # Real headings across the corpus that must keep passing (regression guard).

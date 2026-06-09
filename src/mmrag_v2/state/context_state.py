@@ -225,11 +225,12 @@ def is_valid_heading(text: str) -> bool:
     # has the domain-shaped token mid-phrase followed by real words ("ASP.NET
     # Core", "Visit census.gov for data"). This keys on POSITION, not merely
     # "has a path" (review: the path-only rule false-negatived F3's own bare
-    # masthead case). NB: F1's `_FURNITURE_MASTHEAD_RE` uses a deliberately
-    # NARROWER set + spatial gate; see the note there.
+    # masthead case). Trailing token = end-of-string ignoring trailing
+    # punctuation (\W*$), so "shop.keypubliking.com." is still caught. NB: F1's
+    # `_FURNITURE_MASTHEAD_RE` uses a deliberately NARROWER set + spatial gate.
     if _re.search(
         r"https?://|www\.|@[\w.-]+\.[A-Za-z]{2,}"
-        r"|\b[\w.-]+\.(?:com|org|net|aero|edu|gov)(?:/|\s*$)",
+        r"|\b[\w.-]+\.(?:com|org|net|aero|edu|gov)(?:/|\W*$)",
         text,
         _re.IGNORECASE,
     ):
