@@ -100,16 +100,17 @@ def is_markdown_table(content: str) -> bool:
     return any(re.search(r"\|\s*-{2,}", ln) for ln in lines[1:3])
 
 
-# Mirrors of the production heuristics (kept in sync): F1 furniture masthead
-# (batch_processor._FURNITURE_MASTHEAD_RE) and F3 heading sanity
-# (context_state.is_valid_heading). The F3 bare-domain requires a path so tech
-# headings ("ASP.NET Core") are not flagged (review #2).
-_FURNITURE_MASTHEAD_RE = re.compile(
-    r"https?://|www\.|\.(?:com|org|net|aero|edu|gov)\b", re.I
-)
+# Mirrors of the production heuristics (kept in sync with each producer). F1
+# furniture masthead (batch_processor._FURNITURE_MASTHEAD_RE) is deliberately
+# NARROW (magazine-folio TLDs) because it fires on a SINGLE occurrence behind a
+# spatial gate; broadening it risks dropping a bottom-margin citation. F3 heading
+# sanity (context_state.is_valid_heading) is broader and keys on POSITION (a bare
+# domain fires only as the trailing token or with a path) so a masthead heading
+# is caught while "ASP.NET Core" / "Visit census.gov for data" are not.
+_FURNITURE_MASTHEAD_RE = re.compile(r"https?://|www\.|\.(?:com|aero|org)\b", re.I)
 _INSANE_HEADING_RE = re.compile(
     r"https?://|www\.|@[\w.-]+\.[A-Za-z]{2,}"
-    r"|\b[\w.-]+\.(?:com|org|net|aero|edu|gov)/",
+    r"|\b[\w.-]+\.(?:com|org|net|aero|edu|gov)(?:/|\s*$)",
     re.I,
 )
 _CJK_LATIN_MIX_RE = re.compile("[\u4e00-\u9fff][A-Za-z]|[A-Za-z][\u4e00-\u9fff]")

@@ -1164,11 +1164,14 @@ class BatchProcessor:
         return kept
 
     # Running-furniture filter (PLAN_GATE_QUALITY_V1 F1). Folio/masthead detector.
-    # TLD set kept in sync with context_state.is_valid_heading (F3); F1 needs no
-    # path requirement because a folio chunk IS the standalone masthead.
-    _FURNITURE_MASTHEAD_RE = re.compile(
-        r"https?://|www\.|\.(?:com|org|net|aero|edu|gov)\b", re.I
-    )
+    # DELIBERATELY NARROW TLD set (magazine-folio domains): this rule fires on a
+    # SINGLE occurrence behind the spatial+length gate, so a broad set (.gov/.edu/
+    # .net) would drop a legitimate bottom-margin citation ("Source: data.census.
+    # gov") as furniture (review Finding 3). Other-TLD running headers are still
+    # caught by the cross-page repetition path. NOT the same set as F3
+    # (context_state.is_valid_heading), which is broader + position-keyed because
+    # it has no spatial signal - the two intentionally differ.
+    _FURNITURE_MASTHEAD_RE = re.compile(r"https?://|www\.|\.(?:com|aero|org)\b", re.I)
     _FURNITURE_MAX_CHARS = 70
     _FURNITURE_TOP_BAND = 80  # bbox y1 < 80 -> top ~8% of the [0,1000] page
     _FURNITURE_BOTTOM_BAND = 920  # bbox y0 > 920 -> bottom ~8%

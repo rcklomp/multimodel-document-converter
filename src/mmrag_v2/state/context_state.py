@@ -219,15 +219,17 @@ def is_valid_heading(text: str) -> bool:
     # F3 (PLAN_GATE_QUALITY_V1) heading sanity: reject extracted furniture/garble
     # the layout model labels a "title".
     # URL / email / mastheads (subscription/shop lines: "SCAN THE QR CODE ...
-    # shop.keypubliking.com/casubs", "editor@...com", "www.Key.Aero").
-    # A bare domain must carry a PATH ("domain.com/...") to fire, so a technical
-    # heading like "ASP.NET Core" / "asp.net Core" (a domain-shaped token with NO
-    # path) is not false-rejected (review #2). Every audit masthead has
-    # http/www/@/path; 5.1-style numbered headings have no domain TLD. NB: keep
-    # this TLD set in sync with `batch_processor._FURNITURE_MASTHEAD_RE` (F1).
+    # shop.keypubliking.com", "editor@...com", "www.Key.Aero"). A bare domain
+    # fires only when it is the heading's TRAILING token (end-of-string) or
+    # carries a PATH - mastheads END with the URL, whereas a technical heading
+    # has the domain-shaped token mid-phrase followed by real words ("ASP.NET
+    # Core", "Visit census.gov for data"). This keys on POSITION, not merely
+    # "has a path" (review: the path-only rule false-negatived F3's own bare
+    # masthead case). NB: F1's `_FURNITURE_MASTHEAD_RE` uses a deliberately
+    # NARROWER set + spatial gate; see the note there.
     if _re.search(
         r"https?://|www\.|@[\w.-]+\.[A-Za-z]{2,}"
-        r"|\b[\w.-]+\.(?:com|org|net|aero|edu|gov)/",
+        r"|\b[\w.-]+\.(?:com|org|net|aero|edu|gov)(?:/|\s*$)",
         text,
         _re.IGNORECASE,
     ):
