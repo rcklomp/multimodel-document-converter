@@ -294,9 +294,14 @@ Three facts override assumptions in Sections 3-5 above:
 
 ## 13. Phase 1 Execution (2026-06-09) -- extractor bake-off
 
-Status: HARNESS READY + premises verified; batch deferred behind the full-755
-baseline run (resource isolation). Harness `scripts/omnidocbench_bakeoff.py`
-(standalone, R4-clean) drives prep/smoke/run/score/report.
+Status: RAN 2026-06-09, INCONCLUSIVE — blocked by M5 serving/integration faults
+(see FINDINGS_LOG 2026-06-09 "Phase 1 extractor bake-off"). Only docling_fast and
+qwen3vl ran cleanly; mineru/hybrid invalidated by degraded M5 MinerU2.5 serving
+(empty content-step + `broadcast_shapes` 500s), paddleocr by a strict-JSON engine
+mismatch (returns Markdown), granite by a server load failure. The MinerU re-run is
+parked on a M5 serving fix (or a GX10 vLLM MinerU endpoint). Harness
+`scripts/omnidocbench_bakeoff.py` (standalone, R4-clean) drives prep/smoke/run/
+score/report and is correct — the faults are downstream of it.
 
 ### 13.1 Premises verified (M5 box 10.0.10.235:8000, `/v1/models`, 2026-06-09)
 

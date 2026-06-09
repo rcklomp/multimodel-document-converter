@@ -1054,7 +1054,63 @@ field) and verified to match GT `order` on the smoke page.
 
 **Next (Phase 1/2):** extractor bake-off (MinerU vs PaddleOCR-VL vs granite-docling
 vs Qwen3-VL on OmniDocBench) and re-run after the gate-quality F1–F7 fixes to prove
-fidelity does not regress vs this floor. Full 755-page English run pending (~8h).
+fidelity does not regress vs this floor.
+
+---
+
+## 2026-06-09 — Phase 1 extractor bake-off: INCONCLUSIVE, blocked by M5 serving  `[Results][Lessons]`
+
+Bake-off of five engine routes through our pipeline on a common 44-page English
+subset (6/source), scored on OmniDocBench. Harness `scripts/omnidocbench_bakeoff.py`.
+**The headline question — confirm/revisit MinerU2.5+Qwen on labeled GT — could NOT
+be answered: three of five engines were invalidated by serving/integration faults,
+not fidelity.** Recording the raw table with explicit validity flags so it is never
+mistaken for a model verdict.
+
+| engine | text ED | reading ED | table TEDS | TEDS struct | VALID? |
+|---|--:|--:|--:|--:|---|
+| docling_fast | 0.2770 | 0.3071 | 0.4410 | 0.5676 | YES (offline baseline) |
+| qwen3vl | 0.4936 | 0.4507 | 0.2052 | 0.3392 | YES |
+| mineru | 0.7854 | 0.7607 | 0.2538 | 0.3096 | NO — see below |
+| hybrid | 0.7435 | 0.7493 | 0.2790 | 0.3527 | NO (uses MinerU) |
+| paddleocr | 1.0000 | 1.0000 | 0.0000 | 0.0000 | NO — see below |
+| granite | — | — | — | — | NO (server can't load) |
+
+**Why three engines are invalid (diagnosed directly, not assumed):**
+- **mineru / hybrid — M5 mlx MinerU2.5 serving is degraded.** 20/44 pages produced
+  ZERO chunks. Direct engine probes: the MinerU *layout* step returns rich regions
+  (header/table/text/title/list, matching GT) but the *content* step returns EMPTY
+  text per region; other pages 500 with `Generation failed: [broadcast_shapes]
+  Shapes (3,14,68,64) and (...)` — a tensor-shape bug inside the model forward pass
+  on the server (echoes the earlier "mlx-engine image_token_id" class of bug). The
+  pages are not blank: qwen3vl produced text on pages mineru returned empty. This is
+  an INFRASTRUCTURE fault on the M5 box, not MinerU2.5's fidelity. MinerU2.5 passed
+  6/6 golden docs on 2026-06-05 via a working server — so the model is fine; the
+  current M5 serving is not. **Action: fix/restart the M5 MinerU2.5 serving (or run
+  MinerU via a GX10 vLLM endpoint) and re-run before drawing any MinerU conclusion.**
+- **paddleocr — engine-contract mismatch.** `VlmNativeEngine` requires a STRICT-JSON
+  response (`json.loads(raw)`); PaddleOCR-VL returns plain Markdown (confirmed by a
+  raw chat probe), so every page raises `unrepairable VLM JSON` → 0 chunks. PaddleOCR
+  needs a dedicated Markdown-parsing adapter; it cannot ride the Qwen-shaped VLM
+  engine. Deferred.
+- **granite — server load failure.** M5 mlx returns HTTP 500 "Unrecognized image
+  processor"; also emits DocTags not Markdown. Deferred.
+
+**The one valid comparison (docling_fast vs qwen3vl, scanned-lane images):** verbatim
+OCR (docling) tracks GT transcription markedly better than the VLM on these scanned
+page-images — text ED 0.277 vs 0.494, reading 0.307 vs 0.451, TEDS 0.441 vs 0.205.
+Directional reading: Qwen3-VL paraphrases/restructures and emits many extra image/
+form chunks, which inflates edit distance against verbatim GT, and it left 4/44 pages
+empty. This is NARROW — it measures TRANSCRIPTION FIDELITY on synthetic scanned
+images, the opposite end from the crucible's RETRIEVAL-VALUE finding on native PDFs
+that picked MinerU+Qwen. The two are not in conflict; they measure different axes on
+different inputs. **Lesson: a fair extractor bake-off needs every engine actually
+serving correctly first — verify each endpoint END-TO-END through the pipeline (not
+just a raw /v1 probe) before trusting the score. A raw chat probe said all three of
+mineru/paddle/granite "worked"; the pipeline integration is where two of them broke.**
+
+Bake-off artifacts: `~/omnidocbench-eval/bakeoff/<engine>/{preds,score}`. Harness +
+this finding committed; the MinerU re-run is parked on the M5 serving fix.
 
 ---
 
