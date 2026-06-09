@@ -207,11 +207,15 @@ the only-chunk-on-page case is PROMOTED to IMAGE, keeping the rendered crop).
 
 ### 3.6 The Docling Lane `[SHIPPED]` + retained debt `[PARTIAL]`
 `DoclingFastEngine` (`src/mmrag_v3/engines/docling_fast.py`, the sole V3 docling
-import boundary) serves prose pages. It retains V2's caveats. The untracked
-`scripts/postprocess_markdown.py` is a *symptom-level band-aid* for Docling's
-per-page layout inconsistency (abbreviation pairs classed TEXT on one page / TABLE
-on the next), figure placeholders, and mid-sentence page-break merges. Debt, named
-honestly. See Section 8 (retire-or-harden decision).
+import boundary) serves prose pages. It retains V2's caveats: Docling's per-page
+layout inconsistency (abbreviation pairs classed TEXT on one page / TABLE on the
+next), figure placeholders, and mid-sentence page-break merges. A symptom-level
+band-aid (`scripts/postprocess_markdown.py`, untracked, V2-era, operated on
+Docling *markdown* not the V3 JSONL) was **removed 2026-06-09** (PR review flag:
+footgun, in-place-overwrite default, never wired into the V3 path). The
+underlying debt is unchanged - see Section 8 (retire-or-harden decision); if the
+harden path is chosen, fold the fix into the engine with a per-page-consistency
+check, not a post-hoc markdown repair.
 
 ### 3.7 Schema / Serialization `[SHIPPED]`
 `IngestionChunk.from_uir` is the V3 emission boundary. `content` is canonical and
@@ -320,7 +324,7 @@ modality-switched rubric matrix is design intent `[PROPOSED]`.
 | VLM JSON invalid on dense pages (NEW, 2026-06-02 soak) | RESOLVED for the default path (MinerU, 2026-06-05) | Was: whole-page strict-JSON truncates/malforms on dense layouts. MinerU2.5 (now default, §3.3) does NOT emit whole-page JSON - it emits per-element structured output with built-in anti-repetition, so the density ceiling does not apply; the dense CarOK spreadsheet Qwen emptied now yields a full Markdown table. The A1-A4 scaffolding remains for the retained Qwen path. |
 | VLM bbox crop drift / interior misplacement (3.3) | RESOLVED for the default path (MinerU, 2026-06-05) | Was: MEASURED 40-50% drift on the 2026-06-02 soak. MinerU2.5's two-stage layout DETECTOR emits reliable region bboxes (the §5 research precedent), structurally fixing the crop drift; the 7/7 corpus soak passed crop-audit (`PLAN_VLM_EVAL` §14). The semantic in-range-but-wrong-crop residual (3.3) still applies in principle but was not observed. |
 | Router misroute residue (3.2) | Med | Monospace closes code; broad layout complexity open. Measure via AIOS smoke before building a heuristic. |
-| Docling-lane debt (3.6) | Med | Decide: retire the lane (route everything to VLM, eat the cost) OR harden it (fold `postprocess_markdown` into the engine + add a per-page-consistency check). Currently a band-aid. |
+| Docling-lane debt (3.6) | Med | Decide: retire the lane (route everything to VLM, eat the cost) OR harden it (a per-page-consistency check folded INTO the engine). The untracked `postprocess_markdown` band-aid was removed 2026-06-09; the underlying per-page-inconsistency debt is unaddressed, not masked. |
 | Grand Soak (5) | High - RUN + HALTED 2026-06-02 | Stopped at doc 9/17: pipeline does not meet requirements on dense docs (JSON-invalid -> Docling fallback; 40-50% crop drift). The long tail (~20 books) was excluded by `--max-pages 200`. Do not re-run until the two extraction blockers above are fixed. See `docs/paper/FINDINGS_LOG.md` 2026-06-02. |
 | Single-point M5 dependency | Med | Extraction has one bandwidth-rich host. Define a fallback (OpenRouter cloud VLM) and its cost ceiling. |
 | ColPali cost if adopted (6.2) | Med | Gated behind the 6.2 constraints; do not adopt blind. |
