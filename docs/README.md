@@ -8,7 +8,7 @@ Minimal docs index. The authoritative ordering is in `CLAUDE.md`'s
 1. `docs/PROJECT_STATUS.md` — current task state, active models/endpoints, next work.
 2. `AGENTS.md` (repo root) — technical invariants + UIR contract + classification rules.
 3. `docs/V3_EXECUTION_MANDATE.md` — single-source governance for V3. Supersedes any conflict in other docs.
-4. `docs/ARCHITECTURE_V3_DRAFT_0.5.md` — V3.0 target architecture (canonical).
+4. `docs/ARCHITECTURE_V3_DRAFT_0.5.md` — V3.0 target architecture (canonical *target*; as-built reality is the V3.1 charter at 4a).
 4a. `docs/ARCHITECTURE_V3.1_CHARTER.md` — V3.1 as-built + roadmap (current reality; status-tagged). Read alongside the 0.5 target.
 5. `docs/ARCHITECTURE.md` — v2.X pipeline architecture (production baseline being evolved).
 6. `docs/DECISIONS.md` + `docs/QUALITY_GATES.md` — decisions log + acceptance thresholds.

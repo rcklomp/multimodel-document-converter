@@ -64,6 +64,17 @@ crash, reject, strip, or silently drop.
 fit, carry-through, or degrade-with-provenance - never crash, reject, or silently
 drop. Each boundary is enforced by an executable contract test.
 
+**Terminology (reconciling "fail-open" with the "FAIL-CLOSED" extraction ladder):**
+each individual boundary "fails OPEN" (degrades rather than crashing); the extraction
+ladder as a whole (`src/mmrag_v3/processor.py::extract`, `processor.py` docstring
+"FAIL-CLOSED") is "fail-CLOSED" against silent DATA LOSS - it never lets an
+engine/network failure zero a text-bearing page. Same don't-lose-data goal from
+opposite ends; the two terms are not in conflict. (NOTE: the ladder's actual
+3-tier behavior + provenance keys are documented in PROJECT_STATUS and will be folded
+into Section 3/4 here per `docs/PLAN_EXTRACTION_FIDELITY_V1.md` Phase 5; that plan
+also corrects this section's circuit-breaker description, which the shipped ladder
+superseded.)
+
 ### 2.1 Boundary Register (the invariant made concrete)
 
 | # | Boundary | V2-era assumption (fail-closed) | Fail-open contract (V3.1) | Enforcing test | Status |

@@ -36,7 +36,7 @@ Companion docs:
 
 12. **AGENT-GATE-PROGRESSION (2026-06-08):** A content-quality signal enters the gate suite as an ADVISORY metric in `qa_semantic_fidelity.py`, calibrated on the crucible corpus with a frozen regression fixture under `tests/`. It is promoted to a HARD gate only after (a) the extraction path can pass it on the full corpus and (b) the threshold is shown stable across doc classes. HARD gates are reserved for deterministic schema invariants. No hard gate may be introduced that would be passed by *weakening extraction* rather than improving it (the no-weaken rule from the other direction). See `docs/PLAN_GATE_QUALITY_V1.md`.
 
-**Numbering Note:** SRS IRON IDs remain canonical. Agent-local constraints use `AGENT-*` IDs to avoid collisions.
+**Numbering Note:** REQ-*/IRON requirement IDs remain canonical (they originate in the archived SRS; the live coordinate IDs are restated in `docs/QUALITY_GATES.md`, e.g. REQ-COORD-01/02). Agent-local constraints use `AGENT-*` IDs to avoid collisions.
 
 ---
 
@@ -57,7 +57,7 @@ Companion docs:
 - In the digital_magazine profile, visual layout data overrides the native PDF text layer.
 
 **F. Recover through Shadow (Information Retrieval)**
-- Any shadow asset is a potential text source; use extraction_method=shadow_ocr to prevent information loss.
+- Any shadow asset is a potential text source; use extraction_method=shadow_ocr to prevent information loss. *(Legacy v2 path. In the V3 path `shadow_ocr` is not implemented; information-loss recovery is the fail-closed 3-tier `extract()` ladder - tier 2 offline Docling, tier 3 PyMuPDF native text - in `src/mmrag_v3/processor.py`.)*
 
 **G. Chunking by Profile, Validated by Evidence**
 - Do not enforce one global "optimal" chunk size.
@@ -90,10 +90,10 @@ Companion docs:
      Prior-version baselines are quarantined in `docs/.archive/`
      and blocked by `.aiignore`; do not read or reference them.
 2. Use the three-layer documentation model:
-   - Layer 0 contracts: this file, `CLAUDE.md`, `docs/V3_EXECUTION_MANDATE.md`, `docs/DECISIONS.md`, `docs/QUALITY_GATES.md`, `docs/ARCHITECTURE.md`, `docs/ARCHITECTURE_V3_DRAFT_0.5.md`, SRS.
+   - Layer 0 contracts: this file, `CLAUDE.md`, `docs/V3_EXECUTION_MANDATE.md`, `docs/DECISIONS.md`, `docs/QUALITY_GATES.md`, `docs/ARCHITECTURE.md`, `docs/ARCHITECTURE_V3_DRAFT_0.5.md` (V3.0 target), `docs/ARCHITECTURE_V3.1_CHARTER.md` (V3.1 as-built + roadmap).
    - Layer 1 current state: `docs/PROJECT_STATUS.md`.
    - Layer 2 execution: active plan docs, `docs/TESTING.md`, run logs.
-3. Cross-check nontrivial changes against `docs/ARCHITECTURE_V3_DRAFT_0.5.md` for V3 UIR compliance; `docs/ARCHITECTURE.md` is the v2.X production baseline being evolved.
+3. Cross-check nontrivial changes against `docs/ARCHITECTURE_V3_DRAFT_0.5.md` (V3.0 target) for V3 UIR compliance and `docs/ARCHITECTURE_V3.1_CHARTER.md` (V3.1 as-built reality, status-tagged) for what actually ships; `docs/ARCHITECTURE.md` is the v2.X production baseline being evolved.
 4. Before marking a task complete or expanding docs, apply `docs/V3_EXECUTION_MANDATE.md`.
 5. When finishing a task, update `docs/PROJECT_STATUS.md` (current state + recommended next step) and create/update a dated quality snapshot if quality numbers changed.
 
