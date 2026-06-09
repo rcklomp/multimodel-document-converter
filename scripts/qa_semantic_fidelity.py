@@ -110,7 +110,7 @@ def is_markdown_table(content: str) -> bool:
 _FURNITURE_MASTHEAD_RE = re.compile(r"https?://|www\.|\.(?:com|aero|org)\b", re.I)
 _INSANE_HEADING_RE = re.compile(
     r"https?://|www\.|@[\w.-]+\.[A-Za-z]{2,}"
-    r"|\b[\w.-]+\.(?:com|org|net|aero|edu|gov)(?:/|\s*$)",
+    r"|\b[\w.-]+\.(?:com|org|net|aero|edu|gov)(?:/|\W*$)",
     re.I,
 )
 _CJK_LATIN_MIX_RE = re.compile("[\u4e00-\u9fff][A-Za-z]|[A-Za-z][\u4e00-\u9fff]")
