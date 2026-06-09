@@ -24,6 +24,11 @@ REJECT = [
     "Order from our online shop... shop.keypublishing.com/a400matlas",
     "editor@combataircraftjournal.com",
     "www.Key.Aero",
+    # Bare-domain mastheads with NO path: the domain is the trailing token. The
+    # path-only rule false-negatived these (F3's own motivating case); the
+    # position rule catches them again.
+    "SCAN THE QR CODE shop.keypubliking.com",
+    "shop.keypubliking.com",
 ]
 
 # Real headings across the corpus that must keep passing (regression guard).
@@ -36,11 +41,13 @@ KEEP = [
     "What Is an AI Agent?",
     "KREATIVE AKTFOTOGRAFIE",
     "Durchgangige Prozesskette von der Spezifikation bis zum Test",
-    # Tech headings: domain-shaped tokens with NO path must NOT be rejected
-    # (review #2 - the bare-domain rule requires a path now).
+    # Tech headings + sentences: a domain-shaped token MID-phrase (not the
+    # trailing token) must NOT be rejected - the rule keys on position.
     "ASP.NET Core",
     "asp.net Core",
     "Node.js Internals",
+    "Visit census.gov for data",
+    "The example.com Story",
 ]
 
 
@@ -85,13 +92,15 @@ def test_heading_sanity_metric_counts_garbage():
     qa = _load_qa_sem()
     rows = [
         _chunk("THE BOY WHO LIVED"),  # ok
-        _chunk("shop.keypubliking.com/casubs"),  # masthead url (with path, #2)
+        _chunk("shop.keypubliking.com/casubs"),  # masthead url (with path)
+        _chunk("SCAN THE QR CODE shop.keypubliking.com"),  # bare masthead (trailing)
         _chunk("合DANCGING-WIITH"),  # cjk garble
         _chunk("36 | Chapter 2"),  # folio-shaped
         _chunk("Introduction"),  # ok
-        _chunk("ASP.NET Core"),  # tech heading, must NOT be counted (#2)
+        _chunk("ASP.NET Core"),  # tech heading, NOT counted
+        _chunk("Visit census.gov for data"),  # sentence, domain mid-phrase, NOT counted
     ]
-    assert qa.count_insane_headings(rows) == 3
+    assert qa.count_insane_headings(rows) == 4
 
 
 def test_heading_sanity_metric_quiet_on_clean_headings():

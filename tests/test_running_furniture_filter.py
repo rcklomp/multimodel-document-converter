@@ -89,6 +89,19 @@ def test_non_repeating_margin_line_without_masthead_kept(tmp_path):
     assert any("one-off marginal" in (c.content or "") for c in out)
 
 
+def test_bottom_margin_citation_not_dropped_single_occurrence(tmp_path):
+    # Finding 3: a single bottom-margin .gov/.edu/.net citation is NOT a magazine
+    # folio. F1's masthead set is deliberately narrow (com|aero|org), so a lone
+    # citation survives; a repeating running header is still caught by the
+    # cross-page repetition path.
+    chunks = [
+        _txt("Body content on the page.", 5, BODY),
+        _txt("Source: data.census.gov", 5, BOTTOM),  # citation, .gov, single occurrence
+    ]
+    out = _filter(tmp_path, chunks)
+    assert any("census.gov" in (c.content or "") for c in out)
+
+
 def test_page_coverage_guard_keeps_furniture_only_page(tmp_path):
     # If a folio is the ONLY chunk on its page, keep it (do not orphan the page).
     chunks = [
