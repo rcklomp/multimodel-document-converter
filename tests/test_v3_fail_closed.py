@@ -199,3 +199,90 @@ def test_terminal_does_not_fabricate_on_blank_page(tmp_path, monkeypatch):
     out = processor.extract(str(pdf))
     assert out.metadata.extra["extraction_fallback"] == "pymupdf_terminal"
     assert out.pages[0].elements == []  # empty, NOT fabricated
+
+
+def test_zero_element_page_with_text_layer_recovered(tmp_path, monkeypatch):
+    # The engine returned NO elements at all for a page that HAS a text layer.
+    # This is the failure shape the TEXT-region-present heuristic used to miss.
+    pdf = tmp_path / "t.pdf"
+    _make_pdf(pdf, ["native text the engine dropped entirely"])
+    primary = _Engine(doc=_doc([_page(1, [])]))           # zero elements
+    docling = _Engine(doc=_doc([_page(1, [_text("")])]))  # docling no better
+    _route(monkeypatch, primary_env="USE_MINERU_ENGINE", primary=primary, docling=docling)
+
+    out = processor.extract(str(pdf))
+    assert "native text the engine dropped entirely" in out.pages[0].elements[0].content
+    assert out.metadata.extra["extraction_degraded_pages"] == 1
+    assert out.metadata.extra["extraction_recovered_pages"] == 1
+    assert out.metadata.extra["extraction_fallback"] == "pymupdf_terminal"
+
+
+def test_zero_element_blank_page_is_not_flagged_pays_nothing(tmp_path, monkeypatch):
+    # A genuinely blank page also yields zero elements, but the text-layer probe
+    # must NOT flag it degraded -> no docling cost, no fabrication.
+    pdf = tmp_path / "blank.pdf"
+    _make_pdf(pdf, [""])
+    calls: list[str] = []
+    primary = _Engine(doc=_doc([_page(1, [])]), counter=calls, label="primary")
+    docling = _Engine(doc=_doc([_page(1, [_text("must not be used")])]),
+                      counter=calls, label="docling")
+    _route(monkeypatch, primary_env="USE_MINERU_ENGINE", primary=primary, docling=docling)
+
+    out = processor.extract(str(pdf))
+    assert calls == ["primary"]  # blank page is not "degraded" -> docling never run
+    assert out.metadata.extra["extraction_fallback"] is None
+    assert out.pages[0].elements == []  # empty, NOT fabricated
+
+
+def test_wholesale_failure_terminal_backstops_docling_degraded_page(tmp_path, monkeypatch):
+    # Primary raises (whole doc) AND docling returns an empty-but-textful page.
+    # The terminal tier must backstop docling on this path too (not just per-page).
+    pdf = tmp_path / "t.pdf"
+    _make_pdf(pdf, ["page text docling missed"])
+    primary = _Engine(exc=RuntimeError("ServerError 500 broadcast_shapes"))
+    docling = _Engine(doc=_doc([_page(1, [_text("")])]))  # docling degenerate
+    _route(monkeypatch, primary_env="USE_MINERU_ENGINE", primary=primary, docling=docling)
+
+    out = processor.extract(str(pdf))
+    assert "page text docling missed" in out.pages[0].elements[0].content
+    assert out.metadata.extra["extraction_engine"] == "mineru"
+    assert out.metadata.extra["extraction_fallback"] == "pymupdf_terminal"
+
+
+def test_probe_does_not_crash_on_get_text_error(monkeypatch):
+    # Review fix #1: the cheap text-layer oracle must NEVER crash extraction. A page
+    # whose get_text() raises (corrupt content stream) is returned for recovery
+    # (fail-closed), not propagated.
+    import fitz
+
+    class _BadPage:
+        def get_text(self):
+            raise RuntimeError("corrupt content stream")
+
+    class _BadDoc:
+        page_count = 1
+
+        def __getitem__(self, _i):
+            return _BadPage()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(fitz, "open", lambda *_a, **_k: _BadDoc())
+    doc = _doc([_page(1, [_text("")])])
+    assert processor._indices_with_text_layer("/x.pdf", doc, [0]) == [0]
+
+
+def test_docling_figure_only_does_not_bury_text_layer(tmp_path, monkeypatch):
+    # Review fix #2: docling returns a FIGURE-ONLY page (no text) for a page that has
+    # a text layer. It must NOT bury the recoverable text — terminal recovers it.
+    pdf = tmp_path / "t.pdf"
+    _make_pdf(pdf, ["real text under a figure-only docling result"])
+    primary = _Engine(doc=_doc([_page(1, [])]))          # engine dropped the page
+    docling = _Engine(doc=_doc([_page(1, [_image()])]))  # figure-only, NO text content
+    _route(monkeypatch, primary_env="USE_MINERU_ENGINE", primary=primary, docling=docling)
+
+    out = processor.extract(str(pdf))
+    assert "real text under a figure-only docling result" in out.pages[0].elements[0].content
+    assert out.metadata.extra["extraction_fallback"] == "pymupdf_terminal"
+    assert out.metadata.extra["extraction_recovered_pages"] == 1

@@ -112,20 +112,37 @@ def _select_engine() -> "tuple[str, object]":
     return "hybrid", HybridEngine()
 
 
-def _page_is_degenerate(page) -> bool:
-    """True when the engine found TEXT regions but extracted no content at all.
+def _page_lacks_content(page) -> bool:
+    """True when a page carries no extractable content and is not a real visual page.
 
-    Defense-in-depth signature (TEXT elements present, combined content empty). A
-    genuinely image-only page has no TEXT elements and is NOT degenerate, so the
-    VLM/MinerU lane is never second-guessed on real figures. NOTE: ``Element``
-    stores text in ``.content`` (there is no ``.text`` attribute). An over-fire is
-    safe: the page is only replaced when docling does strictly better.
+    Covers BOTH engine-failure shapes that zero a page:
+      * a TEXT region was detected but its content came back empty (the documented
+        MinerU content-step failure), and
+      * the engine returned no usable elements at all (a dropped page).
+
+    A page with an IMAGE or TABLE element is a legitimate visual page and is never
+    flagged, so the VLM/MinerU lane is not second-guessed on real figures/tables.
+    NOTE: ``Element`` stores text in ``.content`` (there is no ``.text`` attribute).
+    Flagging here is only a *suspicion*: whether the page is genuinely blank (leave
+    it) or text was lost (recover it) is decided by the cheap text-layer probe in
+    ``_indices_with_text_layer`` before any costly fallback runs.
     """
-    has_text_region = any(e.type == ElementType.TEXT for e in page.elements)
-    if not has_text_region:
+    has_visual = any(e.type in (ElementType.IMAGE, ElementType.TABLE) for e in page.elements)
+    if has_visual:
         return False
-    content_chars = sum(len((e.content or "").strip()) for e in page.elements)
-    return content_chars == 0
+    return _page_content_chars(page) == 0
+
+
+def _page_content_chars(page) -> int:
+    """Total extracted content across ALL elements (text, plus table-cell text).
+
+    Used to decide recovery for a page already CONFIRMED to have a text layer: a
+    page with zero content here still needs recovery even if it carries an empty
+    IMAGE element, so a docling figure-only page never buries a recoverable text
+    layer. A TABLE element's content (its cell text) counts — we do not throw away
+    a recovered docling table for the terminal tier's flat text.
+    """
+    return sum(len((e.content or "").strip()) for e in page.elements)
 
 
 def _stamp(doc: UniversalDocument, *, engine: str, fallback=None,
@@ -193,13 +210,51 @@ def _terminal_recover(doc: UniversalDocument, path: str, indices: list) -> int:
     fdoc = fitz.open(path)
     try:
         for i in indices:
-            page, has_text = _pymupdf_page(fdoc, doc.pages[i].page_number - 1, doc.pages[i].page_number)
+            pidx = doc.pages[i].page_number - 1
+            if not (0 <= pidx < fdoc.page_count):
+                logger.warning(
+                    "extract: page_number %d out of range for %s; skipping terminal recover",
+                    doc.pages[i].page_number, path,
+                )
+                continue
+            page, has_text = _pymupdf_page(fdoc, pidx, doc.pages[i].page_number)
             if has_text:
                 doc.pages[i] = page
                 recovered += 1
     finally:
         fdoc.close()
     return recovered
+
+
+def _indices_with_text_layer(path: str, doc: UniversalDocument, indices: list) -> list:
+    """Subset of `indices` whose PDF text layer is non-empty (the cheap oracle).
+
+    Distinguishes an engine that LOST a page's text (text layer present -> recover)
+    from a genuinely blank/scanned page (no text layer -> leave empty, pay nothing).
+    This is what keeps a healthy doc that merely contains a blank divider page from
+    paying a needless docling re-extraction. This probe is a CHEAP ORACLE and must
+    never crash extraction: an unreadable file OR a page whose ``get_text`` raises
+    (corrupt content stream) yields that index for recovery (fail-closed)."""
+    import fitz
+
+    try:
+        fdoc = fitz.open(path)
+    except Exception:  # noqa: BLE001 — unreadable file: attempt recovery for all
+        return list(indices)
+    try:
+        out = []
+        for i in indices:
+            pidx = doc.pages[i].page_number - 1
+            if not (0 <= pidx < fdoc.page_count):
+                continue  # page_number does not map to this PDF; terminal would skip it too
+            try:
+                if (fdoc[pidx].get_text() or "").strip():
+                    out.append(i)
+            except Exception:  # noqa: BLE001 — a probe failure must not crash extraction
+                out.append(i)  # cannot tell -> attempt recovery (fail-closed)
+        return out
+    finally:
+        fdoc.close()
 
 
 def extract(file_path: Union[str, "os.PathLike[str]"]) -> UniversalDocument:
@@ -250,21 +305,43 @@ def extract(file_path: Union[str, "os.PathLike[str]"]) -> UniversalDocument:
                 _FALLBACK_ENGINE_NAME, type(dexc).__name__, path,
             )
             doc = _terminal_doc(path)
-            fallback = _TERMINAL_ENGINE_NAME
+            return _stamp(
+                doc, engine=engine_name, fallback=_TERMINAL_ENGINE_NAME,
+                degraded=len(doc.pages),
+                recovered=sum(1 for p in doc.pages if not _page_lacks_content(p)),
+                reason=f"{type(exc).__name__}: {exc}",
+            )
+        # Docling served the doc; backstop any page it left WITHOUT text content
+        # (incl. a figure-only page that buries a real text layer) via the terminal
+        # tier, so the same 3-rung ladder applies on this path too. Skip the fitz
+        # probe entirely when docling already produced content for every page.
+        empties = [i for i, p in enumerate(doc.pages) if _page_content_chars(p) == 0]
+        still = _indices_with_text_layer(path, doc, empties) if empties else []
+        if still:
+            try:
+                if _terminal_recover(doc, path, still):
+                    fallback = _TERMINAL_ENGINE_NAME
+            except Exception as texc:  # noqa: BLE001 — terminal only fails on unreadable file
+                logger.warning("extract: PyMuPDF terminal failed (%s) for %s", type(texc).__name__, path)
         return _stamp(
             doc, engine=engine_name, fallback=fallback,
             degraded=len(doc.pages),
-            recovered=sum(1 for p in doc.pages if not _page_is_degenerate(p)),
+            recovered=sum(1 for p in doc.pages if not _page_lacks_content(p)),
             reason=f"{type(exc).__name__}: {exc}",
         )
 
     if engine_name == _FALLBACK_ENGINE_NAME:
         return _stamp(doc, engine=engine_name)
 
-    # 2) Per-page degradation (e.g. MinerU empty content-step on some pages).
-    degraded = [i for i, p in enumerate(doc.pages) if _page_is_degenerate(p)]
-    if not degraded:
+    # 2) Per-page degradation. A page with no content and no visual element is only a
+    #    SUSPECT; the cheap text-layer probe confirms which suspects actually lost
+    #    text (recover) versus which are genuinely blank/scanned (leave, pay nothing).
+    suspects = [i for i, p in enumerate(doc.pages) if _page_lacks_content(p)]
+    if not suspects:
         return _stamp(doc, engine=engine_name)
+    degraded = _indices_with_text_layer(path, doc, suspects)
+    if not degraded:
+        return _stamp(doc, engine=engine_name)  # all suspects genuinely blank
 
     logger.warning(
         "extract: %s produced %d/%d degraded page(s) for %s; recovering from %s",
@@ -276,7 +353,10 @@ def extract(file_path: Union[str, "os.PathLike[str]"]) -> UniversalDocument:
         fb_by_page = {p.page_number: p for p in fb_doc.pages}
         for i in degraded:
             fb_page = fb_by_page.get(doc.pages[i].page_number)
-            if fb_page is not None and not _page_is_degenerate(fb_page):
+            # Accept docling's page only if it carries actual content; a figure-only
+            # page (no text content) must NOT bury the recoverable text layer — leave
+            # such a page for the terminal tier below.
+            if fb_page is not None and _page_content_chars(fb_page) > 0:
                 doc.pages[i] = fb_page
                 recovered += 1
     except Exception as exc:  # noqa: BLE001 — keep primary if docling itself fails
@@ -284,15 +364,20 @@ def extract(file_path: Union[str, "os.PathLike[str]"]) -> UniversalDocument:
             "extract: docling fallback itself failed (%s); trying terminal for %s",
             type(exc).__name__, path,
         )
-    # 3) Terminal tier: any page neither primary nor docling could serve falls back
-    #    to the PDF's native text layer (no model, no network — cannot lose text).
-    still = [i for i in degraded if _page_is_degenerate(doc.pages[i])]
+    # 3) Terminal tier: any degraded page that STILL has no text content (primary
+    #    empty, or docling returned figure-only) falls back to the PDF's native text
+    #    layer (no model, no network). All `degraded` pages are probe-confirmed textful.
+    still = [i for i in degraded if _page_content_chars(doc.pages[i]) == 0]
+    fallback = _FALLBACK_ENGINE_NAME
     if still:
         try:
-            recovered += _terminal_recover(doc, path, still)
+            term = _terminal_recover(doc, path, still)
+            recovered += term
+            if term:
+                fallback = _TERMINAL_ENGINE_NAME
         except Exception as exc:  # noqa: BLE001 — terminal only fails on unreadable file
             logger.warning("extract: PyMuPDF terminal failed (%s) for %s", type(exc).__name__, path)
     return _stamp(
-        doc, engine=engine_name, fallback=_FALLBACK_ENGINE_NAME,
+        doc, engine=engine_name, fallback=fallback,
         degraded=len(degraded), recovered=recovered,
     )

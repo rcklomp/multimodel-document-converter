@@ -1134,7 +1134,11 @@ THREE-TIER ladder, each tier serving only the pages the tier above could not:
 network; may itself fail) -> `tier 3` PyMuPDF native text layer (no model, no network
 — the only thing that defeats it is an unreadable file, a true input error raised
 loudly). A page is recovered per-page (not whole-doc swap) when the engine raises or
-returns a page that found TEXT regions but no content. The served lane + outcome are
+returns a page with no content and no visual element (covers both the empty-TEXT and
+the dropped-zero-element shapes). A cheap fitz text-layer probe gates recovery so a
+genuinely blank divider page pays nothing, and the probe is crash-proof (a corrupt
+page's `get_text` is treated as recoverable, never propagated). A docling figure-only
+result never buries a recoverable text layer — such a page falls through to tier 3. The served lane + outcome are
 stamped on `doc.metadata.extra` (`extraction_engine`/`extraction_fallback`/
 `extraction_degraded_pages`/`extraction_recovered_pages`) and logged at WARNING.
 Healthy extractions pay nothing. **Guarantee: no page that HAS extractable text is
