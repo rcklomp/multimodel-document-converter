@@ -1000,6 +1000,29 @@ dense multi-column exam layouts) and newspaper (text 0.370). research_report is 
 single page (reading 1.0 = total order mismatch on that one page; not
 generalizable).
 
+**FULL 755-page English baseline (authoritative; the 128 above was the preview).**
+All 755 English pages, 243 tables scored, 0 errors, 0 timeouts, 0 match fallbacks.
+26 pages rendered empty (offline scanned lane extracted nothing). Headline: text
+Edit_dist **0.3009**, reading-order **0.3183**, table TEDS **0.5632** (struct 0.6137).
+
+| data_source | text ED | reading ED | table TEDS |
+|---|--:|--:|--:|
+| **ALL (755)** | **0.3009** | **0.3183** | **0.5632** (struct 0.6137) |
+| PPT2PDF | 0.1198 | 0.1470 | 0.7881 |
+| colorful_textbook | 0.2124 | 0.1811 | 0.7829 |
+| exam_paper | 0.2819 | 0.3626 | 0.7897 |
+| book | 0.3049 | 0.3349 | 0.7709 |
+| magazine | 0.3053 | 0.2820 | 0.7800 |
+| academic_literature | 0.3768 | 0.3950 | 0.6859 |
+| newspaper | 0.4586 | 0.4305 | 0.4250 |
+
+At full scale the easy/hard ordering holds (PPT best, newspaper worst) but the
+small-sample noise washes out: table TEDS is a tight 0.77–0.79 band across PPT/
+textbook/exam/book/magazine and only newspaper (0.425, dense multi-column furniture)
+and academic (0.686, complex multi-table pages) sit below. The stratified exam_paper
+TEDS 0.34 was a 6-page-sample artifact — at 82 pages it is 0.79. This full table is
+the **fidelity floor** the gate-quality F1–F7 re-run (Phase 2) must not regress.
+
 **Caveat labels (bake into any citation of these numbers; per PLAN 12.3):**
 1. **Synthetic image-PDF → scanned lane.** Inputs are flat page images with no
    text layer, so the classifier routes ALL of them to `scanned`/`scanned_degraded`
