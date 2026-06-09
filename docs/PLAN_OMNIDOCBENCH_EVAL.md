@@ -291,3 +291,45 @@ Three facts override assumptions in Sections 3-5 above:
   against GT `figure` blocks BEFORE building the output adapter; an omit that
   drops scored caption text inflates edit-distance on content we already have.
   Pre-full-run, same pass as R5.
+
+## 13. Phase 1 Execution (2026-06-09) -- extractor bake-off
+
+Status: HARNESS READY + premises verified; batch deferred behind the full-755
+baseline run (resource isolation). Harness `scripts/omnidocbench_bakeoff.py`
+(standalone, R4-clean) drives prep/smoke/run/score/report.
+
+### 13.1 Premises verified (M5 box 10.0.10.235:8000, `/v1/models`, 2026-06-09)
+
+All four bake-off models are served. Direct endpoint probes (NOT pipeline runs, to
+avoid contending with the in-flight baseline):
+- **Qwen3-VL-8B-Instruct-8bit** -- returns clean Markdown + tables (wrapped in a
+  ```` ```markdown ```` fence the scorer strips). VLM route, proven.
+- **PaddleOCR-VL-1.5-8bit** -- returns Markdown + tables via the generic OpenAI
+  chat API; bake-off viable through the VLM engine with a different model id.
+- **MinerU2.5-2509-1.2B-bf16** -- rich layout detection matching GT structure
+  (header/table/table_caption/text/title/list/page_number); `extract()` clean.
+- **granite-docling-258M-mlx** -- DEFERRED. Server cannot load it (HTTP 500
+  "Unrecognized image processor"); also emits DocTags not Markdown -> would need a
+  dedicated adapter. Re-add when both are resolved. (Not silently dropped.)
+
+### 13.2 Engine routes (env per `src/mmrag_v3/processor.py:extract` precedence)
+
+| route | env | endpoint shape |
+|---|---|---|
+| docling_fast | `USE_DOCLING_FAST=1` | local (Phase 0 baseline) |
+| mineru | `USE_MINERU_ENGINE=1` + `MINERU_ENDPOINT`/`MINERU_MODEL` | base URL `http://10.0.10.235:8000` (NO /v1), full id `mlx-community/MinerU2.5-2509-1.2B-bf16` |
+| qwen3vl | `USE_VLM_ENGINE=1` + `VLM_NATIVE_*` | `http://10.0.10.235:8000/v1`, `mlx-community/Qwen3-VL-8B-Instruct-8bit` |
+| hybrid | `MINERU_ENDPOINT` + `VLM_NATIVE_*` (default route, no force flag) | both above -- our shipped default |
+| paddleocr | `USE_VLM_ENGINE=1` + `VLM_NATIVE_MODEL=...PaddleOCR-VL-1.5-8bit` | `.../v1` |
+
+### 13.3 Execution plan (runs AFTER the full-755 baseline completes)
+
+Subset: 44 pages (6 per `data_source` from the stratified set; note/research_report
+n=1). Workspaces under `~/omnidocbench-eval/bakeoff/<engine>/`, sharing the
+already-built 1-page PDFs by symlink; GT subset `bakeoff/gt_bakeoff.json`.
+Harness mechanics (prep -> score -> report) validated end-to-end on the
+already-rendered docling preds (text ED 0.277 / reading 0.307 / TEDS 0.441 on the
+44-subset). Sequence: smoke-first one page through `mineru` (most complex
+integration) -> per-engine `run`+`render`+`score` (contiguous per engine so the M5
+mlx server swaps models only 4x) -> `report`. Record the comparison table + the
+engine-choice verdict (confirm/revisit MinerU2.5+Qwen) in FINDINGS_LOG.
