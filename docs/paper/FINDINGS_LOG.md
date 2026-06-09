@@ -964,6 +964,77 @@ Pre-existing file-wide black/ruff drift in `batch_processor.py` left untouched
 
 ---
 
+## 2026-06-09 — OmniDocBench fidelity baseline: first labeled ground-truth numbers (Phase 0)  `[Results][Method]`
+
+First-ever measurement of our pipeline against EXTERNAL labeled ground truth
+(OmniDocBench, opendatalab, Apache-2.0). Every prior quality signal scored the
+converter against itself or a human read; this is third-party transcription
+fidelity. Stratified English subset, current `main` (pipeline 2.7.0), offline.
+
+**Setup.** 128 English pages (~18 per `data_source`, capped; note + research_report
+n=1). Each OmniDocBench page ships as an IMAGE → wrapped lossless to a 1-page PDF
+(`img2pdf`) → run through the shipping CLI `mmrag-v2 process --batch-size 10
+--vision-provider none` → `ingestion.jsonl` rendered to one Markdown page →
+scored by OmniDocBench `quick_match`, no-CDM config. Adapter:
+`scripts/omnidocbench_adapter.py`; config `configs/omnidocbench_end2end.yaml`.
+128/128 ran, 0 failures; 5 pages rendered empty (offline scanned lane extracted
+nothing). Scorer: 128 pages scored, 34 tables (TEDS), 0 errors, 0 timeouts.
+
+**Text Edit_dist (lower=better) | Reading-order Edit_dist | Table TEDS (higher=better)**
+
+| data_source | text ED | reading ED | table TEDS |
+|---|--:|--:|--:|
+| **ALL (128)** | **0.2511** | **0.2491** | **0.6691** (struct 0.7494) |
+| PPT2PDF | 0.0184 | 0.0926 | 0.6167 |
+| magazine | 0.1599 | 0.1152 | 0.9908 |
+| colorful_textbook | 0.2544 | 0.2101 | 0.6913 |
+| academic_literature | 0.2481 | 0.2526 | 0.7197 |
+| book | 0.2727 | 0.3020 | 1.0000 |
+| newspaper | 0.3701 | 0.2149 | 0.7182 |
+| exam_paper | 0.4393 | 0.5126 | 0.3441 |
+| research_report (n=1) | — | 1.0000 | 0.9806 |
+
+Best lane: PPT (near-perfect text 0.018) and magazine (text 0.160, table TEDS
+0.99). Worst lane: exam_paper (text 0.439, reading 0.513, table TEDS 0.344 —
+dense multi-column exam layouts) and newspaper (text 0.370). research_report is a
+single page (reading 1.0 = total order mismatch on that one page; not
+generalizable).
+
+**Caveat labels (bake into any citation of these numbers; per PLAN 12.3):**
+1. **Synthetic image-PDF → scanned lane.** Inputs are flat page images with no
+   text layer, so the classifier routes ALL of them to `scanned`/`scanned_degraded`
+   (`is_scan=True`, `extraction_method=uir_native_chunker`, offline Docling-fast).
+   This is SCANNED-lane fidelity, NOT native-PDF quality.
+2. **F1 ↔ abandon directional, not exact (sanity-passed).** All 28 stratified
+   pages with GT `abandon` blocks have EMPTY abandon text — OmniDocBench `abandon`
+   is a text-less spatial region carrying no scored content. Our F1 furniture
+   filter drops *repeating* headers/footers (GT `header`/`footer`/`page_number`,
+   all scored as text), not `abandon`; and F1 needs ≥3-page repetition so it is
+   structurally inert on these 1-page docs. The two operate on different things;
+   no scored text is at stake. Disagreement is directional, not an extraction error.
+3. **no-CDM config: formulas unscored by CDM** (excluded, not penalized). The
+   notex config still scores `equation_isolated` by Edit_dist if present; CDM
+   render-fidelity deferred (no TeX stack).
+4. **English subset = `language` attribute (authoritative), NOT `_eng_` filename.**
+   The filename heuristic tags only 5 of 755 English pages (cross-tab disagreement
+   750); we select on `page_info.page_attribute.language == english`.
+5. **VLM descriptions omitted.** Image regions render as nothing (GT `figure`
+   blocks carry 0 scored text; the scorer strips markdown image syntax; emitting
+   our long visual_descriptions would inflate edit distance). This is a TEXT/TABLE
+   fidelity baseline, not multimodal value-add.
+
+**Adapter render decisions, resolved against the scorer source (not assumption):**
+heading markers are normalized away (`clean_string` → alphanumerics) so headings
+render as plain text; the scorer strips ```` ```markdown/html/latex ```` fences;
+reading order is reconstructed from JSONL line order (no `reading_order` schema
+field) and verified to match GT `order` on the smoke page.
+
+**Next (Phase 1/2):** extractor bake-off (MinerU vs PaddleOCR-VL vs granite-docling
+vs Qwen3-VL on OmniDocBench) and re-run after the gate-quality F1–F7 fixes to prove
+fidelity does not regress vs this floor. Full 755-page English run pending (~8h).
+
+---
+
 ## Backfill backlog (remaining threads — to expand when drafting)
 
 *Covered above as of 2026-05-30:* V1→V2 lineage · V2 metrics trajectory · V2

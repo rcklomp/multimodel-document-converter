@@ -1,0 +1,42 @@
+# OmniDocBench end-to-end fidelity config (PLAN_OMNIDOCBENCH_EVAL Phase 0).
+#
+# Consumed by the OmniDocBench scorer in the ISOLATED `omnidocbench` env
+# (`python pdf_validation.py --config <this>`), NOT by mmrag-v2. Paths are
+# absolute so this file can live in our repo and be pointed at from the eval env.
+#
+# Pairing (produced by scripts/omnidocbench_adapter.py):
+#   ground_truth -> English-only GT subset (page_attribute.language == english;
+#                   the `_eng_` filename tags only 5 of 755 pages, so it is NOT
+#                   used -- see PLAN 12.1#3).
+#   prediction   -> our pipeline's per-page Markdown (render mode: R5/R6/R7
+#                   resolved; image regions omitted, headings as plain text).
+#
+# Metric subset v1 (PLAN Section 4): text Edit_dist, table TEDS + Edit_dist,
+# reading-order Edit_dist. Formula CDM deferred (no TeX stack) -- display_formula
+# is scored by Edit_dist only here, so math-heavy pages still contribute an
+# edit-distance number; exclude them upstream if they drag the text axis.
+end2end_eval:
+  dataset:
+    dataset_name: end2end_dataset
+    ground_truth:
+      data_path: /Users/ronald/omnidocbench-eval/run/gt_english.json
+    prediction:
+      data_path: /Users/ronald/omnidocbench-eval/run/preds
+    match_method: quick_match
+    match_workers: 13
+    match_timeout_sec: 420
+    quick_match_truncated_timeout_sec: 300
+    timeout_fallback_max_chunk_span: 10
+    timeout_fallback_order_penalty: 0.1
+  metrics:
+    text_block:
+      metric:
+      - Edit_dist
+    table:
+      metric:
+      - TEDS
+      - Edit_dist
+      teds_workers: 13
+    reading_order:
+      metric:
+      - Edit_dist

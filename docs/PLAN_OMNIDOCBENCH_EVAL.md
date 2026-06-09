@@ -1,6 +1,6 @@
 # PLAN_OMNIDOCBENCH_EVAL - Ground-Truth Fidelity Benchmark Workstream
 
-Status: PROPOSED (2026-06-07)
+Status: PROPOSED (2026-06-07) -- Phase 0 underway, see Section 12.
 Owner: extraction + QA
 Depends on / pairs with: PLAN_GATE_QUALITY_V1 (this is its ground-truth half).
 Trigger: stand this up so it is ready WHEN acceptance testing for the
@@ -66,6 +66,8 @@ Render each document's `ingestion.jsonl` to one Markdown file per page, named
 - text -> paragraphs
 - tables -> our Markdown grid (already produced)
 - formulas -> LaTeX if present
+- (SUPERSEDED by 12.1#1: "join chunks in reading_order" -- reading_order is not
+  a schema field; reconstruct from JSONL line order. See Section 12.)
 - DECISION (image handling): OmniDocBench end-to-end Markdown does NOT carry our
   long VLM visual_descriptions. Emitting them would INFLATE edit distance against
   ground truth. So for the OmniDocBench adapter, render image regions as the GT
@@ -183,3 +185,109 @@ benchmark is wired before acceptance starts. PLAN_GATE_QUALITY_V1 Section 10
   OmniDocBench run on the English subset with a recorded baseline.
 - Baseline (text edit distance, TEDS, reading order) logged in FINDINGS_LOG.md.
 - PLAN_GATE_QUALITY_V1 acceptance references the fidelity floor.
+
+## 12. Phase 0 Execution (2026-06-09)
+
+Status: STRATIFIED BASELINE DONE (2026-06-09). Infra DONE (isolated `omnidocbench`
+conda env, repo cloned at `~/omnidocbench-eval/OmniDocBench`). Dataset downloaded
+(1651 pages, 755 English; no source PDFs ship -> input adapter required). Both
+adapters built + tested: `scripts/omnidocbench_adapter.py` (select/build-pdfs/run/
+render, standalone, R4-clean) and `configs/omnidocbench_end2end.yaml`. Open
+questions R1/R5/R6/R7 resolved against the scorer source (see FINDINGS_LOG
+2026-06-09). Stratified 128-page English baseline scored (text ED 0.251 / reading
+ED 0.249 / table TEDS 0.669) and recorded with all five caveat labels; F1<->abandon
+sanity pass clean. REMAINING: full 755-page English run (~8h, sequential),
+then Phase 1 extractor bake-off.
+
+### 12.1 Grounding corrections (verified against the repo + demo, 2026-06-09)
+
+Three facts override assumptions in Sections 3-5 above:
+
+1. **`reading_order` is not a schema field at all.** It is absent from
+   `ingestion_schema.py` entirely (not present-but-null). The output adapter (3b)
+   MUST reconstruct reading order from **JSONL line order** (chunks are emitted in
+   document order). Section 3b's "join chunks in reading_order" describes a field
+   that does not exist. (R1: verify emission order == GT `order` on the smoke page
+   before scaling.)
+2. **First JSONL line is a doc-metadata header** (`object_type:
+   ingestion_metadata`, carrying `total_pages` / `source_file` / `doc_id`). The
+   adapter MUST skip it and key real chunks off `metadata.page_number`.
+3. **GT convention is concrete.** `OmniDocBench.json` is a list of page objects
+   `{layout_dets, extra, page_info}`. Match on `page_info.image_path`
+   (`<name>.jpg`); the authoritative language is `page_info.page_attribute.language`
+   (assert on this, NOT the `_eng_` filename); block labels are
+   `layout_dets[].category_type` (`title/text/abandon/figure/table/formula`),
+   reading order is `layout_dets[].order`. Heading depth in OUR output comes from
+   `metadata.hierarchy.level` (1-5) -- do NOT use `breadcrumb_path` depth, it is
+   polluted with synthetic entries (`'Page 1'`, `'[RECOVERED]'`). Demo
+   predictions wrap markdown in a ```` ```markdown ```` fence -- confirm whether
+   the scorer strips it before the full run.
+
+### 12.2 Steps (each with a verification check)
+
+1. **Download + characterize.** `snapshot_download("opendatalab/OmniDocBench",
+   repo_type="dataset")` into `~/omnidocbench-eval/data/` (in the `omnidocbench`
+   env). Verify: JSON parses; count `language=="english"` pages; cross-tab vs
+   `_eng_` filename to quantify disagreement; confirm no source PDFs ship.
+2. **Input adapter** (`scripts/omnidocbench_adapter.py`, input half): image ->
+   1-page PDF (`img2pdf`, lossless) -> `process <pdf> --batch-size 10
+   --vision-provider none`. Verify: smoke ONE code/table-bearing English page
+   end-to-end; chunks produced, `page_number==1`, no crash. Routing decision (R2)
+   resolved AFTER this smoke -- inspect the lane + score, then decide whether a
+   `--profile-override` comparison run is worth the credits.
+3. **Output adapter** (output half): JSONL -> one `<image_basename>.md` per page.
+   Group by `page_number`, order by JSONL line order (12.1#1). Render:
+   - heading -> `#`x`hierarchy.level` ONLY when `level` is non-null. **`level` is
+     null on ~43-53% of chunks** (verified: a chunk gets a level only when
+     `breadcrumb_path` is populated). NULL-LEVEL FALLBACK: render as a paragraph,
+     never as `#`x`None`. Do NOT derive depth from `breadcrumb_path` length (it
+     carries synthetic `Page N`/`[RECOVERED]` tails, 12.1#3).
+   - text -> paragraph; table -> existing markdown grid; code -> fenced.
+   - image -> see R6 below. The omit-vs-caption call (12.2 Step 3 said "OMIT" vs
+     Section 3b's "placeholder/caption") MUST be resolved against
+     `OmniDocBench.json` `figure` blocks FIRST: if GT figure blocks contribute
+     scored caption text, OMIT is penalized for content we have; if figures are
+     unscored/excluded, OMIT is correct. This section supersedes 3b once resolved.
+
+   Verify: eyeball one `.md` vs the GT page rendered from `layout_dets[].text` in
+   `order`; resolve the ```` ```markdown ```` wrapper question AND the figure-caption
+   scoring question in the same pass.
+4. **Config + run.** Copy `end2end_notex.yaml`; set `ground_truth.data_path`,
+   `prediction.data_path`, `match_method: quick_match`, `filter.language:
+   english`. Verify: math pages EXCLUDED not scored-as-zero (else they drag
+   edit-distance); run completes; per-category text edit-dist + TEDS +
+   reading-order present; scored page count == English subset count.
+5. **Record baseline** in `docs/paper/FINDINGS_LOG.md`: three metrics per
+   category + all five 12.3 caveat labels verbatim.
+6. **F1 <-> abandon sanity pass** on ~3 docs: diff our F1 furniture drops vs GT
+   `abandon` blocks; confirm disagreements are directional noise, not extraction
+   errors. Log the finding.
+
+### 12.3 Baseline caveat labels (bake into FINDINGS_LOG verbatim)
+
+1. Synthetic image-PDF, scanned-lane routing -- NOT native-PDF quality.
+2. F1 <-> abandon directional, not exact -- sanity-passed first.
+3. no-CDM config: formulas unscored (excluded, not penalized).
+4. English subset = `language` attr AND `_eng_` filename (asserted on attr).
+5. VLM descriptions omitted -- this is a TEXT/TABLE fidelity baseline, not
+   multimodal value-add.
+
+### 12.4 Issue / risk register
+
+- R1: `reading_order` null -> verify JSONL emission order == GT `order` on the
+  smoke page before scaling.
+- R2: synthetic image-PDF routes everything down the scanned lane -> label
+  baseline accordingly; routing-override comparison decided after the Step 2 smoke.
+- R3: F3 CJK rule misfires on CN leakage -> English-subset-only sidesteps; assert
+  on language attr.
+- R4: adapter is new code but must NOT touch the extraction path -> keep it a
+  standalone script, no imports into `batch_processor`/`uir_chunker`; run
+  `scripts/smoke_production.sh` (must print `SMOKE_PRODUCTION_PASS`).
+- R5: ```` ```markdown ```` fence handling unknown -> resolve in Step 3 verify
+  before the full run.
+- R6: `hierarchy.level` is null on ~43-53% of chunks -> Step 3 null-level fallback
+  (render as paragraph, never `#`x`None`); do NOT use breadcrumb depth. Pre-full-run.
+- R7: image OMIT (12.2) vs placeholder/caption (3b) unreconciled -> resolve
+  against GT `figure` blocks BEFORE building the output adapter; an omit that
+  drops scored caption text inflates edit-distance on content we already have.
+  Pre-full-run, same pass as R5.
