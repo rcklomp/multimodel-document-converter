@@ -42,6 +42,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
@@ -129,6 +130,61 @@ def _is_mislabelled_equation(content: str) -> bool:
 # MinerU does not emit a per-element confidence; use the same default the VLM
 # adapter applies to elements with no confidence field.
 _DEFAULT_CONFIDENCE = 0.9
+
+
+# --------------------------------------------------------------------------- #
+# Bounded retry-before-fallback policy (PLAN_EXTRACTION_FIDELITY_V1 Section 5.1 /
+# Phase 0.5). MIRRORS the vlm_provider policy (attempt cap, linear backoff,
+# transient-only retry); it is a NEW wrapper, not a reuse - the MinerU path had no
+# retry. The third-party ``MinerUClient.two_step_extract`` is STATELESS per call
+# (verified against the installed mineru_vl_utils source: layout_detect ->
+# _batch_predict -> post_process all derive from the ``image`` argument and mutate
+# no instance state), so retrying the SAME page is a genuine recovery of the
+# intermittent ``broadcast_shapes`` 500 (fcd4207), not a mask. Retry lives in the
+# ENGINE so it PRECEDES any cross-engine move in ``processor.extract()`` - the
+# fail-closed ladder still engages once these bounded attempts are exhausted.
+MINERU_MAX_RETRIES = 3  # mirrors VlmProviderConfig.max_retries
+MINERU_RETRY_BACKOFF_SECONDS = 2.0  # mirrors VlmProviderConfig.retry_backoff_seconds
+# A read timeout means the server is generating but too slowly; a retry just burns
+# another full timeout on the same heavy page. Mirrors vlm_provider's dedicated cap.
+MINERU_READ_TIMEOUT_MAX_ATTEMPTS = 1
+# Transient HTTP statuses worth retrying - IDENTICAL set to vlm_provider. The
+# intermittent broadcast_shapes 500 lives here. A 4xx is NEVER retried.
+_MINERU_RETRYABLE_STATUS = frozenset({408, 429, 500, 502, 503, 504})
+
+
+def _mineru_retry_classification(exc: BaseException) -> Tuple[bool, bool]:
+    """Classify a ``two_step_extract`` exception for bounded retry.
+
+    Returns ``(retryable, is_read_timeout)``. Retry ONLY on transient classes
+    (connection/timeout faults and the ``{408,429,500,502,503,504}`` status set,
+    mirroring vlm_provider); never on a 4xx. The MinerU http-client surfaces a
+    non-200 as a ``ServerError`` whose message carries the status code
+    (``"Unexpected status code: [500], ..."``) and a connect failure as a
+    ``ServerError("Failed to connect ...")``; classification is duck-typed on a
+    structured ``status_code``/``response.status_code`` first, then the message,
+    so it needs no httpx / mineru_vl_utils import. An unknown error shape is NOT
+    retried (it must not mask a logic bug) - the fail-closed ladder handles it.
+    """
+    status = getattr(exc, "status_code", None)
+    response = getattr(exc, "response", None)
+    if status is None and response is not None:
+        status = getattr(response, "status_code", None)
+    if status is None:
+        match = re.search(r"status code:?\s*\[?(\d{3})\]?", str(exc).lower())
+        if match:
+            status = int(match.group(1))
+    if isinstance(status, int):
+        return status in _MINERU_RETRYABLE_STATUS, False
+    # No HTTP status -> a transport fault? (connect / read timeout, conn refused,
+    # or the http-client's "Failed to connect" wrap of httpx.ConnectError.)
+    name = type(exc).__name__.lower()
+    low = str(exc).lower()
+    if "timeout" in name or "timed out" in low:
+        return True, True
+    if "connect" in name or "connectionerror" in name or "failed to connect" in low:
+        return True, False
+    return False, False
 
 
 class _TableHTMLParser(HTMLParser):
@@ -442,7 +498,7 @@ def extract_page_mineru(
     callers off the engine's private surface (``_render_page``, ``client``).
     """
     image, pixel_w, pixel_h = mineru_engine._render_page(page)
-    elements = mineru_engine.client.two_step_extract(image)
+    elements = mineru_engine.two_step_extract(image)
     return mineru_page_to_universal_page(list(elements), page_number, (pixel_w, pixel_h))
 
 
@@ -493,6 +549,49 @@ class MineruNativeEngine:
             self._client = self._build_client()
         return self._client
 
+    def two_step_extract(self, image: Any) -> Any:
+        """Call MinerU ``two_step_extract`` with bounded retry on transient faults.
+
+        Phase 0.5 retry-before-fallback (PLAN_EXTRACTION_FIDELITY_V1 Section 5.1).
+        Up to ``MINERU_MAX_RETRIES`` attempts, linear backoff
+        (``BACKOFF * attempt``), retrying ONLY transient classes
+        (connection/timeout/5xx incl. the intermittent ``broadcast_shapes`` 500),
+        never a 4xx. A read timeout gets its own small sub-cap. On exhaustion or a
+        non-retryable fault the last exception propagates, so
+        ``processor.extract()``'s fail-closed ladder still engages - retry
+        PRECEDES fallback, it does not replace it.
+        """
+        last_exc: Optional[BaseException] = None
+        read_timeout_attempts = 0
+        for attempt in range(1, MINERU_MAX_RETRIES + 1):
+            try:
+                return self.client.two_step_extract(image)
+            except Exception as exc:  # noqa: BLE001 — classify, then retry-or-raise
+                last_exc = exc
+                retryable, is_read_timeout = _mineru_retry_classification(exc)
+                if not retryable:
+                    raise
+                if is_read_timeout:
+                    read_timeout_attempts += 1
+                    if read_timeout_attempts >= MINERU_READ_TIMEOUT_MAX_ATTEMPTS:
+                        logger.warning(
+                            "MinerU read timeout (attempt %d/%d); not retrying — a "
+                            "retry would just repeat the wait on the same page",
+                            attempt,
+                            MINERU_MAX_RETRIES,
+                        )
+                        raise
+                logger.warning(
+                    "MinerU two_step_extract transient fault (attempt %d/%d): %s",
+                    attempt,
+                    MINERU_MAX_RETRIES,
+                    exc,
+                )
+                if attempt < MINERU_MAX_RETRIES:
+                    time.sleep(MINERU_RETRY_BACKOFF_SECONDS * attempt)
+        assert last_exc is not None  # loop only exits via return or raise
+        raise last_exc
+
     def _build_client(self) -> Any:
         if not self._server_url:
             raise MineruConfigError(
@@ -526,7 +625,7 @@ class MineruNativeEngine:
             pages: List[Tuple[int, Sequence[Dict[str, Any]], Tuple[int, int]]] = []
             for page_index in range(doc.page_count):
                 image, pixel_w, pixel_h = self._render_page(doc[page_index])
-                elements = self.client.two_step_extract(image)
+                elements = self.two_step_extract(image)
                 pages.append((page_index + 1, list(elements), (pixel_w, pixel_h)))
         finally:
             doc.close()
