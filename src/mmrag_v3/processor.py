@@ -72,13 +72,15 @@ def is_mineru_qwen_hybrid_route_enabled() -> bool:
 
 
 def _default_route_is_mineru() -> bool:
-    """The default route is MinerU2.5 whenever a MinerU server is configured.
+    """True when a MinerU server is configured, selecting the default V3 route.
 
-    MinerU2.5 is the chosen extractor (PLAN_VLM_EVAL §10-13). Making it the
-    default is gated on ``MINERU_ENDPOINT`` being set so that standing up a
-    MinerU server is the single, explicit act that opts a deployment into it;
-    setups with no MinerU endpoint keep the legacy ``HybridEngine`` default
-    and are never hard-broken by this flip.
+    The default route is the ``MineruQwenHybridEngine`` (code-dense pages to Qwen
+    VLM, every other page to MinerU2.5), not pure MinerU - see ``_select_engine``
+    and AGENTS.md V3 Phase C. MinerU2.5 is the chosen extractor (PLAN_VLM_EVAL
+    §10-13). Selecting this default is gated on ``MINERU_ENDPOINT`` being set so
+    that standing up a MinerU server is the single, explicit act that opts a
+    deployment into it; setups with no MinerU endpoint keep the legacy
+    ``HybridEngine`` default and are never hard-broken by this flip.
     """
     return bool(os.environ.get("MINERU_ENDPOINT", "").strip())
 
