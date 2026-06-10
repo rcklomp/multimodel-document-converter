@@ -21,6 +21,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -50,6 +51,26 @@ logger = logging.getLogger(__name__)
 
 
 PAGE_RENDER_DPI = 200
+
+# Longest-side render cap (px) for the VLM lane — INTERIM default per
+# DECISIONS.md "cap1600 interim render setting" (2026-06-10). The uncapped
+# dpi200 render (observed up to 19192 px on large-format pages) ships ~12k
+# vision tokens/page and trips the VLM into degenerate repetition on dense
+# pages: fidelity-HARMFUL in aggregate (Phase 0A n=44: text-ED 0.411 vs
+# 0.081 at cap1600, which is also ~5x cheaper). Rollback lever:
+# VLM_RENDER_MAX_PX env var; 0 disables the cap (pure-DPI rendering).
+VLM_RENDER_MAX_PX = 1600
+
+
+def _render_max_px() -> int:
+    raw = os.environ.get("VLM_RENDER_MAX_PX", "").strip()
+    if not raw:
+        return VLM_RENDER_MAX_PX
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return VLM_RENDER_MAX_PX
+
 
 # A2 (Charter Blocker A): cheap per-page output-budget estimate. The VLM's
 # JSON output size tracks the page's content volume, and the page's own
@@ -353,8 +374,15 @@ def render_page_png(
 
     The single source of truth for VLM page rendering, shared by
     ``VlmNativeEngine``, ``HybridEngine`` and ``MineruQwenHybridEngine``.
+    The longest rendered side is clamped to ``VLM_RENDER_MAX_PX`` (env
+    override; 0 disables) so a large-format page can never balloon past the
+    target resolution — small pages render at ``render_dpi`` unchanged.
     """
     zoom = render_dpi / 72.0
+    max_px = _render_max_px()
+    if max_px:
+        longest_pts = max(page.rect.width, page.rect.height) or 1.0
+        zoom = min(zoom, max_px / longest_pts)
     matrix = fitz.Matrix(zoom, zoom)
     pixmap = page.get_pixmap(matrix=matrix, alpha=False)
     buffer = io.BytesIO()

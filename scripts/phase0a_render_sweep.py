@@ -85,7 +85,9 @@ BASELINE_SETTING = "dpi200"
 INTERNAL_MANIFEST: list[dict] = [
     {"label": "carok_dutch_automotive_table", "corpus": "internal", "pdf": "data/data_spreadsheet/CarOK voorraadtelling 2021-04.pdf", "page": 1},
     {"label": "combat_aircraft_dense_magazine", "corpus": "internal", "pdf": "data/digital_magazine/Combat Aircraft - August 2025 UK.pdf", "page": 8},
-    {"label": "python_design_patterns_code", "corpus": "internal", "pdf": "data/technical_manual/Ayeva K. Mastering Python Design Patterns...essential Python patterns...3ed 2024.pdf", "page": 60},
+    # page 65, NOT 60: p60 is a blank section break (zero text at every render
+    # setting); p65 is the first genuine dense-code page (31-line indented JSON).
+    {"label": "python_design_patterns_code", "corpus": "internal", "pdf": "data/technical_manual/Ayeva K. Mastering Python Design Patterns...essential Python patterns...3ed 2024.pdf", "page": 65},
     {"label": "dutch_business_form", "corpus": "internal", "pdf": "data/business_form/betwistingsformulier_aankoop_niet_ontvangen.pdf", "page": 0},
     {"label": "scanned_form_0013", "corpus": "internal", "pdf": "data/business_form/0013_140302111325_001.pdf", "page": 0},
 ]
