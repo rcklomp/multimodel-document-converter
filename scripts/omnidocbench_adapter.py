@@ -33,11 +33,11 @@ on 2026-06-09:
     prose would inflate edit distance. So image-modality chunks are OMITTED.
     Captions our pipeline emits as TEXT chunks are kept (scored vs figure_caption).
 """
+
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -54,26 +54,118 @@ _OMIT_MODALITIES = {"image"}
 # --------------------------------------------------------------------------- #
 # select
 # --------------------------------------------------------------------------- #
+# Canonical data_source order for stratified selection (largest content-diverse
+# classes first; the two singleton classes last). Used only by --stratify.
+_STRATA_ORDER = [
+    "academic_literature",
+    "book",
+    "PPT2PDF",
+    "magazine",
+    "exam_paper",
+    "newspaper",
+    "colorful_textbook",
+    "research_report",
+    "note",
+]
+_SCANNED_ISSUES = {"fuzzy_scan", "geometric_deformation"}
+
+
+def _page_features(page: dict) -> dict:
+    """Coverage flags used by --stratify: table/scanned/form/equation-hard.
+
+    Read from layout_dets + page_attribute so the balanced subset can guarantee
+    tables, prose, forms, and scanned pages are all represented (the n=4 failure
+    was a math/table-skewed academic subset; this exists to not reproduce it)."""
+    cats = {d.get("category_type") for d in page.get("layout_dets", [])}
+    attr = page["page_info"].get("page_attribute", {})
+    issues = set(attr.get("special_issue") or [])
+    name_l = page["page_info"]["image_path"].lower()
+    return {
+        "has_table": "table" in cats,
+        "scanned": bool(_SCANNED_ISSUES & issues),
+        "form": ("form" in name_l) or ("character sheet" in name_l),
+        "eq_hard": attr.get("subset") == "equation_hard",
+    }
+
+
+def _stratified_select(gt: list, language: str, cap: int) -> list[dict]:
+    """Balanced pick: <=cap pages per data_source class, deterministic, with
+    coverage ordering (scanned -> form -> <=2 tables -> prose -> eq_hard)."""
+    by_ds: dict[str, list[dict]] = {}
+    for page in gt:
+        attr = page["page_info"].get("page_attribute", {})
+        if language != "all" and attr.get("language") != language:
+            continue
+        ds = attr.get("data_source")
+        rec = {
+            "image_path": page["page_info"]["image_path"],
+            "name": Path(page["page_info"]["image_path"]).stem,
+            "language": attr.get("language"),
+            "data_source": ds,
+            **_page_features(page),
+        }
+        by_ds.setdefault(ds, []).append(rec)
+
+    selected: list[dict] = []
+    order = _STRATA_ORDER + [d for d in sorted(by_ds) if d not in _STRATA_ORDER]
+    for ds in order:
+        group = by_ds.get(ds)
+        if not group:
+            continue
+        group.sort(key=lambda r: r["name"])  # deterministic
+        picked: list[dict] = []
+        tables = 0
+
+        def take(rec):
+            nonlocal tables
+            if rec not in picked and len(picked) < cap:
+                picked.append(rec)
+                if rec["has_table"]:
+                    tables += 1
+
+        for r in group:  # priority 1: scanned coverage
+            if r["scanned"]:
+                take(r)
+                break
+        for r in group:  # priority 2: a fillable/form page if the class has one
+            if r["form"]:
+                take(r)
+                break
+        for r in group:  # priority 3: up to 2 table-bearing, non-eq-hard pages
+            if r["has_table"] and not r["eq_hard"] and tables < 2:
+                take(r)
+        for r in group:  # priority 4: prose (no table, not eq-hard)
+            if not r["has_table"] and not r["eq_hard"]:
+                take(r)
+        for r in group:  # priority 5: backfill (eq-hard / leftover)
+            take(r)
+        selected.extend(picked)
+    return selected
+
+
 def cmd_select(args: argparse.Namespace) -> int:
     gt = json.loads(Path(args.gt_json).read_text(encoding="utf-8"))
     language = args.language
-    pages = []
-    for page in gt:
-        info = page["page_info"]
-        attr = info.get("page_attribute", {})
-        if language != "all" and attr.get("language") != language:
-            continue
-        image_path = info["image_path"]  # e.g. yanbaopptmerge_SE05.pdf_7.jpg
-        pages.append(
-            {
-                "image_path": image_path,
-                "name": Path(image_path).stem,  # gt key, no extension
-                "language": attr.get("language"),
-                "data_source": attr.get("data_source"),
-            }
-        )
-    if args.limit:
-        pages = pages[: args.limit]
+    if args.stratify:
+        pages = _stratified_select(gt, language, args.cap_per_class)
+    else:
+        pages = []
+        for page in gt:
+            info = page["page_info"]
+            attr = info.get("page_attribute", {})
+            if language != "all" and attr.get("language") != language:
+                continue
+            image_path = info["image_path"]  # e.g. yanbaopptmerge_SE05.pdf_7.jpg
+            pages.append(
+                {
+                    "image_path": image_path,
+                    "name": Path(image_path).stem,  # gt key, no extension
+                    "language": attr.get("language"),
+                    "data_source": attr.get("data_source"),
+                }
+            )
+        if args.limit:
+            pages = pages[: args.limit]
 
     workspace = Path(args.workspace)
     workspace.mkdir(parents=True, exist_ok=True)
@@ -264,9 +356,7 @@ def cmd_render(args: argparse.Namespace) -> int:
             empty += 1
         (preds_dir / f"{name}.md").write_text(markdown + "\n", encoding="utf-8")
         written += 1
-    print(
-        f"RENDER: written={written} missing_jsonl={missing} empty={empty} -> {preds_dir}"
-    )
+    print(f"RENDER: written={written} missing_jsonl={missing} empty={empty} -> {preds_dir}")
     return 1 if missing else 0
 
 
@@ -274,15 +364,35 @@ def cmd_render(args: argparse.Namespace) -> int:
 # cli
 # --------------------------------------------------------------------------- #
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--workspace", default=str(DEFAULT_WORKSPACE), help="run workspace dir")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_sel = sub.add_parser("select", help="filter GT json to a language subset -> manifest.json")
     p_sel.add_argument("--gt-json", default=str(DEFAULT_GT_JSON))
     p_sel.add_argument("--images-dir", default=str(DEFAULT_IMAGES))
-    p_sel.add_argument("--language", default="english", help="page_attribute.language to keep, or 'all'")
-    p_sel.add_argument("--limit", type=int, default=0, help="cap page count (smoke)")
+    p_sel.add_argument(
+        "--language", default="english", help="page_attribute.language to keep, or 'all'"
+    )
+    p_sel.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="cap page count (smoke; head-slice, ignored under --stratify)",
+    )
+    p_sel.add_argument(
+        "--stratify",
+        action="store_true",
+        help="balanced pick across data_source classes with table/scanned/form/prose coverage",
+    )
+    p_sel.add_argument(
+        "--cap-per-class",
+        type=int,
+        default=6,
+        help="max pages per data_source class under --stratify",
+    )
     p_sel.set_defaults(func=cmd_select)
 
     p_pdf = sub.add_parser("build-pdfs", help="page images -> 1-page PDFs")

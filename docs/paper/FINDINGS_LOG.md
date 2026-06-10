@@ -1228,6 +1228,64 @@ Phase 0A deliverable; fidelity needs scale before it can decide anything.
 
 ---
 
+## 2026-06-10 — Render-cap fidelity at n=44 inverts I6; 3-way MinerU serving probe  `[Results][Method][Lessons]`
+
+The n=4 fidelity column from the morning was noise (non-monotonic, cap1400 implausibly
+"best"). Re-run on a BALANCED 44-page OmniDocBench EN subset (9 data_source classes, 15
+tables / 5 scanned / 2 forms / 0 equation-hard; the n=4 was math/table-skewed), it
+resolved into a coherent result that INVERTS the I6 risk: a longest-side render cap is
+not merely fidelity-safe, in aggregate it is fidelity-POSITIVE *and* 4.5–8x cheaper.
+Mechanism (corroborated by the internal artifacts): the production dpi200 render
+over-sizes pages — one page hit **19192 px** longest side, ~12163 vision tokens — and
+the VLM falls into repetition loops; the cap simply doesn't give it the room to loop.
+
+**Phase 0A DoD table (n=44, M5 Qwen3-VL-8B-8bit; text/read ED lower=better, TEDS higher).**
+
+| setting | max px | mean s | vision tok | pages/hr (3600/mean) | text-ED | dED | read-ED | TEDS |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| dpi200 (prod) | 19192 | 86.1 | 12163 | 42 | 0.411 | 0.000 | 0.468 | 0.166 |
+| dpi150 | 14394 | 68.0 | 7759 | 53 | 0.340 | -0.071 | 0.384 | 0.281 |
+| cap1600 | 1600 | 17.5 | 1894 | 206 | 0.081 | **-0.330** | 0.178 | 0.523 |
+| cap1400 | 1400 | 15.3 | 1474 | 235 | 0.089 | **-0.322** | 0.179 | 0.439 |
+
+Worst-K (category-level; the scorer exposes category not per-sample ED): the cap rescues
+the classes dpi200 degenerates on (exam_paper 0.999→0.005, double_column 0.669→0.028,
+scanned 0.654→0.074) but CATASTROPHICALLY breaks one dense academic `1andmore_column`
+page (0.004→0.95, n=1). So **I6 is RETIRED in aggregate, CONFIRMED for one page class** —
+the worst-K convention earned its keep by surfacing the regression the mean hid. cap1600
+is the fidelity sweet spot, cap1400 the throughput sweet spot; dpi150 stays inconclusive
+(non-monotonic per class). Code-indentation is stripped at EVERY setting (a model
+property, render-independent) — and the labelled "code page" p60 turned out BLANK; the
+real code page is p65. Production render setting NOT changed (user decision; needs the
+150-200 page set to size the academic-multicolumn tail).
+
+**3-way MinerU serving probe (same 5-page set via the shipping engine + WP2 retry).**
+
+| box (chip) | k1 mean/max | pages/hr k1 | best-k pages/hr | k1 ok | 500s | retries rec. | sanity |
+|---|---|--:|--:|--:|--:|--:|---|
+| GX10 vLLM (GB10) | 8.6/13.1 s | 419 | **1180 (k4)** | 5/5 | 0 | 0 | all 5, in-family el counts |
+| M5 mlx (M5 Max) | 12.3/26.0 s | 293 | **0 (k2 collapse)** | 3/5 | 5 | 7 | magazine+form FAIL (500) |
+| Mini mlx (M4 Pro) | 24.4/51.1 s | 147 | 72 (k2) | 3/5 | 3/4 | 8 | magazine+form FAIL (500) |
+
+GX10 vLLM is the only box that serves all five page classes, the only one that batches
+(1180 vs 0–293 pages/hr under concurrency), and the only one with zero 500s. Both mlx
+boxes are sequential-only and fail the two highest-element-count pages (magazine el=18,
+form el=39) on a `broadcast_shapes` 500 that PERSISTS through all 3 WP2 retries (the
+retry recovers *transient* 500s — M5 7, Mini 8 — but cannot fix a deterministic per-page
+serving fault). Where all boxes complete, element counts are identical (in-family). No
+repetition observed on GX10 despite its missing anti-repetition logits processor (5-page
+sample, so the risk stayed theoretical). This is the concrete "invest in moving MinerU to
+GX10 vLLM" data point for memo B — verdict still deferred to Phase 1 serving-health gating.
+
+**Lesson:** the dominant VLM-extraction cost AND a dominant VLM-fidelity failure are the
+SAME variable — render resolution — pulling in the same direction: oversized renders cost
+more *and* destabilize the model. Throughput is a memory-bandwidth problem; fidelity on
+dense pages is a token-budget problem; a longest-side cap addresses both. But the mean
+lies on a mixed corpus — only the worst-K split exposed that the cap that fixes 8 classes
+breaks the 9th. Measure the spread, not just the aggregate, before flipping a default.
+
+---
+
 ## Backfill backlog (remaining threads — to expand when drafting)
 
 *Covered above as of 2026-05-30:* V1→V2 lineage · V2 metrics trajectory · V2
