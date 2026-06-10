@@ -1034,6 +1034,17 @@ class IngestionMetadata(BaseModel):
     source_file_hash: Optional[str] = None  # SHA-256
     config_hash: Optional[str] = None  # SHA-256 of relevant pipeline options
 
+    # Extraction provenance (PLAN_EXTRACTION_FIDELITY_V1 Section 5.4) — the served
+    # engine + fail-closed ladder outcome, aggregated across batches. ADVISORY:
+    # they let a green gate report what fraction of its pages the primary engine
+    # actually served vs. the ladder. Absent (None) on legacy outputs.
+    extraction_engine: Optional[str] = None
+    # Most-severe ladder tier engaged anywhere in the doc (docling_fast <
+    # pymupdf_terminal); None when the primary engine served every page.
+    extraction_fallback: Optional[str] = None
+    extraction_degraded_pages: Optional[int] = None  # pages the primary left degraded
+    extraction_recovered_pages: Optional[int] = None  # degraded pages the ladder recovered
+
 
 # ============================================================================
 # HELPER FUNCTIONS

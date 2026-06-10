@@ -1535,6 +1535,34 @@ class BatchProcessor:
                 local[key] = value
         return local or None
 
+    # Fail-closed ladder tier severity (PLAN_EXTRACTION_FIDELITY_V1 Section 5.4):
+    # None (primary served) < docling_fast < pymupdf_terminal. Aggregating the
+    # MOST-severe tier across batches answers "did any page need the ladder?".
+    _FALLBACK_SEVERITY = {None: 0, "docling_fast": 1, "pymupdf_terminal": 2}
+
+    def _accumulate_extraction_provenance(self, universal_doc) -> None:
+        """Fold one batch's extraction provenance into the doc-level summary.
+
+        Reads the ``extraction_*`` stamps that ``mmrag_v3.extract`` records on
+        ``universal_doc.metadata.extra`` (served engine, fail-closed fallback
+        tier, degraded/recovered page counts) and aggregates them across the
+        document's batches: the first engine seen, the most-severe ladder tier
+        engaged anywhere, and summed degraded/recovered page counts. ADVISORY
+        observability for the Section 5.4 consumers; never gates anything.
+        """
+        extra = getattr(getattr(universal_doc, "metadata", None), "extra", None) or {}
+        acc = self._extraction_provenance
+        engine = extra.get("extraction_engine")
+        if engine and acc["engine"] is None:
+            acc["engine"] = engine
+        fallback = extra.get("extraction_fallback")
+        sev = self._FALLBACK_SEVERITY.get(fallback, 1 if fallback else 0)
+        cur_sev = self._FALLBACK_SEVERITY.get(acc["fallback"], 1 if acc["fallback"] else 0)
+        if sev > cur_sev:
+            acc["fallback"] = fallback
+        acc["degraded"] += int(extra.get("extraction_degraded_pages") or 0)
+        acc["recovered"] += int(extra.get("extraction_recovered_pages") or 0)
+
     def _process_single_batch(
         self,
         batch_info: BatchInfo,
@@ -1573,6 +1601,7 @@ class BatchProcessor:
         profile_type = self._intelligence_metadata.get("profile_type") or None
 
         universal_doc = v3_extract(str(batch_info.batch_path))
+        self._accumulate_extraction_provenance(universal_doc)
 
         # PLAN_V3.1 P2: thread the PyMuPDF TOC (extracted document-wide in
         # process_pdf, keyed by ABSOLUTE page) into the UIR-native chunker as
@@ -1700,6 +1729,18 @@ class BatchProcessor:
         # heading never bleeds into the next document in a batch CLI run.
         self._carry_heading = None
         self._carry_breadcrumb = None
+
+        # PLAN_EXTRACTION_FIDELITY_V1 Section 5.4: aggregate the per-batch
+        # extraction provenance (served engine + fail-closed ladder outcome,
+        # stamped on each UniversalDocument by mmrag_v3.extract) into a
+        # doc-level summary written onto the IngestionMetadata header. ADVISORY
+        # observability only; never affects gate semantics.
+        self._extraction_provenance = {
+            "engine": None,
+            "fallback": None,
+            "degraded": 0,
+            "recovered": 0,
+        }
 
         # Workstream B: legacy callers still get the cheap pre-pass here.
         # Canonical CLI paths pass a PdfConversionPlan with this decision already made.
@@ -2497,6 +2538,12 @@ class BatchProcessor:
                 ingestion_timestamp=datetime.now(timezone.utc).isoformat(),
                 pipeline_version=SCHEMA_VERSION,
                 source_file_hash=_src_hash,
+                # PLAN_EXTRACTION_FIDELITY_V1 Section 5.4: doc-level extraction
+                # provenance aggregated across batches (advisory observability).
+                extraction_engine=self._extraction_provenance.get("engine"),
+                extraction_fallback=self._extraction_provenance.get("fallback"),
+                extraction_degraded_pages=self._extraction_provenance.get("degraded"),
+                extraction_recovered_pages=self._extraction_provenance.get("recovered"),
             )
             f.write(json.dumps(meta_record.model_dump(mode="json"), ensure_ascii=False) + "\n")
 

@@ -263,14 +263,17 @@ fails = []
 notes = []
 
 chunks = []
+meta = {}
 with jsonl.open("r", encoding="utf-8") as fh:
     for line in fh:
         line = line.strip()
         if not line:
             continue
         obj = json.loads(line)
-        # Skip the manifest/metadata line (no "modality").
+        # Skip the manifest/metadata line (no "modality") but keep it for the
+        # extraction-provenance NOTE below (PLAN_EXTRACTION_FIDELITY_V1 5.4).
         if obj.get("object_type") == "ingestion_metadata":
+            meta = obj
             continue
         if "modality" not in obj:
             continue
@@ -284,6 +287,17 @@ n_img = mods.get("image", 0)
 n_tbl = mods.get("table", 0)
 n_txt = mods.get("text", 0)
 notes.append(f"chunks={n} (txt={n_txt} img={n_img} tbl={n_tbl})")
+
+# Extraction provenance aggregates (advisory observability, Section 5.4 fleet
+# consumer): which engine served and whether the fail-closed ladder engaged.
+_eng = meta.get("extraction_engine")
+if _eng:
+    _fb = meta.get("extraction_fallback")
+    _deg = meta.get("extraction_degraded_pages") or 0
+    _rec = meta.get("extraction_recovered_pages") or 0
+    notes.append(
+        f"extract={_eng} fallback={_fb or 'none'} degraded={_deg} recovered={_rec}"
+    )
 
 # (a) BATCH INTEGRITY -----------------------------------------------------
 require_chunks = (expect == "require_chunks") or full

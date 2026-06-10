@@ -1038,6 +1038,44 @@ def _table_issues(chunks: list[dict[str, Any]]) -> list[Issue]:
     return issues
 
 
+def _print_extraction_provenance(metadata: dict[str, Any]) -> None:
+    """ADVISORY: surface the served engine + fail-closed ladder outcome.
+
+    PLAN_EXTRACTION_FIDELITY_V1 Section 5.4 consumer 2, advisory phase per
+    AGENT-GATE-PROGRESSION: a green gate must report what fraction of its pages
+    the primary engine actually served versus the ladder (tier-2 docling /
+    tier-3 PyMuPDF terminal). Pure observability - it reads the doc-level
+    ``extraction_*`` stamps on the IngestionMetadata header and NEVER changes
+    the QA verdict (no new failure condition tonight). A flagged/ladder-served
+    ratio bound that emits QA_WARN is Phase 3 work, gated on calibration.
+    """
+    print("Extraction Provenance (advisory)")
+    print("--------------------------------")
+    engine = metadata.get("extraction_engine")
+    if engine is None:
+        print(
+            "No extraction_* provenance stamps on this output "
+            "(legacy / pre-Section-5.4 conversion)."
+        )
+        print()
+        return
+    total = metadata.get("total_pages")
+    degraded = int(metadata.get("extraction_degraded_pages") or 0)
+    recovered = int(metadata.get("extraction_recovered_pages") or 0)
+    fallback = metadata.get("extraction_fallback")
+
+    def _frac(n: int) -> str:
+        if isinstance(total, int) and total > 0:
+            return f"{n}/{total} ({100.0 * n / total:.1f}%)"
+        return f"{n}"
+
+    print(f"engine: {engine}")
+    print(f"ladder fallback: {fallback or 'none (primary engine served every page)'}")
+    print(f"ladder-served pages (primary could not serve): {_frac(degraded)}")
+    print(f"ladder-recovered pages: {_frac(recovered)}")
+    print()
+
+
 def _print_script_results(results: list[ScriptResult]) -> None:
     print("Existing QA Scripts")
     print("-------------------")
@@ -1253,6 +1291,7 @@ def main() -> int:
         f"table={sum(1 for c in chunks if c.get('modality') == 'table')}"
     )
     print()
+    _print_extraction_provenance(metadata)
     _print_script_results(script_results)
     _print_issues("Additional Deterministic Checks", issues)
     print()
