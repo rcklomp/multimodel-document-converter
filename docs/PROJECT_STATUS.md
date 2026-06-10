@@ -1,8 +1,47 @@
 # Project Status
 
-Last updated: 2026-06-08 (full-crucible Grand Soak: 5 gate fails / 4 clusters fixed + corpus-validated 16/16 clean QA_PASS; multimodal no-VLM image policy + local enrichment lane; code-review hardening)
+Last updated: 2026-06-09 (branch `feat/omnidocbench-phase0`: OmniDocBench Phase 0+1 fidelity benchmark + fail-closed 3-tier extraction ladder shipped)
 
-## Current state (2026-06-08) - full 16-doc crucible CLEAN; clusters A/C/B/D fixed; multimodal image policy shipped
+## Current state (2026-06-09) - OmniDocBench fidelity benchmark + fail-closed extraction
+
+Branch `feat/omnidocbench-phase0` (NOT pushed). Two workstreams shipped on top of
+the 2026-06-08 crucible baseline:
+
+**Fail-closed extraction ladder (`fcd4207`, `e73fbd8`, + working-tree hardening).**
+`mmrag_v3.processor.extract()` no longer depends on a remote GPU server staying
+healthy. It degrades through three tiers, each serving only the pages the tier
+above could not:
+- tier 1 - selected engine (MineruQwenHybridEngine default when `MINERU_ENDPOINT`
+  is set, else legacy HybridEngine; forced via `USE_*` env flags),
+- tier 2 - offline `DoclingFastEngine` (no network),
+- tier 3 - PyMuPDF native-text terminal tier (no model/network).
+
+The served lane + outcome are stamped on `doc.metadata.extra`
+(`extraction_engine` / `extraction_fallback` / `extraction_degraded_pages` /
+`extraction_recovered_pages` / `extraction_fallback_reason`) and logged.
+Guarantee scope (honest): no page that HAS an extractable text layer is zeroed by
+an engine/server/network failure; a cheap text-layer probe means genuinely blank
+pages pay zero fallback cost; the terminal tier never fabricates text. Out of
+scope: a scanned page where OCR also fails. Working-tree hardening (this session)
+broadened degeneracy detection to zero-element pages, backstopped the whole-doc
+failure path with the terminal tier, and added the blank-page cost gate (3 tests).
+
+**OmniDocBench Phase 0+1 (`746ea31`..`e970e54`).** Ground-truth fidelity benchmark
+(adapters + stratified baseline). Full 755-page English baseline: text
+edit-distance 0.301 / TEDS 0.563. Phase 1 extractor bake-off harness shipped but
+**INCONCLUSIVE** - the M5 mlx MinerU2.5 server threw intermittent
+`broadcast_shapes` 500s (serving faults, not a fidelity verdict); paddle/granite
+adapters deferred. See `docs/PLAN_OMNIDOCBENCH_EVAL.md`.
+
+**Test state (honest):** `pytest tests/` = 1574 passed / 99 skipped with the
+working-tree hardening (1571 on the committed branch tip), plus **1 KNOWN,
+pre-existing, unrelated failure** -
+`tests/test_v3_vlm_code_form.py::test_code_smuggles_as_text_promotes_to_code_modality`
+(a code-fencing whitespace assertion the branch never touched). It must be fixed
+or explicitly quarantined before "green suite" can be claimed. `ruff` clean;
+`SMOKE_PRODUCTION_PASS` (offline).
+
+## Prior state (2026-06-08) - full 16-doc crucible CLEAN; clusters A/C/B/D fixed; multimodal image policy shipped
 
 The full-crucible Grand Soak (16 docs) that closed the MinerU+Qwen cycle surfaced
 5 gate failures in 4 root-cause clusters. All four are fixed, corpus-validated,
@@ -383,7 +422,10 @@ visual-dense queries.
 ## Test command
 
 ```
-pytest tests/ -q            # 1355 passed / 99 skipped / 0 failed
+pytest tests/ -q            # current: 1574 passed / 99 skipped + 1 KNOWN failure
+                            # (test_v3_vlm_code_form::test_code_smuggles_as_text_
+                            #  promotes_to_code_modality) — see "Test state (honest)"
+                            # in the current-state section above; was 1355 at 2026-06-03
 bash scripts/smoke_production.sh   # -> SMOKE_PRODUCTION_PASS (offline)
 ```
 

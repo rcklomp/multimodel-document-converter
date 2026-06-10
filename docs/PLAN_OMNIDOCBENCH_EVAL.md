@@ -337,4 +337,33 @@ already-rendered docling preds (text ED 0.277 / reading 0.307 / TEDS 0.441 on th
 44-subset). Sequence: smoke-first one page through `mineru` (most complex
 integration) -> per-engine `run`+`render`+`score` (contiguous per engine so the M5
 mlx server swaps models only 4x) -> `report`. Record the comparison table + the
-engine-choice verdict (confirm/revisit MinerU2.5+Qwen) in FINDINGS_LOG.
+engine-choice verdict (confirm/revisit MinerU2.5+Qwen) in FINDINGS_LOG. The verdict
+is issued per the PRE-REGISTERED rule in 13.4 - never post-hoc from the table.
+
+### 13.4 Pre-registered decision rule (2026-06-10; mirror of
+PLAN_EXTRACTION_FIDELITY_V1 Section 7.2, which is canonical)
+
+Added after the Round-1 audit of PLAN_EXTRACTION_FIDELITY_V1 (findings A1/A3): the
+INCONCLUSIVE first run showed the bake-off can fail by competitor forfeit, and
+neither this plan nor `omnidocbench_bakeoff.py` defined any margin or variance
+treatment, leaving the verdict open to post-hoc rationalization.
+
+- **Fixed paired set:** expand the 44-page shakeout subset toward 150-200 stratified
+  pages; every engine INCLUDING the baseline runs the SAME set. The full-755
+  baseline (text ED 0.301 / TEDS 0.563) is a corpus reference, never a comparator
+  for subset runs (the 44-page docling numbers vs full-755 are cross-set and carry
+  no comparative meaning). Per-class claims need n >= 10 pages of that class.
+- **Paired statistics:** per-page paired deltas, bootstrap 95% CI on the mean delta;
+  report worst-K per-page deltas per class alongside means.
+- **The rule:** pipeline-primary CONFIRMED iff paired mean text-ED delta improves by
+  >= 0.02 with CI excluding zero, AND table TEDS does not regress (CI excludes a
+  regression > 0.02), AND no per-class paired mean regresses by > 0.05, AND the
+  internal-corpus axis (PLAN_EXTRACTION_FIDELITY_V1 Section 7.3, validated signals
+  only) does not regress. REFUTED iff the same holds for the VLM hybrid. Anything
+  else: INCONCLUSIVE, recorded, default does not move.
+- **Verdict eligibility (engine-health guard):** per-engine page-level request
+  failures are logged; any engine exceeding 2% failures (after retry) invalidates
+  every comparison involving it. A run with a forfeiting/unhealthy candidate is a
+  DRY RUN - harness shakeout, no verdict authority.
+- Margins are pre-registered; changing them after verdict-eligible data exists
+  requires a recorded USER decision with rationale.
