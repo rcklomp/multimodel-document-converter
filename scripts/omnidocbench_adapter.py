@@ -85,12 +85,25 @@ def _page_features(page: dict) -> dict:
         "scanned": bool(_SCANNED_ISSUES & issues),
         "form": ("form" in name_l) or ("character sheet" in name_l),
         "eq_hard": attr.get("subset") == "equation_hard",
+        "layout": attr.get("layout"),  # single_column / 1andmore_column / ... (Section 7.2 per-class)
     }
 
 
-def _stratified_select(gt: list, language: str, cap: int) -> list[dict]:
+def _stratified_select(
+    gt: list,
+    language: str,
+    cap: int,
+    table_quota: int = 2,
+    ensure_layout: tuple[str, int] | None = None,
+) -> list[dict]:
     """Balanced pick: <=cap pages per data_source class, deterministic, with
-    coverage ordering (scanned -> form -> <=2 tables -> prose -> eq_hard)."""
+    coverage ordering (scanned -> form -> <=table_quota tables -> prose -> eq_hard).
+
+    ensure_layout=(layout_name, n): after the balanced pick, top up so at least n
+    pages of page_attribute.layout==layout_name are present (Section 7.2 needs
+    n>=10 of the cap1600 tail-risk class `1andmore_column`). Topups are pulled
+    deterministically, round-robin across data_sources to avoid over-loading one
+    class, and appended BEYOND the per-class cap (a small, recorded overage)."""
     by_ds: dict[str, list[dict]] = {}
     for page in gt:
         attr = page["page_info"].get("page_attribute", {})
@@ -131,8 +144,8 @@ def _stratified_select(gt: list, language: str, cap: int) -> list[dict]:
             if r["form"]:
                 take(r)
                 break
-        for r in group:  # priority 3: up to 2 table-bearing, non-eq-hard pages
-            if r["has_table"] and not r["eq_hard"] and tables < 2:
+        for r in group:  # priority 3: up to table_quota table-bearing, non-eq-hard pages
+            if r["has_table"] and not r["eq_hard"] and tables < table_quota:
                 take(r)
         for r in group:  # priority 4: prose (no table, not eq-hard)
             if not r["has_table"] and not r["eq_hard"]:
@@ -140,6 +153,34 @@ def _stratified_select(gt: list, language: str, cap: int) -> list[dict]:
         for r in group:  # priority 5: backfill (eq-hard / leftover)
             take(r)
         selected.extend(picked)
+
+    if ensure_layout:
+        layout_name, want = ensure_layout
+        have = sum(1 for r in selected if r.get("layout") == layout_name)
+        if have < want:
+            sel_names = {r["name"] for r in selected}
+            # candidate pool of the target layout, grouped by data_source, deterministic
+            pool_by_ds: dict[str, list[dict]] = {}
+            for ds in order:
+                for r in sorted(by_ds.get(ds, []), key=lambda x: x["name"]):
+                    if r.get("layout") == layout_name and r["name"] not in sel_names:
+                        pool_by_ds.setdefault(ds, []).append(r)
+            # round-robin across data_sources so the topup is source-diverse
+            ds_cycle = [ds for ds in order if pool_by_ds.get(ds)]
+            i = 0
+            while have < want and ds_cycle:
+                ds = ds_cycle[i % len(ds_cycle)]
+                bucket = pool_by_ds.get(ds)
+                if bucket:
+                    r = bucket.pop(0)
+                    selected.append(r)
+                    sel_names.add(r["name"])
+                    have += 1
+                if not bucket:
+                    ds_cycle = [d for d in ds_cycle if pool_by_ds.get(d)]
+                    i = 0
+                    continue
+                i += 1
     return selected
 
 
@@ -147,7 +188,14 @@ def cmd_select(args: argparse.Namespace) -> int:
     gt = json.loads(Path(args.gt_json).read_text(encoding="utf-8"))
     language = args.language
     if args.stratify:
-        pages = _stratified_select(gt, language, args.cap_per_class)
+        ensure_layout = None
+        if args.ensure_layout:
+            lname, _, lnum = args.ensure_layout.partition(":")
+            ensure_layout = (lname, int(lnum or 0))
+        pages = _stratified_select(
+            gt, language, args.cap_per_class,
+            table_quota=args.table_quota, ensure_layout=ensure_layout,
+        )
     else:
         pages = []
         for page in gt:
@@ -392,6 +440,18 @@ def main() -> int:
         type=int,
         default=6,
         help="max pages per data_source class under --stratify",
+    )
+    p_sel.add_argument(
+        "--table-quota",
+        type=int,
+        default=2,
+        help="max table-bearing pages taken per class before prose (under --stratify)",
+    )
+    p_sel.add_argument(
+        "--ensure-layout",
+        default="",
+        help="LAYOUT:N -- top up so >=N pages of page_attribute.layout==LAYOUT are "
+        "present (e.g. 1andmore_column:12 for the Section 7.2 cap1600 tail class)",
     )
     p_sel.set_defaults(func=cmd_select)
 

@@ -1351,3 +1351,74 @@ committed `V3_OVERNIGHT_REPORT.md`). Still to do:
   / 18.4 s/page, fidelity OK. Remaining: large-magazine thrash test + oMLX A-B.
 - **(legacy backlog note)** Judge calibration — GX10 Qwen2.5-14B-FP8: format TRUSTWORTHY,
   rel/faith RESTRICTED; treat as directional. Source: memory `feedback_v2_14_gx10_14b_fp8_swap`.
+
+---
+
+## 2026-06-11 - Phase 1 two-corpus extractor bake-off: INCONCLUSIVE, both pure extremes refuted  `[Results][Method][Decision]`
+
+The Phase 1 decision run (PLAN_EXTRACTION_FIDELITY_V1 Section 7.2 / PLAN_OMNIDOCBENCH
+13.4), unattended overnight. Fixed set: 158 stratified English OmniDocBench pages
+(n>=22 per main data_source class, 12 1andmore_column, 29 tables) + a 6-doc internal
+native-PDF corpus. Four registered candidates; PaddleOCR-VL EXCLUDED (strict-JSON
+engine mismatch, not a forfeit). Per-sample scoring surfaced from the OmniDocBench
+scorer; paired per-page bootstrap 95% CI (10k resamples, seed 20260610). Full report:
+`HANDOVER_PHASE1_REPORT.md`.
+
+**VERDICT: INCONCLUSIVE** on the pre-registered comparison (pipeline-primary candidate
+vs the VLM hybrid); the default does NOT move (Phase 0B interim offline-floor default
+stays; the MinerU+Qwen hybrid stays the validated candidate). Reason: on OmniDocBench
+the only viable pipeline candidate (MinerU) is statistically identical to the incumbent
+hybrid (paired text-ED delta +0.0001, inside the +/-0.02 margin) because the hybrid IS
+MinerU on a near-code-free benchmark. What the two corpora establish positively, both
+with margin: pure-VLM-primary REFUTED (pipeline beats Qwen3-VL) and pure-pipeline-primary
+REFUTED for code (MinerU mangles indentation). The non-dominated architecture is the
+complementary one the candidate thesis describes - a MinerU-dominant default WITH a VLM
+code-specialist lane - i.e. the EXISTING hybrid.
+
+**OmniDocBench fidelity (158 pages; text/reading ED lower=better, TEDS higher):**
+
+| engine | text ED | reading ED | TEDS | note |
+|---|--:|--:|--:|---|
+| docling_fast | 1.000 | 1.000 | 0.000 | DRY - content-empty (do_ocr=False on image-only PDFs) |
+| mineru | 0.221 | 0.226 | 0.798 | GX10 vLLM |
+| qwen3vl | 0.256 | 0.238 | 0.421 | M5 mlx, cap1600 |
+| hybrid | 0.221 | 0.227 | 0.793 | == mineru here |
+
+Paired (n_text=151, n_teds=29): mineru vs hybrid text +0.0001 CI[+0.0000,+0.0002]
+(equivalent); hybrid vs qwen3vl text +0.0346 CI[+0.0036,+0.0663], TEDS +0.1745
+CI[+0.0283,+0.3102] (pipeline beats VLM, margin met); qwen3vl regresses worst on
+newspaper/three_column/1andmore_column (VLM multi-column reading-order failure).
+Engine health: all four 0% ladder/degraded, but docling content-empty 151/151 ->
+its OmniDocBench comparisons are DRY (the ladder-health guard does not see
+content-emptiness; flagged as a guard blind-spot).
+
+**Internal native-PDF corpus (6 docs x 4 engines, all fb=None, 0 ladder):**
+
+| class | docling_fast | mineru | qwen3vl | hybrid |
+|---|---|---|---|---|
+| CarOK dense table | 0 table (flattened, part-nrs lost) | 12 table | 12 table | 12 table |
+| scanned form 0013 | 0 text (no OCR) | text+table (OCR) | text+table | text+table |
+| code R3 indentation | vacuous (0 code chunks) | **0.300 FAIL** | **0.950** | **0.947** |
+
+R3 reconciliation: the PRODUCTION schema prompt preserves Qwen code indentation
+(0.950), unlike the render-sweep transcription prompt (which stripped it) - so
+indentation loss was a PROMPT property, not an unavoidable model property; the
+hybrid's Qwen-for-code lane is validated (0.947 vs pure MinerU 0.300). Junk-presence
+signals clean across all engines (no added junk); the real differentiators are
+OMISSION (counts) and CODE (R3), the classes those signals are blind to (judged
+qualitatively per Section 7.3).
+
+**Per-class winners (Phase 2 evidence, no action):** prose MinerU==hybrid>Qwen;
+tables MinerU/hybrid>>Qwen and >>docling; scans MinerU/hybrid>>docling;
+code-indentation Qwen/hybrid>>MinerU>>docling; multi-column MinerU/hybrid>Qwen. The
+hybrid loses no class outright.
+
+**Lesson:** a bake-off on a corpus that lacks the deciding content class cannot
+decide it. OmniDocBench (English, ~no dense code) makes pure MinerU and the
+MinerU+Qwen hybrid indistinguishable - the ONLY page class that separates them
+(code-indentation) lives exclusively in the internal corpus, where the R3 gate (not
+text-ED, which is whitespace-blind) shows MinerU failing and the VLM rescuing it.
+The two-corpus design is what turned a benchmark tie into a real architectural
+finding. Also: presence-not-content - an engine can post 0% ladder failures and
+still emit empty pages (docling on image-only PDFs); a fidelity health guard must
+check content, not just that a chunk was produced.
