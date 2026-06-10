@@ -299,7 +299,13 @@ Status: RAN 2026-06-09, INCONCLUSIVE — blocked by M5 serving/integration fault
 qwen3vl ran cleanly; mineru/hybrid invalidated by degraded M5 MinerU2.5 serving
 (empty content-step + `broadcast_shapes` 500s), paddleocr by a strict-JSON engine
 mismatch (returns Markdown), granite by a server load failure. The MinerU re-run is
-parked on a M5 serving fix (or a GX10 vLLM MinerU endpoint). Harness
+parked on a M5 serving fix (or a GX10 vLLM MinerU endpoint). UNPARKED 2026-06-10:
+the GX10 vLLM MinerU endpoint (`http://10.0.10.239:8001`, served id
+`MinerU2.5-2509-1.2B`) is live, probe-validated (5/5 page classes, 0 500s, batches
+at k=4), and is the DECIDED MinerU serving home (DECISIONS.md 2026-06-10) - the
+`broadcast_shapes` fault is deterministic to the mlx stack and routed around by
+substitution. The re-run is PLAN_EXTRACTION_FIDELITY_V1 Phase 1, governed by the
+13.4 pre-registered rule. Harness
 `scripts/omnidocbench_bakeoff.py` (standalone, R4-clean) drives prep/smoke/run/
 score/report and is correct — the faults are downstream of it.
 

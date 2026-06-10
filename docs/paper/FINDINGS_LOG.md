@@ -1286,6 +1286,54 @@ breaks the 9th. Measure the spread, not just the aggregate, before flipping a de
 
 ---
 
+## 2026-06-10 — Three decisions ratified; serving topology settled; a prompt caveat on the indentation finding  `[Results][Architecture][Lessons]`
+
+The interactive session between the two unattended runs: stood up the comparison
+endpoints, ratified the decisions the evidence supported, and shipped the render cap.
+
+**Serving standup data (morning, pre-probe):**
+- Mac Mini identified: **M4 Pro, 64 GB, macOS 15.7.3, 10.0.10.246** — it IS the
+  omlx embedder box (oMLX.app on :8000). MinerU eval server stood up at :8010 in an
+  isolated uv env pinned to M5 parity (python 3.12, mlx-vlm 0.5.0, mlx 0.31.2).
+- GX10 already had `gx10-vllm-mineru` on :8001 (up 3+ days, gpu-mem-util 0.15,
+  served id `MinerU2.5-2509-1.2B`, NO anti-repetition logits processor).
+- M5 serving stack identified: `python -m mlx_vlm.server` (conda env `vlm-server`).
+- One-page smoke, same page, real `two_step_extract`: **GX10 2.2 s vs Mini 4.8 s**,
+  byte-identical layout (6 blocks, 70 chars) — client integration clean on both.
+
+**Decisions ratified (user, on the two overnight evidence runs; DECISIONS.md
+"Phase 0B interim default + MinerU serving home + cap1600 render"):**
+1. INTERIM production default = offline floor (`USE_DOCLING_FAST=1`), with the
+   first written production-level acceptance definition (>=200 pages/hr;
+   ladder-served QA_WARN >10%/doc; Section 5.4 aggregates as observability floor).
+2. MinerU serving home = GX10 vLLM :8001; mlx MinerU serving deprecated (the
+   `broadcast_shapes` fault is DETERMINISTIC on element-heavy pages and reproduces
+   on both mlx boxes — it is the stack, not the M5). Mini :8010 stopped same day.
+3. cap1600 INTERIM render, shipped as `VLM_RENDER_MAX_PX=1600` at the single
+   render chokepoint (`bd09e6d`; env rollback; 7 tests). Also closes the
+   unbounded-render defect (19192 px pages observed).
+Also: the WP6 contract conflict user-adjudicated to the F4 fenced contract
+(`4f20801`) — suite FULLY GREEN for the first time (1624/0).
+
+**Caveat discovered on the indentation finding (matters for Phase 1):** the render
+sweep's "VLM strips ALL leading indentation at every setting" was measured under the
+harness's one-line `VERBATIM_PROMPT` ("preserve ... code indentation exactly" — plain
+markdown transcription), NOT the production UIR schema prompt (JSON output, mandatory
+fences, rule-6 spacing contract). The model ignored an explicit indentation
+instruction in transcription mode — suggestive of a model property — but the
+production path previously PASSED the R3 gate on AIOS code. The two facts are not yet
+reconciled; Phase 1 measures code classes with the R3 gate on the production path.
+
+**Lesson:** the serving comparison was settled by topology, not benchmarks — the
+1.2B many-small-crops workload dodges both GB10 weaknesses (memory: trivial at 2.4 GB;
+single-stream decode: short outputs) and lands on its strength (batched prefill).
+The boxes settle into roles by architecture: GX10 = batch-shaped work (MinerU crops +
+judge), M5 Max = single-stream-heavy big VLM (bandwidth), Mini = always-on embedder.
+And: a "model property" claim is only as strong as the prompt it was measured under —
+record the prompt with the finding.
+
+---
+
 ## Backfill backlog (remaining threads — to expand when drafting)
 
 *Covered above as of 2026-05-30:* V1→V2 lineage · V2 metrics trajectory · V2
