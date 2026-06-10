@@ -149,6 +149,6 @@ cycle-open.
 - `src/mmrag_v2/engines/` … format-specific extraction (Docling, etc.).
 - `src/mmrag_v3/` … V3 Phase C vision-native namespace (`engines/vlm_native.py`, `engines/vlm_provider.py`, `engines/docling_fast.py`, `engines/router.py`, `processor.py`). UIR contract types are imported from `mmrag_v2.universal.intermediate`.
 - `v3_execution_root/` (V3 Phase A sandbox) was **removed 2026-05-30** — duplicate `mmrag_v3` namespace, not a production dependency. Durable docs salvaged to `docs/V3_DEFERRED_TESTS.md` + `docs/paper/archive_extracts/`; full backup at `~/mmrag_v3_execution_root_backup_2026-05-30.tar.gz`. (The broken sandbox-importing baseline scripts are tracked for repointing/removal in `docs/PLAN_V3.1_PIPELINE_RECONVERGENCE.md` P1 — that transient work item does not belong in this contract.)
-- `docs/` … SRS, architecture, audits (canonical references).
+- `docs/` … architecture, audits, plans, governance (canonical references). (The SRS is archived — REQ/IRON IDs originate there; see the Numbering Note above.)
 
 **END OF AGENTS.md**

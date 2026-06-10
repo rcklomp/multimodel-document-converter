@@ -33,13 +33,16 @@ edit-distance 0.301 / TEDS 0.563. Phase 1 extractor bake-off harness shipped but
 `broadcast_shapes` 500s (serving faults, not a fidelity verdict); paddle/granite
 adapters deferred. See `docs/PLAN_OMNIDOCBENCH_EVAL.md`.
 
-**Test state (honest):** `pytest tests/` = 1574 passed / 99 skipped with the
-working-tree hardening (1571 on the committed branch tip), plus **1 KNOWN,
-pre-existing, unrelated failure** -
-`tests/test_v3_vlm_code_form.py::test_code_smuggles_as_text_promotes_to_code_modality`
-(a code-fencing whitespace assertion the branch never touched). It must be fixed
-or explicitly quarantined before "green suite" can be claimed. `ruff` clean;
-`SMOKE_PRODUCTION_PASS` (offline).
+**Test state (honest):** `pytest tests/` = 1616 passed / 99 skipped on the
+committed branch tip, plus **1 KNOWN failure** -
+`tests/test_v3_vlm_code_form.py::test_code_smuggles_as_text_promotes_to_code_modality`.
+Diagnosed (2026-06-10): it is a CONTRACT CONFLICT, not an implementation bug. Its
+`assert ic.content == code` (verbatim, UNFENCED) was superseded by the deliberate
+F4 fencing contract (`eeffcff` "code MUST be fenced"), now pinned by the passing
+`tests/test_code_fencing_f4.py` + the `code_fence_consistency` guard. No
+implementation can satisfy both contracts; which one wins needs USER adjudication
+(proposed requirement change in `HANDOVER_MORNING_REPORT.md`). Left failing per
+the don't-weaken-a-test rule. `ruff` clean; `SMOKE_PRODUCTION_PASS` (offline).
 
 ## Prior state (2026-06-08) - full 16-doc crucible CLEAN; clusters A/C/B/D fixed; multimodal image policy shipped
 
@@ -422,10 +425,10 @@ visual-dense queries.
 ## Test command
 
 ```
-pytest tests/ -q            # current: 1574 passed / 99 skipped + 1 KNOWN failure
+pytest tests/ -q            # current: 1616 passed / 99 skipped + 1 KNOWN failure
                             # (test_v3_vlm_code_form::test_code_smuggles_as_text_
-                            #  promotes_to_code_modality) — see "Test state (honest)"
-                            # in the current-state section above; was 1355 at 2026-06-03
+                            #  promotes_to_code_modality — a contract conflict, see
+                            #  "Test state (honest)" above); was 1355 at 2026-06-03
 bash scripts/smoke_production.sh   # -> SMOKE_PRODUCTION_PASS (offline)
 ```
 
