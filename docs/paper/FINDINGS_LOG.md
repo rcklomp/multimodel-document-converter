@@ -1164,6 +1164,70 @@ the attribute exists before building a theory on its value.
 
 ---
 
+## 2026-06-10 — Phase 0A render sweep + seeded-fault instrument validation  `[Results][Method][Lessons]`
+
+Two prerequisite measurements for PLAN_EXTRACTION_FIDELITY_V1, run overnight on the M5
+`Qwen3-VL-8B-Instruct-8bit`. Both are FAILURE-MODE EXPOSURE on small fixed sets, not
+benchmarks.
+
+**Phase 0A — what render resolution actually costs (the M5-load question).** 9-page
+fixed set (5 internal + 4 OmniDocBench), four render settings, client-side metrics:
+
+| setting | px (longest) | TTFT s | vision tok | payload KB | pages/hr |
+|---------|-------------|--------|-----------|-----------|----------|
+| dpi200 (prod default) | up to 4873 | 28.3 | 9220 | 1499 | 173 |
+| dpi150 | up to 3655 | 15.2 | 6022 | 1770 | 244 |
+| cap1600 | 1600 | 2.1 | 1867 | 550 | 274 |
+| cap1400 | 1400 | 1.6 | 1464 | 434 | 415 |
+
+ROBUST result: the production default renders every page at up to ~4873px on the
+longest side (~9220 vision tokens/page); a longest-side CAP at 1400px cuts vision
+tokens 6.3x, TTFT ~18x, and lifts throughput 2.4x. Most extreme single case — a
+large-format form page: **162s / 16320 tokens at dpi200 vs 4.0s / 1420 tokens at
+cap1400 (~40x)**. Strongly supports the plan hypothesis that render resolution, not
+architecture, may dominate the VLM cost. A longest-side CAP beats a uniform DPI cut on
+cost (cap1400 ships fewer tokens than dpi150 at a smaller payload).
+
+NEGATIVE result (honest): the COMPUTED OmniDocBench text-ED fidelity column is NOISE at
+n=4 — non-monotonic and partly implausible (cap1400 scored text-ED 0.007, "better" than
+dpi200's 0.196; reading-ED improved monotonically as resolution dropped). That is
+`quick_match` block-alignment variance on a 4-page subset dominated by one math-heavy
+page (formulas excluded) and one large form; TEDS likewise swung 0.019->0.432->0.179
+(~1 real table in the set). So the I6 risk (a resolution cut silently lowering fidelity)
+is STILL OPEN. The harness now works end-to-end (render->transcribe->score->delta); it
+needs a larger, balanced subset for a fidelity verdict. Saved per-(page,setting)
+artifacts for the internal-corpus artifact review.
+
+SATURATION: the mlx-vlm server does not serve concurrent requests gracefully — a k=2
+concurrent probe both TIMED OUT while a single sequential call to the same page
+returned. mlx-vlm is single-request-oriented; throughput gains need a batching backend
+(vLLM), not client concurrency.
+
+**Section 7.3 — both selection instruments are BLIND to the failure class we fear.**
+Seeded four content-omission faults, ran each through the instruments that exist:
+
+| fault | OmniDocBench text-ED | table-TEDS | gate junk-presence signals |
+|---|---|---|---|
+| strip code indentation | BLIND (Δ=0.0) | N/A | BLIND |
+| drop small label | MOVED (Δ=0.068) | N/A | BLIND |
+| flatten table to prose | MOVED (Δ=0.770) | MOVED (1.0->0.0) | BLIND |
+| reorder two columns | MOVED (Δ=0.190) | MOVED (1.0->0.52) | BLIND |
+
+The OmniDocBench TEXT metric strips ALL whitespace (`clean_string`) and is BLIND to
+code-indentation loss — the metric that would judge a code-fidelity regression cannot
+see one (a pipeline that strips indentation and a VLM that preserves it score
+IDENTICALLY). The PLAN_GATE_QUALITY_V1 junk-presence signals are BLIND to ALL four
+omission faults by construction. Phase 1/2 verdicts on content-omission classes are
+therefore QUALITATIVE (fixed-page artifact diff), not measured — and must be recorded
+as such. Code fidelity must be judged by the R3 indentation gate, never text-ED.
+
+**Lesson:** measure the instrument before you trust its verdict. The text metric that
+anchors the whole bake-off is blind to the exact regression (indentation) the project
+most fears; n=4 fidelity scoring produces confidently-wrong numbers. Cost is the solid
+Phase 0A deliverable; fidelity needs scale before it can decide anything.
+
+---
+
 ## Backfill backlog (remaining threads — to expand when drafting)
 
 *Covered above as of 2026-05-30:* V1→V2 lineage · V2 metrics trajectory · V2
