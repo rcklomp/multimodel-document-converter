@@ -1,8 +1,38 @@
 # Project Status
 
-Last updated: 2026-06-09 (branch `feat/omnidocbench-phase0`: OmniDocBench Phase 0+1 fidelity benchmark + fail-closed 3-tier extraction ladder shipped)
+Last updated: 2026-06-10 (branch `feat/omnidocbench-phase0`: rev. 4 plan prerequisites shipped; three Phase 0B-era decisions ratified; suite fully green)
 
-## Current state (2026-06-09) - OmniDocBench fidelity benchmark + fail-closed extraction
+## Current state (2026-06-10) - rev. 4 prerequisites shipped; interim default + serving home + render cap decided
+
+`PLAN_EXTRACTION_FIDELITY_V1` rev. 4 Phases 0A/0B/0.5 are DONE (two unattended
+runs, 2026-06-10; evidence in FINDINGS_LOG + the gitignored
+`HANDOVER_MORNING_REPORT*.md`). Shipped: MinerU retry-before-fallback
+(`6a352da`+`66d2a08`, 22 tests), Section 5.4 provenance consumers wired to the
+JSONL + QA advisory block (`bcfac2b`), seeded-fault blindness report (`d046583`
+- text-ED is BLIND to code-indentation loss; junk-presence gate signals are
+BLIND to all omission faults), Phase 0A n=44 render sweep + 3-way MinerU
+serving probe, and the `VLM_RENDER_MAX_PX` longest-side render cap (default
+1600, env rollback).
+
+**Decisions ratified 2026-06-10 (see DECISIONS.md "Phase 0B interim default +
+MinerU serving home + cap1600 render"):** (1) INTERIM production default = the
+offline floor (`USE_DOCLING_FAST=1`) with an initial production-level
+acceptance definition; (2) MinerU serving home = GX10 vLLM
+(`http://10.0.10.239:8001`, served id `MinerU2.5-2509-1.2B`) - mlx MinerU
+serving deprecated (deterministic `broadcast_shapes` on magazine/form pages,
+concurrency collapse); (3) cap1600 INTERIM render for the VLM lane (dpi200 was
+measured fidelity-HARMFUL: repetition loops on dense pages, text-ED 0.411 vs
+0.081). **Phase 0 is effectively complete by substitution** - all bake-off
+candidate engines now have a healthy serving path, so Phase 1 is
+verdict-ELIGIBLE pending its entry gates (Section 7.2 health logging + the
+150-200 page set; the fixed 44-page subset is the down payment).
+
+**Test state:** `pytest tests/` = 1624 passed / 99 skipped / **0 failures**
+(fully green; the long-standing `test_v3_vlm_code_form` contract conflict was
+user-adjudicated to the F4 fenced contract, `4f20801`).
+`SMOKE_PRODUCTION_PASS` (offline) on the branch tip.
+
+## Prior state (2026-06-09) - OmniDocBench fidelity benchmark + fail-closed extraction
 
 Branch `feat/omnidocbench-phase0` (NOT pushed). Two workstreams shipped on top of
 the 2026-06-08 crucible baseline:
@@ -43,6 +73,8 @@ F4 fencing contract (`eeffcff` "code MUST be fenced"), now pinned by the passing
 implementation can satisfy both contracts; which one wins needs USER adjudication
 (proposed requirement change in `HANDOVER_MORNING_REPORT.md`). Left failing per
 the don't-weaken-a-test rule. `ruff` clean; `SMOKE_PRODUCTION_PASS` (offline).
+(RESOLVED 2026-06-10: user adjudicated to the F4 fenced contract, `4f20801` -
+see Current state above.)
 
 ## Prior state (2026-06-08) - full 16-doc crucible CLEAN; clusters A/C/B/D fixed; multimodal image policy shipped
 

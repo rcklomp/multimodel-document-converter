@@ -2999,3 +2999,57 @@ documented advisory class governed by `QUALITY_GATES.md`, added per the
 two-tier/advisory-first protocol (`AGENTS.md` AGENT-GATE-PROGRESSION), not a
 threshold relaxation. Review follow-ups #8/#9/#10 are dispositioned deferrals in
 the project backlog, not silent drops.
+
+## Phase 0B interim default + MinerU serving home + cap1600 render (2026-06-10)
+
+Three decisions ratified by the user on the two overnight evidence runs
+(FINDINGS_LOG 2026-06-10: n=44 render sweep, 3-way MinerU serving probe,
+seeded-fault blindness report), per `PLAN_EXTRACTION_FIDELITY_V1` rev. 4
+Phase 0B / Section 9. None of these flips the production default ROUTE -
+that remains the plan's Phase 4, gated on the Phase 1 bake-off.
+
+1. **INTERIM production default = the offline floor** (`USE_DOCLING_FAST=1`
+   under the fail-closed ladder), stamped INTERIM, superseded by the Phase 4
+   outcome. Rationale: it is the only lane the mandatory smoke certifies, has
+   a recorded full-755 fidelity baseline (text ED 0.301 / TEDS 0.563), and has
+   zero server dependency - while the shipping hybrid's MinerU half on M5 mlx
+   deterministically fails magazine/form pages (page-persistent
+   `broadcast_shapes`, survives all retries; WP-B probe). The upgraded hybrid
+   (GX10-served MinerU + cap1600 Qwen) is the Phase 1 CANDIDATE, not a
+   same-morning production default.
+   **Production-level acceptance (initial values - calibrate after the first
+   production week, change requires a recorded user decision):**
+   - throughput: >= 200 pages/hr sustained on the conversion host (the floor
+     and the cap1600 Qwen lane both clear it; the dpi200 status quo at ~42
+     does not - any Phase 4 successor must clear it too);
+   - ladder-served-page ceiling: per-doc advisory `QA_WARN` above 10%
+     ladder-served pages; investigate any fleet-week above 5%;
+   - `extraction_quality_risk`-page ceiling (once Phase 3 ships): same bounds;
+   - observability minimum: the Section 5.4 provenance aggregates in every
+     JSONL header + the `qa_full_conversion.py` advisory block (live,
+     `bcfac2b`);
+   - rollback: the env-var routing in `processor._select_engine` stays alive
+     through Phase 5 (the spec rewrite must not delete it).
+2. **MinerU serving home = GX10 vLLM**: `MINERU_ENDPOINT=http://10.0.10.239:8001`,
+   `MINERU_MODEL=MinerU2.5-2509-1.2B` (the SERVED id, not the HF path). The
+   only box serving all five probe page classes (0 500s) and the only one that
+   batches (1180 pages/hr at k=4 vs M5 mlx k=2 collapse to 0/5). mlx MinerU
+   serving is DEPRECATED for this model (the fault is the mlx stack, not the
+   M5 box - the Mini M4 Pro reproduced it; its :8010 eval server is stopped).
+   Riders: (a) add `mineru_vl_utils:MinerULogitsProcessor` at the container's
+   next natural restart (currently absent); (b) until then the
+   degenerate-repetition check stays in all Phase 1 scoring; (c) Phase 1
+   verdict remains gated on Section 7.2 serving health.
+3. **cap1600 INTERIM render setting for the VLM (Qwen) lane.** Implemented as
+   `VLM_RENDER_MAX_PX = 1600` default at the single render chokepoint
+   (`vlm_native.render_page_png`); env-overridable, `0` = rollback to pure-DPI.
+   Evidence (n=44, two-corpus): the uncapped dpi200 default is
+   fidelity-HARMFUL - renders up to 19192 px, ~12k vision tokens/page, trips
+   the VLM into degenerate repetition on dense pages (text-ED 0.411 vs 0.081
+   at cap1600, which is also ~5x cheaper, 206 vs 42 pages/hr). Known tail
+   (worst-K): ONE dense academic multi-column page (n=1) catastrophically
+   regresses under the cap (0.004 -> 0.95); the Section 7.2 150-200 page set
+   must size that class before the cap is more than INTERIM. The production
+   corpus (manuals/magazines/forms) sits in the cap's strong classes.
+   Recorded for Phase 2+ design (not implemented): per-page adaptive render
+   escalation for dense-small-text pages.
