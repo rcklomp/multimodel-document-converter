@@ -1433,3 +1433,64 @@ The two-corpus design is what turned a benchmark tie into a real architectural
 finding. Also: presence-not-content - an engine can post 0% ladder failures and
 still emit empty pages (docling on image-only PDFs); a fidelity health guard must
 check content, not just that a chunk was produced.
+
+## 2026-06-11 - Phase 4 shadow window: the hybrid flip is JUSTIFIED, interim default fails 4/16  `[Results][Decision][Lessons]`
+
+Phase 4 (formalize the MinerU+Qwen hybrid as the production default) ran a shadow
+window: the 16-doc crucible through BOTH production configs on IDENTICAL 15-page
+slices per doc, via the shipping CLI (`--vision-provider none`). arm A = the interim
+default (`USE_DOCLING_FAST=1`, offline floor); arm B = the hybrid (GX10 MinerU `:8001`
++ M5 Qwen `:8000` code lane + cap1600). Harness: `scripts/phase4_shadow_window.py`.
+
+Shadow table (verdict | engine | degraded | leak | text/img/tbl chunks | wall_s):
+
+| doc | A verdict | A chunks (t/i/tb) | A wall | B verdict | B chunks (t/i/tb) | B deg | B wall |
+|---|---|---|--:|---|---|--:|--:|
+| CombatAircraft | PASS_ADV | 34/36/0 | 43s | PASS_ADV | 48/33/0 | 0 | 236s |
+| PCWorld | PASS_ADV | 36/21/0 | 12s | PASS_ADV | 36/16/0 | 0 | 90s |
+| AIOS_academic | PASS_ADV | 54/7/0 | 12s | PASS_ADV | 57/5/5 | 0 | 126s |
+| FluentPython | PASS_ADV | 29/7/0 | 10s | PASS_ADV | 36/6/0 (64 tot) | 0 | 453s |
+| Grundlagen | PASS_ADV | 31/11/0 | 12s | PASS_ADV | 34/8/0 | 0 | 129s |
+| Form_0013 | PASS_ADV | 0/2/0 | 5s | **PASS** | 2/0/2 | 0 | 9s |
+| Form_betwisting | PASS_ADV | 3/3/0 | 5s | PASS_ADV | 3/1/0 | 0 | 13s |
+| CarOK_spreadsheet | **QA_FAIL** | 37/4/0 | 20s | **PASS** | 37/0/12 | 0 | 230s |
+| Firearms | **QA_FAIL** | 0/29/0 | 11s | PASS_ADV | 42/30/0 | 0 | 84s |
+| DigitaleFotografie | **QA_FAIL** | 0/13/0 | 35s | PASS_ADV | 27/20/0 | 0 | 133s |
+| HarryPotter | **QA_FAIL** | 14/4/0 | 9s | PASS_ADV | 18/6/0 | 0 | 53s |
+| Kimothi_RAG | PASS_ADV | 21/4/0 | 11s | PASS_ADV | 22/2/0 | 0 | 72s |
+| ATZ_Elektronik | PASS_ADV | 24/14/0 | 7s | PASS_ADV | 27/14/0 | 0 | 77s |
+| IRJET_academic | PASS_ADV | 32/6/0 | 8s | PASS_ADV | 29/5/2 | 0 | 77s |
+| Hybrid_EV | PASS_ADV | 76/13/0 | 17s | PASS_ADV | 84/14/5 | 0 | 188s |
+| Bevestigingsmiddelen | PASS | 4/0/0 | 5s | PASS | 5/0/1 | 0 | 61s |
+
+Aggregates: arm A QA_WARN+QA_FAIL = 4/16 = 25.0%; **arm B = 0/16 = 0.0%**. Both
+arms 0% ladder-served, 0 leak. Total wall A 222s, B 2030s (~9x; offline docling).
+
+Readings:
+- arm B regresses NO doc's verdict and is strictly better on 5 (4 FAIL->PASS/PASS_ADV
+  + Form_0013 PASS_ADV->PASS). The flip is JUSTIFIED by the pre-stated WP-A criteria
+  (arm B no worse on verdicts + ladder rates; the known class gaps favour B).
+- The 4 arm-A QA_FAILs are real content losses, all the documented docling weakness:
+  HEADING-coverage collapse from no-OCR (`do_ocr=False` -> 0 text on image/scan-heavy
+  Firearms + DigitaleFotografie), spreadsheet table-flatten (CarOK 0 tables, HEADING
+  0/37), and a dropped page (HarryPotter missing page 12). arm B fixes all four:
+  OCRs the scans (Firearms 0->42 text, Form_0013 0->2 text + 2 table), recovers
+  tables (CarOK 0->12, AIOS +5, Hybrid_EV +5, IRJET +2), keeps the page.
+- arm B's only advisories are `IMAGE_NO_VLM` (no VLM in the shadow run, by design)
+  + the semantic-fidelity advisory; neither blocks PASS_ADV.
+
+Lessons / dead-ends:
+- **A missing client library silently degrades the whole flip.** First shadow run
+  laddered EVERY non-code page on arm B to docling: the `[mineru]` extra
+  `mineru-vl-utils` was absent in the Mini env, so the MinerU lane raised
+  `ModuleNotFoundError` and the fail-closed ladder caught it. The smoke that
+  "passed" earlier only routed code-dense pages (which go to Qwen, not MinerU) so it
+  never exercised the broken lane. Lesson: smoke a NON-code page when validating the
+  MinerU half; and the absence shows as `degraded=N` in provenance, not as an error
+  verdict - watch the ladder stamp, not just the QA verdict.
+- **Throughput tail = the all-code doc on the M5 sequential mlx lane** (FluentPython
+  452s/15pg ~= 120 pages/hr, under the Phase 0B 200 pages/hr floor). Real production
+  code docs are mixed (most pages go to batched GX10 MinerU); flagged for the
+  production-week throughput calibration, not a flip-blocker.
+- The smoke script's `ENV_PYTHON` default (`$HOME/miniforge3/...`) does not match this
+  box's env (`/Users/Shared/miniforge3/...`); pass `ENV_PYTHON` explicitly.

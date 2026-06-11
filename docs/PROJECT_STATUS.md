@@ -1,6 +1,47 @@
 # Project Status
 
-Last updated: 2026-06-11 (branch `feat/omnidocbench-phase0`: Phase 1 bake-off COMPLETE and RATIFIED; both pure theses refuted; hybrid validated non-dominated; Phase 4 greenlit)
+Last updated: 2026-06-11 (branch `feat/omnidocbench-phase0`: Phase 4 DONE - shadow window JUSTIFIED the flip; the MinerU+Qwen hybrid is the FORMAL production default with a pre-named rollback + re-extraction policy)
+
+## Current state (2026-06-11 PM) - Phase 4 complete: the hybrid is the formal production default
+
+`PLAN_EXTRACTION_FIDELITY_V1` Phase 4 is DONE (controls + evidence + records; no
+engine code changed - the default route already selected `MineruQwenHybridEngine`
+when `MINERU_ENDPOINT` is set). Evidence + records: DECISIONS.md "Phase 4 - the
+MinerU+Qwen hybrid is the production default", FINDINGS_LOG 2026-06-11 (Phase 4),
+gitignored `HANDOVER_PHASE4_REPORT.md`.
+
+- **Shadow window (WP-A): the flip is JUSTIFIED.** 16-doc crucible, identical
+  15-page slices per doc, both arms via the shipping CLI (`--vision-provider none`).
+  arm A = interim default (`USE_DOCLING_FAST=1`), arm B = the hybrid config. arm B
+  regresses NO doc and is strictly better on 5: QA_WARN+QA_FAIL rate arm A 25%
+  (4/16 QA_FAIL) vs **arm B 0%**. The 4 arm-A failures are real docling content
+  losses (CarOK spreadsheet HEADING 0/37 table-flatten; Firearms + DigitaleFotografie
+  HEADING 0/0, zero text on image/scan pages with `do_ocr=False`; HarryPotter dropped
+  page 12). arm B: 0 ladder-served pages, 0 leak; known class gaps (tables/scans/code)
+  all favour B.
+- **Formalized config:** route `mineru_qwen_hybrid` = GX10 MinerU `:8001`
+  (`MinerU2.5-2509-1.2B`) + M5 Qwen `:8000` (`Qwen3-VL-8B-Instruct-8bit`, code lane)
+  + cap1600 render, default precedence (no force flag). Runtime prerequisite
+  installed: the `[mineru]` extra `mineru-vl-utils` (was missing in the Mini env;
+  its absence silently ladders every non-code page to docling).
+- **Rollback (WP-B, pre-named):** revert to `USE_DOCLING_FAST=1` if, over any 10
+  consecutive production docs, QA_WARN+QA_FAIL > 20pp (arm-B baseline 0%) OR
+  ladder-served > 2% of pages (baseline 0%). The env-var routing stays alive through
+  Phase 5 (pinned by `test_docling_fast_overrides_mineru_default`).
+- **Re-extraction policy (WP-B, written; execution USER-SCHEDULED):** stale = any
+  prior JSONL whose provenance is not (hybrid + GX10 + cap1600); re-extract via
+  `scripts/rebaseline_v3.py`; Qdrant re-ingestion is user-scheduled (production
+  collections on the M1 docker, not this box). Nothing re-extracted/ingested tonight.
+- **Interim default retired** from "production default" to tier-2 of the fail-closed
+  ladder; the option-2 scanned/image-only exclusion DIES with the flip (hybrid OCRs
+  scans on the primary path). The laddered-scan-still-blank residual stays the Phase 3
+  OCR-on-fallback candidate.
+- **Validation (WP-C):** 7 routing tests pass (default + rollback paths);
+  `SMOKE_FULL=1` with the exact flipped env -> `SMOKE_PRODUCTION_PASS`. Two-axis
+  advisory baseline: hybrid Phase 1 fidelity text-ED 0.2212 / TEDS 0.7933.
+- **Phase 5 (Layer-0 spec rewrite) NOT done** - charter/mandate/QUALITY_GATES edits
+  are Phase 5. Phase 3 scope (quality-risk arbitration, specialist re-extraction,
+  content-empty health guard, OCR-on-fallback net) untouched.
 
 ## Current state (2026-06-11) - Phase 1 complete: hybrid validated, Phase 2 settled by evidence, Phase 4 greenlit
 

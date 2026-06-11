@@ -3097,3 +3097,94 @@ User ratified the Phase 1 two-corpus bake-off as recorded (verdict-eligible run,
    docling recovery runs so a laddered scanned page is not blank (cost paid only
    when laddered); (c) PaddleOCR-VL needs a markdown-first adapter before it can
    ever be a registered candidate (excluded, not forfeited).
+
+## Phase 4 - the MinerU+Qwen hybrid is the production default (2026-06-11)
+
+`PLAN_EXTRACTION_FIDELITY_V1` Phase 4, greenlit by the user 2026-06-11 ("Phase 1
+outcome RATIFIED", item 3). Phase 1 validated the MinerU+Qwen hybrid as the
+non-dominated engine on every measured class; Phase 4 promotes it from validated
+candidate to FORMAL production default. No engine code changed: the route
+precedence in `src/mmrag_v3/processor.py:_select_engine` already selects
+`MineruQwenHybridEngine` when `MINERU_ENDPOINT` is set (no USE_* force flag).
+This entry records the shadow-window evidence, the rollback condition, the
+re-extraction policy, and the interim default's retirement. Evidence base: the
+gitignored `HANDOVER_PHASE4_REPORT.md` + FINDINGS_LOG 2026-06-11 (Phase 4).
+
+**The formalized production configuration (exact):**
+- `MINERU_ENDPOINT=http://10.0.10.239:8001`, `MINERU_MODEL=MinerU2.5-2509-1.2B`
+  (the SERVED id) - GX10 vLLM, MinerU for tables/layout/scans/prose;
+- `VLM_NATIVE_ENDPOINT=http://10.0.10.235:8000/v1`,
+  `VLM_NATIVE_MODEL=mlx-community/Qwen3-VL-8B-Instruct-8bit` - M5 mlx, the
+  Qwen-for-code specialist lane (code-dense pages, monospace ratio >= 0.10);
+- cap1600 render (the shipped `VLM_RENDER_MAX_PX=1600` default, not overridden);
+- route = `mineru_qwen_hybrid` via the default precedence (no force flag).
+- Runtime prerequisite (was missing in the Mac Mini env, now installed): the
+  `[mineru]` extra `mineru-vl-utils>=1.0.3` MUST be present, else the MinerU lane
+  raises `ModuleNotFoundError` and every non-code page silently ladders to
+  offline docling. Add it to any conversion-host environment build.
+
+**Shadow-window evidence (WP-A; 16-doc crucible, identical 15-page slices per doc,
+both arms via the shipping CLI `--vision-provider none`):**
+- arm A = interim default (`USE_DOCLING_FAST=1`); arm B = the hybrid config above.
+- arm B is no worse than arm A on the QA verdict for ALL 16 docs and strictly
+  better on 5: QA_WARN+QA_FAIL rate arm A 25% (4/16 QA_FAIL) vs **arm B 0%
+  (0 QA_FAIL)**. The 4 arm-A failures are real content losses, all documented
+  docling weaknesses: CarOK spreadsheet HEADING 0/37 (table flattened, 0 tables
+  -> arm B 12 tables, QA_PASS); Firearms + DigitaleFotografie HEADING 0/0 (docling
+  `do_ocr=False` extracted ZERO text on image/scan-heavy pages -> arm B 42 / 27
+  text chunks); HarryPotter `missing_pages=[12]` (docling dropped a page -> arm B
+  no missing pages).
+- The known class gaps from Phase 1 WP-3 visibly favour arm B: tables (CarOK 0->12,
+  AIOS 0->5, Hybrid_EV 0->5, IRJET 0->2), scans/forms (Form_0013 0 text -> 2 text
+  + 2 table), code (FluentPython 36 -> 64 chunks, code preserved via the Qwen lane).
+- arm B: 0 ladder-served pages (degraded=0 on every doc), 0 leak across all 16.
+  arm B's only advisories are the benign `IMAGE_NO_VLM` (no VLM in the shadow run,
+  by design) + the semantic-fidelity advisory; neither blocks QA_PASS_WITH_ADVISORIES.
+- Cost: arm B total wall 2030s vs arm A 222s (offline docling is ~9x faster). The
+  throughput tail is the all-code doc on the M5 sequential mlx Qwen lane
+  (FluentPython 452s/15pg ~= 120 pages/hr, below the Phase 0B 200 pages/hr floor);
+  most docs clear the floor and GX10-batched MinerU is fast. This is the known
+  both-servers-required characteristic, flagged for the production-week throughput
+  calibration, not a flip-blocker (WP-A justification = QA verdicts + ladder rates
+  + class gaps, all decisively for B).
+- **Verdict: the flip is JUSTIFIED.** arm B regresses NO doc and closes the four
+  arm-A content failures.
+
+**Rollback condition (WP-B; pre-named, numeric; tuned to the shadow table, both
+numbers non-trivially clear of arm B's measured 0%/0% baseline):** production
+reverts to the interim default (`USE_DOCLING_FAST=1` env routing) if, over any 10
+consecutive production docs, EITHER the QA_WARN+QA_FAIL rate exceeds **20
+percentage points** (i.e. >= 3 of any 10 consecutive docs WARN/FAIL; arm-B
+shadow baseline 0%), OR ladder-served pages exceed **2% of pages** (arm-B shadow
+baseline 0%). Mechanism: the env-var routing in `processor._select_engine` stays
+ALIVE through Phase 5 - the spec rewrite must not delete the `USE_DOCLING_FAST`
+escape hatch (routing test `test_docling_fast_overrides_mineru_default` pins it).
+
+**Re-extraction policy (WP-B; rule written, execution USER-SCHEDULED, run nothing
+tonight):** a prior JSONL is STALE iff its provenance is NOT (engine=
+`mineru_qwen_hybrid` + GX10 `:8001` MinerU + M5 cap1600 Qwen) - i.e. interim-default
+docling outputs, pre-cap1600 dpi200 hybrid outputs, and any pre-provenance output
+(no `extraction_*` header = stale by definition). Stale docs re-extract through
+`scripts/rebaseline_v3.py` (already runs the shipping path); the Qdrant
+re-ingestion that follows is USER-SCHEDULED (production Qdrant collections live on
+the M1 docker, NOT this box's `:6333`). No re-extraction or ingestion was run.
+
+**Interim default retirement:** `USE_DOCLING_FAST=1` reverts from "interim
+production default" (DECISIONS 2026-06-10 + the 2026-06-11 option-2 disposition
+with its scanned/image-only exclusion) to being TIER-2 of the fail-closed
+extraction ladder, nothing more. The option-2 scanned/image-only exclusion DIES
+with this flip: the hybrid's MinerU lane OCRs scanned/image-only input on the
+primary path (measured: Form_0013 0 text -> 2 text + 2 table; Firearms 0 text ->
+42 text). The outage-net residual (a laddered scanned page is still blank because
+tier-2 docling runs `do_ocr=False`) remains the registered Phase 3 OCR-on-fallback
+candidate.
+
+**Validation (WP-C):** routing tests assert the default (`mineru_qwen_hybrid` when
+`MINERU_ENDPOINT` set) and the rollback path (`USE_DOCLING_FAST` overrides the
+default) - 7 tests in `tests/test_mineru_native.py`, all pass. `SMOKE_FULL=1`
+production smoke with the exact flipped env (MinerU GX10 + M5 Qwen + cap1600) ->
+`SMOKE_PRODUCTION_PASS`. Two-axis acceptance (advisory): the hybrid's Phase 1
+fidelity on the 158-page fixed set (text-ED 0.2212 / TEDS 0.7933) is the
+regression baseline future runs compare against; junk-presence signals stayed
+clean (0.0 across WP-3). Layer-0 spec edits (charter, mandate, QUALITY_GATES) are
+Phase 5, NOT done here.
