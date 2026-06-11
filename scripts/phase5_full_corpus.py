@@ -167,9 +167,16 @@ def process(name, src, base, retry=False) -> dict:
     if clean:
         r["ingested"] = ingest_dense(base)
     tag = "retry " if retry else ""
+    if r["ingested"]:
+        outcome = "INGESTED"
+    elif not clean:
+        # distinguish a connectivity/ladder skip (deg>0) from a content QA skip (deg==0)
+        outcome = "SKIP(deg>0)" if r["degraded"] else f"SKIP({r['verdict']})"
+    else:
+        outcome = "INGEST_FAIL"
     log(
         f"  {tag}{name}: {r['verdict']} deg={r['degraded']} chunks={r['n_chunks']} "
-        f"{r['wall_s']}s -> {'INGESTED' if r['ingested'] else ('SKIP(deg>0)' if not clean else 'INGEST_FAIL')}"
+        f"{r['wall_s']}s -> {outcome}"
     )
     with open(RESULTS, "a") as f:
         f.write(json.dumps(r) + "\n")
