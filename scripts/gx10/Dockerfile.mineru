@@ -1,0 +1,24 @@
+# Derived MinerU serving image: the pinned vLLM aarch64 build + MinerU's
+# anti-repetition logits processor baked in, so vLLM can load it at startup via
+#   --logits-processors mineru_vl_utils.logits_processor.vllm_v1_no_repeat_ngram:VllmV1NoRepeatNGramLogitsProcessor
+#
+# WHY: MinerU2.5-1.2B served on plain vLLM (no logits processor) can fall into
+# degenerate repetition on some pages -> the request generates to the token cap
+# very slowly and effectively hangs (observed 2026-06-11: a 50-min stall on a
+# Kimothi page; empty layout output then silence). mineru_vl_utils already SENDS
+# no_repeat_ngram_size=100 per request (MinerUSamplingParams); this image gives
+# the server the matching V1 logits processor so that param is actually enforced.
+#
+# Base deps of mineru-vl-utils are light (httpx/pillow/pydantic/loguru); torch,
+# vllm and transformers are pip EXTRAS, NOT base deps, so this install adds nothing
+# that conflicts with the image's CUDA/torch/vllm stack. The processor imports
+# `torch` and `vllm.v1.sample.logits_processor.interface`, both already present.
+#
+# Build (on the GX10, aarch64):
+#   docker build -f Dockerfile.mineru -t gx10-vllm-mineru:logitsproc .
+FROM vllm/vllm-openai:v0.20.0-aarch64-cu130-ubuntu2404
+
+# Pinned for reproducibility; 1.0.4 is the version validated against this stack.
+RUN python3 -m pip install --no-cache-dir "mineru-vl-utils==1.0.4" \
+ && python3 -c "import importlib; m=importlib.import_module('mineru_vl_utils.logits_processor.vllm_v1_no_repeat_ngram'); \
+getattr(m,'VllmV1NoRepeatNGramLogitsProcessor'); print('logits processor import OK')"

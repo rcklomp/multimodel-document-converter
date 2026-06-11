@@ -1,20 +1,20 @@
-# GX10 (NVIDIA GB10, 121 GiB UNIFIED CPU+GPU memory) — time-sliced model serving.
+# GX10 (NVIDIA GB10, 121 GiB UNIFIED CPU+GPU memory) — managed model serving.
 #
 # Tier-2 robustness for MM-RAG V3: replaces ad-hoc `docker run --rm` + bash-trap
 # cleanup (which leaked ~100 GiB zombie containers on SIGKILL) with supervised,
 # logged, auto-restarting services that clean up deterministically via
 # `docker compose down`. Driven by scripts/v3_sequential_soak.sh.
 #
-# ONLY ONE SERVICE RUNS AT A TIME — both bind :8000 and the GB10 can't hold both
-# model footprints + KV caches at safe utilization. The orchestrator brings up
-# one, `down`s it, then brings up the other.
+# PORT MAP: qwen-vlm / qwen-judge SHARE :8000 (only ONE at a time — the GB10 can't
+# hold both at safe utilization). The `mineru` OCR lane is on :8001 and runs
+# CONCURRENTLY with the judge (0.15 + 0.60 util ~= 0.75 of 121 GiB, safe).
 #
 # *** UNIFIED-MEMORY RULE (do not "optimize" these upward) ***
 # There is NO separate VRAM. `--gpu-memory-utilization` reserves that fraction of
 # the SHARED 121 GiB pool, so high values (0.80-0.85) over-commit and crash with
 # `NVRM: Out of memory [NV_ERR_NO_MEMORY]` on activation spikes (esp. VLM image
-# encoding). Empirically validated safe: VLM 0.55 (+max-num-seqs 2), text 0.60.
-# See memory: reference-local-endpoints "GB10 UNIFIED MEMORY".
+# encoding). Empirically validated safe: VLM 0.55 (+max-num-seqs 2), text 0.60,
+# MinerU-1.2B 0.15. See memory: reference-local-endpoints "GB10 UNIFIED MEMORY".
 
 x-common: &common
   image: vllm/vllm-openai:v0.20.0-aarch64-cu130-ubuntu2404   # pinned aarch64 build (NOT :latest)
@@ -34,7 +34,7 @@ x-common: &common
     interval: 15s
     timeout: 6s
     retries: 60
-    start_period: 90s        # first boot may download weights
+    start_period: 300s       # 14B-FP8 first boot ~5min (weights+torch.compile); cache warms after
   logging:
     driver: json-file
     options: {max-size: "50m", max-file: "3"}   # keep crash logs, cap disk
@@ -58,6 +58,7 @@ services:
   qwen-judge:
     <<: *common
     container_name: gx10-vllm-14b-fp8
+    restart: unless-stopped   # standing judge service (M5 now owns VLM lane); survives reboot
     command:
       - "--model=RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic"
       - "--served-model-name"                              # nargs='+': two aliases follow
@@ -68,3 +69,32 @@ services:
       - "--gpu-memory-utilization=0.60"
       - "--max-model-len=32768"
       - "--trust-remote-code"
+
+  # OCR extraction — MinerU2.5-1.2B on :8001, CONCURRENT with the judge.
+  # Derived image (Dockerfile.mineru) bakes in MinerU's anti-repetition logits
+  # processor; the --logits-processors flag enforces the no_repeat_ngram_size=100
+  # the client already sends (MinerUSamplingParams), preventing the degenerate-
+  # repetition page hangs that wedged the server (2026-06-11 root cause). Standing
+  # V3 extraction lane -> restart: unless-stopped.
+  mineru:
+    <<: *common
+    image: gx10-vllm-mineru:logitsproc
+    container_name: gx10-vllm-mineru
+    ports: ["8001:8001"]
+    restart: unless-stopped
+    command:
+      - "--model=opendatalab/MinerU2.5-2509-1.2B"
+      - "--served-model-name=MinerU2.5-2509-1.2B"
+      - "--host=0.0.0.0"
+      - "--port=8001"
+      - "--gpu-memory-utilization=0.15"
+      - "--max-model-len=16384"
+      - "--trust-remote-code"
+      - "--logits-processors"
+      - "mineru_vl_utils.logits_processor.vllm_v1_no_repeat_ngram:VllmV1NoRepeatNGramLogitsProcessor"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/v1/models',timeout=3).status==200 else 1)"]
+      interval: 15s
+      timeout: 6s
+      retries: 60
+      start_period: 180s       # 1.2B loads fast (~90-110s observed)
