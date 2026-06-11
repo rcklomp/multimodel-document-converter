@@ -37,20 +37,21 @@ DEFAULT_COLLECTION = "mmrag_v3__bm25_sparse"
 DEFAULT_QDRANT = "http://127.0.0.1:6333"
 BASE_DIR = REPO_ROOT / "output" / "phase5_reextract"
 
-DOCS = [
-    "Form_0013",
-    "Form_betwisting",
-    "Bevestigingsmiddelen",
-    "ATZ_Elektronik",
-    "IRJET_academic",
-    "CarOK_spreadsheet",
-    "Hybrid_EV",
-    "AIOS_academic",
-    "DigitaleFotografie",
-    "Firearms",
-    "CombatAircraft",
-    "PCWorld",
-]
+
+def discover_docs() -> list[str]:
+    """Every output/phase5_reextract/<base>/ that has an ingestion.jsonl, sorted.
+
+    Auto-discovery so the sparse twin always covers whatever has been re-extracted
+    (the full-corpus run grows this set; no hardcoded list to drift). Excludes the
+    smoke/src helper dirs (leading underscore)."""
+    return sorted(
+        p.name
+        for p in BASE_DIR.iterdir()
+        if p.is_dir() and not p.name.startswith("_") and (p / "ingestion.jsonl").exists()
+    )
+
+
+DOCS = discover_docs()
 
 
 def _http(method: str, url: str, body=None) -> dict:
