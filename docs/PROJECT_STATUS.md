@@ -11,8 +11,9 @@ closure"). WP-2 re-extracted a 12-doc bounded crucible subset (12/12 `mineru_qwe
 `degraded=0`, 0/724 laddered) and dense-ingested 3338 points into `mmrag_v3__qwen3_local` on
 the LOCAL Mini Qdrant (`127.0.0.1:6333`, omlx 4096-dim). A per-process conda-env routing
 fault to the M5/GX10 (EHOSTUNREACH - VPN `utun` scoped-route) was bridged with a localhost
-relay (`scripts/phase5_relay.py`); the permanent fix is the VPN split-tunnel. Deferred: BM25
-sparse twin (point-id namespace fix), full-corpus reconciliation. See
+relay (`scripts/phase5_relay.py`); the permanent fix is the VPN split-tunnel. The BM25 sparse
+twin `mmrag_v3__bm25_sparse` (1854 pts, `scripts/phase5_ingest_bm25.py`) is also DONE - RRF
+fuses by chunk_id, validated 20/20. Deferred: full-corpus reconciliation (~32 docs). See
 `HANDOVER_PHASE5_REEXTRACT_REPORT.md`.
 
 ## Prior state (2026-06-11 PM) - Phase 4 complete: the hybrid is the formal production default

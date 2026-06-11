@@ -3230,8 +3230,10 @@ crucible subset re-extracted 12/12 `mineru_qwen_hybrid`, `degraded=0`, 0/724 lad
 QA_WARN/FAIL (docling-failure docs recovered: CarOK 0->12 tables, DigitaleFotografie/Firearms
 text recovered); dense-ingested 3338 points into `mmrag_v3__qwen3_local` on the LOCAL Mini
 Qdrant (`127.0.0.1:6333`, omlx Qwen3-Embedding-8B-mxfp8 4096-dim) - point count == exact
-chunk sum, validated. Deferred: the BM25 sparse twin (the production script's `uuid5`
-namespace `NAMESPACE_DNS` != the dense `8b7c...` namespace would break RRF fusion - a code
-fix, not hacked blind) and the full-corpus reconciliation (~32 docs + authoritative
-production-set enumeration). The permanent fix is the VPN split-tunnel (exclude
+chunk sum, validated. The BM25 sparse twin is DONE: 1854 points into `mmrag_v3__bm25_sparse`
+(`scripts/phase5_ingest_bm25.py`, additive); RRF fuses by `chunk_id` (`fusion_v3.py`), NOT
+point id, so the production script's `NAMESPACE_DNS` vs dense `8b7c...` point-id namespace is
+irrelevant to fusion (an earlier deferral on that basis was wrong - corrected); chunk_id
+alignment verified 20/20. Deferred: the full-corpus reconciliation (~32 docs + authoritative
+production-set enumeration). The permanent network fix is the VPN split-tunnel (exclude
 `10.0.10.0/24`). See `HANDOVER_PHASE5_REEXTRACT_REPORT.md` for the full runbook.
