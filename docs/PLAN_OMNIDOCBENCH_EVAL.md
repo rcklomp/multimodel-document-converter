@@ -327,7 +327,7 @@ avoid contending with the in-flight baseline):
 
 | route | env | endpoint shape |
 |---|---|---|
-| docling_fast | `USE_DOCLING_FAST=1` | local (Phase 0 baseline) |
+| docling_fast | `USE_DOCLING_FAST=1` | local. CORRECTED 2026-06-11: `do_ocr=False` -> content-empty on this image-only corpus (Phase 1, 151/151); the Phase 0 baseline (0.301/0.563) came from the OCR-enabled legacy offline default route, NOT this flag |
 | mineru | `USE_MINERU_ENGINE=1` + `MINERU_ENDPOINT`/`MINERU_MODEL` | base URL `http://10.0.10.235:8000` (NO /v1), full id `mlx-community/MinerU2.5-2509-1.2B-bf16` |
 | qwen3vl | `USE_VLM_ENGINE=1` + `VLM_NATIVE_*` | `http://10.0.10.235:8000/v1`, `mlx-community/Qwen3-VL-8B-Instruct-8bit` |
 | hybrid | `MINERU_ENDPOINT` + `VLM_NATIVE_*` (default route, no force flag) | both above -- our shipped default |

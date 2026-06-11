@@ -1156,6 +1156,17 @@ margin worth its failure surface or it gets cut (benchmark-gated prune — start
 paddle/granite stretch engines and the monospace-routing hybrid). Smart-when-healthy,
 reliable-always.
 
+> **CORRECTION (2026-06-11):** "the offline floor is MEASURED" conflated two configs.
+> The 0.301/0.563 baseline was produced by the OCR-enabled legacy offline default
+> route (shipping CLI with no `USE_*` flag, Docling with default OCR — only 26/755
+> pages empty), NOT by `USE_DOCLING_FAST=1` (`DoclingFastEngine`, `do_ocr=False`).
+> Phase 1 (2026-06-11 entry) proved the no-OCR engine is content-empty on ALL 151
+> scored pages of the image-only corpus. The fail-closed ladder's tier-2 net and the
+> Phase 0B interim default therefore have NO measured OmniDocBench fidelity and are
+> blank on scanned/image-only input. Same-day Phase 1 also showed the hybrid OCRs
+> scans cleanly — the durable fixes are Phase 4 (hybrid default) + a Phase 3
+> candidate (OCR on fallback-only recovery runs).
+
 **Lesson:** when a pipeline keeps "disappointing," check whether reliability is wired to
 its most fragile component with no fallback. The fix is a safety net + provenance, not
 chasing the fragile component to perfection. Also: a `getattr(e, "text")` typo (the field

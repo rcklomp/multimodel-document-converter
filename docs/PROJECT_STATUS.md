@@ -1,8 +1,29 @@
 # Project Status
 
-Last updated: 2026-06-10 (branch `feat/omnidocbench-phase0`: rev. 4 plan prerequisites shipped; three Phase 0B-era decisions ratified; suite fully green)
+Last updated: 2026-06-11 (branch `feat/omnidocbench-phase0`: Phase 1 bake-off COMPLETE and RATIFIED; both pure theses refuted; hybrid validated non-dominated; Phase 4 greenlit)
 
-## Current state (2026-06-10) - rev. 4 prerequisites shipped; interim default + serving home + render cap decided
+## Current state (2026-06-11) - Phase 1 complete: hybrid validated, Phase 2 settled by evidence, Phase 4 greenlit
+
+The Phase 1 two-corpus bake-off ran verdict-ELIGIBLE (158-page OmniDocBench fixed
+set + 6-doc internal corpus, 4 registered candidates, paired bootstrap stats per
+the pre-registered Section 7.2 rule) and was RATIFIED by the user 2026-06-11. See
+DECISIONS.md "Phase 1 outcome RATIFIED" + FINDINGS_LOG 2026-06-11:
+- **Pipeline-vs-hybrid: INCONCLUSIVE by construction** (identical on a code-free
+  benchmark; +0.0001). The default does not move on it.
+- **Pure VLM-primary REFUTED** (hybrid > Qwen3-VL: text-ED +0.0346, TEDS +0.1745,
+  CIs exclude 0). **Pure pipeline-primary REFUTED for code** (R3 0.300 vs 0.947).
+- **The MinerU+Qwen hybrid is non-dominated on every measured class.** Phase 2 is
+  settled by the same evidence: ONE specialist lane (Qwen-for-code), already
+  implemented. **Phase 4 (formalize hybrid as production default, with shadow
+  window + rollback + re-extraction policy) is greenlit and is the next milestone.**
+- Baseline-provenance CORRECTION: the 0.301/0.563 full-755 baseline came from the
+  OCR-enabled legacy offline route, NOT `USE_DOCLING_FAST=1` (do_ocr=False, proven
+  content-empty on image-only input). Interim-default disposition pending user
+  decision; tier-2-net OCR fix registered for Phase 3.
+- R3 reconciliation: the PRODUCTION schema prompt preserves code indentation on
+  Qwen (0.950); the render-sweep's indentation loss was a PROMPT property.
+
+## Prior state (2026-06-10) - rev. 4 prerequisites shipped; interim default + serving home + render cap decided
 
 `PLAN_EXTRACTION_FIDELITY_V1` rev. 4 Phases 0A/0B/0.5 are DONE (two unattended
 runs, 2026-06-10; evidence in FINDINGS_LOG + the gitignored

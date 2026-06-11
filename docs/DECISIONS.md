@@ -3053,3 +3053,39 @@ that remains the plan's Phase 4, gated on the Phase 1 bake-off.
    corpus (manuals/magazines/forms) sits in the cap's strong classes.
    Recorded for Phase 2+ design (not implemented): per-page adaptive render
    escalation for dense-small-text pages.
+
+## Phase 1 outcome RATIFIED + baseline-provenance correction (2026-06-11)
+
+User ratified the Phase 1 two-corpus bake-off as recorded (verdict-eligible run,
+158-page fixed set + 6-doc internal corpus; report in the gitignored
+`HANDOVER_PHASE1_REPORT.md`, tables in FINDINGS_LOG 2026-06-11):
+
+1. **Verdict: INCONCLUSIVE for pipeline-vs-hybrid** (structurally identical on a
+   code-free benchmark, paired delta +0.0001) - the default does NOT move on it.
+   **Pure VLM-primary REFUTED** (hybrid beats Qwen3-VL: text-ED +0.0346 CI
+   [+0.0036,+0.0663], TEDS +0.1745 CI [+0.0283,+0.3102]). **Pure pipeline-primary
+   REFUTED for code** (R3: MinerU 0.300 SEMANTIC_FAIL vs hybrid 0.947). The
+   non-dominated engine across every measured class is the MinerU+Qwen hybrid -
+   the complementary architecture the candidate thesis described.
+2. **Phase 2 settled by the same evidence:** the per-class routing table records
+   ONE specialist lane - Qwen-for-code (R3 0.95 vs 0.30, n=20 judgeable) - which
+   is already implemented. No other lane has measured-loss evidence; no lane cut
+   below the n>=10 floor. No build work.
+3. **Phase 4 greenlit:** formalize the hybrid (GX10 MinerU :8001 + cap1600 Qwen +
+   code lane) as the production default via the Phase 4 controls (shadow window,
+   pre-named rollback, re-extraction policy, SMOKE_FULL).
+4. **Correction to the 2026-06-10 entry (decision 1 evidence line):** the
+   full-755 baseline (0.301/0.563) was produced by the OCR-enabled legacy offline
+   default route, NOT by `USE_DOCLING_FAST=1` (`do_ocr=False`). Phase 1 proved
+   the no-OCR engine content-empty on the image-only benchmark (151/151) and
+   dominated on the internal corpus (CarOK part numbers lost, scanned form 0013
+   zero text, code never typed). The interim default therefore has NO measured
+   OmniDocBench fidelity and is BLANK on scanned input. Interim-default
+   disposition (keep-with-documented-scanned-exclusion vs re-point at the OCR
+   route) = USER-DECISION-PENDING; expected short-lived given Phase 4.
+5. **Registered (Phase 3/4 work items):** (a) the Section 7.2 engine-health guard
+   must also count content-empty page rate (the ladder guard misses silent
+   emptiness - found twice today); (b) candidate: enable OCR on fallback-ONLY
+   docling recovery runs so a laddered scanned page is not blank (cost paid only
+   when laddered); (c) PaddleOCR-VL needs a markdown-first adapter before it can
+   ever be a registered candidate (excluded, not forfeited).

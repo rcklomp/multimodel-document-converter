@@ -443,7 +443,13 @@ AGENT-GATE-PROGRESSION:
   (lanes x tiers x retry x arbitration is a multiplicative test surface).
 - **Phase 3 - Reliability + quality correction.** Implement quality-risk arbitration
   + the Section 5.4 action-on-flag consumers + demote the ladder (Section 5 items
-  3-4, Sections 5.3-5.4). DoD: new tests for quarantine-on-quality-risk and
+  3-4, Sections 5.3-5.4). Registered additions (2026-06-11, from the Phase 1 run):
+  (a) extend the Section 7.2 engine-health guard to count CONTENT-EMPTY page rate
+  (the ladder guard counts fallbacks, not silent emptiness - missed twice on
+  2026-06-10/11); (b) candidate: `do_ocr=True` on fallback-ONLY docling recovery
+  runs, so a laddered scanned page is not blank (tier-2 net is currently no-OCR;
+  cost paid only when laddered - USER sign-off before enabling, it changes net
+  latency). DoD: new tests for quarantine-on-quality-risk and
   ladder-as-last-resort; the Section 5.4 consumers LIVE (specialist re-extraction
   attempt wired; `qa_full_conversion.py` reports flagged + ladder-served page counts
   with advisory thresholds; aggregates in the smoke/QA summary) - a flag with no
