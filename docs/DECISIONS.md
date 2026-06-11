@@ -3219,11 +3219,19 @@ dense code; Qwen alone empties dense tables); the hybrid is the NON-DOMINATED co
 | F8 | AGENTS Principle F `shadow_ocr` not marked legacy; V3 recovery unpointed | ALREADY RESOLVED in the tree (AGENTS.md:60 marks `shadow_ocr` legacy and points V3 recovery at the fail-closed ladder). No edit. |
 | F9 | 0.5 "(canonical target)" tag ambiguous | CLOSED. CLAUDE.md + README clarified: 0.5 is the aspirational target, NOT as-built; the charter is the as-built reference. |
 
-**Scope note (honest):** the Phase 5 WP-2 corpus re-extraction + Qdrant re-ingestion
-that the plan also scheduled was NOT executed - blocked by (a) production Qdrant down
-(`10.0.10.232:6333` unreachable, user-controlled), (b) the canonical per-doc output
-dirs absent on disk so the stale set could not be authoritatively enumerated, and
-(c) a verified conversion-env connectivity fault (the mmrag-v2 conda python cannot
-reach the M5/GX10 inference endpoints - EHOSTUNREACH - while curl and system python
-can, so the hybrid silently ladders to Docling). The mandatory pre-batch smoke
-correctly halted the batch. See `HANDOVER_PHASE5_REEXTRACT_REPORT.md` for the runbook.
+**Scope note (WP-2 - bounded subset COMPLETED):** the Phase 5 WP-2 re-extraction +
+ingestion ran after a connectivity fault was diagnosed and bridged. The mmrag-v2 conda
+python cannot reach the M5/GX10 inference endpoints (EHOSTUNREACH - a per-process utun/VPN
+scoped-route fault; curl + system python reach them fine), which the mandatory smoke caught
+(every page laddered to Docling, `degraded>0`). Bridged with a localhost TCP relay
+(`scripts/phase5_relay.py`, run by system python; harness `PHASE5_*_ENDPOINT` overrides) -
+no server/route/VPN change. Re-smoke then PASSED `degraded=0`. Results: the 12-doc bounded
+crucible subset re-extracted 12/12 `mineru_qwen_hybrid`, `degraded=0`, 0/724 laddered, 0
+QA_WARN/FAIL (docling-failure docs recovered: CarOK 0->12 tables, DigitaleFotografie/Firearms
+text recovered); dense-ingested 3338 points into `mmrag_v3__qwen3_local` on the LOCAL Mini
+Qdrant (`127.0.0.1:6333`, omlx Qwen3-Embedding-8B-mxfp8 4096-dim) - point count == exact
+chunk sum, validated. Deferred: the BM25 sparse twin (the production script's `uuid5`
+namespace `NAMESPACE_DNS` != the dense `8b7c...` namespace would break RRF fusion - a code
+fix, not hacked blind) and the full-corpus reconciliation (~32 docs + authoritative
+production-set enumeration). The permanent fix is the VPN split-tunnel (exclude
+`10.0.10.0/24`). See `HANDOVER_PHASE5_REEXTRACT_REPORT.md` for the full runbook.

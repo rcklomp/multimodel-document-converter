@@ -1,8 +1,21 @@
 # Project Status
 
-Last updated: 2026-06-11 (branch `feat/omnidocbench-phase0`: Phase 4 DONE - shadow window JUSTIFIED the flip; the MinerU+Qwen hybrid is the FORMAL production default with a pre-named rollback + re-extraction policy)
+Last updated: 2026-06-11 (branch `feat/omnidocbench-phase0`: Phase 5 DONE - spec rewritten to the Phase 4 hybrid-default reality [F1/F3/F5 closed]; WP-2 bounded re-extraction + dense ingest completed)
 
-## Current state (2026-06-11 PM) - Phase 4 complete: the hybrid is the formal production default
+## Current state (2026-06-11 PM) - Phase 5: spec reconciled + bounded corpus re-ingested
+
+`PLAN_EXTRACTION_FIDELITY_V1` Phase 5 is DONE. WP-1 rewrote the Layer-0 spec to the
+Phase 4 reality (charter §4 retry-first + fail-closed ladder + rollback hatch; QUALITY_GATES
+advisory fidelity gate; F1-F9 dispositioned - `DECISIONS.md` "Phase 5 - spec rewrite
+closure"). WP-2 re-extracted a 12-doc bounded crucible subset (12/12 `mineru_qwen_hybrid`,
+`degraded=0`, 0/724 laddered) and dense-ingested 3338 points into `mmrag_v3__qwen3_local` on
+the LOCAL Mini Qdrant (`127.0.0.1:6333`, omlx 4096-dim). A per-process conda-env routing
+fault to the M5/GX10 (EHOSTUNREACH - VPN `utun` scoped-route) was bridged with a localhost
+relay (`scripts/phase5_relay.py`); the permanent fix is the VPN split-tunnel. Deferred: BM25
+sparse twin (point-id namespace fix), full-corpus reconciliation. See
+`HANDOVER_PHASE5_REEXTRACT_REPORT.md`.
+
+## Prior state (2026-06-11 PM) - Phase 4 complete: the hybrid is the formal production default
 
 `PLAN_EXTRACTION_FIDELITY_V1` Phase 4 is DONE (controls + evidence + records; no
 engine code changed - the default route already selected `MineruQwenHybridEngine`

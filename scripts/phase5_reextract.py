@@ -41,10 +41,14 @@ SMOKE_SRC = OUT_DIR / "_smoke_src"
 PY = sys.executable
 
 # The formalized production hybrid config (Phase 4 DECISIONS entry, 2026-06-11).
+# Endpoints are overridable via PHASE5_MINERU_ENDPOINT / PHASE5_VLM_ENDPOINT so the
+# run can be routed through a localhost relay (/tmp/phase5_relay.py) when the conda
+# env cannot reach the LAN servers directly (the 2026-06-11 utun scoped-route fault).
+# The relay is transport-only: the served models + routing are identical.
 PROD_ENV = {
-    "MINERU_ENDPOINT": "http://10.0.10.239:8001",
+    "MINERU_ENDPOINT": os.environ.get("PHASE5_MINERU_ENDPOINT", "http://10.0.10.239:8001"),
     "MINERU_MODEL": "MinerU2.5-2509-1.2B",
-    "VLM_NATIVE_ENDPOINT": "http://10.0.10.235:8000/v1",
+    "VLM_NATIVE_ENDPOINT": os.environ.get("PHASE5_VLM_ENDPOINT", "http://10.0.10.235:8000/v1"),
     "VLM_NATIVE_MODEL": "mlx-community/Qwen3-VL-8B-Instruct-8bit",
     "VLM_NATIVE_API_KEY": "EMPTY",
     # cap1600 is the shipped VLM_RENDER_MAX_PX default - do NOT override.
