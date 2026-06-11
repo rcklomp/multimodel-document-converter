@@ -248,12 +248,16 @@ def main() -> int:
             content_fail.append((base, r["verdict"]))
         else:  # LADDER_FAIL
             ladder_retry.append((base, src))
-        # connectivity-collapse halt: consecutive near-total ladders = relay/network down
-        collapse = collapse + 1 if ladder_ratio(r) > COLLAPSE_RATIO else 0
+        # Engine-collapse halt: consecutive TOTAL failures = the engine path is broken
+        # (relay/network down, OR the GX10 MinerU wedged -> watchdog-killed NO_OUTPUT,
+        # which has no page count so it must be counted explicitly here, not via ratio).
+        dead = r.get("total_pages") is None or ladder_ratio(r) > COLLAPSE_RATIO
+        collapse = collapse + 1 if dead else 0
         if collapse >= COLLAPSE_HALT:
             log(
-                f"CONNECTIVITY COLLAPSE: {collapse} consecutive ~fully-laddered docs. "
-                f"Relay/network down - STOPPING (content fails do NOT trigger this)."
+                f"ENGINE COLLAPSE: {collapse} consecutive total-failure docs (NO_OUTPUT or "
+                f"~fully laddered) - relay/network down or MinerU wedged. STOPPING (content "
+                f"fails do NOT trigger this; restart MinerU / fix the relay, then re-run to resume)."
             )
             break
 
