@@ -19,6 +19,8 @@ An architectural phase is complete only when ALL hold:
 
 RETIRED criterion: the prior Identity-Gate step (`scripts/run_identity_gate.py`, NOT YET BUILT, "< 5% delta") is dropped - that script was never built, and a single sub-5% delta against the v2.16 baseline is impossible by design once the V3 chunker changes chunk shape (§3). Identity is now an explained-delta review (identity-half >= 95% AND explained-delta <= 5%), not one number against v2.16.
 
+ADVISORY criterion (fidelity outcome gate, F5, AGENT-GATE-PROGRESSION): an extraction-path change SHOULD report the OmniDocBench fidelity delta (text edit distance, table TEDS) versus the recorded hybrid regression baseline (158-page fixed set: text-ED **0.2212** / TEDS **0.7933**, `PLAN_EXTRACTION_FIDELITY_V1` Phase 1) via `scripts/omnidocbench_adapter.py`. This is an OFFLINE selection/regression gate, ADVISORY for now (no ground truth at conversion time); it is promoted to a hard regression gate only per `docs/QUALITY_GATES.md` and Section 6 of that plan. It is NOT a per-conversion production gate.
+
 ## 3. SCOPE + DEFERRAL DISCIPLINE
 * The V3 chunker fundamentally alters chunk shape; chunk COUNT/CONTENT parity vs v2.16 is NOT a smoke requirement (use the explained-delta review).
 * Deferrals are DISPOSITIONED, never "permanent." Every deferred v2.16 heuristic or skipped test is exactly one of:

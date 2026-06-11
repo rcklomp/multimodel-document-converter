@@ -19,12 +19,28 @@ errors and capability overclaims) and updates the target in
 
 ## 1. Executive Summary (honest framing)
 
-V3 is **vision-native extraction ADDED to the v2 pipeline, not a replacement of
-it.** The shipping system is a two-engine hybrid: a VLM extracts visually-complex
-or code-dense pages, while `DoclingFastEngine` (CPU, OCR-off) handles prose pages
-for cost. Docling therefore remains live, and so do its caveats (stripped code
-indentation, per-page layout inconsistency, placeholder images). Pretending V3
-"replaced" V2 is the mistake that produced the previous drafts.
+V3 is **specialized document extraction ADDED to the v2 pipeline, not a
+replacement of it.** The shipping production default (formalized 2026-06-11,
+`docs/DECISIONS.md` "Phase 4 - the MinerU+Qwen hybrid is the production default")
+is the `MineruQwenHybridEngine`: a served document-parsing model, **MinerU2.5**,
+is the PRIMARY extractor for prose / tables / forms / scans, and the **Qwen3-VL**
+VLM is a TARGETED SPECIALIST for code-dense pages (monospace-char ratio >= 0.10).
+The default is not "VLM-primary proven" and not "pipeline-primary proven": the
+two-corpus bake-off (`PLAN_EXTRACTION_FIDELITY_V1` Phase 1) was **INCONCLUSIVE**,
+both pure extremes were REFUTED (MinerU alone mangles dense code to R3 0.44; Qwen
+alone empties dense tables), and the hybrid is the **non-dominated** configuration
+- strictly better on every class Phase 1 flagged (tables, scans/forms, code) and
+worse on none (Phase 4 shadow window, `docs/paper/FINDINGS_LOG.md` 2026-06-11).
+
+`DoclingFastEngine` (CPU, OCR-off) is therefore **no longer the live prose engine**.
+It is demoted to (a) tier-2 of the fail-closed extraction ladder (Section 4) and
+(b) the `USE_DOCLING_FAST` rollback hatch. Its caveats (stripped code indentation,
+per-page layout inconsistency, placeholder images) still matter precisely because
+the ladder falls back to it when the primary engines are unreachable or fail -
+which is exactly why a re-extraction whose pages laddered to Docling must be
+treated as stale, not equivalent. Pretending V3 "replaced" V2 is the mistake that
+produced the previous drafts; so is pretending the ladder's Docling output is
+primary-quality.
 
 V3's value is real but bounded. In a head-to-head soak (same embedder, reranker,
 GX10 judge, seed 7), V3 beat the v2.16 baseline on every axis:
@@ -69,11 +85,12 @@ each individual boundary "fails OPEN" (degrades rather than crashing); the extra
 ladder as a whole (`src/mmrag_v3/processor.py::extract`, `processor.py` docstring
 "FAIL-CLOSED") is "fail-CLOSED" against silent DATA LOSS - it never lets an
 engine/network failure zero a text-bearing page. Same don't-lose-data goal from
-opposite ends; the two terms are not in conflict. (NOTE: the ladder's actual
-3-tier behavior + provenance keys are documented in PROJECT_STATUS and will be folded
-into Section 3/4 here per `docs/PLAN_EXTRACTION_FIDELITY_V1.md` Phase 5; that plan
-also corrects this section's circuit-breaker description, which the shipped ladder
-superseded.)
+opposite ends; the two terms are not in conflict. (The ladder's actual 3-tier
+behavior, the retry-before-fallback policy, and the `extraction_*` provenance keys
+are now documented in **Section 4.1** - folded in by `PLAN_EXTRACTION_FIDELITY_V1`
+Phase 5, which also corrected this charter's old circuit-breaker-as-reliability-story
+framing: the shipped fail-closed ladder, not the breaker, is the reliability story,
+and the breaker is one fail-fast rung inside it. See B4 below.)
 
 ### 2.1 Boundary Register (the invariant made concrete)
 
@@ -82,7 +99,7 @@ superseded.)
 | B1 | `from_uir` asset_ref (QA-CHECK-05) | Docling emits a binary image per picture | Materialize a bbox crop -> `asset_ref`; never reject | `test_v3_asset_materializer.py` | `[SHIPPED]` |
 | B2 | `visual_description` 400 cap | OCR-era short captions | Truncate at producer; full text stays in `content` | `test_v3_asset_materializer.py` | `[SHIPPED]` |
 | B3 | `ElementType` vocabulary | 3 values: text/image/table | Smuggle code/form as TEXT + `promoted_modality`; promote to `Modality.CODE/FORM` in the chunker; unknown -> TEXT + `original_vlm_type` provenance | `test_v3_vlm_code_form.py` | `[SHIPPED]` |
-| B4 | VLM transport failure | Docling is local CPU; no network failure class | `VlmInfraError` hard-fails the batch (no silent Docling fallback); soak harness pauses-and-polls to recover | `test_v3_circuit_breaker.py`, `test_v3_resilient_breaker.py` | `[SHIPPED]` |
+| B4 | VLM transport failure | Docling is local CPU; no network failure class | `VlmInfraError` hard-fails the ENGINE fast (no silent IN-engine degrade); the `extract()` fail-closed ladder (Section 4.1) then catches it and serves the page from tier-2 Docling / tier-3 PyMuPDF, PROVENANCE-STAMPED (`extraction_fallback` + `extraction_degraded_pages`), never silently as primary-equivalent; soak harness pauses-and-polls to recover | `test_v3_circuit_breaker.py`, `test_v3_resilient_breaker.py` | `[SHIPPED]` |
 | B5 | empty-content asset chunk | text chunks always carry content | guard empty-content asset chunks before qdrant ingest | (regression for `b44724b`) | `[SHIPPED]` |
 | B6 | VLM bbox accuracy | coordinates are trustworthy | adapter projects raw px -> `[0,1000]` and clamps; crop-audit flags edge-overflow + blank crops | `test_v3_asset_materializer.py` (crop-audit) | `[SHIPPED]`, residual risk in 3.3 |
 | B7 | router code blind spot | object presence implies visual complexity | monospace-ratio >= 0.10 routes code-as-text to the VLM | router monospace guard | `[SHIPPED]` (`2a60a99`) |
@@ -218,7 +235,11 @@ the only-chunk-on-page case is PROMOTED to IMAGE, keeping the rendered crop).
 
 ### 3.6 The Docling Lane `[SHIPPED]` + retained debt `[PARTIAL]`
 `DoclingFastEngine` (`src/mmrag_v3/engines/docling_fast.py`, the sole V3 docling
-import boundary) serves prose pages. It retains V2's caveats: Docling's per-page
+import boundary) is, as of the Phase 4 flip (2026-06-11), **no longer on the
+default production path**. It serves two demoted roles: tier-2 of the fail-closed
+ladder (Section 4.1) and the `USE_DOCLING_FAST` rollback engine (Section 4.2). On
+the legacy `HybridEngine` route (no `MINERU_ENDPOINT`) it still serves prose pages.
+It retains V2's caveats: Docling's per-page
 layout inconsistency (abbreviation pairs classed TEXT on one page / TABLE on the
 next), figure placeholders, and mid-sentence page-break merges. A symptom-level
 band-aid (`scripts/postprocess_markdown.py`, untracked, V2-era, operated on
@@ -236,13 +257,88 @@ requires `asset_ref`+`spatial.bbox` only for IMAGE/TABLE.
 
 ---
 
-## 4. Resilience & Operations `[SHIPPED]`
+## 4. Resilience & Operations
+
+The reliability story is **retry the primary engine first, then a fail-closed
+ladder as a last resort** - not the circuit breaker (which is one fail-fast rung
+inside the ladder, not the story). This section was rewritten in
+`PLAN_EXTRACTION_FIDELITY_V1` Phase 5 (2026-06-11) to match the shipped code and
+close governance findings F1 (resilience contradiction) and F3 (charter silent on
+the ladder). The old "circuit-breaker hard-fails, no Docling fallback" framing was
+a corner-cut the audit caught; the corrected design (retry-first + quality-risk
+arbitration + ladder-as-last-resort) is below, status-tagged for what actually
+ships today versus what is still proposed.
+
+### 4.1 The fail-closed extraction ladder `[SHIPPED]`
+
+`mmrag_v3.processor.extract()` is FAIL-CLOSED against silent data loss through a
+three-tier ladder; each tier serves only the pages the tier above could not:
+
+- **tier 1** the selected engine (default `mineru_qwen_hybrid`: MinerU2.5 for
+  prose/tables/forms/scans, Qwen for code). Best quality; may fail or degrade.
+- **tier 2** offline `DoclingFastEngine` (no network; may itself fail).
+- **tier 3** PyMuPDF native text layer (no model/network; only an unreadable page
+  yields nothing - we do not fabricate).
+
+**Retry precedes fallback `[SHIPPED]` (Phase 0.5).** Before any cross-engine move,
+a transient fault (timeout / connection / 5xx incl. the MinerU `broadcast_shapes`
+500) retries the SAME page on the SAME engine with bounded linear backoff. Both
+lanes have this: the VLM lane in `vlm_provider.py` (attempt cap, backoff,
+retryable-status classification, separate read-timeout budget) and the MinerU lane
+in `mineru_native.py` (a NEW wrapper mirroring that policy - `two_step_extract` is
+stateless per call, so the retry is a genuine recovery, not a mask). Only after the
+bounded attempts are exhausted does the ladder drop a rung.
+
+**Provenance is stamped, never silent.** `_stamp()` records on the document:
+`extraction_engine`, `extraction_fallback` (the tier that served), 
+`extraction_degraded_pages` (count laddered below tier 1), `extraction_recovered_pages`,
+and `extraction_fallback_reason`. A laddered page is retained and chunked but is
+NOT primary-equivalent - this is exactly why the Phase 4 re-extraction policy treats
+any non-(`mineru_qwen_hybrid` + GX10 + cap1600) provenance as STALE.
+
+**Known coverage gap (presence, not fidelity).** The ladder's tier-2/tier-3 accept
+test is `_page_content_chars(page) > 0` - it asserts a page produced text, not that
+the text is faithful. A Docling tier-2 page that strips code indentation or flattens
+a table passes. So a silently-laddered code page (e.g. when the Qwen endpoint is
+unreachable and every code page degrades to Docling) is the dominant stale-quality
+risk; `extraction_degraded_pages > 0` is the signal to catch it. **The mandatory
+pre-batch smoke asserts `degraded == 0` on the hardest classes precisely to catch a
+silent-ladder regression before a corpus run** (this is how the 2026-06-11 Phase 5
+re-extraction attempt was correctly halted when the conversion env could not reach
+the inference servers). Closing the presence-not-fidelity gap is Section 4.3.
+
+### 4.2 Rollback hatch `[SHIPPED]`
+
+The env-var routing in `processor._select_engine` keeps `USE_DOCLING_FAST=1` ALIVE
+as the production rollback mechanism: it forces the offline-floor route even when
+`MINERU_ENDPOINT` is set. This hatch is pinned by
+`tests/test_mineru_native.py::test_docling_fast_overrides_mineru_default` and MUST
+NOT be deleted (the Phase 5 spec rewrite explicitly preserves it). The pre-named
+Phase 4 rollback CONDITION: revert to `USE_DOCLING_FAST=1` if, over any 10
+consecutive production docs, the QA_WARN+QA_FAIL rate exceeds 20 percentage points
+OR ladder-served pages exceed 2% of pages (both clear of the arm-B shadow baseline
+of 0% / 0%).
+
+### 4.3 Quality-risk arbitration `[PROPOSED]` (Phase 3)
+
+Per `PLAN_EXTRACTION_FIDELITY_V1` Section 5.3-5.4, a merge-point arbiter would
+accept a fallback/secondary page only if it clears a per-modality quality-RISK bar
+(proxies: table-grid validity, code-fence/indentation integrity, reading-order
+monotonicity, empty-region ratio), else retain it flagged `extraction_quality_risk`
+with three live consumers (one-shot specialist re-extraction; a `qa_full_conversion.py`
+advisory counting flagged + ladder-served pages; fleet aggregates). **Not built.**
+The flag and its consumers are Phase 3 work; until then the ladder's presence test
+(4.1) is the only arbiter and the offline OmniDocBench gate (Section 7 /
+`PLAN_OMNIDOCBENCH_EVAL`) is the only true fidelity verdict.
+
+### 4.4 Operational guards `[SHIPPED]`
 
 - **Circuit breaker:** `VlmInfraError` (transport timeout / connection refused /
-  502/503/504/408) hard-fails rather than silently degrading to Docling; semantic
-  errors (empty content, malformed JSON, non-retryable 4xx, 429, 500) still fall
-  back per-page. The engine stays fail-fast; resilience policy lives only in the
-  harness, so the production CLI never silently blocks.
+  502/503/504/408) hard-fails the ENGINE fast rather than degrading in-engine;
+  semantic errors (empty content, malformed JSON, non-retryable 4xx, 429, 500)
+  fall back per-page. The engine stays fail-fast; the ladder (4.1) supplies the
+  provenance-stamped recovery, so the production CLI never silently blocks AND
+  never silently substitutes.
 - **Resilient pause-and-poll** (`scripts/v3_batch_ingest.py
   ::_process_with_resilience`): on infra failure, poll `GET /v1/models` every 60s
   and resume on recovery. **Two bounded guards** (both required): a 30-minute

@@ -3188,3 +3188,42 @@ fidelity on the 158-page fixed set (text-ED 0.2212 / TEDS 0.7933) is the
 regression baseline future runs compare against; junk-presence signals stayed
 clean (0.0 across WP-3). Layer-0 spec edits (charter, mandate, QUALITY_GATES) are
 Phase 5, NOT done here.
+
+## Phase 5 - spec rewrite closure: docs reconciled to the Phase 4 reality (2026-06-11)
+
+**Decision:** Apply the `PLAN_EXTRACTION_FIDELITY_V1` Section 8 Layer-0 edits so the
+governance docs describe the PROVEN reality, and close the 2026-06-09 governance
+audit findings F1/F3/F5 (with F2/F4/F6/F8/F9 doc-hygiene). The substantive thesis +
+reliability-model decision is the Phase 4 entry above (the MinerU+Qwen hybrid default,
+retry-first, ladder-as-last-resort, rollback + re-extraction policy); this entry does
+NOT duplicate it - it records that the spec now MATCHES it.
+
+**Reality the spec was written to (not "pipeline-primary proven"):** Phase 1 was
+INCONCLUSIVE on OmniDocBench; both pure extremes were REFUTED (MinerU alone mangles
+dense code; Qwen alone empties dense tables); the hybrid is the NON-DOMINATED config
+(Phase 4 shadow: regresses no doc, strictly better on tables/scans/code). The
+`USE_DOCLING_FAST` rollback hatch is PRESERVED and still pinned by
+`tests/test_mineru_native.py::test_docling_fast_overrides_mineru_default`.
+
+**F1-F9 disposition:**
+
+| F | Finding | Disposition (Phase 5) |
+|---|---|---|
+| F1 | Resilience contradiction (charter §4 "no Docling fallback" vs the shipped ladder; PROJECT_STATUS "HALTS the doc") | CLOSED. Charter §4 rewritten to retry-first + fail-closed ladder (§4.1) + rollback hatch (§4.2) + quality-risk arbitration `[PROPOSED]` (§4.3); B4 reconciled; PROJECT_STATUS "Must-respect" corrected to the ladder behavior (degraded-stamped, not halt). |
+| F2 | `smoke_production.sh` "not yet built" stale; `visual_description` unconditional | CLOSED (already corrected in the mandate; verified). Mandate line 18 states SHIPPED + FULL-mode-conditional `visual_description`; DoD gains the advisory fidelity criterion. |
+| F3 | Charter silent on the shipped 3-tier ladder | CLOSED. Charter §4.1 documents the ladder + retry + the `extraction_*` provenance keys, demoted to last-resort net. |
+| F4 | Charter missing from Layer-0 list; phantom SRS | ALREADY RESOLVED in the tree. Charter is in the AGENTS.md (§4.2) + README Layer-0 lists; the SRS is correctly marked ARCHIVED (REQ/IRON-ID provenance only), not a live governance doc. No edit (dropping the archived-SRS note would orphan REQ/IRON ID lineage). |
+| F5 | OmniDocBench / two-axis "fidelity floor wired" overclaim | CLOSED. QUALITY_GATES gains the fidelity outcome gate + quality-risk proxies as ADVISORY; mandate DoD adds the advisory fidelity criterion; PROJECT_STATUS "wired" softened to PROPOSED/advisory. |
+| F6 | Stale test-command count in PROJECT_STATUS | CLOSED. Test-command block updated to the measured 1623 passed / 100 skipped / 0 failures (the 1624/99 headline differs by one endpoint-gated skip while the inference servers are unreachable; F4 contract adjudicated, `4f20801`). |
+| F7 | Doc-hygiene (2026-06-09 audit) | No actionable Phase-5 edit identified in the handover WP-1 list; the audit report itself is not in-tree. Recorded as no-op; re-open if the original F7 text surfaces. |
+| F8 | AGENTS Principle F `shadow_ocr` not marked legacy; V3 recovery unpointed | ALREADY RESOLVED in the tree (AGENTS.md:60 marks `shadow_ocr` legacy and points V3 recovery at the fail-closed ladder). No edit. |
+| F9 | 0.5 "(canonical target)" tag ambiguous | CLOSED. CLAUDE.md + README clarified: 0.5 is the aspirational target, NOT as-built; the charter is the as-built reference. |
+
+**Scope note (honest):** the Phase 5 WP-2 corpus re-extraction + Qdrant re-ingestion
+that the plan also scheduled was NOT executed - blocked by (a) production Qdrant down
+(`10.0.10.232:6333` unreachable, user-controlled), (b) the canonical per-doc output
+dirs absent on disk so the stale set could not be authoritatively enumerated, and
+(c) a verified conversion-env connectivity fault (the mmrag-v2 conda python cannot
+reach the M5/GX10 inference endpoints - EHOSTUNREACH - while curl and system python
+can, so the hybrid silently ladders to Docling). The mandatory pre-batch smoke
+correctly halted the batch. See `HANDOVER_PHASE5_REEXTRACT_REPORT.md` for the runbook.

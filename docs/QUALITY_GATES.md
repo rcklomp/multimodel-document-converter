@@ -28,6 +28,44 @@ The verdict is INDEPENDENT of `content_type`. Full rationale, anti-weakening
 note, and the rejected alternatives: `docs/DECISIONS.md` "R3 Code-Indentation
 Gate Redesign" and `docs/PLAN_R3_CODE_GATE_REDESIGN.md`.
 
+## Fidelity Outcome Gate + Quality-Risk Proxies (ADVISORY; F5)
+
+Added in `PLAN_EXTRACTION_FIDELITY_V1` Phase 5 (2026-06-11) per `AGENT-GATE-PROGRESSION`
+(advisory-first; HARD gates are reserved for deterministic schema invariants).
+
+**Fidelity outcome gate (offline, ADVISORY).** The one place a true fidelity verdict
+is issued - it has labeled ground truth and runs OFFLINE, distinct from the
+conversion-time proxies below. Instrument: OmniDocBench labeled metrics (text edit
+distance, table TEDS, reading-order edit distance) via `scripts/omnidocbench_adapter.py`.
+It reports the fidelity delta versus the recorded hybrid regression baseline -
+**158-page fixed set: text-ED 0.2212 / TEDS 0.7933** (`PLAN_EXTRACTION_FIDELITY_V1`
+Phase 1). The bar is REGRESSION-against-baseline (no fidelity loss vs the selected
+baseline), NOT an absolute exact-match floor (edit-distance/TEDS penalize functionally
+equivalent formatting). Comparability: every engine-vs-baseline comparison runs on the
+SAME fixed page set; the full-755 number (0.301/0.563) is a corpus reference, never a
+subset comparator. Promotion to a HARD regression gate is gated on (a) the bake-off
+running clean end-to-end and (b) the chosen route shown stable across doc classes on
+BOTH corpora. It is NOT a per-conversion production gate (no ground truth at conversion
+time). Anti-weaken: no hard gate may be passable by dropping hard pages; it pairs with
+`PLAN_GATE_QUALITY_V1`'s retrieval-value axis so clean transcription of junk cannot pass
+both.
+
+**Conversion-time quality-risk proxies (ADVISORY signals, NOT fidelity).** No ground
+truth exists at conversion time, so these ESTIMATE risk; they are PROXIES, never a
+fidelity claim. Candidates: table-grid validity (parses to a rectangular grid),
+code-fence/indentation integrity, reading-order monotonicity, degenerate-repetition
+score, empty-region ratio. A page failing a proxy is FLAGGED (`extraction_quality_risk`),
+not declared low-fidelity. `extraction_quality_risk` and its consumers are `[PROPOSED]`
+(Phase 3, not yet built - charter §4.3); until then the ladder's presence test and the
+ladder-served page count (below) are the available signals. Do NOT replace `chars > 0`
+with `proxy_score > threshold` and call it fidelity - that is the false-confidence trap.
+
+**Ladder-served visibility (ADVISORY).** A green gate must say what fraction of its
+pages the primary engine actually served. `extraction_degraded_pages` (ladder-served)
+and `extraction_recovered_pages` are surfaced so a laddered-page spike is visible; a
+ladder-served ratio above the Phase 4 bound (2% of pages over 10 consecutive docs) is
+a rollback trigger (charter §4.2), not a silent `QA_PASS`.
+
 ## QA-CHECK-01 Tolerance Policy (Pass/Fail Source)
 
 | Scope | Tolerance | Gate Decision |

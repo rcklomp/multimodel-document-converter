@@ -192,8 +192,12 @@ chunks/headings, text-as-image survivors, CJK garbage headings, cover garble).
   hard protocol (now in AGENTS.md), crucible-calibrated regression fixtures.
 - `docs/PLAN_OMNIDOCBENCH_EVAL.md` - ground-truth fidelity benchmark (the gate
   plan measures retrieval value on OUR docs; this measures transcription fidelity
-  vs labeled ground truth - 1651 annotated pages, TEDS/edit-distance). Wired as a
-  two-axis acceptance with a Phase-0 fidelity floor.
+  vs labeled ground truth - 1651 annotated pages, TEDS/edit-distance). PROPOSED as
+  a two-axis acceptance; the fidelity axis is ADVISORY (offline selection/regression
+  gate, benchmark-gated per `AGENT-GATE-PROGRESSION`), NOT a wired per-conversion
+  floor (F5). The recorded hybrid regression baseline is the 158-page fixed set
+  text-ED 0.2212 / TEDS 0.7933 (Phase 1); the full-755 0.301/0.563 is a corpus
+  reference, never a subset comparator.
 
 **Harnesses:** `scripts/mineru_crucible_soak.sh` (leak-metric corrected to a
 whitelist) and `scripts/crucible_vlm_pipeline.sh` (soak -> M5 enrichment ->
@@ -512,19 +516,26 @@ visual-dense queries.
 - Acceptance requires `GATE_PASS` + `UNIVERSAL_PASS` across the smoke matrix, and
   `SMOKE_PRODUCTION_PASS` for any V3 extraction-path change.
 - Default-route dependency: the hybrid default needs BOTH servers (GX10 MinerU +
-  M5 Qwen) for any code-bearing doc; a Qwen transport outage trips the circuit
-  breaker and HALTS the doc (correctness over availability, no MinerU fallback).
-  Use `USE_MINERU_ENGINE=1` for MinerU-only availability. See `DECISIONS.md`
+  M5 Qwen) for FULL-QUALITY code-bearing docs. A Qwen transport outage trips the
+  circuit breaker (no cross-engine MinerU fallback for that code page) and the
+  `extract()` fail-closed ladder then serves the page from tier-2 Docling /
+  tier-3 PyMuPDF, PROVENANCE-STAMPED `extraction_degraded_pages > 0` - the doc is
+  NOT halted, but its laddered code pages are Docling-quality (stripped indentation)
+  and STALE by the Phase 4 re-extraction policy. The mandatory pre-batch smoke
+  asserts `degraded == 0` precisely to catch this silent-ladder case before a
+  corpus run (charter §4.1). Use `USE_MINERU_ENGINE=1` for MinerU-only
+  availability, or `USE_DOCLING_FAST=1` for the offline rollback. See `DECISIONS.md`
   "MinerU+Qwen-for-code hybrid is the default extraction route" -> Operational
-  envelope.
+  envelope, and "Phase 4 - the MinerU+Qwen hybrid is the production default".
 
 ## Test command
 
 ```
-pytest tests/ -q            # current: 1616 passed / 99 skipped + 1 KNOWN failure
-                            # (test_v3_vlm_code_form::test_code_smuggles_as_text_
-                            #  promotes_to_code_modality — a contract conflict, see
-                            #  "Test state (honest)" above); was 1355 at 2026-06-03
+pytest tests/ -q            # current: 1623 passed / 100 skipped / 0 failures (F6;
+                            #  measured 2026-06-11. The 1624/99 headline differs by one
+                            #  endpoint-gated skip when the inference servers are
+                            #  unreachable. The prior test_v3_vlm_code_form contract
+                            #  conflict was adjudicated to the F4 fenced contract, 4f20801)
 bash scripts/smoke_production.sh   # -> SMOKE_PRODUCTION_PASS (offline)
 ```
 
