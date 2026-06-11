@@ -18,8 +18,10 @@ DECISIONS.md "Phase 1 outcome RATIFIED" + FINDINGS_LOG 2026-06-11:
   window + rollback + re-extraction policy) is greenlit and is the next milestone.**
 - Baseline-provenance CORRECTION: the 0.301/0.563 full-755 baseline came from the
   OCR-enabled legacy offline route, NOT `USE_DOCLING_FAST=1` (do_ocr=False, proven
-  content-empty on image-only input). Interim-default disposition pending user
-  decision; tier-2-net OCR fix registered for Phase 3.
+  content-empty on image-only input). Interim-default disposition RESOLVED
+  (option 2): keep `USE_DOCLING_FAST=1` with a documented scanned/image-only
+  exclusion, time-boxed to the Phase 4 flip; tier-2-net OCR fix registered for
+  Phase 3.
 - R3 reconciliation: the PRODUCTION schema prompt preserves code indentation on
   Qwen (0.950); the render-sweep's indentation loss was a PROMPT property.
 

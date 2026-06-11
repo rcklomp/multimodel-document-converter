@@ -3081,8 +3081,16 @@ User ratified the Phase 1 two-corpus bake-off as recorded (verdict-eligible run,
    dominated on the internal corpus (CarOK part numbers lost, scanned form 0013
    zero text, code never typed). The interim default therefore has NO measured
    OmniDocBench fidelity and is BLANK on scanned input. Interim-default
-   disposition (keep-with-documented-scanned-exclusion vs re-point at the OCR
-   route) = USER-DECISION-PENDING; expected short-lived given Phase 4.
+   disposition RESOLVED (user, 2026-06-11): **OPTION 2** - keep
+   `USE_DOCLING_FAST=1` as the interim default WITH a documented scanned/
+   image-only EXCLUSION (such input produces no text under the interim default;
+   do not convert scans on it), explicitly TIME-BOXED to the Phase 4 flip.
+   Rationale: Phase 4's hybrid closes the scanned hole on the primary path
+   (measured: form 0013 fully extracted); no scan conversions are pending in the
+   window; re-pointing at the slower OCR route would be superseded within days.
+   The outage-net residual (a laddered scan is still blank even after Phase 4)
+   remains the registered Phase 3 OCR-on-fallback candidate, user sign-off
+   required.
 5. **Registered (Phase 3/4 work items):** (a) the Section 7.2 engine-health guard
    must also count content-empty page rate (the ladder guard misses silent
    emptiness - found twice today); (b) candidate: enable OCR on fallback-ONLY
