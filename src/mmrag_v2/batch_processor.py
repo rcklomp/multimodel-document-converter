@@ -5735,10 +5735,22 @@ class BatchProcessor:
         fence_recovered = 0
         if self._current_pdf_path and self._current_pdf_path.exists():
             for ch in chunks:
-                if ch.modality != Modality.TEXT or not is_code_chunk(ch):
+                # Admit promoted Modality.CODE chunks, not only code smuggled as
+                # TEXT. V3 promotes code to Modality.CODE, which the old TEXT-only
+                # gate skipped, leaving this recovery dead on the entire promoted
+                # population (PLAN_F1 Phase 0(b) modality seam).
+                if ch.modality not in (Modality.TEXT, Modality.CODE) or not is_code_chunk(ch):
                     continue
                 try:
                     fidelity = getattr(ch.metadata, "indentation_fidelity", None)
+                    if fidelity is None:
+                        # The hygiene loop above stamps indentation_fidelity only
+                        # on TEXT chunks; derive the same flat/indented signal for
+                        # CODE chunks so already-indented code is not re-extracted.
+                        _code_lines = [ln for ln in (ch.content or "").splitlines() if ln.strip()]
+                        _has_indent = any(ln.startswith(("    ", "\t")) for ln in _code_lines)
+                        _has_repl = any(ln.lstrip().startswith(">>> ") for ln in _code_lines)
+                        fidelity = 1.0 if (_has_indent or _has_repl) else 0.0
                     if fidelity is not None and fidelity > 0:
                         continue  # Already has indentation
 
