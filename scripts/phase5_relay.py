@@ -13,6 +13,15 @@ local ports. No server or routing reconfiguration.
   127.0.0.1:18001  ->  10.0.10.239:8001   (GX10 MinerU)
 
 Run: /usr/bin/python3 /tmp/phase5_relay.py
+
+A1 WORKAROUND (do not delete casually). This script + phase5_relay_supervisor.sh
+exist solely to work around fault A1 (root cause confirmed 2026-06-12: macOS Local
+Network privacy blocking the conda interpreter; the GUI permission toggle was still
+pending at that date). A1 is INTERMITTENT: a one-shot passing connect test only
+proves it is dormant, not fixed. REMOVAL CONDITION (all three): (1) the conda-python
+connect tests to 10.0.10.235:8000 and 10.0.10.239:8001 pass; AND (2) the probe log
+/Users/Shared/a1probe/a1probe.log spans >= 24h with ZERO FAULT blocks; AND (3) the
+user has confirmed the A1 root cause is closed. Until then, KEEP.
 """
 
 import asyncio
