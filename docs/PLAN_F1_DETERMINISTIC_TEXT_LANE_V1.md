@@ -4,7 +4,7 @@
 M1 session; the 2026-06-12 review three amendment conditions are incorporated and
 BINDING). Phase 1 build AUTHORIZED with the Section 6 oracle as the non-negotiable
 exit criterion. Phase 2 remains gated on Section 8 decision 3 (re-extraction
-budget).** Phase 0 (read-only
+budget).** **PHASE 1 CLOSED SCOPED 2026-06-12: P1 lane VALIDATED (Jungjun oracle 0.895-0.925, floor unchanged) + user human-acceptance review PASSED on the source-vs-output artifact bundle; P2 BLOCKED-BY-CHUNKER (Chaubal ~0.78; code blocks split across interleaved figure/table chunks - registered chunker contiguity item gates the P2 re-attempt). Devlin reclassified P0 flat-source defect. See HANDOVER_F1_PHASE1_REPORT.md + PROJECT_STATUS.** Phase 0 (read-only
 attribution, a-d) was executed 2026-06-12; results in Section 1.1. The
 2026-06-12 external review verified the modality seam and the P2 inference, and
 imposed three amendment conditions, all applied in this revision: (a) an
