@@ -5,7 +5,8 @@
 # logged, auto-restarting services that clean up deterministically via
 # `docker compose down`. Driven by scripts/v3_sequential_soak.sh.
 #
-# PORT MAP: qwen-vlm / qwen-judge SHARE :8000 (only ONE at a time — the GB10 can't
+# PORT MAP: qwen-judge owns :8000 (the qwen-vlm service was pruned 2026-06-12;
+# the M5 owns the VLM lane). Historical: vlm/judge shared :8000 (only ONE at a time — the GB10 can't
 # hold both at safe utilization). The `mineru` OCR lane is on :8001 and runs
 # CONCURRENTLY with the judge (0.15 + 0.60 util ~= 0.75 of 121 GiB, safe).
 #
@@ -40,20 +41,6 @@ x-common: &common
     options: {max-size: "50m", max-file: "3"}   # keep crash logs, cap disk
 
 services:
-  # Extraction — Qwen3-VL (BF16, full precision; quality-max, fits at 0.55)
-  qwen-vlm:
-    <<: *common
-    container_name: gx10-vllm-qwen3vl
-    command:
-      - "--model=Qwen/Qwen3-VL-8B-Instruct"
-      - "--served-model-name=Qwen3-VL-8B-Instruct"
-      - "--host=0.0.0.0"
-      - "--port=8000"
-      - "--gpu-memory-utilization=0.55"
-      - "--max-num-seqs=2"
-      - "--max-model-len=32768"   # >= magazine-page prompts (~16.9k tok). Do NOT lower to 16384 — it truncates them.
-      - "--trust-remote-code"
-
   # Evaluation — Qwen2.5-14B-FP8 judge (+ short alias preserved)
   qwen-judge:
     <<: *common
