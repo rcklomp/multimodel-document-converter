@@ -23,13 +23,21 @@ Behavior:
       path (the same shape ``mmrag-v2 process`` emits). NO
       ingestion_metadata header line.
 
-Env requirements:
-    USE_VLM_ENGINE          — must be "1" to use the VLM route (else
-                              the script raises rather than silently
-                              re-baselining against Docling output).
-    VLM_NATIVE_ENDPOINT     — e.g. http://10.0.10.246:8000/v1
-    VLM_NATIVE_MODEL        — e.g. Qwen2.5-VL-7B-Instruct-8bit
-    VLM_NATIVE_API_KEY      — Bearer token for the endpoint (optional)
+Targets:
+    * ``--pdf <path>`` (+ optional ``--baseline <path>``, default
+      ``output/<stem>/ingestion.jsonl``) re-baselines an arbitrary doc.
+    * a positional named shortcut (e.g. ``CarOK_voorraadtelling``) uses
+      the path pair from ``REF_DOCS``.
+
+Route guard (replaces the old USE_VLM_ENGINE hard gate):
+    Re-baselining must run through a VLM/hybrid vision route, NEVER the
+    docling/offline fallback (that would promote inferior extraction).
+    The effective route is resolved by mirroring
+    ``mmrag_v3.processor._select_engine`` precedence; the script proceeds
+    iff it resolves to ``mineru_qwen_hybrid`` or ``vlm_native`` (the
+    explicitly-forced VLM route), and refuses (exit 2) otherwise.
+    Set ``USE_VLM_ENGINE=1`` (+ ``VLM_NATIVE_*``) or configure
+    ``MINERU_ENDPOINT`` (the ``mineru_qwen_hybrid`` default).
 """
 
 from __future__ import annotations
@@ -41,7 +49,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -60,23 +68,55 @@ REF_DOCS = {
 }
 
 
-def rebaseline(doc_name: str) -> int:
-    if doc_name not in REF_DOCS:
+# Routes that carry VLM-grade fidelity and are therefore valid rebaseline
+# sources. Everything else (notably docling_fast and the legacy docling-based
+# `hybrid` fallback) is refused — rebaselining against docling would promote the
+# very output this script exists to replace.
+ALLOWED_ROUTES = {"mineru_qwen_hybrid", "vlm_native"}
+
+
+def resolve_route() -> str:
+    """Return the effective engine route name WITHOUT instantiating an engine.
+
+    Mirrors the precedence of ``mmrag_v3.processor._select_engine`` (first
+    match wins) using that module's pure env-predicate helpers, so the guard
+    reuses a single source of routing truth instead of re-parsing env vars.
+    """
+    from mmrag_v3.processor import (
+        _default_route_is_mineru,
+        is_docling_fast_route_enabled,
+        is_hybrid_route_enabled,
+        is_mineru_qwen_hybrid_route_enabled,
+        is_mineru_route_enabled,
+        is_vlm_route_enabled,
+    )
+
+    if is_mineru_route_enabled():
+        return "mineru"
+    if is_vlm_route_enabled():
+        return "vlm_native"
+    if is_docling_fast_route_enabled():
+        return "docling_fast"
+    if is_hybrid_route_enabled():
+        return "hybrid"
+    if is_mineru_qwen_hybrid_route_enabled():
+        return "mineru_qwen_hybrid"
+    if _default_route_is_mineru():
+        return "mineru_qwen_hybrid"
+    return "hybrid"
+
+
+def rebaseline(pdf_path: Path, baseline_path: Path) -> int:
+    route = resolve_route()
+    if route not in ALLOWED_ROUTES:
         print(
-            f"unknown ref doc: {doc_name!r} (known: {sorted(REF_DOCS.keys())})"
+            f"REFUSING TO REBASELINE: effective route is {route!r} — re-baselining "
+            f"must run through a VLM vision route ({sorted(ALLOWED_ROUTES)}), not the "
+            f"docling/offline fallback. Set USE_VLM_ENGINE=1 (+ VLM_NATIVE_*) or "
+            f"configure MINERU_ENDPOINT (the mineru_qwen_hybrid default)."
         )
         return 2
 
-    if os.environ.get("USE_VLM_ENGINE", "").strip() not in {"1", "true", "TRUE", "yes"}:
-        print(
-            "REFUSING TO REBASELINE: USE_VLM_ENGINE is not set — re-baselining "
-            "must run through the V3 VLM engine, not the Docling fallback."
-        )
-        return 2
-
-    ref = REF_DOCS[doc_name]
-    pdf_path: Path = ref["pdf"]
-    baseline_path: Path = ref["baseline"]
     if not pdf_path.is_file():
         print(f"source PDF missing: {pdf_path}")
         return 2
@@ -93,7 +133,7 @@ def rebaseline(doc_name: str) -> int:
     from mmrag_v2.chunking.uir_chunker import chunk_universal_document
     from mmrag_v2.schema.ingestion_schema import FileType, IngestionChunk
 
-    print(f"running V3 extraction on {pdf_path.name} ...")
+    print(f"running V3 extraction on {pdf_path.name} (route={route}) ...")
     t0 = time.time()
     universal_doc = v3_extract(str(pdf_path))
     uir_chunks = chunk_universal_document(universal_doc)
@@ -123,16 +163,48 @@ def rebaseline(doc_name: str) -> int:
     return 0
 
 
-def main(argv: List[str] | None = None) -> int:
+def resolve_targets(args: argparse.Namespace) -> Optional[Tuple[Path, Path]]:
+    """Resolve (pdf_path, baseline_path) from --pdf/--baseline or a named shortcut."""
+    if args.pdf:
+        pdf_path = Path(args.pdf).expanduser().resolve()
+        if args.baseline:
+            baseline_path = Path(args.baseline).expanduser().resolve()
+        else:
+            baseline_path = REPO_ROOT / "output" / pdf_path.stem / "ingestion.jsonl"
+        return pdf_path, baseline_path
+
+    doc_name = args.doc
+    if doc_name not in REF_DOCS:
+        print(f"unknown ref doc: {doc_name!r} (known: {sorted(REF_DOCS.keys())})")
+        return None
+    ref = REF_DOCS[doc_name]
+    return ref["pdf"], ref["baseline"]
+
+
+def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "doc",
         nargs="?",
         default="CarOK_voorraadtelling",
-        help="Reference doc name to re-baseline (default: CarOK_voorraadtelling)",
+        help="named ref-doc shortcut (used when --pdf is not given; "
+        "default: CarOK_voorraadtelling)",
+    )
+    parser.add_argument(
+        "--pdf",
+        default=None,
+        help="arbitrary source PDF path (overrides the named shortcut)",
+    )
+    parser.add_argument(
+        "--baseline",
+        default=None,
+        help="baseline JSONL output path (default: output/<stem>/ingestion.jsonl)",
     )
     args = parser.parse_args(argv)
-    return rebaseline(args.doc)
+    targets = resolve_targets(args)
+    if targets is None:
+        return 2
+    return rebaseline(*targets)
 
 
 if __name__ == "__main__":
