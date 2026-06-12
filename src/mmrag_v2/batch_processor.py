@@ -139,6 +139,56 @@ _CODE_FENCE_THRESHOLD: int = 5
 # Minimum weighted code-line ratio in the page sample.
 _CODE_RATIO_THRESHOLD: float = 0.10
 
+# --- PLAN_F1 4.1: text_native_code page signal -----------------------------
+# Font-INDEPENDENT born-digital code-page signal, calibrated by the Phase 0(e)
+# over-trigger measurement (PLAN_F1 1.1): C2 (code-keyword-START fraction) is the
+# required discriminator (every Workstream B negative scored 0.00, positives
+# >=0.50); C1 (distinct positive indent depths) is confirming-only because nested
+# lists/poetry over-trigger on indentation alone; C3 (short-ragged) was dropped as
+# non-discriminating. Fenced code qualifies via the existing fence threshold.
+# A real text layer (>= _TEXT_NATIVE_MIN_CHARS) is a precondition: this signal
+# gates the Mechanism-B text-layer patch, which is meaningless on raster pages.
+_TEXT_NATIVE_C2_MIN: float = 0.30
+_TEXT_NATIVE_MIN_DEPTHS: int = 2
+_TEXT_NATIVE_MIN_CHARS: int = 100
+
+
+def _score_text_native_code(page_text: str) -> "Tuple[bool, dict]":
+    """Decide whether a page is born-digital code from its text-layer text alone.
+
+    Returns ``(is_text_native_code, channels)`` where ``channels`` records the
+    measured signals for logging/calibration. Font-independent by construction:
+    no monospace/font features are required (P1 is font-blind), though the caller
+    may pass the monospace ratio as a confirming third vote (not required here).
+    """
+    text = page_text or ""
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    n = len(lines)
+    channels = {
+        "chars": len(text.strip()),
+        "lines": n,
+        "c2_kw": 0.0,
+        "c1_depths": 0,
+        "fence": 0,
+    }
+    if n == 0 or channels["chars"] < _TEXT_NATIVE_MIN_CHARS:
+        return False, channels
+
+    kw_lines = sum(
+        1 for ln in lines if any(ln.lstrip().startswith(k) for k in _CODE_EVIDENCE_KEYWORDS)
+    )
+    fence = sum(1 for ln in lines if ln.lstrip().startswith(("```", "~~~")))
+    depths = {len(ln) - len(ln.lstrip(" \t")) for ln in lines}
+    pos_depths = len([d for d in depths if d > 0])
+
+    channels["c2_kw"] = round(kw_lines / n, 3)
+    channels["c1_depths"] = pos_depths
+    channels["fence"] = fence
+
+    keyword_code = channels["c2_kw"] >= _TEXT_NATIVE_C2_MIN and pos_depths >= _TEXT_NATIVE_MIN_DEPTHS
+    fenced_code = fence >= _CODE_FENCE_THRESHOLD
+    return bool(keyword_code or fenced_code), channels
+
 
 def _select_code_evidence_sample_indices(total_pages: int) -> "List[int]":
     """Return page indices for cheap code-evidence sampling.
@@ -5734,6 +5784,35 @@ class BatchProcessor:
         recovered = 0
         fence_recovered = 0
         if self._current_pdf_path and self._current_pdf_path.exists():
+            # PLAN_F1 WP-2 (Mechanism B): on a born-digital text_native_code page
+            # the PDF text layer is the AUTHORITATIVE source for code indentation,
+            # so EVERY code chunk on such a page is re-served from the text-layer
+            # clip — both lanes, not only flat chunks. Precompute the page signal
+            # once (single PDF open) over the pages that actually carry code chunks.
+            code_pages = {
+                ch.metadata.page_number
+                for ch in chunks
+                if (
+                    ch.modality in (Modality.TEXT, Modality.CODE)
+                    and is_code_chunk(ch)
+                    and ch.metadata
+                    and ch.metadata.page_number
+                )
+            }
+            text_native_pages: dict = {}
+            if code_pages:
+                try:
+                    import fitz as _fitz
+
+                    _doc = _fitz.open(str(self._current_pdf_path))
+                    for _pno in code_pages:
+                        if 1 <= _pno <= len(_doc):
+                            _native, _ = _score_text_native_code(_doc[_pno - 1].get_text())
+                            text_native_pages[_pno] = _native
+                    _doc.close()
+                except Exception as _e:
+                    logger.debug(f"[CODE-INDENT] text_native_code precompute failed: {_e}")
+
             for ch in chunks:
                 # Admit promoted Modality.CODE chunks, not only code smuggled as
                 # TEXT. V3 promotes code to Modality.CODE, which the old TEXT-only
@@ -5742,6 +5821,9 @@ class BatchProcessor:
                 if ch.modality not in (Modality.TEXT, Modality.CODE) or not is_code_chunk(ch):
                     continue
                 try:
+                    page_num = ch.metadata.page_number if ch.metadata else None
+                    is_text_native = bool(text_native_pages.get(page_num, False))
+
                     fidelity = getattr(ch.metadata, "indentation_fidelity", None)
                     if fidelity is None:
                         # The hygiene loop above stamps indentation_fidelity only
@@ -5751,8 +5833,13 @@ class BatchProcessor:
                         _has_indent = any(ln.startswith(("    ", "\t")) for ln in _code_lines)
                         _has_repl = any(ln.lstrip().startswith(">>> ") for ln in _code_lines)
                         fidelity = 1.0 if (_has_indent or _has_repl) else 0.0
-                    if fidelity is not None and fidelity > 0:
-                        continue  # Already has indentation
+                    # WP-2 rule (documented, supersedes the c95950b skip on
+                    # text-native pages): the text layer wins on a text_native_code
+                    # page, so re-serve even already-indented chunks (the engine's
+                    # indentation may be a lossy raster round-trip). OFF text-native
+                    # pages, retain c95950b: only attempt flat chunks.
+                    if not is_text_native and fidelity is not None and fidelity > 0:
+                        continue  # Already has indentation; not a text-native page
 
                     # Strategy 1: PyMuPDF recovery for pure code chunks
                     if self._recover_code_indentation_from_pdf(ch):
@@ -5830,7 +5917,10 @@ class BatchProcessor:
                     x_start = spans[0]["bbox"][0]
                     text = "".join(s.get("text", "") for s in spans)
                     if text.strip():
-                        raw_lines.append((y_center, x_start, text.rstrip()))
+                        # Strip leading whitespace too (PLAN_F1 WP-2 double-indent
+                        # guard): x_start already encodes the indent, so leading
+                        # space glyphs in the span text would be added TWICE.
+                        raw_lines.append((y_center, x_start, text.strip()))
 
             if len(raw_lines) < 2:
                 return False
