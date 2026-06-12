@@ -180,6 +180,20 @@ def main(argv: Optional[list[str]] = None) -> int:
         source_pdf=Path(args.source_pdf) if args.source_pdf else None,
     )
 
+    # J2 (NON-BINDING diagnostic, user 2026-06-12): whole-block reassembled parse.
+    # Group repair-touched judgeable-Python chunks by page, concatenate in order,
+    # and parse the block - shows how much of the chunk-level failure is chunk
+    # GRANULARITY (a reassembled page block parses even if fragments don't) vs a
+    # real defect. Does NOT affect the verdict; chunk parseability is what the
+    # index serves (J2 keeps the chunk-level oracle binding).
+    by_page: dict[int, list[str]] = {}
+    for c in post_touched:
+        pno = (c.get("metadata") or {}).get("page_number")
+        if pno:
+            by_page.setdefault(int(pno), []).append(c.get("content") or "")
+    block_ok = sum(1 for pno in by_page if _parses("\n".join(by_page[pno])))
+    block_rate = (block_ok / len(by_page)) if by_page else 1.0
+
     floor_ok = post_n > 0 and post_rate >= args.floor
     improved = post_rate > pre_rate
     verdict = "ORACLE_PASS" if (floor_ok and improved) else "ORACLE_FAIL"
@@ -188,6 +202,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     print(f"  pre-lane  judgeable-python parse rate: {pre_rate:.3f} ({pre_ok}/{pre_n})")
     print(f"  post-lane repair-touched parse rate:   {post_rate:.3f} ({post_ok}/{post_n})")
     print(f"  post-lane all-judgeable parse rate:    {post_all_rate:.3f} (n={post_all_n}) [diagnostic]")
+    print(f"  whole-block reassembled parse rate:    {block_rate:.3f} ({block_ok}/{len(by_page)} pages) [J2 diagnostic, NON-binding]")
     print(f"  floor>={args.floor}: {'PASS' if floor_ok else 'FAIL'}   improved(post>pre): {'PASS' if improved else 'FAIL'}")
     print(f"  artifacts: {pages} pages -> {args.artifacts_dir}/{args.book}_oracle_artifacts.txt")
     print(f"  {verdict}")

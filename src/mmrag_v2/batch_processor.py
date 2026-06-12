@@ -180,6 +180,185 @@ def _tn_is_code_line(stripped: str) -> bool:
     return False
 
 
+# --- PLAN_F1 Phase 1 residual-defect fixes (user J1, 2026-06-12) -----------
+# Three real extraction defects surfaced by the Jungjun oracle (all ORTHOGONAL to
+# indentation): (b) smart quotes used as code delimiters, (c) single/double/f-strings
+# hard-wrapped across printed-source lines (illegal in Python -> parse fail), and
+# (a) code blocks cut mid-docstring across a chunk boundary. Fixes are conservative
+# and apply to CODE chunks only.
+_SMART_QUOTES = {
+    "“": '"', "”": '"', "″": '"',   # " " ”  -> "
+    "‘": "'", "’": "'", "′": "'",   # ' ' ′  -> '
+}
+_SMART_QUOTE_TABLE = str.maketrans(_SMART_QUOTES)
+
+
+def _normalize_code_quotes(text: str) -> str:
+    """(b) Replace typographic/smart quotes with ASCII quotes (code chunks only)."""
+    return (text or "").translate(_SMART_QUOTE_TABLE)
+
+
+def _scan_code_line(line: str, triple: "Optional[str]") -> "Tuple[Optional[str], bool]":
+    """Scan one line starting inside triple-string ``triple`` (or None).
+
+    Returns ``(end_triple, nontriple_string_open)``: the triple-delimiter still
+    open at line end (carried to the next line - legal multiline docstring), and
+    whether a SINGLE/DOUBLE/f-string was left open at line end (an illegal
+    hard-wrap that must be rejoined). ``#`` comments outside strings end scanning.
+    """
+    i, n = 0, len(line)
+    s = triple  # active string delimiter (triple, or single/double, or None)
+    while i < n:
+        if s in ('"""', "'''"):
+            if line[i:i + 3] == s:
+                s = None
+                i += 3
+                continue
+            i += 1
+            continue
+        if s in ("'", '"'):
+            if line[i] == "\\":
+                i += 2
+                continue
+            if line[i] == s:
+                s = None
+                i += 1
+                continue
+            i += 1
+            continue
+        # not in a string
+        c = line[i]
+        if c == "#":
+            break
+        if line[i:i + 3] in ('"""', "'''"):
+            s = line[i:i + 3]
+            i += 3
+            continue
+        if c in ("'", '"'):
+            s = c
+            i += 1
+            continue
+        i += 1
+    if s in ('"""', "'''"):
+        return s, False           # still inside a (legal) triple-quoted block
+    if s in ("'", '"'):
+        return None, True         # non-triple string left open -> wrapped line
+    return None, False
+
+
+def _rejoin_wrapped_code_lines(text: str) -> str:
+    """(c) Conservatively rejoin lines where a NON-triple string is left open.
+
+    A bare ``"abc`` / ``'abc`` at a line end is always a Python syntax error - it
+    is a printed-source hard-wrap. Join it with following line(s) (word-wrap
+    convention: single space) until the string closes. Triple-quoted docstrings
+    that legally span lines are NOT touched. Open brackets alone are legal
+    multiline and are left as-is (conservative: only rejoin what breaks parse).
+    """
+    raw = (text or "").split("\n")
+    out: "List[str]" = []
+    triple: "Optional[str]" = None
+    i = 0
+    while i < len(raw):
+        line = raw[i]
+        while True:
+            end_triple, nontriple_open = _scan_code_line(line, triple)
+            if nontriple_open and i + 1 < len(raw):
+                line = line + " " + raw[i + 1].lstrip()
+                i += 1
+                continue
+            break
+        triple = end_triple
+        out.append(line)
+        i += 1
+    return "\n".join(out)
+
+
+def _code_bracket_depth(line: str) -> int:
+    """Net unclosed ([{ depth at end of a line, ignoring strings and # comments."""
+    d = 0
+    s = None
+    i = 0
+    n = len(line)
+    while i < n:
+        if s:
+            if s in ("'", '"') and line[i] == "\\":
+                i += 2
+                continue
+            if s in ('"""', "'''") and line[i:i + 3] == s:
+                s = None
+                i += 3
+                continue
+            if s in ("'", '"') and line[i] == s:
+                s = None
+            i += 1
+            continue
+        c = line[i]
+        if c == "#":
+            break
+        if line[i:i + 3] in ('"""', "'''"):
+            s = line[i:i + 3]
+            i += 3
+            continue
+        if c in ("'", '"'):
+            s = c
+        elif c in "([{":
+            d += 1
+        elif c in ")]}":
+            d = max(0, d - 1)
+        i += 1
+    return d
+
+
+def _rejoin_open_brackets(text: str) -> str:
+    """Collapse open-bracket line continuations (no separator: code wraps split
+    mid-token, e.g. ``request.tool`` + ``s``). REPAIR-ONLY use: collapsing legal
+    multi-line calls is non-conservative, so only apply when the chunk does not
+    already parse and keep the result only if it then parses (see _repair_code_content).
+    """
+    raw = text.split("\n")
+    out: "List[str]" = []
+    i = 0
+    while i < len(raw):
+        line = raw[i]
+        while _code_bracket_depth(line) > 0 and i + 1 < len(raw):
+            line = line + raw[i + 1].lstrip()
+            i += 1
+        out.append(line)
+        i += 1
+    return "\n".join(out)
+
+
+def _repair_code_content(text: str) -> str:
+    """PLAN_F1 J1 (b)+(c): normalize smart quotes, rejoin open-string hard-wraps,
+    and (only if still unparseable) rejoin open-bracket wraps - keeping the bracket
+    rejoin solely when it makes the chunk parse, so a parseable chunk is never
+    degraded. No-op on already-clean code (idempotent)."""
+    fixed = _rejoin_wrapped_code_lines(_normalize_code_quotes(text or ""))
+    try:
+        import ast as _ast
+        _ast.parse(fixed)
+        return fixed
+    except (SyntaxError, ValueError):
+        pass
+    candidate = _rejoin_open_brackets(fixed)
+    try:
+        import ast as _ast
+        _ast.parse(candidate)
+        return candidate
+    except (SyntaxError, ValueError):
+        return fixed
+
+
+def _leaves_docstring_open(text: str) -> bool:
+    """True if ``text`` ends inside an unterminated triple-quoted string (a code
+    block cut mid-docstring across a chunk boundary - PLAN_F1 J1 (a))."""
+    triple = None
+    for line in (text or "").split("\n"):
+        triple, _ = _scan_code_line(line, triple)
+    return triple in ('"""', "'''")
+
+
 def _score_text_native_code(page_text: str) -> "Tuple[bool, dict]":
     """Decide whether a page is born-digital code from its text-layer text alone.
 
@@ -5878,12 +6057,61 @@ class BatchProcessor:
                 except Exception as e:
                     logger.debug(f"[CODE-INDENT] Recovery failed for {ch.chunk_id}: {e}")
 
-        if reclassified or reflowed or recovered or fence_recovered:
+        # PLAN_F1 J1 (b)+(c): repair the residual non-indentation defects in code
+        # chunks - smart quotes, hard-wrapped open strings, and (repair-only) open
+        # brackets. Idempotent / no-op on already-clean code.
+        repaired_code = 0
+        for ch in chunks:
+            if ch.modality in (Modality.TEXT, Modality.CODE) and is_code_chunk(ch):
+                new_content = _repair_code_content(ch.content or "")
+                if new_content != ch.content:
+                    ch.content = new_content
+                    repaired_code += 1
+
+        # PLAN_F1 J1 (a): heal code blocks cut mid-docstring across a chunk
+        # boundary - merge a code chunk that ends inside an unterminated
+        # triple-quoted string into the next adjacent (same/next page) code chunk.
+        merged_docstrings = 0
+        if any(_leaves_docstring_open(c.content or "") for c in chunks
+               if c.modality in (Modality.TEXT, Modality.CODE) and is_code_chunk(c)):
+            healed: List[IngestionChunk] = []
+            i = 0
+            while i < len(chunks):
+                ch = chunks[i]
+                if (
+                    ch.modality in (Modality.TEXT, Modality.CODE)
+                    and is_code_chunk(ch)
+                    and _leaves_docstring_open(ch.content or "")
+                    and i + 1 < len(chunks)
+                ):
+                    nxt = chunks[i + 1]
+                    cur_pg = ch.metadata.page_number if ch.metadata else None
+                    nxt_pg = nxt.metadata.page_number if nxt.metadata else None
+                    adjacent = (
+                        cur_pg is not None and nxt_pg is not None and 0 <= (nxt_pg - cur_pg) <= 1
+                    )
+                    if (
+                        nxt.modality in (Modality.TEXT, Modality.CODE)
+                        and is_code_chunk(nxt)
+                        and adjacent
+                    ):
+                        ch.content = (ch.content or "") + "\n" + _repair_code_content(nxt.content or "")
+                        merged_docstrings += 1
+                        i += 2  # absorbed nxt
+                        healed.append(ch)
+                        continue
+                healed.append(ch)
+                i += 1
+            chunks = healed
+
+        if reclassified or reflowed or recovered or fence_recovered or repaired_code or merged_docstrings:
             logger.info(
                 f"[CODE-HYGIENE] Reclassified {reclassified} chunks as code, "
                 f"reflowed {reflowed} flat code, "
                 f"recovered indentation for {recovered} chunks (PyMuPDF), "
-                f"{fence_recovered} chunks (fence reflow)"
+                f"{fence_recovered} chunks (fence reflow), "
+                f"repaired {repaired_code} code chunks (quotes/wraps), "
+                f"merged {merged_docstrings} split-docstring code chunks"
             )
 
         return chunks
