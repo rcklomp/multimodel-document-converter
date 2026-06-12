@@ -140,54 +140,80 @@ _CODE_FENCE_THRESHOLD: int = 5
 _CODE_RATIO_THRESHOLD: float = 0.10
 
 # --- PLAN_F1 4.1: text_native_code page signal -----------------------------
-# Font-INDEPENDENT born-digital code-page signal, calibrated by the Phase 0(e)
-# over-trigger measurement (PLAN_F1 1.1): C2 (code-keyword-START fraction) is the
-# required discriminator (every Workstream B negative scored 0.00, positives
-# >=0.50); C1 (distinct positive indent depths) is confirming-only because nested
-# lists/poetry over-trigger on indentation alone; C3 (short-ragged) was dropped as
-# non-discriminating. Fenced code qualifies via the existing fence threshold.
-# A real text layer (>= _TEXT_NATIVE_MIN_CHARS) is a precondition: this signal
-# gates the Mechanism-B text-layer patch, which is meaningless on raster pages.
-_TEXT_NATIVE_C2_MIN: float = 0.30
-_TEXT_NATIVE_MIN_DEPTHS: int = 2
+# Font-INDEPENDENT born-digital code-page signal. RECALIBRATED after the WP-4
+# spike (PLAN_F1 1.1 / report): the original keyword-START-fraction + leading-
+# whitespace-depth channels were calibrated on SYNTHETIC fixtures and fired on 0
+# of 39 real Jungjun code pages and ~0 Chaubal code pages, because (a) real PDFs
+# encode indentation as x-position or non-breaking spaces that ``get_text`` does
+# NOT surface as regular leading whitespace, and (b) the def/class/import-only
+# keyword set misses body-heavy code (loops, calls, assignments). The robust
+# discriminator is the CODE-LINE RATIO: the fraction of non-blank lines that look
+# like code statements (keyword headers, assignments, or call expressions). This
+# fires on real code pages (Chaubal/Jungjun ~0.5-0.8) and stays ~0 on the frozen
+# Workstream B negatives (prose, magazines, incidental shell, poetry, nested
+# lists), which carry indentation but not code syntax. Fenced code still qualifies
+# via the existing threshold. A real text layer (>= _TEXT_NATIVE_MIN_CHARS) is a
+# precondition: the signal gates the Mechanism-B text-layer patch, meaningless on
+# raster pages. The over-trigger contract is the Workstream B negative set.
 _TEXT_NATIVE_MIN_CHARS: int = 100
+_TEXT_NATIVE_CODE_RATIO_MIN: float = 0.40
+
+_TN_KEYWORDS: tuple = (
+    "def ", "class ", "import ", "from ", "return", "yield", "for ", "while ",
+    "if ", "elif ", "else", "try", "except", "finally", "with ", "async ",
+    "await ", "raise ", "print(", "assert ", "lambda ", "@",
+)
+_TN_ASSIGN = re.compile(r"[^=!<>]=[^=]")       # a plain/augmented assignment, not ==/!=/<=/>=
+_TN_CALL = re.compile(r"[A-Za-z_]\w*\(")        # function/method call
+
+
+def _tn_is_code_line(stripped: str) -> bool:
+    """True if a stripped line looks like a code statement (not prose/list/kv)."""
+    if any(stripped.startswith(k) for k in _TN_KEYWORDS):
+        return True
+    if _TN_ASSIGN.search(stripped):
+        return True
+    if _TN_CALL.search(stripped):
+        return True
+    if stripped.endswith(":") and "(" in stripped:  # suite header
+        return True
+    return False
 
 
 def _score_text_native_code(page_text: str) -> "Tuple[bool, dict]":
     """Decide whether a page is born-digital code from its text-layer text alone.
 
-    Returns ``(is_text_native_code, channels)`` where ``channels`` records the
-    measured signals for logging/calibration. Font-independent by construction:
-    no monospace/font features are required (P1 is font-blind), though the caller
-    may pass the monospace ratio as a confirming third vote (not required here).
+    Returns ``(is_text_native_code, channels)``. Font-independent by construction
+    (P1 is font-blind) and indentation-encoding-independent (uses code SYNTAX, not
+    leading whitespace, which ``get_text`` strips for x-positioned indentation).
     """
-    text = page_text or ""
+    text = (page_text or "").replace("\xa0", " ")  # normalize nbsp -> space
     lines = [ln for ln in text.splitlines() if ln.strip()]
     n = len(lines)
     channels = {
         "chars": len(text.strip()),
         "lines": n,
-        "c2_kw": 0.0,
-        "c1_depths": 0,
+        "code_ratio": 0.0,
+        "kw_starts": 0,
         "fence": 0,
+        "depths": 0,
     }
     if n == 0 or channels["chars"] < _TEXT_NATIVE_MIN_CHARS:
         return False, channels
 
-    kw_lines = sum(
-        1 for ln in lines if any(ln.lstrip().startswith(k) for k in _CODE_EVIDENCE_KEYWORDS)
-    )
+    code_lines = sum(1 for ln in lines if _tn_is_code_line(ln.strip()))
     fence = sum(1 for ln in lines if ln.lstrip().startswith(("```", "~~~")))
-    depths = {len(ln) - len(ln.lstrip(" \t")) for ln in lines}
-    pos_depths = len([d for d in depths if d > 0])
+    kw = sum(1 for ln in lines if any(ln.lstrip().startswith(k) for k in _CODE_EVIDENCE_KEYWORDS))
+    depths = len({len(ln) - len(ln.lstrip(" \t")) for ln in lines if len(ln) - len(ln.lstrip(" \t")) > 0})
 
-    channels["c2_kw"] = round(kw_lines / n, 3)
-    channels["c1_depths"] = pos_depths
+    channels["code_ratio"] = round(code_lines / n, 3)
+    channels["kw_starts"] = kw
     channels["fence"] = fence
+    channels["depths"] = depths
 
-    keyword_code = channels["c2_kw"] >= _TEXT_NATIVE_C2_MIN and pos_depths >= _TEXT_NATIVE_MIN_DEPTHS
+    dense_code = channels["code_ratio"] >= _TEXT_NATIVE_CODE_RATIO_MIN
     fenced_code = fence >= _CODE_FENCE_THRESHOLD
-    return bool(keyword_code or fenced_code), channels
+    return bool(dense_code or fenced_code), channels
 
 
 def _select_code_evidence_sample_indices(total_pages: int) -> "List[int]":

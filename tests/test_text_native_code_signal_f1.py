@@ -80,6 +80,27 @@ _FLUENT_FENCED = (
     "```python\ndef factorial(n):\n    return 1 if n < 2 else n * factorial(n - 1)\n```\n"
     * 4
 )
+# Recalibration positive: body-heavy code as REAL PDF get_text() yields it -
+# indentation flattened to FLUSH (x-positioned in the PDF, lost by get_text), and
+# few def/class headers. The old keyword+leading-whitespace signal scored this ~0
+# (the WP-4 Jungjun false-negative); the code-line-ratio signal must fire on it.
+_FLUSH_BODY_CODE = "\n".join(
+    [
+        "import torch",
+        "model = build_model(config)",
+        "optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)",
+        "for epoch in range(epochs):",
+        "for batch in loader:",
+        "loss = model(batch)",
+        "loss.backward()",
+        "optimizer.step()",
+        "optimizer.zero_grad()",
+        "scheduler.step(val_acc)",
+        "lr = scheduler.get_last_lr()",
+        "print(f'epoch {epoch}: loss={loss.item()}')",
+    ]
+    * 3
+)
 
 
 @pytest.mark.parametrize("name", list(_NEGATIVES))
@@ -98,16 +119,27 @@ def test_fenced_code_fires():
     assert fired is True, ch
 
 
+def test_flush_body_heavy_code_fires():
+    # The WP-4 recalibration target: real get_text() yields FLUSH code (no leading
+    # whitespace) that is body-heavy (few def/class headers). Must fire.
+    fired, ch = _score_text_native_code(_FLUSH_BODY_CODE)
+    assert fired is True, ch
+    assert ch["code_ratio"] >= 0.40
+
+
 def test_short_text_layer_is_not_text_native():
     # Raster pages / near-empty pages: below the real-text-layer precondition.
-    fired, ch = _score_text_native_code("def f(): return 1")
+    fired, ch = _score_text_native_code("model = build_model(config)")
     assert fired is False
     assert ch["chars"] < 100
 
 
-def test_c2_is_required_not_indentation_alone():
-    # Poetry has c1_depths>=2 but c2_kw==0 -> must not fire (C2 is necessary).
+def test_code_syntax_required_not_indentation_alone():
+    # Poetry/nested lists HAVE indentation but ~no code syntax -> must not fire.
+    # The discriminator is code-line ratio, not indentation.
     fired, ch = _score_text_native_code(_POETRY)
-    assert ch["c1_depths"] >= 2
-    assert ch["c2_kw"] == 0.0
+    assert ch["code_ratio"] < 0.40
     assert fired is False
+    fired2, ch2 = _score_text_native_code(_NESTED_LIST)
+    assert ch2["code_ratio"] < 0.40
+    assert fired2 is False
