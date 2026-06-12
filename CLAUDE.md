@@ -71,6 +71,7 @@ conda env create -f environment.yml
 conda activate mmrag-v2
 pip install -e .
 pip install -e ".[dev]"
+pip install -e ".[mineru]"   # REQUIRED on production conversion hosts: without mineru-vl-utils, non-code pages silently ladder
 ```
 
 ## Core Commands
