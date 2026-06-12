@@ -194,8 +194,21 @@ _SMART_QUOTE_TABLE = str.maketrans(_SMART_QUOTES)
 
 
 def _normalize_code_quotes(text: str) -> str:
-    """(b) Replace typographic/smart quotes with ASCII quotes (code chunks only)."""
-    return (text or "").translate(_SMART_QUOTE_TABLE)
+    """(b/K2) Replace typographic/smart quotes with ASCII quotes AND non-breaking
+    spaces (U+00A0) with regular spaces (code chunks only). nbsp is how some PDFs
+    encode leading indentation; normalizing it to spaces both fixes the literal
+    "invalid non-printable U+00A0" parse error and preserves the indent depth."""
+    return (text or "").translate(_SMART_QUOTE_TABLE).replace(" ", " ")
+
+
+def _strip_code_fences(text: str) -> str:
+    """(K1) Drop markdown code-fence lines (``` / ~~~, optionally language-tagged)
+    that the VLM emits around code blocks. A fence line is pure syntax noise in a
+    code chunk and is line 1's `invalid syntax` parse failure on Chaubal."""
+    return "\n".join(
+        ln for ln in (text or "").split("\n")
+        if not ln.strip().startswith(("```", "~~~"))
+    )
 
 
 def _scan_code_line(line: str, triple: "Optional[str]") -> "Tuple[Optional[str], bool]":
@@ -334,7 +347,8 @@ def _repair_code_content(text: str) -> str:
     and (only if still unparseable) rejoin open-bracket wraps - keeping the bracket
     rejoin solely when it makes the chunk parse, so a parseable chunk is never
     degraded. No-op on already-clean code (idempotent)."""
-    fixed = _rejoin_wrapped_code_lines(_normalize_code_quotes(text or ""))
+    cleaned = _strip_code_fences(_normalize_code_quotes(text or ""))
+    fixed = _rejoin_wrapped_code_lines(cleaned)
     try:
         import ast as _ast
         _ast.parse(fixed)
@@ -6067,6 +6081,10 @@ class BatchProcessor:
                 if new_content != ch.content:
                     ch.content = new_content
                     repaired_code += 1
+                    try:
+                        ch.metadata.code_repair_applied = True
+                    except Exception:
+                        pass
 
         # PLAN_F1 J1 (a): heal code blocks cut mid-docstring across a chunk
         # boundary - merge a code chunk that ends inside an unterminated
