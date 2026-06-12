@@ -1,7 +1,10 @@
 # PLAN F1 - Deterministic text-layer code extraction + the 5.4 quality-risk loop
 
-**Status: DRAFT rev. 3, 2026-06-12 - review incorporated, awaiting ratification.
-Nothing in this plan is authorized to BUILD until ratified.** Phase 0 (read-only
+**Status: rev. 3 RATIFIED 2026-06-12 (user direction to proceed, recorded by the
+M1 session; the 2026-06-12 review three amendment conditions are incorporated and
+BINDING). Phase 1 build AUTHORIZED with the Section 6 oracle as the non-negotiable
+exit criterion. Phase 2 remains gated on Section 8 decision 3 (re-extraction
+budget).** Phase 0 (read-only
 attribution, a-d) was executed 2026-06-12; results in Section 1.1. The
 2026-06-12 external review verified the modality seam and the P2 inference, and
 imposed three amendment conditions, all applied in this revision: (a) an
