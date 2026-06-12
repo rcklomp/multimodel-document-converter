@@ -66,7 +66,20 @@ set -uo pipefail
 # --- Resolve repo + interpreters ------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ENV_PYTHON="${ENV_PYTHON:-$HOME/miniforge3/envs/mmrag-v2/bin/python}"
+# ENV_PYTHON resolution chain (C3): explicit env var wins; else the Shared-seat
+# interpreter; else the per-user one; else fail fast naming the var.
+if [ -n "${ENV_PYTHON:-}" ]; then
+  : # explicit override wins (validated for executability below)
+elif [ -x "/Users/Shared/miniforge3/envs/mmrag-v2/bin/python" ]; then
+  ENV_PYTHON="/Users/Shared/miniforge3/envs/mmrag-v2/bin/python"
+elif [ -x "$HOME/miniforge3/envs/mmrag-v2/bin/python" ]; then
+  ENV_PYTHON="$HOME/miniforge3/envs/mmrag-v2/bin/python"
+else
+  echo "FATAL: could not resolve a python interpreter. Set ENV_PYTHON to the" >&2
+  echo "       mmrag-v2 env python, e.g." >&2
+  echo "       ENV_PYTHON=/Users/Shared/miniforge3/envs/mmrag-v2/bin/python" >&2
+  exit 2
+fi
 MMRAG_CLI="$(dirname "$ENV_PYTHON")/mmrag-v2"
 
 # The editable install resolves mmrag_v2/mmrag_v3 to the MAIN checkout; when
@@ -177,6 +190,19 @@ if [ "$FULL" -eq 1 ]; then
     log "  (vlm_serve.sh) or run without SMOKE_FULL=1 for the offline gate."
     log "SMOKE_PRODUCTION_FAIL"
     exit 1
+  fi
+  # MinerU env preflight (C2): when the hybrid route can reach MinerU, the
+  # mineru-vl-utils package MUST import or non-code pages silently ladder.
+  if [ -n "${MINERU_ENDPOINT:-}" ]; then
+    if "$ENV_PYTHON" -c "import mineru_vl_utils" >/dev/null 2>&1; then
+      log "  mineru_vl_utils import OK (MINERU_ENDPOINT set)."
+    else
+      log "FULL-MODE PRECONDITION FAIL: MINERU_ENDPOINT is set but"
+      log "  'import mineru_vl_utils' failed in $ENV_PYTHON. Install the extra:"
+      log "  python -m pip install -e '.[mineru]'  (the silent-ladder prerequisite)."
+      log "SMOKE_PRODUCTION_FAIL"
+      exit 2
+    fi
   fi
 fi
 
