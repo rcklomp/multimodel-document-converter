@@ -1,6 +1,31 @@
 # Project Status
 
-Last updated: 2026-06-11 (branch `feat/omnidocbench-phase0`: Phase 5 DONE - spec rewritten to the Phase 4 hybrid-default reality [F1/F3/F5 closed]; WP-2 bounded re-extraction + dense ingest completed)
+Last updated: 2026-06-12 (branch `feat/omnidocbench-phase0`: PLAN_F1 Phase 1 CLOSED-SCOPED - P1 deterministic code lane validated, P2 blocked-by-chunker)
+
+## Current state (2026-06-12) - PLAN_F1 Phase 1 closed (scoped); chunker fragment-merge registered
+
+PLAN_F1 Phase 1 (deterministic text-layer code lane) is **closed, scoped**:
+- **P1 VALIDATED.** On Jungjun (a born-digital x-indented code book) the lane +
+  signal recalibration + code-content repairs take repair-touched judgeable-Python
+  `ast.parse` from 0.000 to **0.90-0.92** (>= the unchanged 0.85 oracle floor).
+  Devlin reclassified OUT as a flat-source defect (no indentation in the PDF at
+  all - a new P0 population, like Earthship/Adedeji).
+- **P2 BLOCKED-BY-CHUNKER.** Chaubal (P2) tops out at ~0.78: its code is clean and
+  correctly indented, but ~58% of the residual `ast.parse` fails are code blocks
+  the CHUNKER split across an interleaved image/table/prose chunk (15 of 26), which
+  no post-hoc adjacent-code merge can heal without breaking document order. The
+  one-iteration general fragment-merge helped Jungjun (0.90->0.92) but was neutral
+  on Chaubal and was reverted (it is a band-aid; the fix belongs in the chunker).
+- **REGISTERED ITEM (pipeline-wide chunker):** the chunker must not split a single
+  code block across a non-code (figure/table) chunk - keep code-block segments
+  contiguous, or merge code fragments that bracket an interleaved non-code chunk.
+  This is a chunker-segmentation fix, not code-hygiene; it gates re-attempting P2's
+  0.85 and applies corpus-wide. Owner/scope TBD.
+- Shipped this phase (committed, not pushed): modality-seam fix (`c95950b`),
+  `text_native_code` signal + recalibration + Mechanism B + the `f1_oracle`
+  (`31a0ee0`/`05ac421`), code-content repairs - smart quotes, open-string wraps,
+  fence-strip, nbsp normalize (`f713954`/`51ccef9`). No gate/fixture weakening;
+  Workstream B negatives green throughout; suite 1678.
 
 ## Current state (2026-06-11 PM) - Phase 5: spec reconciled + bounded corpus re-ingested
 
