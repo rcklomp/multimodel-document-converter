@@ -56,3 +56,6 @@ docs/archive-do not use
 HANDOVER_*.md
 SMOKE_*.md
 *OVERNIGHT_REPORT*.md
+
+# Run logs (extraction/ingest/soak output) — local-only noise
+logs/
