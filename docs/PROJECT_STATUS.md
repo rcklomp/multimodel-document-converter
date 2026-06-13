@@ -1,6 +1,39 @@
 # Project Status
 
-Last updated: 2026-06-12 (branch `feat/omnidocbench-phase0`: PLAN_F1 Phase 1 CLOSED-SCOPED - P1 deterministic code lane validated, P2 blocked-by-chunker)
+Last updated: 2026-06-13 (branch `feat/omnidocbench-phase0`: WP-A chunker-contiguity P2 re-attempt FAILED at the right layer - the fix is built and correct but fires 0x on Chaubal; the P2 residual is re-scoped OFF "chunker contiguity" onto REPL-transcript + engine token-corruption)
+
+## Current state (2026-06-13) - WP-A P2 re-attempt: chunker contiguity is the WRONG LEVER; residual re-scoped
+
+The registered "chunker contiguity" item (PLAN_F1 WP-A) is **BUILT, correct, and
+non-regressing, but it is NOT the lever for Chaubal's 0.85** - the prior
+Phase-1-closure diagnosis ("15/26 of Chaubal's residual fails are one code block
+split across interleaved figure/table chunks") is **FALSIFIED**.
+
+- `_coalesce_code_blocks` shipped in `uir_chunker._chunk_page` (`c6c1f4c`+`9866832`,
+  12 unit tests): when code Elements on a page form one logical block (prev ends
+  open `:`/`\`/unclosed-bracket/unterminated-docstring, or next starts mid-body)
+  across an interleaved figure/table/prose Element, the code segments merge into
+  one chunk and the non-code is emitted after. Per page only; never bridges a page
+  boundary; integer bbox union; heading-carry + table/form untouched. Full suite
+  **1690 passed / 100 skipped / 0 failed**; WS-B negatives green; offline
+  `SMOKE_PRODUCTION_PASS`.
+- **P2 re-attempt FAIL -> STOP (registered rule).** Re-extract + `f1_oracle`:
+  FluentPython 15pg slice QA_PASS indent 1.00 (no-regression), Jungjun 0.669
+  (coalesced 0x, swing is fresh-VLM-extraction variance not a chunker regression -
+  the prior 0.895 stands on its extraction), **Chaubal 0.828 < 0.85 (coalesced 0x)**.
+  Per the rule: no floor weakening, no book swap; code books EXCLUDED from WP-C
+  ingestion.
+- **Why 0x.** The 129 same-page CODE-[noncode]-CODE interleavings in Chaubal are
+  **REPL/notebook transcripts** (Jupyter `[17]:` inputs / `[t17]: tensor(...)`
+  outputs around prose), NOT one contiguous block split by a figure - genuinely
+  separate snippets the continuation predicate correctly declines to merge. The
+  residual is further dominated by **engine token corruption** (`=`->`\(\equiv\)`,
+  CJK garbage, fullwidth punctuation).
+- **RE-SCOPED REGISTER ITEM (was "chunker contiguity"):** Chaubal's P2 0.85 needs
+  a **REPL/notebook-transcript-aware code handler + engine token-corruption repair**
+  (de-LaTeX `\(\equiv\)`, CJK/fullwidth scrub) - a NEW item distinct from chunker
+  segmentation. Keep the contiguity fix (net-positive, fires on the genuine
+  contiguous-split class, 0x here, no regression). Owner/scope TBD.
 
 ## Current state (2026-06-12) - PLAN_F1 Phase 1 closed (scoped); chunker fragment-merge registered
 

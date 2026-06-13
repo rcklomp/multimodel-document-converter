@@ -21,6 +21,21 @@ full-corpus failure evidence. Companion governance: `PLAN_EXTRACTION_FIDELITY_V1
 Section 5.4 (quality-risk consumers, spec'd unbuilt), `ARCHITECTURE_V3.1_CHARTER`
 (post-Phase-5 rewrite), DECISIONS "Phase 4 - hybrid default".
 
+**WP-A chunker-contiguity P2 re-attempt CLOSED 2026-06-13 - FAIL/STOP, residual
+re-scoped.** The chunker contiguity fix is BUILT and correct (`_coalesce_code_blocks`
+in `uir_chunker._chunk_page`, `c6c1f4c`+`9866832`, 12 tests; suite 1690 green;
+offline smoke PASS) but fires **0x** on Chaubal, which re-oracled to **0.828 < 0.85**
+(STOP per Section 6; no floor weakening, no book swap; code books excluded from
+WP-C). The prior "one code block split across interleaved figure/table chunks"
+diagnosis is FALSIFIED: the 129 same-page CODE-[noncode]-CODE interleavings are
+REPL/notebook transcripts (separate snippets the continuation predicate correctly
+declines to merge), and the residual is dominated by engine token corruption
+(`=`->`\(\equiv\)`, CJK/fullwidth garbage). The P2 0.85 lever is therefore a NEW
+register item - a REPL/notebook-transcript-aware code handler + engine
+token-corruption repair - NOT chunker segmentation. Keep the contiguity fix
+(net-positive on the genuine contiguous-split class). See `PROJECT_STATUS.md`
+2026-06-13 + `HANDOVER_OVERNIGHT_0613_REPORT.md`.
+
 ---
 
 ## 1. The measured problem
