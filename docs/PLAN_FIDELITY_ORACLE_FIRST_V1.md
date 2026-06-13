@@ -14,6 +14,44 @@ PLAN_EXTRACTION_FIDELITY_V1; it unblocks its Phase 1 verdict for the failing cla
 
 ---
 
+## 0.5 CORRECTION (2026-06-13, after a full FINDINGS_LOG review) - READ FIRST
+
+A findings-log review caught this plan re-deriving SOLVED results with a CONFOUNDED
+instrument. Corrections, binding:
+
+1. **The code-indentation "crisis" in Section 1.2 is largely an INSTRUMENT ARTIFACT,
+   retracted.** `code_repo_oracle.py` matched on ABSOLUTE indentation. Fluent Python (and
+   most books) present class methods DE-NESTED at column 0 with prose "inside class X:".
+   Verified: every flagged "indentation-loss" line (`def angle(self):`, `def __eq__`,
+   `return math.atan2(...)`) exists in the repo ONLY at depth 4/8 (inside a class); the
+   extraction faithfully reproduced the BOOK's col-0 listing. So `indentation_gap` 0.40 is
+   mostly book-vs-repo NESTING convention, not extraction damage. The RELATIVE indentation
+   the extraction actually preserves is fine.
+2. **Code indentation on the production path is ALREADY SOLVED and measured.** FINDINGS_LOG
+   2026-06-11 (two-corpus bake-off): production schema prompt -> Qwen/hybrid R3 indentation
+   **0.947/0.950**, MinerU 0.300, docling vacuous. The render-sweep's "VLM strips all
+   indentation" was a TRANSCRIPTION-PROMPT property, not the production path (2026-06-10
+   caveat). Do NOT chase code indentation; do NOT build a hard repo-diff indentation gate.
+3. **The engine/architecture decision is SETTLED, not open.** Phase 4 shadow window
+   (2026-06-11): hybrid arm B 0/16 QA_WARN+FAIL vs interim docling 4/16; pure-VLM REFUTED,
+   pure-pipeline REFUTED for code; the MinerU+Qwen hybrid is the non-dominated, validated
+   production default. My bake-off only RE-CONFIRMED the known ranking
+   (docling<<<mineru<<qwen/hybrid). No new engine verdict.
+
+**What HELD (corroborated, keep):** docling is vacuous/near-empty on code (this run:
+verbatim 0.015, 67 lines; log: "docling vacuous 0 code chunks") -> a silently-laddered code
+page is data loss, which makes "kill the silent ladder" a data-INTEGRITY requirement, not
+hygiene. And the `code_repo_oracle.py` DEINDENTED axis (content-only, nesting-invariant) is a
+valid CONTENT-COVERAGE diagnostic (docling 0.33 vs hybrid 0.77) - kept as a diagnostic, NOT a
+fidelity gate.
+
+**Consequence:** the Section 3 phasing is REPLACED by Section 3' (residual burndown). The
+"build per-class fidelity oracles first" thesis partly re-proposed the already-executed
+PLAN_EXTRACTION_FIDELITY_V1; the genuinely-unbuilt oracle (omission-sensitive internal-corpus
+GT) is the expensive deep item, deferred - not the next phase.
+
+---
+
 ## 0. Root cause (why all document types have struggled for six weeks)
 
 The forensic read of all 21 handovers (2026-06-03 .. 2026-06-13) shows ONE pattern,
@@ -112,6 +150,12 @@ the per-book divergence baseline in Phase 1.
 
 ### 1.2 Phase 1 result - Fluent Python code-dense slice, all four engines (2026-06-13)
 
+> PARTIALLY RETRACTED - read Section 0.5. The `verbatim_fidelity` / `indentation_gap`
+> columns are confounded by book-vs-repo nesting and do NOT show an indentation defect
+> (prod-path code indentation is R3 0.947, already solved). What holds: the engine
+> RANKING (re-confirmation only) and docling being vacuous on code. Treat the deindented
+> column as a content-coverage diagnostic, not a fidelity verdict.
+
 Densest 40-page code window (p286-325, Vector2d/Vector chapters) extracted through
 every candidate engine via the relay prod env (`--vision-provider none`), each scored
 against the repo with callout normalization (`--strip-callouts`; publisher `# <n>`
@@ -174,39 +218,68 @@ the coverage hole this plan fills.
 
 ---
 
-## 3. Phasing (each phase mechanically checkable)
+## 3'. Next phase - Residual burndown + green-gate integrity (the REAL open surface)
 
-- **Phase 0 - FREEZE + instrument (this session).** DONE: root cause recorded;
-  `scripts/code_repo_oracle.py` shipped + seeded-fault-validated on Fluent Python.
-  FREEZE: no new per-class extraction heuristic ships for a class until that class
-  has an oracle. (The existing chunker-contiguity fix stays; it is net-positive and
-  non-regressing. No NEW code-lane heuristic until the code oracle gives a real
-  book-level number.)
-- **Phase 1 - Code class, fully measured.** Clone the verified author repos; run a
-  FULL-BOOK extraction of each repo'd code book through each candidate engine
-  (MinerU-only, hybrid, docling-fast, Qwen-only) via the relay prod env; score every
-  arm with `code_repo_oracle.py`. DoD: a per-book, per-engine table of
-  `verbatim_fidelity` / `indentation_gap` / `content_loss` with the book-vs-repo
-  divergence baseline (best-arm) recorded, so an ABSOLUTE code-fidelity floor can be
-  set from evidence instead of the contested 0.85 ast.parse proxy. This is the input
-  PLAN_EXTRACTION_FIDELITY_V1 Phase 1 needed and lacked.
-- **Phase 2 - No-repo classes.** Build the hand-labeled mini ground-truth sets
-  (5-10 pages per class: no-repo code, DE/NL technical, scans/forms, REPL structural).
-  Small + paired is decisive (Section 7.2 of PLAN_EXTRACTION_FIDELITY_V1). DoD: a
-  fidelity scorer per class + a recorded baseline per engine.
-- **Phase 3 - Wire as regression gates.** Add the per-class oracles as ADVISORY
-  regression gates (AGENT-GATE-PROGRESSION), promoted to hard per class once stable.
-  DoD: `qa_full_conversion.py` / smoke surface per-class fidelity deltas; frozen
-  fixtures; suite green; `SMOKE_PRODUCTION_PASS`.
-- **Phase 4 - Decide engine/routing on measured evidence.** Re-run the
-  PLAN_EXTRACTION_FIDELITY_V1 Phase 1 bake-off, now verdict-ELIGIBLE on the failing
-  classes. Cut/keep specialist lanes per the measured per-class winner; cap at the top
-  2 lanes by loss magnitude. DoD: the per-class routing table; default named by
-  evidence; Layer-0 edits per PLAN_EXTRACTION_FIDELITY_V1 Section 8.
-- **Phase 5 - Close the operational lie (parallel, cheap).** Hard preflight that
-  fails closed if `mineru-vl-utils` is absent (no silent ladder); surface
-  `extraction_degraded_pages` in the gate summary so a laddered run cannot read as
-  QA_PASS. DoD: tests + smoke.
+Reframed after the findings-log review (Section 0.5). The engine/architecture decision,
+code indentation, reliability ladder, render cap, and serving topology are all SETTLED.
+The remaining "can't convert all PDFs" struggle is (a) a finite set of NAMED, diagnosed,
+class-specific extraction residuals, and (b) two cheap measurement blind-spots that let
+bad pages pass a green gate. The discipline that breaks the six-week re-diagnosis loop:
+**every fix ships with a FROZEN crucible-calibrated regression fixture** (AGENT-GATE-
+PROGRESSION) so it cannot silently regress AND the next session cannot re-diagnose it
+from scratch - that re-diagnosis loop is the meta-failure behind the deja vu.
+
+DEAD-ENDS - explicitly NOT in scope (each proven unsuccessful or already solved in
+FINDINGS_LOG): engine swap / model-swap reflex (2026-06-05 settled, memory guardrail);
+code-indentation repair or a hard repo-diff indentation gate (R3 0.947 on prod path,
+Section 0.5); more scaffolding around a single general VLM (caused the MinerU pivot);
+re-running the bake-off (INCONCLUSIVE by corpus construction); scoring fidelity at small
+n (2026-06-10 n=4 noise); text-ED / ast.parse / R3 used AS a fidelity oracle
+(whitespace/presence-blind, 2026-06-10 Section 7.3); any gate/floor/fixture weakening.
+
+**WS1 - Stop bad pages passing green (cheap, registered, high-leverage).**
+- WP1a content-emptiness health guard: the ladder/health guard counts FALLBACKS, not
+  silent CONTENT-EMPTINESS (docling content-empty 151/151 went uncounted, FINDINGS_LOG
+  2026-06-11 "guard blind-spot"). Count content-empty page rate per doc; advisory
+  `QA_WARN` above a calibrated bound. Frozen fixture: a content-empty docling page.
+- WP1b kill the silent ladder (data-integrity, my finding HELD): a missing
+  `mineru-vl-utils` silently laddered every non-code page to docling (2026-06-11 Phase 4
+  lesson). Hard preflight fails closed if the dep is absent; surface
+  `extraction_degraded_pages` in the QA summary; a laddered CODE page (docling vacuous
+  on code, corroborated) is a hard-FAIL, not an advisory. Frozen fixture: a degraded-page
+  doc must not read QA_PASS.
+
+**WS2 - Burn down the NAMED class residuals (each fixed-and-frozen).**
+- WP2a Chaubal-type code residual (the current open code item, re-scoped OFF indentation
+  and OFF chunker-contiguity - both already shown to be wrong levers): REPL/notebook
+  transcript handling + engine token-corruption repair (de-LaTeX `\(\equiv\)`,
+  CJK-garbage and fullwidth-punctuation scrub). Frozen fixture: the specific corrupted
+  tokens from the Chaubal oracle artifacts.
+- WP2b Adedeji thin-strip table fragments: table-header rows (720x28, aspect-26,
+  `*_table_000.png`) emitted as IMAGE chunks, deterministic hard IMAGE-gate FAIL. An
+  aspect+size cull behind the existing page-coverage guard. Frozen fixture: the 7 strips.
+- WP2c (USER SIGN-OFF, latency cost) OCR-on-fallback: tier-2 docling recovery is
+  `do_ocr=False`, so a laddered scanned page is blank (FINDINGS_LOG 2026-06-11 Phase 3
+  candidate). Enable `do_ocr=True` on fallback-ONLY recovery runs (cost paid only when
+  laddered). Sign-off needed (changes net latency).
+- WP2d (VERIFY-FIRST, may be a non-issue) prose-into-code-chunk: this run saw English
+  paragraphs inside `modality=code` chunks. Confirm it is real mis-bucketing vs the
+  book's legitimate inline prose BEFORE any fix; if real, it overlaps PLAN_GATE_QUALITY_V1
+  content-quality signals - fold there, do not start a parallel lane.
+
+**WS3 - Size the one open render question (specific measurement, not a meta-loop).**
+- WP3 academic-multicolumn render tail: cap1600 catastrophically breaks one
+  `1andmore_column` page class (0.004->0.95, n=1; FINDINGS_LOG 2026-06-10, I6 CONFIRMED
+  for that class). Run the 150-200 page set to size the tail and decide cap1600 vs a
+  class-conditional render. DoD: per-class worst-K render table; render setting ratified
+  or a class-conditional rule registered.
+
+Deferred (deep, expensive, NOT the next phase): omission-sensitive labeled ground truth
+for the internal classes (DE/NL technical, automotive, wiring) - the one genuinely-
+unbuilt oracle (OmniDocBench is EN-only and its text metric is omission/indentation
+blind; the internal retrieval-value axis is junk-presence and omission-blind by
+construction, 2026-06-10 Section 7.3). Real gap, but a large labeling effort; do not let
+it block WS1-WS3.
 
 ---
 
