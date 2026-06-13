@@ -30,6 +30,8 @@ data/
 # Ignore output directories (generated artifacts)
 output/
 *.jsonl
+# Corpus reconciliation manifest is a committed source-of-truth (PLAN_F1 WP-B/D1)
+!corpus_manifest.jsonl
 
 # Ignore conda environment
 env/
