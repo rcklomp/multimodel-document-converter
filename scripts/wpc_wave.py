@@ -231,7 +231,9 @@ def header_of(jsonl: Path) -> dict:
     return {}
 
 
-def run_wave(include_code_books: bool, max_docs: int, page_cap: int) -> int:
+def run_wave(
+    include_code_books: bool, max_docs: int, page_cap: int, no_ingest: bool = False
+) -> int:
     WAVE_DIR.mkdir(parents=True, exist_ok=True)
     results = WAVE_DIR / "wave_results.jsonl"
     scope = load_scope(include_code_books)
@@ -274,7 +276,8 @@ def run_wave(include_code_books: bool, max_docs: int, page_cap: int) -> int:
 
         ingested = False
         deleted = 0
-        if verdict in ("QA_PASS", "QA_PASS_WITH_ADVISORIES"):
+        would_ingest = verdict in ("QA_PASS", "QA_PASS_WITH_ADVISORIES")
+        if would_ingest and not no_ingest:
             deleted = delete_doc_points(doc_id, logf)  # clean replace of stale points
             rc_ing = dense_ingest(jsonl, logf)
             ingested = rc_ing == 0
@@ -290,6 +293,8 @@ def run_wave(include_code_books: bool, max_docs: int, page_cap: int) -> int:
             "pages": pages,
             "verdict": verdict,
             "ingested": ingested,
+            "would_ingest": would_ingest,
+            "no_ingest_mode": no_ingest,
             "deleted_stale": deleted,
             "dense_before": dense_before,
             "dense_after": dense_after,
@@ -339,6 +344,11 @@ def main() -> int:
     ap.add_argument("--max-docs", type=int, default=0, help="cap docs this wave (0 = all in scope)")
     ap.add_argument("--page-cap", type=int, default=0, help="skip docs with more pages than this")
     ap.add_argument("--dry-run", action="store_true", help="print scope and exit")
+    ap.add_argument(
+        "--no-ingest",
+        action="store_true",
+        help="extract + enrich + QA only; record would_ingest, mutate NO Qdrant state",
+    )
     a = ap.parse_args()
     if a.dry_run:
         scope = load_scope(a.include_code_books)
@@ -350,7 +360,7 @@ def main() -> int:
         for r in scope:
             print(f"  {r.get('pages') or '?':>5}p  {r['source_path']}")
         return 0
-    return run_wave(a.include_code_books, a.max_docs, a.page_cap)
+    return run_wave(a.include_code_books, a.max_docs, a.page_cap, a.no_ingest)
 
 
 if __name__ == "__main__":
