@@ -357,6 +357,204 @@ def _assign_headings(
 
 
 # ---------------------------------------------------------------------------
+# Code-block contiguity (PLAN_F1 WP-A — chunker-level)
+# ---------------------------------------------------------------------------
+#
+# The chunker emits one chunk per code Element in document order. When the
+# extractor splits a single logical code block into several code Elements with
+# a figure/table/prose Element interleaved between them, the fragments each
+# fail ``ast.parse`` (the F1 oracle's dominant residual: 15/26 Chaubal fails
+# were a code block split across an interleaved non-code chunk). This pre-pass
+# coalesces code Elements that form ONE logical block into a single Element and
+# defers any interleaved non-code Element to AFTER the block. It runs per page
+# only; it never bridges a page boundary, never reorders two code blocks, and
+# never merges code that does not continue (an open structure / suite header in
+# the running segment, or a mid-body continuation in the next). AGENT-SPATIAL-20
+# and bbox [0,1000] are untouched (bbox is the integer union of the merged
+# segments); heading carry (B1) and table/form handling are unchanged.
+
+
+def _is_code_element(element: Element) -> bool:
+    """True if the Element is a promoted CODE element (VLM smuggle / MinerU)."""
+    return (element.metadata or {}).get("promoted_modality") == "code"
+
+
+def _strip_code_fence(content: str) -> str:
+    """Remove a single surrounding Markdown ``` fence (idempotent, lang-tolerant).
+
+    Segments arriving from the MinerU lane are individually fenced; joining them
+    verbatim would interleave fence markers mid-block. Strip the outer fence so
+    the merged body is re-fenced exactly once by ``_code_element_to_uirchunk``.
+    """
+    if not content:
+        return content
+    lines = content.strip("\n").split("\n")
+    if lines and lines[0].lstrip().startswith("```"):
+        lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        return "\n".join(lines)
+    return content
+
+
+def _has_unclosed_brackets(text: str) -> bool:
+    """Heuristic: more opening than closing brackets (naive, string-agnostic)."""
+    opens = text.count("(") + text.count("[") + text.count("{")
+    closes = text.count(")") + text.count("]") + text.count("}")
+    return opens > closes
+
+
+def _has_unterminated_triple_quote(text: str) -> bool:
+    """Heuristic: an odd count of triple-quote markers (mid-docstring split)."""
+    return (text.count('"""') % 2 == 1) or (text.count("'''") % 2 == 1)
+
+
+_MIDBODY_LEADS: Tuple[str, ...] = (
+    ")",
+    "]",
+    "}",
+    "else",
+    "elif",
+    "except",
+    "finally",
+    "case",
+    ".",
+)
+
+
+def _code_block_continues(prev_content: str, next_content: str) -> bool:
+    """True if ``next`` code segment continues ``prev``'s logical block.
+
+    Continuation signals (any one suffices), mirroring the oracle's residual
+    failure classes: ``prev`` ends OPEN (suite header ``:``, explicit ``\\``
+    continuation, unclosed brackets, or an unterminated docstring), OR ``next``
+    starts MID-BODY (leading indentation, or a continuation token such as a
+    closing bracket / ``else``/``elif``/``except``/``finally``). Two complete,
+    standalone code blocks (``prev`` closed AND ``next`` starting at column 0
+    with a fresh statement) are NOT merged.
+    """
+    prev = _strip_code_fence(prev_content or "")
+    nxt = _strip_code_fence(next_content or "")
+    prev_nonblank = [ln for ln in prev.splitlines() if ln.strip()]
+    nxt_lines = nxt.splitlines()
+    nxt_first = next((ln for ln in nxt_lines if ln.strip()), "")
+    if not prev_nonblank or not nxt_first:
+        return False
+
+    last = prev_nonblank[-1].rstrip()
+    prev_open = (
+        last.endswith(":")
+        or last.endswith("\\")
+        or _has_unclosed_brackets(prev)
+        or _has_unterminated_triple_quote(prev)
+    )
+
+    next_midbody = nxt_first.startswith((" ", "\t")) or nxt_first.lstrip().startswith(
+        _MIDBODY_LEADS
+    )
+    return prev_open or next_midbody
+
+
+def _merge_code_elements(segments: List[Element]) -> Element:
+    """Merge code Elements forming one logical block into a single Element.
+
+    Content is de-fenced per segment and joined with newlines (re-fenced once at
+    chunk emission). BBox is the integer union of the segments' bboxes (None if
+    none carry a bbox). Metadata keeps ``promoted_modality='code'`` and the first
+    segment's ``original_vlm_type``; the lowest ``element_index`` is preserved so
+    document order is unchanged.
+    """
+    bodies = [_strip_code_fence(s.content or "") for s in segments]
+    merged_content = "\n".join(b for b in bodies if b.strip())
+
+    left = top = 1_000
+    right = bottom = 0
+    have = False
+    for s in segments:
+        if s.bbox:
+            left = min(left, s.bbox.x_min)
+            top = min(top, s.bbox.y_min)
+            right = max(right, s.bbox.x_max)
+            bottom = max(bottom, s.bbox.y_max)
+            have = True
+    merged_bbox: Optional[BoundingBox] = None
+    if have and right > left and bottom > top:
+        merged_bbox = BoundingBox(x_min=left, y_min=top, x_max=right, y_max=bottom)
+
+    first = segments[0]
+    metadata = dict(first.metadata or {})
+    metadata["promoted_modality"] = "code"
+    metadata["code_block_coalesced"] = len(segments)
+    return Element(
+        type=first.type,
+        content=merged_content,
+        bbox=merged_bbox,
+        confidence=min(s.confidence for s in segments),
+        extraction_method=first.extraction_method,
+        element_index=min(s.element_index for s in segments),
+        source_label=first.source_label,
+        metadata=metadata,
+    )
+
+
+def _coalesce_code_blocks(elements: List[Element]) -> List[Element]:
+    """Coalesce split code blocks on one page (see module-section header).
+
+    Walks the page's Element list; when a code Element begins a logical block
+    that continues across interleaved non-code Elements, the code segments are
+    merged into one Element and the interleaved non-code Elements are re-emitted
+    immediately AFTER the merged block (their relative order preserved). Code
+    that does not continue is left untouched (one chunk per Element, as before).
+    """
+    result: List[Element] = []
+    i = 0
+    n = len(elements)
+    while i < n:
+        el = elements[i]
+        if not _is_code_element(el):
+            result.append(el)
+            i += 1
+            continue
+
+        code_segs: List[Element] = [el]
+        deferred: List[Element] = []
+        j = i + 1
+        while j < n:
+            nxt = elements[j]
+            if _is_code_element(nxt):
+                if _code_block_continues(code_segs[-1].content or "", nxt.content or ""):
+                    code_segs.append(nxt)
+                    j += 1
+                    continue
+                break
+            # Non-code run: bridge only if a following code Element continues
+            # the block; otherwise stop and leave it in place.
+            k = j
+            interleaved: List[Element] = []
+            while k < n and not _is_code_element(elements[k]):
+                interleaved.append(elements[k])
+                k += 1
+            if (
+                k < n
+                and _code_block_continues(code_segs[-1].content or "", elements[k].content or "")
+            ):
+                deferred.extend(interleaved)
+                code_segs.append(elements[k])
+                j = k + 1
+                continue
+            break
+
+        if len(code_segs) == 1:
+            result.append(code_segs[0])
+        else:
+            result.append(_merge_code_elements(code_segs))
+        result.extend(deferred)
+        i = j
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Per-page chunking
 # ---------------------------------------------------------------------------
 
@@ -443,7 +641,12 @@ def _chunk_page(
 
         text_buffer.clear()
 
-    for element in page.elements:
+    # PLAN_F1 WP-A: coalesce a logical code block split across an interleaved
+    # figure/table/prose Element into one code chunk (interleaved non-code
+    # re-emitted after the block). No-op on pages with <2 code Elements.
+    page_elements = _coalesce_code_blocks(page.elements)
+
+    for element in page_elements:
         # Charter §7.1: ElementType is the 3-value legacy vocabulary. The VLM
         # adapter smuggles 'code'/'form' through as ElementType.TEXT and tags
         # the original signal here; promote it to Modality.CODE/FORM at this
