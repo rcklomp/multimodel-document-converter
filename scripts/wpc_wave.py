@@ -135,8 +135,17 @@ def extract(src: Path, out: Path, logf: Path) -> int:
     env = {k: v for k, v in os.environ.items() if k not in ROUTE_KEYS}
     env.update(PROD_ENV)
     cmd = [
-        PY, "-m", "mmrag_v2.cli", "process", str(src),
-        "--output-dir", str(out), "--batch-size", "10", "--vision-provider", "none",
+        PY,
+        "-m",
+        "mmrag_v2.cli",
+        "process",
+        str(src),
+        "--output-dir",
+        str(out),
+        "--batch-size",
+        "10",
+        "--vision-provider",
+        "none",
     ]
     with open(logf, "w") as lf:
         return subprocess.run(cmd, env=env, stdout=lf, stderr=subprocess.STDOUT).returncode
@@ -148,13 +157,17 @@ def enrich(jsonl: Path, logf: Path) -> int:
     cmd = [PY, "scripts/enrich_image_chunks_v29.py", str(jsonl)]
     with open(logf, "a") as lf:
         lf.write("\n=== ENRICH ===\n")
-        return subprocess.run(cmd, env=env, cwd=ROOT, stdout=lf, stderr=subprocess.STDOUT).returncode
+        return subprocess.run(
+            cmd, env=env, cwd=ROOT, stdout=lf, stderr=subprocess.STDOUT
+        ).returncode
 
 
 def qa(jsonl: Path, src: Path) -> str:
     p = subprocess.run(
         [PY, "scripts/qa_full_conversion.py", str(jsonl), "--source-pdf", str(src)],
-        cwd=ROOT, capture_output=True, text=True,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
     )
     for line in reversed(p.stdout.splitlines()):
         for tok in ("QA_PASS_WITH_ADVISORIES", "QA_PASS", "QA_WARN", "QA_FAIL"):
@@ -163,11 +176,45 @@ def qa(jsonl: Path, src: Path) -> str:
     return "NO_VERDICT"
 
 
+def delete_doc_points(doc_id: str, logf: Path) -> int:
+    """Remove a doc's existing dense points before a clean re-ingest.
+
+    A below-standard (e.g. docling_fast) prior ingest has DIFFERENT chunk_ids
+    than the new hybrid extraction, so a plain upsert would leave stale points
+    alongside the new ones. Delete-by-doc_id first (reversible via the D3
+    snapshot). Returns the deleted count, or -1 on error.
+    """
+    before = _dense_count(doc_id)
+    if before <= 0:
+        return 0
+    try:
+        _http(
+            "POST",
+            f"{QDRANT}/collections/{DENSE_COLLECTION}/points/delete?wait=true",
+            {"filter": {"must": [{"key": "doc_id", "match": {"value": doc_id}}]}},
+        )
+    except Exception as e:
+        with open(logf, "a") as lf:
+            lf.write(f"\n=== DELETE doc_id={doc_id} FAILED: {e} ===\n")
+        return -1
+    with open(logf, "a") as lf:
+        lf.write(f"\n=== DELETED {before} stale points for doc_id={doc_id} ===\n")
+    return before
+
+
 def dense_ingest(jsonl: Path, logf: Path) -> int:
     cmd = [
-        PY, "scripts/ingest_to_qdrant.py", str(jsonl),
-        "--provider", "omlx", "--model", "Qwen3-Embedding-8B-mxfp8",
-        "--collection", DENSE_COLLECTION, "--qdrant-url", QDRANT,
+        PY,
+        "scripts/ingest_to_qdrant.py",
+        str(jsonl),
+        "--provider",
+        "omlx",
+        "--model",
+        "Qwen3-Embedding-8B-mxfp8",
+        "--collection",
+        DENSE_COLLECTION,
+        "--qdrant-url",
+        QDRANT,
     ]
     with open(logf, "a") as lf:
         lf.write("\n=== DENSE INGEST ===\n")
@@ -226,17 +273,27 @@ def run_wave(include_code_books: bool, max_docs: int, page_cap: int) -> int:
         dense_before = _dense_count(doc_id)
 
         ingested = False
+        deleted = 0
         if verdict in ("QA_PASS", "QA_PASS_WITH_ADVISORIES"):
+            deleted = delete_doc_points(doc_id, logf)  # clean replace of stale points
             rc_ing = dense_ingest(jsonl, logf)
             ingested = rc_ing == 0
         dense_after = _dense_count(doc_id)
         wall = round(time.time() - t0, 1)
 
         rec = {
-            "doc": base, "doc_id": doc_id, "source_path": r["source_path"],
-            "engine": engine, "degraded": deg, "pages": pages,
-            "verdict": verdict, "ingested": ingested,
-            "dense_before": dense_before, "dense_after": dense_after, "wall_s": wall,
+            "doc": base,
+            "doc_id": doc_id,
+            "source_path": r["source_path"],
+            "engine": engine,
+            "degraded": deg,
+            "pages": pages,
+            "verdict": verdict,
+            "ingested": ingested,
+            "deleted_stale": deleted,
+            "dense_before": dense_before,
+            "dense_after": dense_after,
+            "wall_s": wall,
         }
         _record(results, rec)
         log(
@@ -253,10 +310,14 @@ def run_wave(include_code_books: bool, max_docs: int, page_cap: int) -> int:
         wf = sum(1 for v in window10 if v in ("QA_WARN", "QA_FAIL"))
         ladder_rate = (degraded_total / served) if served else 0.0
         if wf >= 3:
-            log(f"ROLLBACK GUARD FIRED: {wf}/10 consecutive QA_WARN/FAIL. STOPPING. window={window10}")
+            log(
+                f"ROLLBACK GUARD FIRED: {wf}/10 consecutive QA_WARN/FAIL. STOPPING. window={window10}"
+            )
             return 3
         if ladder_rate > 0.02:
-            log(f"ROLLBACK GUARD FIRED: ladder-served {degraded_total}/{served}={ladder_rate:.3%}>2%. STOPPING.")
+            log(
+                f"ROLLBACK GUARD FIRED: ladder-served {degraded_total}/{served}={ladder_rate:.3%}>2%. STOPPING."
+            )
             return 3
 
     log("WAVE COMPLETE (no guard fired). Rebuild sparse next: scripts/phase5_ingest_bm25.py")
@@ -270,8 +331,11 @@ def _record(path: Path, rec: dict) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--include-code-books", action="store_true",
-                    help="include Chaubal/Jungjun/Bourne (only if WP-A acceptance passed)")
+    ap.add_argument(
+        "--include-code-books",
+        action="store_true",
+        help="include Chaubal/Jungjun/Bourne (only if WP-A acceptance passed)",
+    )
     ap.add_argument("--max-docs", type=int, default=0, help="cap docs this wave (0 = all in scope)")
     ap.add_argument("--page-cap", type=int, default=0, help="skip docs with more pages than this")
     ap.add_argument("--dry-run", action="store_true", help="print scope and exit")
