@@ -201,6 +201,35 @@ def _normalize_code_quotes(text: str) -> str:
     return (text or "").translate(_SMART_QUOTE_TABLE).replace(" ", " ")
 
 
+# WS2a (PLAN_FIDELITY_ORACLE_FIRST_V1 Section 3'): fullwidth ASCII-variant
+# punctuation/digits (Unicode "Halfwidth and Fullwidth Forms", offset 0xFEE0) that
+# a VLM emits in place of their ASCII code counterparts - the `[:，2]` fullwidth-comma
+# class of Chaubal engine token corruption. Each has an UNAMBIGUOUS 1:1 ASCII
+# equivalent, so this is a correct-by-construction scrub, not a guess. Restricted to
+# punctuation + digits; fullwidth LETTERS are excluded (they can be legitimate string
+# content, where a guess WOULD be wrong). The ambiguous Chaubal corruptions
+# (de-LaTeX `\(\equiv\)` -> `=` vs `==`; CJK-garbage stripping) are DEFERRED - they
+# need a trustworthy code-fidelity measure this project does not yet have.
+_FULLWIDTH_CODE_TABLE = {
+    cp: cp - 0xFEE0
+    for cp in (
+        list(range(0xFF01, 0xFF10))  # !"#$%&'()*+,-./
+        + list(range(0xFF10, 0xFF1A))  # 0-9
+        + list(range(0xFF1A, 0xFF21))  # :;<=>?@
+        + list(range(0xFF3B, 0xFF41))  # [\]^_`
+        + list(range(0xFF5B, 0xFF5F))  # {|}~
+    )
+}
+
+
+def _normalize_code_fullwidth(text: str) -> str:
+    """(WS2a) Map fullwidth ASCII-variant punctuation/digits back to ASCII in code
+    chunks. Unambiguous 1:1 (the fullwidth block is NFKC-equivalent to ASCII);
+    fullwidth letters are intentionally NOT touched. Idempotent / no-op on clean
+    code."""
+    return (text or "").translate(_FULLWIDTH_CODE_TABLE)
+
+
 def _strip_code_fences(text: str) -> str:
     """(K1) Drop markdown code-fence lines (``` / ~~~, optionally language-tagged)
     that the VLM emits around code blocks. A fence line is pure syntax noise in a
@@ -347,7 +376,7 @@ def _repair_code_content(text: str) -> str:
     and (only if still unparseable) rejoin open-bracket wraps - keeping the bracket
     rejoin solely when it makes the chunk parse, so a parseable chunk is never
     degraded. No-op on already-clean code (idempotent)."""
-    cleaned = _strip_code_fences(_normalize_code_quotes(text or ""))
+    cleaned = _strip_code_fences(_normalize_code_fullwidth(_normalize_code_quotes(text or "")))
     fixed = _rejoin_wrapped_code_lines(cleaned)
     try:
         import ast as _ast
