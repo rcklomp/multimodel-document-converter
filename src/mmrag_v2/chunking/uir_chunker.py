@@ -534,9 +534,8 @@ def _coalesce_code_blocks(elements: List[Element]) -> List[Element]:
             while k < n and not _is_code_element(elements[k]):
                 interleaved.append(elements[k])
                 k += 1
-            if (
-                k < n
-                and _code_block_continues(code_segs[-1].content or "", elements[k].content or "")
+            if k < n and _code_block_continues(
+                code_segs[-1].content or "", elements[k].content or ""
             ):
                 deferred.extend(interleaved)
                 code_segs.append(elements[k])

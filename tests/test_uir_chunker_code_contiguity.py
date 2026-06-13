@@ -88,7 +88,10 @@ def test_continuation_predicate_next_midbody_indent():
 
 
 def test_continuation_predicate_unterminated_docstring():
-    assert _code_block_continues('def f():\n    """start of doc', 'more doc\n    """\n    return 1') is True
+    assert (
+        _code_block_continues('def f():\n    """start of doc', 'more doc\n    """\n    return 1')
+        is True
+    )
 
 
 def test_continuation_predicate_unclosed_brackets():
@@ -140,7 +143,11 @@ def test_coalesce_code_split_by_prose(tmp_path):
     page = _page_from_vlm(
         [
             _el("code", seg1, bbox=(10, 10, 500, 100)),
-            _el("text", "This loop processes each item in turn and prints it.", bbox=(10, 110, 500, 160)),
+            _el(
+                "text",
+                "This loop processes each item in turn and prints it.",
+                bbox=(10, 110, 500, 160),
+            ),
             _el("code", seg2, bbox=(10, 170, 500, 260)),
         ]
     )
@@ -172,7 +179,11 @@ def test_two_standalone_blocks_not_coalesced(tmp_path):
     page = _page_from_vlm(
         [
             _el("code", "def a():\n    return 1", bbox=(10, 10, 500, 100)),
-            _el("text", "Some explanation between two unrelated functions.", bbox=(10, 110, 500, 160)),
+            _el(
+                "text",
+                "Some explanation between two unrelated functions.",
+                bbox=(10, 110, 500, 160),
+            ),
             _el("code", "def b():\n    return 2", bbox=(10, 170, 500, 260)),
         ]
     )
@@ -182,7 +193,9 @@ def test_two_standalone_blocks_not_coalesced(tmp_path):
     # Document order preserved: prose stays between the two code chunks.
     text_chunks = [c for c in chunks if c.modality == Modality.TEXT]
     assert text_chunks
-    assert code_chunks[0].reading_order < text_chunks[0].reading_order < code_chunks[1].reading_order
+    assert (
+        code_chunks[0].reading_order < text_chunks[0].reading_order < code_chunks[1].reading_order
+    )
 
 
 def test_single_code_element_is_noop(tmp_path):
