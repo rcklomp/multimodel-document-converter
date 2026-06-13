@@ -395,7 +395,9 @@ AXIS green on the 4 books - it does not by itself ingest them (review finding
 2. Earthship disposition if attributed non-code: separate scanned-prose issue
    (recommended) or pulled into this plan's scope.
 3. Phase 2 cost posture: bounded re-extraction budget per doc (pages or
-   wall-clock cap) before a doc ships flagged.
+   wall-clock cap) before a doc ships flagged. **RESOLVED 2026-06-13 (user):
+   budget = max 25% of a doc's pages, one re-extraction attempt per page.
+   Phase 2 execution itself remains unauthorized.**
 4. Whether Phase 3 reconciliation auto-ingests on `QA_PASS*` or queues for a
    user-reviewed batch (the no-human-in-the-loop default says auto-ingest;
    flagging because it writes production collections).
