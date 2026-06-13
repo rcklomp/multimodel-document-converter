@@ -1,17 +1,25 @@
 #!/usr/bin/env python3
-"""Phase 5 BM25 sparse twin for the re-extracted bounded subset.
+"""BM25 sparse twin for the dense-ingested corpus.
 
-Builds a BM25 index over the 12 phase5 docs' text chunks and ingests sparse
-vectors into ``mmrag_v3__bm25_sparse`` on the LOCAL Mini Qdrant, parallel to the
-dense ``mmrag_v3__qwen3_local``. Hybrid RRF fusion joins dense+sparse by
-``chunk_id`` (``src/mmrag_v2/retrieval/fusion_v3.py`` - leg scores keyed by
-chunk_id), which both collections carry in payload; point IDs are computed in the
-SAME namespace as the dense ingester for consistency (not required by fusion).
+Builds a BM25 index over the text chunks of the docs that are ACTUALLY ingested
+into the dense collection ``mmrag_v3__qwen3_local`` and ingests sparse vectors
+into ``mmrag_v3__bm25_sparse`` on the LOCAL Mini Qdrant. Hybrid RRF fusion joins
+dense+sparse by ``chunk_id`` (``src/mmrag_v2/retrieval/fusion_v3.py`` - leg scores
+keyed by chunk_id), which both collections carry in payload; point IDs are
+computed in the SAME namespace as the dense ingester for consistency.
+
+Doc selection is SCOPED TO THE DENSE DOC SET (2026-06-13 fix): the script scrolls
+the dense collection's doc_ids and indexes only ``output/phase5_reextract/<base>/``
+dirs whose header doc_id is dense-ingested. This prevents the asymmetry where the
+phase5_reextract scratch dir (which accumulates re-extractions of EXCLUDED /
+never-ingested docs - code books, failed-QA docs) leaks those docs' text into a
+BM25 index that has no dense counterpart, polluting RRF with sparse-only hits.
 
 Self-contained (does NOT import the v2.16-pinned ``ingest_bm25_sparse.py``, whose
 hardcoded ``CANONICAL_DOCS`` is the wrong corpus). Idempotent: drop + recreate.
 
 Run: python scripts/phase5_ingest_bm25.py [--qdrant-url http://127.0.0.1:6333]
+     [--dense-collection mmrag_v3__qwen3_local]
 """
 
 from __future__ import annotations
@@ -34,24 +42,9 @@ from mmrag_v2.retrieval.sparse import BM25Index  # noqa: E402
 _POINT_ID_NAMESPACE = uuid.UUID("8b7c5e3a-1f4d-4b2a-9c1e-6d8a3f0b9c2e")
 SPARSE_VECTOR_NAME = "bm25"
 DEFAULT_COLLECTION = "mmrag_v3__bm25_sparse"
+DEFAULT_DENSE_COLLECTION = "mmrag_v3__qwen3_local"
 DEFAULT_QDRANT = "http://127.0.0.1:6333"
 BASE_DIR = REPO_ROOT / "output" / "phase5_reextract"
-
-
-def discover_docs() -> list[str]:
-    """Every output/phase5_reextract/<base>/ that has an ingestion.jsonl, sorted.
-
-    Auto-discovery so the sparse twin always covers whatever has been re-extracted
-    (the full-corpus run grows this set; no hardcoded list to drift). Excludes the
-    smoke/src helper dirs (leading underscore)."""
-    return sorted(
-        p.name
-        for p in BASE_DIR.iterdir()
-        if p.is_dir() and not p.name.startswith("_") and (p / "ingestion.jsonl").exists()
-    )
-
-
-DOCS = discover_docs()
 
 
 def _http(method: str, url: str, body=None) -> dict:
@@ -63,9 +56,63 @@ def _http(method: str, url: str, body=None) -> dict:
         return json.loads(r.read())
 
 
-def iter_text_chunks():
-    """Yield (doc, chunk_id, content) for every text chunk across the 12 docs."""
-    for doc in DOCS:
+def dense_doc_ids(qdrant_url: str, dense_collection: str) -> set[str]:
+    """The set of doc_ids actually ingested into the dense collection.
+
+    The sparse twin MUST mirror the dense doc set so RRF (fused by chunk_id) is
+    aligned and excluded/un-ingested docs are not made BM25-retrievable. Scrolls
+    the dense payloads (read-only)."""
+    ids: set[str] = set()
+    offset = None
+    while True:
+        body = {"limit": 1000, "with_payload": ["doc_id"], "with_vector": False}
+        if offset is not None:
+            body["offset"] = offset
+        res = _http("POST", f"{qdrant_url}/collections/{dense_collection}/points/scroll", body)[
+            "result"
+        ]
+        for p in res["points"]:
+            did = (p.get("payload") or {}).get("doc_id")
+            if did:
+                ids.add(did)
+        offset = res.get("next_page_offset")
+        if offset is None:
+            break
+    return ids
+
+
+def _dir_doc_id(jsonl: Path) -> str | None:
+    """The doc_id from a dir's ingestion.jsonl header (first line)."""
+    try:
+        with open(jsonl, encoding="utf-8") as f:
+            return json.loads(f.readline()).get("doc_id")
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def discover_docs(dense_ids: set[str]) -> list[str]:
+    """output/phase5_reextract/<base>/ dirs whose doc_id is dense-ingested, sorted.
+
+    Scoped to the dense doc set (not the whole scratch dir): phase5_reextract
+    accumulates re-extractions of docs that were never ingested (excluded code
+    books, failed-QA docs), and indexing those into sparse would make their text
+    BM25-retrievable while absent from dense - a dense/sparse asymmetry that
+    pollutes RRF. Excludes smoke/src helper dirs (leading underscore)."""
+    out = []
+    for p in sorted(BASE_DIR.iterdir()):
+        if not p.is_dir() or p.name.startswith("_"):
+            continue
+        jl = p / "ingestion.jsonl"
+        if not jl.exists():
+            continue
+        if _dir_doc_id(jl) in dense_ids:
+            out.append(p.name)
+    return out
+
+
+def iter_text_chunks(docs: list[str]):
+    """Yield (doc, chunk_id, content) for every text chunk across the docs."""
+    for doc in docs:
         jl = BASE_DIR / doc / "ingestion.jsonl"
         if not jl.exists():
             print(f"  MISSING {jl} - skip")
@@ -108,12 +155,25 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--qdrant-url", default=DEFAULT_QDRANT)
     ap.add_argument("--collection", default=DEFAULT_COLLECTION)
+    ap.add_argument("--dense-collection", default=DEFAULT_DENSE_COLLECTION)
     ap.add_argument("--batch-size", type=int, default=256)
     a = ap.parse_args()
 
+    # 0. Scope to the dense doc set (mirror dense; do NOT index the whole scratch dir).
+    try:
+        dense_ids = dense_doc_ids(a.qdrant_url, a.dense_collection)
+    except Exception as e:
+        print(f"ERROR: cannot read dense collection {a.dense_collection!r}: {e}", file=sys.stderr)
+        return 1
+    if not dense_ids:
+        print(f"ERROR: dense collection {a.dense_collection!r} has no doc_ids", file=sys.stderr)
+        return 1
+    docs = discover_docs(dense_ids)
+    print(f"Dense doc set: {len(dense_ids)} doc_ids; matched {len(docs)} phase5_reextract dirs")
+
     # 1. Collect text chunks.
-    rows = list(iter_text_chunks())
-    print(f"Collected {len(rows)} text chunks across {len(DOCS)} docs")
+    rows = list(iter_text_chunks(docs))
+    print(f"Collected {len(rows)} text chunks across {len(docs)} docs")
     if not rows:
         print("ERROR: no text chunks found", file=sys.stderr)
         return 1
@@ -163,7 +223,7 @@ def main() -> int:
         f"\n=== DONE: {info.get('points_count')} sparse points, " f"status={info.get('status')} ==="
     )
     print(f"text chunks={n_total}, zero-sparse(OOV)={n_zero}")
-    for d in DOCS:
+    for d in docs:
         print(f"  {d:<22} {per_doc.get(d,0)} text chunks")
     print("INGEST_SPARSE_DONE")
     return 0
