@@ -220,6 +220,14 @@ the coverage hole this plan fills.
 
 ## 3'. Next phase - Residual burndown + green-gate integrity (the REAL open surface)
 
+**Execution status (2026-06-13):** WS1a DONE (`e653fac`), WS1b DONE (`8e954c1`),
+WS2b DONE (`254ec07`), WS2a DONE-scoped (`ef5a377`: safe fullwidth scrub shipped +
+verified on real Chaubal content; ambiguous de-LaTeX/CJK repairs DEFERRED pending a
+trustworthy code-fidelity measure). Each shipped with a frozen regression fixture,
+full suite green, offline `SMOKE_PRODUCTION_PASS`. REMAINING: WS2c (OCR-on-fallback,
+needs USER latency sign-off), WS2d (prose-into-code, verify-first), WS3 (render-tail
+measurement + render-policy USER decision).
+
 Reframed after the findings-log review (Section 0.5). The engine/architecture decision,
 code indentation, reliability ladder, render cap, and serving topology are all SETTLED.
 The remaining "can't convert all PDFs" struggle is (a) a finite set of NAMED, diagnosed,
