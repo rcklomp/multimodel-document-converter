@@ -1371,6 +1371,83 @@ class BatchProcessor:
             )
         return surviving
 
+    def _filter_thin_strip_images(
+        self, chunks: List[IngestionChunk]
+    ) -> List[IngestionChunk]:
+        """Drop thin-strip IMAGE chunks (table-row fragments mis-emitted as images).
+
+        WS2b (PLAN_FIDELITY_ORACLE_FIRST_V1 Section 3'): MinerU/hybrid sometimes
+        emits a table-header or table-row band (e.g. 720x28, aspect 26) as an IMAGE
+        region. The table CONTENT is already captured as a TABLE chunk, so the strip
+        is a redundant crop that only fails the strict IMAGE gate
+        (`qa_conversion_audit.py` flags rendered ``aspect > 25`` as ``thin_strips``,
+        a hard FAIL - the Adedeji deterministic failure). This is the fix half of
+        fix-and-guard: it culls EXACTLY what the gate flags (rendered aspect > 25),
+        behind a page-coverage guard so a strip that is the only content on its page
+        is never orphaned into MISSING_PAGES. The bbox is not used (a hallucinated
+        VLM bbox is unreliable); the rendered asset is the only trustworthy size.
+        """
+        if not getattr(self, "_drop_thin_strip_images", True):
+            return chunks
+        from PIL import Image
+
+        STRIP_ASPECT = 25  # matches qa_conversion_audit.py thin_strip predicate
+
+        def _page(c: IngestionChunk) -> Optional[int]:
+            return c.metadata.page_number if c.metadata else None
+
+        strip_ids: set[int] = set()
+        info: Dict[int, Tuple[str, int, int, Path]] = {}
+        for c in chunks:
+            if c.modality != Modality.IMAGE:
+                continue
+            asset_ref = getattr(c, "asset_ref", None)
+            asset_path = getattr(asset_ref, "file_path", None) if asset_ref else None
+            if not asset_path:
+                continue
+            full = self.output_dir / asset_path
+            if not full.exists():
+                continue
+            try:
+                with Image.open(full) as im:
+                    w, h = im.size
+            except Exception:
+                continue
+            if max(w, h) / max(min(w, h), 1) > STRIP_ASPECT:
+                strip_ids.add(id(c))
+                info[id(c)] = (asset_path, w, h, full)
+
+        if not strip_ids:
+            return chunks
+
+        # Page-coverage guard: keep a strip that is the only content on its page.
+        pages_with_other = {
+            _page(c) for c in chunks if id(c) not in strip_ids and _page(c) is not None
+        }
+
+        surviving: List[IngestionChunk] = []
+        dropped = 0
+        for c in chunks:
+            if id(c) in strip_ids and _page(c) in pages_with_other:
+                asset_path, w, h, full = info[id(c)]
+                dropped += 1
+                logger.info(
+                    f"[THIN-STRIP] Dropping thin-strip image {asset_path} "
+                    f"({w}x{h}px, aspect={max(w, h) / max(min(w, h), 1):.0f})"
+                )
+                try:
+                    full.unlink()
+                except Exception:
+                    pass
+                continue
+            surviving.append(c)
+        if dropped:
+            logger.info(
+                f"[FINALIZE] Dropped {dropped} thin-strip image chunk(s) "
+                "(table-row fragments)"
+            )
+        return surviving
+
     def _promote_or_drop_empty_tables(
         self, chunks: List[IngestionChunk]
     ) -> List[IngestionChunk]:
@@ -2663,6 +2740,11 @@ class BatchProcessor:
             # Drop icon/glyph-class image regions (sub-content tiny rasters that
             # only add retrieval noise + IMAGE_NO_VLM/ASSET_TINY advisories).
             export_chunks = self._filter_tiny_icon_images(export_chunks)
+
+            # Drop thin-strip image regions (table-row fragments mis-emitted as
+            # IMAGE; the table content is already a TABLE chunk). WS2b: clears the
+            # strict IMAGE gate's thin_strips hard-FAIL, page-coverage guarded.
+            export_chunks = self._filter_thin_strip_images(export_chunks)
 
             # Re-apply oversize breaker: TABLE→TEXT promotion may create
             # text chunks exceeding the 1500-char gate.
