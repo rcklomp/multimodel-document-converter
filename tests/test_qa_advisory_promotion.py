@@ -285,6 +285,10 @@ def test_allowed_advisory_codes_match_expected_set() -> None:
         # converter keeps the asset; the missing description is a documented,
         # user-chosen no-VLM state, advisory not FAIL.
         "IMAGE_NO_VLM",
+        # WS1b (2026-06-13, PLAN_FIDELITY_ORACLE_FIRST_V1 Section 3'): ladder-served
+        # pages within the 2% Phase-4 bound; above the bound it is a real WARN, and
+        # a code-bearing laddered doc is EXTRACTION_DEGRADED_CODE (FAIL).
+        "EXTRACTION_LADDER_SERVED",
     })
 
 

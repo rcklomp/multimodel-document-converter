@@ -239,6 +239,18 @@ Allowed advisory codes and their rationale (per `docs/DECISIONS.md`
 | `MISSING_CHAPTERS` | EPUB spine coverage found missing chapters, but every missing chapter is a contiguous leading/trailing low-content structural item (for example title page, cover, copyright/colophon stub, or blank wrapper) that Docling's HTML parser stripped before chunk emission. Internal gaps or content-bearing edge chapters remain `FAIL`. | Yes (edge + low-content structural only) |
 | `VISION_HARD_FALLBACK_RATE` | Hard-fallback rate > 5 % when ALL hard_fallbacks have the F4 sentinel — documented "VLM legitimately can't describe this" cases (complex assets with terse responses after the Phase 3 detail-retry). | Yes (F4 condition above) |
 | `IMAGE_NO_VLM` | The converter ran with `--vision-provider none`, so image chunks are retained as ID-only fallbacks (asset filename, no description). This is a multimodal converter — the image asset still ships; the missing description is a documented, user-chosen no-VLM state, not a defect. The CLI warns at run time that an image-bearing document converted without a VLM has limited multimodal retrieval value. | No |
+| `EXTRACTION_LADDER_SERVED` | The fail-closed ladder served a small fraction of pages from tier-2/tier-3 (the primary engine could not). Allowed as advisory ONLY when the served fraction is within the 2% Phase-4 bound (charter §4.2); above the bound it is a real `QA_WARN`, never an advisory. A code-bearing doc with ANY laddered page is `EXTRACTION_DEGRADED_CODE` (FAIL), not this code. WS1b, `_extraction_ladder_issues`. | Yes (served fraction <= 2%) |
+
+### Extraction-ladder hard signal (WS1b, 2026-06-13)
+
+`EXTRACTION_DEGRADED_CODE` is a HARD `QA_FAIL` (not an advisory): a code-bearing
+document whose fail-closed ladder served ANY page from tier-2 docling / tier-3
+PyMuPDF. Both tiers are vacuous on code (measured: docling `verbatim_fidelity`
+0.015 on a code-dense slice; `PLAN_FIDELITY_ORACLE_FIRST_V1` Section 1.2), so a
+laddered code page is data loss and the doc is stale — it must be re-extracted on
+the primary engine before ingest, never pass silently. Healthy runs
+(`extraction_degraded_pages == 0`) and legacy outputs (no `extraction_*` stamps)
+raise nothing, so the offline smoke (asserts `degraded == 0`) is unaffected.
 
 The PASS variant is parallel to the SCAN0013 form-aware variant
 (`GATE_PASS [form: ...]`) — both are explicit governance allowances
