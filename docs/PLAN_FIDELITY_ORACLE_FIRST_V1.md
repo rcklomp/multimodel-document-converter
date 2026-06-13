@@ -110,14 +110,59 @@ are (a) `indentation_gap` (book annotations do not change indentation) and (b)
 ENGINE-COMPARATIVE deltas on the same book/pages. Absolute fidelity floors require
 the per-book divergence baseline in Phase 1.
 
+### 1.2 Phase 1 result - Fluent Python code-dense slice, all four engines (2026-06-13)
+
+Densest 40-page code window (p286-325, Vector2d/Vector chapters) extracted through
+every candidate engine via the relay prod env (`--vision-provider none`), each scored
+against the repo with callout normalization (`--strip-callouts`; publisher `# <n>`
+markers are book-vs-repo divergence, common-mode to all arms, so they do not affect
+the ranking). Harness: `scripts/p1_code_oracle_bakeoff.sh`. Outputs:
+`output/p1_code_oracle/`.
+
+| engine | verbatim (content+indent) | deindented (content) | indent_gap | content_loss | code lines |
+|---|--:|--:|--:|--:|--:|
+| docling_fast | **0.015** | 0.328 | 0.313 | 0.672 | 67 |
+| mineru_only | 0.147 | 0.629 | 0.482 | 0.371 | 170 |
+| vlm_qwen_only | 0.343 | 0.750 | 0.407 | 0.250 | 236 |
+| **hybrid_default** | **0.371** | **0.768** | 0.397 | 0.232 | 237 |
+
+Findings (measured, first time):
+1. **Engine ranking on code: hybrid > qwen >> mineru >>> docling.** The production
+   hybrid is the measured code winner; this validates the Qwen-for-code lane on ground
+   truth (the slice is code-dense, so the hybrid routes to Qwen).
+2. **The dominant residual code defect is INDENTATION, not content.** Hybrid recovers
+   77% of code-line CONTENT but only 37% of lines correct WITH indentation (0.40 gap).
+   For Python that is semantically fatal, and it is precisely what `ast.parse` (the old
+   oracle) and text-ED both score as fine. The project optimized blind to it.
+3. **docling is catastrophic for code** (verbatim 0.015, loses 2/3 of content outright,
+   surfaces 1/3 the code lines). docling is the offline floor, the fail-closed tier-2,
+   AND the Phase 0B interim default. A code page that silently ladders to docling is
+   DESTROYED, not degraded -> this upgrades Phase 5 "kill the silent ladder" from
+   hygiene to data-integrity (a laddered code page must hard-fail, not advise).
+
+Calibration honesty: even after callout normalization, `content_loss` (0.232 on the
+winner) still mixes three things the `--examples` dump confirmed - real line-merge
+corruption, PROSE misclassified into code chunks (run-on paragraphs bucketed as code),
+and legitimately-non-Python examples (Jython/Java/shell in the book, absent from the
+repo). So the ABSOLUTE verbatim/content numbers are FLOORS on true fidelity; the
+engine-comparative deltas are exact. NEW register item surfaced by this run:
+prose-into-code-chunk misclassification (a code/prose boundary defect, distinct from
+indentation and from the F1 code lane).
+
+Code-fidelity floor decision (replaces the contested `ast.parse` 0.85): use the
+repo-diff metrics, ADVISORY first (AGENT-GATE-PROGRESSION) - (a) `deindented_fidelity`
+regression-vs-best-arm-baseline, (b) `indentation_gap` as the primary defect signal. A
+hard ABSOLUTE floor is deferred until the prose-into-code contamination is removed
+(else the floor punishes a code/prose defect as if it were code infidelity).
+
 ---
 
 ## 2. Per-class oracle coverage map (the work surface)
 
 | class | example docs | ground-truth source | status |
 |---|---|---|---|
-| code (Python, repo'd) | Fluent Python, Python Distilled, Programming ArcGIS, Python Cookbook | author/publisher repo, line-diff | Fluent Python LIVE; others: verify+clone (Phase 1) |
-| code (no clean repo) | Chaubal (PyTorch), Jungjun (MEAP), Hao, Raieli, Eliasz Zephyr-C | hand-label 5-10 dense code pages per book | Phase 2 |
+| code (Python, repo'd) | Fluent Python | author repo `fluentpython/example-code`, line-diff | **LIVE + measured (1.2)** |
+| code (no clean repo) | Python Distilled (repo is errata-only, no source), Programming ArcGIS (2nd-ed repo URL 404), Chaubal (PyTorch), Jungjun (MEAP), Hao, Raieli, Eliasz Zephyr-C | hand-label 5-10 dense code pages per book | Phase 2 (verified 2026-06-13: only Fluent Python has a clean source repo; `gh` unavailable for deeper search) |
 | multilingual technical | Grundlagen, Handbuch (DE), Bevestigingsmiddelen (NL) | hand-label 5-10 pages per language | Phase 2 |
 | scanned / forms | 0013, scanned_degraded | hand-label transcription + field set | Phase 2 |
 | REPL / notebook transcript | Chaubal, Jungjun | structural oracle (input/output cell pairing intact) | Phase 2 |

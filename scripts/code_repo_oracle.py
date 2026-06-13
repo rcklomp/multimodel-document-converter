@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -45,6 +46,17 @@ sys.path.insert(0, str(_REPO / "scripts"))
 import _code_quality as cq  # noqa: E402
 
 _MIN_SIG_LEN = 4  # stripped length below which a line is too trivial to attribute
+
+# Book callout markers appended to code lines, e.g. "...  # 1" or "...  # <3>".
+# Publishers (O'Reilly AsciiDoc) annotate listings this way; the repo source does
+# not, so they are book-vs-repo divergence, not extraction error. Normalizing them
+# is the honest move for an ABSOLUTE fidelity number (it does not change the
+# engine-comparative ranking, which is common-mode to all arms).
+_CALLOUT_RE = re.compile(r"\s*#\s*<?\d{1,3}>?\s*$")
+
+
+def _norm_callout(line: str, strip: bool) -> str:
+    return _CALLOUT_RE.sub("", line) if strip else line
 
 
 def _iter_chunks(jsonl: Path):
@@ -67,7 +79,7 @@ def _strip_fences(content: str) -> list[str]:
     return out
 
 
-def build_ground_truth(repo: Path) -> tuple[set[str], set[str], int]:
+def build_ground_truth(repo: Path, strip_callouts: bool = False) -> tuple[set[str], set[str], int]:
     """Index all .py source lines. Returns (verbatim_set, deindented_set, n_files)."""
     verbatim: set[str] = set()
     deindent: set[str] = set()
@@ -79,7 +91,7 @@ def build_ground_truth(repo: Path) -> tuple[set[str], set[str], int]:
             continue
         n += 1
         for raw in text.splitlines():
-            line = raw.rstrip()
+            line = _norm_callout(raw.rstrip(), strip_callouts)
             s = line.strip()
             if len(s) < _MIN_SIG_LEN:
                 continue
@@ -88,7 +100,9 @@ def build_ground_truth(repo: Path) -> tuple[set[str], set[str], int]:
     return verbatim, deindent, n
 
 
-def score(jsonl: Path, verbatim: set[str], deindent: set[str]) -> dict[str, Any]:
+def score(
+    jsonl: Path, verbatim: set[str], deindent: set[str], strip_callouts: bool = False
+) -> dict[str, Any]:
     sig = 0
     v_hit = 0
     d_hit = 0
@@ -107,7 +121,7 @@ def score(jsonl: Path, verbatim: set[str], deindent: set[str]) -> dict[str, Any]
             repl_chunks += 1
             continue
         for raw in _strip_fences(content):
-            line = raw.rstrip()
+            line = _norm_callout(raw.rstrip(), strip_callouts)
             s = line.strip()
             if len(s) < _MIN_SIG_LEN:
                 continue
@@ -144,12 +158,19 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--repo", required=True, help="authoritative author code repo (cloned)")
     ap.add_argument("--label", default=None, help="display label")
     ap.add_argument("--examples", action="store_true", help="print sample mismatched lines")
+    ap.add_argument(
+        "--strip-callouts",
+        action="store_true",
+        help="normalize trailing publisher callout markers (# 1 / # <3>) on both "
+        "sides before matching - for an honest ABSOLUTE number (does not affect "
+        "the engine-comparative ranking)",
+    )
     args = ap.parse_args(argv)
 
     repo = Path(args.repo)
     jsonl = Path(args.jsonl)
-    verbatim, deindent, n_files = build_ground_truth(repo)
-    r = score(jsonl, verbatim, deindent)
+    verbatim, deindent, n_files = build_ground_truth(repo, args.strip_callouts)
+    r = score(jsonl, verbatim, deindent, args.strip_callouts)
 
     label = args.label or jsonl.parent.name
     print(f"=== CODE-REPO ORACLE: {label} ===")
