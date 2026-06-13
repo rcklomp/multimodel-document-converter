@@ -99,6 +99,10 @@ _ALLOWED_ADVISORY_WARN_CODES = frozenset(
         # Phase-4 bound. Above the bound it is a real WARN; a code-bearing doc
         # that laddered any page is EXTRACTION_DEGRADED_CODE (FAIL), never here.
         "EXTRACTION_LADDER_SERVED",
+        # WS1a: content-emptiness visibility on no-source-pdf runs. Always advisory
+        # (blank-vs-lost is unverifiable without the source); nudges toward the hard
+        # MISSING_PAGES verdict. Never a basis to FAIL.
+        "CONTENT_EMPTY_PAGES_UNVERIFIED",
     }
 )
 
@@ -1058,6 +1062,52 @@ def _print_extraction_provenance(metadata: dict[str, Any]) -> None:
 # signal; at/below it a small transient ladder is a documented advisory.
 _LADDER_SERVED_ADVISORY_BOUND = 0.02
 
+# WS1a: fraction of pages that produced NO chunk above which a no-source-pdf run
+# surfaces a content-emptiness advisory (a few blank dividers are normal).
+_CONTENT_EMPTY_ADVISORY_BOUND = 0.15
+
+
+def _content_emptiness_issues(
+    metadata: dict[str, Any],
+    chunks: list[dict[str, Any]],
+    source_pdf_provided: bool,
+) -> list[Issue]:
+    """WS1a (PLAN_FIDELITY_ORACLE_FIRST_V1 Section 3'): content-emptiness visibility.
+
+    Page coverage (`_page_coverage_issues`) only runs WITH --source-pdf (blank-page
+    aware -> hard MISSING_PAGES). Without it, silent content-emptiness - an engine
+    that posts 0 ladder failures yet emits empty pages (the documented docling-on-
+    image-only case, FINDINGS_LOG 2026-06-11 "presence-not-content") - is invisible.
+    This adds an ADVISORY-only nudge for the no-source case: orphan pages (pages that
+    produced no chunk of ANY modality, so image/table pages are NOT counted) above a
+    bound. It CANNOT distinguish a blank source page from a lost one, so it never
+    FAILs - it points the operator at the hard verdict. Silent emptiness stops being
+    silent. With --source-pdf, MISSING_PAGES is the authority and this is inert.
+    """
+    if source_pdf_provided:
+        return []
+    if metadata.get("extraction_engine") is None:
+        return []  # legacy output: no provenance to reason about
+    total = metadata.get("total_pages")
+    if not isinstance(total, int) or total <= 0:
+        return []
+    pages_present = {p for c in chunks if (p := _chunk_page(c)) is not None}
+    empty = total - len(pages_present)
+    if empty <= 0:
+        return []
+    frac = empty / total
+    if frac <= _CONTENT_EMPTY_ADVISORY_BOUND:
+        return []
+    return [
+        Issue(
+            "WARN",
+            "CONTENT_EMPTY_PAGES_UNVERIFIED",
+            f"{empty}/{total} ({100.0 * frac:.1f}%) page(s) produced no chunk; "
+            "no --source-pdf so blank-vs-lost is unverified. Re-run with --source-pdf "
+            "for a hard MISSING_PAGES verdict.",
+        )
+    ]
+
 
 def _extraction_ladder_issues(
     metadata: dict[str, Any],
@@ -1284,6 +1334,7 @@ def main() -> int:
     issues.extend(_asset_issues(jsonl_path, chunks))
     issues.extend(_table_issues(chunks))
     issues.extend(_extraction_ladder_issues(metadata, chunks))
+    issues.extend(_content_emptiness_issues(metadata, chunks, bool(args.source_pdf)))
 
     fail_count = sum(1 for issue in issues if issue.severity == "FAIL")
     warn_issues = [issue for issue in issues if issue.severity == "WARN"]

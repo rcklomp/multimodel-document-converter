@@ -24,6 +24,7 @@ if str(SCRIPTS) not in sys.path:
 
 from qa_full_conversion import (  # noqa: E402
     _ALLOWED_ADVISORY_WARN_CODES,
+    _content_emptiness_issues,
     _extraction_ladder_issues,
     _warn_is_documented_advisory,
 )
@@ -101,3 +102,48 @@ def test_advisory_code_is_registered() -> None:
     assert "EXTRACTION_LADDER_SERVED" in _ALLOWED_ADVISORY_WARN_CODES
     # the hard-fail code must NOT be an allowed advisory
     assert "EXTRACTION_DEGRADED_CODE" not in _ALLOWED_ADVISORY_WARN_CODES
+
+
+# ---------------------------------------------------------------------------
+# WS1a — content-emptiness visibility on no-source-pdf runs
+# ---------------------------------------------------------------------------
+
+
+def _chunk_on_page(page: int, modality="text", content="x"):
+    return {"modality": modality, "content": content, "metadata": {"page_number": page}}
+
+
+def test_emptiness_advisory_fires_without_source_when_orphan_pages_high() -> None:
+    """No --source-pdf, >15% pages produced no chunk -> advisory WARN."""
+    # total 10 pages, only pages 1-2 present -> 8/10 = 80% orphan
+    chunks = [_chunk_on_page(1), _chunk_on_page(2)]
+    issues = _content_emptiness_issues(_meta(degraded=0, total=10), chunks, False)
+    assert len(issues) == 1
+    assert issues[0].severity == "WARN"
+    assert issues[0].code == "CONTENT_EMPTY_PAGES_UNVERIFIED"
+    assert _warn_is_documented_advisory(issues[0], []) is True  # always advisory
+
+
+def test_emptiness_inert_with_source_pdf() -> None:
+    """With --source-pdf, MISSING_PAGES is the authority; this is inert."""
+    chunks = [_chunk_on_page(1)]
+    assert _content_emptiness_issues(_meta(total=10), chunks, True) == []
+
+
+def test_emptiness_quiet_below_bound() -> None:
+    """A couple of blank dividers (<=15%) raise nothing."""
+    chunks = [_chunk_on_page(p) for p in range(1, 10)]  # 9/10 present -> 10% orphan
+    assert _content_emptiness_issues(_meta(total=10), chunks, False) == []
+
+
+def test_emptiness_quiet_on_legacy_output() -> None:
+    """No extraction stamps (legacy) -> not judged."""
+    chunks = [_chunk_on_page(1)]
+    assert _content_emptiness_issues({"total_pages": 10}, chunks, False) == []
+
+
+def test_emptiness_never_fails() -> None:
+    """Even 100% orphan pages is WARN (advisory), never FAIL - blank-vs-lost
+    is unverifiable without the source."""
+    issues = _content_emptiness_issues(_meta(total=10), [], False)
+    assert issues and all(i.severity == "WARN" for i in issues)

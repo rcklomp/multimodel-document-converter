@@ -17,6 +17,7 @@ Allowed advisory codes:
 
 These tests pin the contract.
 """
+
 from __future__ import annotations
 
 import sys
@@ -225,7 +226,8 @@ def test_FAIL_severity_never_advisory() -> None:
 def test_vision_hf_rate_with_all_F4_sentinels_is_advisory() -> None:
     chunks = [_f4_hf_chunk(), _f4_hf_chunk(), _f4_hf_chunk(), _ok_image_chunk()]
     issue = Issue(
-        "WARN", "VISION_HARD_FALLBACK_RATE",
+        "WARN",
+        "VISION_HARD_FALLBACK_RATE",
         "3/4 image chunks are hard_fallback (75 %; limit 5 %).",
     )
     assert _warn_is_documented_advisory(issue, chunks) is True
@@ -238,7 +240,8 @@ def test_vision_hf_rate_with_non_F4_sentinel_is_NOT_advisory() -> None:
         _ok_image_chunk(),
     ]
     issue = Issue(
-        "WARN", "VISION_HARD_FALLBACK_RATE",
+        "WARN",
+        "VISION_HARD_FALLBACK_RATE",
         "2/3 image chunks are hard_fallback.",
     )
     assert _warn_is_documented_advisory(issue, chunks) is False
@@ -274,22 +277,27 @@ def test_allowed_advisory_codes_match_expected_set() -> None:
     separately above: only edge low-content structural spine items are
     allowed to remain WARN.
     """
-    assert _ALLOWED_ADVISORY_WARN_CODES == frozenset({
-        "ASSET_TINY",
-        "PAGE_COUNT_UNKNOWN",
-        "SCRIPT_ADVISORY_FAIL",
-        "VISION_HARD_FALLBACK_RATE",
-        "MISSING_CHAPTERS",
-        # Cluster D (2026-06-06): images retained as ID-only fallbacks when no
-        # vision provider was configured (--vision-provider none). Multimodal
-        # converter keeps the asset; the missing description is a documented,
-        # user-chosen no-VLM state, advisory not FAIL.
-        "IMAGE_NO_VLM",
-        # WS1b (2026-06-13, PLAN_FIDELITY_ORACLE_FIRST_V1 Section 3'): ladder-served
-        # pages within the 2% Phase-4 bound; above the bound it is a real WARN, and
-        # a code-bearing laddered doc is EXTRACTION_DEGRADED_CODE (FAIL).
-        "EXTRACTION_LADDER_SERVED",
-    })
+    assert _ALLOWED_ADVISORY_WARN_CODES == frozenset(
+        {
+            "ASSET_TINY",
+            "PAGE_COUNT_UNKNOWN",
+            "SCRIPT_ADVISORY_FAIL",
+            "VISION_HARD_FALLBACK_RATE",
+            "MISSING_CHAPTERS",
+            # Cluster D (2026-06-06): images retained as ID-only fallbacks when no
+            # vision provider was configured (--vision-provider none). Multimodal
+            # converter keeps the asset; the missing description is a documented,
+            # user-chosen no-VLM state, advisory not FAIL.
+            "IMAGE_NO_VLM",
+            # WS1b (2026-06-13, PLAN_FIDELITY_ORACLE_FIRST_V1 Section 3'): ladder-served
+            # pages within the 2% Phase-4 bound; above the bound it is a real WARN, and
+            # a code-bearing laddered doc is EXTRACTION_DEGRADED_CODE (FAIL).
+            "EXTRACTION_LADDER_SERVED",
+            # WS1a (2026-06-13): content-emptiness visibility on no-source-pdf runs;
+            # always advisory (blank-vs-lost unverifiable without the source).
+            "CONTENT_EMPTY_PAGES_UNVERIFIED",
+        }
+    )
 
 
 def test_f4_sentinel_constant_pinned() -> None:
