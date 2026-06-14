@@ -220,13 +220,21 @@ the coverage hole this plan fills.
 
 ## 3'. Next phase - Residual burndown + green-gate integrity (the REAL open surface)
 
-**Execution status (2026-06-13):** WS1a DONE (`e653fac`), WS1b DONE (`8e954c1`),
-WS2b DONE (`254ec07`), WS2a DONE-scoped (`ef5a377`: safe fullwidth scrub shipped +
-verified on real Chaubal content; ambiguous de-LaTeX/CJK repairs DEFERRED pending a
-trustworthy code-fidelity measure). Each shipped with a frozen regression fixture,
-full suite green, offline `SMOKE_PRODUCTION_PASS`. REMAINING: WS2c (OCR-on-fallback,
-needs USER latency sign-off), WS2d (prose-into-code, verify-first), WS3 (render-tail
-measurement + render-policy USER decision).
+**Execution status (2026-06-13/14): COMPLETE.** WS1a DONE (`e653fac`), WS1b DONE
+(`8e954c1`), WS2b DONE (`254ec07`), WS2a DONE-scoped (`ef5a377`: safe fullwidth scrub
+shipped + verified on real Chaubal content; ambiguous de-LaTeX/CJK repairs DEFERRED
+pending a trustworthy code-fidelity measure). Each shipped with a frozen regression
+fixture, full suite green, offline `SMOKE_PRODUCTION_PASS`.
+- **WS2c DROPPED** (not signed off): OCR is not novel - it was the v2 default, its
+  0.301/0.563 ceiling drove the V3 pivot, MinerU OCRs scans better (0.221), and WS1
+  now DETECTS the laddered-scan-blank gap it targeted. See [[project_ocr_already_tried]].
+- **WS2d CLOSED as a non-issue** by measurement: prose-into-code is 0.0% (1/2651 real
+  code chunks); the earlier flag was an oracle-scan artifact, not a production defect.
+- **WS3 PROVEN** (FINDINGS_LOG 2026-06-14): 12 dense `1andmore_column` pages x 6 render
+  settings, scored vs OmniDocBench GT - **cap1600 is the BEST setting on the dense
+  academic class** (text-ED 0.0501 vs dpi200 0.3666, 7.3x), the prior n=1 break did NOT
+  generalize, and every higher cap LOSES fidelity to repetition loops. Decision: keep
+  cap1600 (no class-conditional render); resolves the parked Phase-0B render USER decision.
 
 Reframed after the findings-log review (Section 0.5). The engine/architecture decision,
 code indentation, reliability ladder, render cap, and serving topology are all SETTLED.

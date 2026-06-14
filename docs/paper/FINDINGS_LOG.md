@@ -1494,3 +1494,50 @@ Lessons / dead-ends:
   production-week throughput calibration, not a flip-blocker.
 - The smoke script's `ENV_PYTHON` default (`$HOME/miniforge3/...`) does not match this
   box's env (`/Users/Shared/miniforge3/...`); pass `ENV_PYTHON` explicitly.
+
+---
+
+## 2026-06-14 - WS3 render-tail PROVEN: cap1600 is BEST on the dense academic class, the n=1 break did not generalize  `[Results][Decision][Lessons]`
+
+The 2026-06-10 sweep left I6 "CONFIRMED for one page class" - cap1600 catastrophically
+broke a single dense academic `1andmore_column` page (0.004->0.95, n=1), parking the
+production render setting on a USER decision. WS3 (PLAN_FIDELITY_ORACLE_FIRST_V1 Section
+3') sized that tail properly: 12 dense `1andmore_column` English pages (mostly Putnam
+exam-math, the densest multi-column class), swept at 6 render settings via the M5
+Qwen3-VL-8B-8bit, scored against OmniDocBench ground truth.
+
+**Result (text/reading Edit_dist, LOWER=better; loops = pages that hit the 8192-token
+cap = runaway over-generation):**
+
+| setting | text ED | reading ED | repetition loops |
+|---|--:|--:|--:|
+| dpi200 (prod baseline) | 0.3666 | 0.5523 | 7/12 |
+| dpi150 | 0.3944 | 0.5603 | 7/12 |
+| **cap1600** | **0.0501** | **0.2287** | **0/12** |
+| cap1400 | 0.0611 | 0.2646 | 0/12 |
+| cap2000 | 0.2619 | 0.4766 | 3/12 |
+| cap2400 | 0.3617 | 0.5453 | 5/12 |
+
+**cap1600 is the BEST setting on the exact class it was thought to break - 7.3x better
+text-ED than dpi200 (0.0501 vs 0.3666), 2.4x better reading order.** Fidelity tracks
+repetition-loop incidence monotonically: cap1600 (0 loops) 0.0501 -> cap2000 (3) 0.2619
+-> cap2400 (5) 0.3617 -> dpi200 (7) 0.3666. The mechanism is now PROVEN end-to-end:
+oversized renders trip the VLM into repetition loops (a 32k-char transcription of one
+page IS the loop), and the repetition destroys fidelity. cap1600 is the highest
+LOOP-FREE resolution - high enough to read dense multi-column, low enough not to loop.
+
+**The higher-cap rescue hypothesis is REFUTED.** There is no middle cap that reads the
+dense class better without reviving the loop pathology; every setting above cap1600 is
+worse on BOTH cost and fidelity. The 2026-06-10 n=1 "cap1600 breaks academic-multicolumn"
+was an outlier, not a class property - at n=12 cap1600 wins the class decisively.
+
+**Decision: keep cap1600 as the production render cap (no class-conditional render).**
+This resolves the parked Phase-0B render-setting USER decision with measured proof.
+
+Lessons: (1) a worst-K n=1 signal is a HYPOTHESIS, not a finding - size it before acting
+(the n=1 break would have driven a needless class-conditional render). (2) the harness
+`score` step KeyError'd on `table.all.TEDS["all"]` for table-free pages and nulled ALL
+metrics incl. the available text/reading ED - read the metric_result.json directly
+(`text_block.page.Edit_dist.ALL` + per-layout `layout: 1andmore_column`) when the
+table key is absent. (3) same `$HOME` env-path mismatch as the smoke script - the
+omnidocbench scorer python is `/Users/Shared/...`, not `$HOME/...`; monkeypatch `ODB_PY`.

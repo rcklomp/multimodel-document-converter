@@ -76,6 +76,11 @@ SETTINGS: list[tuple[str, str, int]] = [
     ("dpi150", "dpi", 150),
     ("cap1600", "cap", 1600),
     ("cap1400", "cap", 1400),
+    # NOTE (WS3, 2026-06-14): cap2000/cap2400 were swept transiently to test whether a
+    # higher cap rescues the dense academic `1andmore_column` class - REFUTED (higher
+    # caps reintroduce repetition loops and LOSE fidelity; cap1600 is the proven best
+    # on that class, text-ED 0.0501 vs cap2400 0.3617). See FINDINGS_LOG 2026-06-14.
+    # Not kept in the default sweep (would inflate every run 50%); add back to repro.
 ]
 BASELINE_SETTING = "dpi200"
 
