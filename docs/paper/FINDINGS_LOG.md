@@ -1,5 +1,9 @@
 # MM-RAG V3 — Findings Log (paper source material)
 
+> 👉 **New here? Read `FINDINGS_DIGEST.md` first** - a one-page to-the-point history
+> (where we are, what's settled, what's been tried-and-failed, what's open). This full
+> log is the detailed append-only archive behind that digest.
+
 **Purpose.** Append-only, dated capture of paper-grade material: motivation,
 method, **verbatim measured data**, conclusions, and **rejected approaches with
 reasoning**. This is the raw material for an eventual systems paper / background
