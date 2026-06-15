@@ -1,6 +1,39 @@
 # Project Status
 
-Last updated: 2026-06-13 (branch `feat/omnidocbench-phase0`: WP-A chunker-contiguity P2 re-attempt FAILED at the right layer - the fix is built and correct but fires 0x on Chaubal; the P2 residual is re-scoped OFF "chunker contiguity" onto REPL-transcript + engine token-corruption)
+Last updated: 2026-06-15 (branch `feat/omnidocbench-phase0`, not pushed). Two things
+closed this cycle: the residual-burndown plan, and a measured RAG/retrieval investigation
+that reframed where the real bottleneck is.
+
+## Current state (2026-06-15) - residual burndown DONE; RAG measured; the lever is "feed top-10", not conversion
+
+**Residual burndown (`PLAN_FIDELITY_ORACLE_FIRST_V1` Section 3') COMPLETE.** WS1a
+content-emptiness advisory (`e653fac`), WS1b extraction-ladder verdict signal -
+laddered code hard-FAILs (`8e954c1`), WS2a fullwidth code token-corruption scrub
+(`ef5a377`), WS2b Adedeji thin-strip cull (`254ec07`); WS2c OCR-on-fallback DROPPED
+(already tried, drove the V3 pivot); WS2d prose-into-code CLOSED as a non-issue
+(measured 0.0%); WS3 render tail PROVEN (cap1600 best on the dense academic class,
+`85dfc9b`). All with frozen fixtures, suite green, offline `SMOKE_PRODUCTION_PASS`.
+
+**The reframe + RAG measurement (the bigger finding).** The "done" bar is "the RAG
+works well" - a RETRIEVAL bar, not a transcription bar. Measured end-to-end on 514
+code-inclusive queries over the 29 ingested docs (`output/v3_soak_code/`, fully local
+oMLX + Qdrant; gen+judge on GX10 14B):
+- **Conversion is NOT the bottleneck** (the data said so twice). Doc-level retrieval is
+  strong (R@5-doc 91.6%); the soft spot is chunk-level precision.
+- **The answer-quality lever is FEED THE LLM TOP-10 CHUNKS, not top-5**: +4.9pp answer
+  correctness (56.8 -> 61.7), German-safe, one-line gen-config change.
+- **Three "clever" levers were ruled out by measurement before shipping:** empty image
+  chunks (+0pp), rerank-score-sort (-10pp), and hybrid/BM25 (no gain over plain top-10,
+  and a German regression). The BM25-index persistence fix (`e3467bc`) was still a real
+  bug fix - hybrid was silently broken - but it is not needed for the answer win.
+- **The one remaining retrieval item:** ~6% of queries never retrieve the right document
+  even at top-100 (an embedder / query-expansion problem). This is the next task.
+
+**Housekeeping (2026-06-15):** repo sanitation pass - archived done plans + dead
+old-phase scripts to `.archive/`; reconciled stale docs; the findings log is being
+condensed for faster session onboarding. Tests untouched (all 146 sound).
+
+See `[[project_retrieval_findings]]` / `[[project_oracle_first_pivot]]` (memory) for detail.
 
 ## Current state (2026-06-13) - WP-A P2 re-attempt: chunker contiguity is the WRONG LEVER; residual re-scoped
 

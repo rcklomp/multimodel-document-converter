@@ -1,5 +1,10 @@
 # MM-Converter V3.0: Architectural Charter — Draft 0.5
 
+> ⚠️ **TARGET, NOT AS-BUILT.** This is the original V3.0 *aspirational target*. For
+> what actually ships today, read `ARCHITECTURE_V3.1_CHARTER.md` (as-built) and
+> `PROJECT_STATUS.md` (current state). Do not treat this draft as a description of
+> current behavior.
+
 > **As-built note (2026-06-03):** this draft is the original V3.0 *target*. The
 > current as-built reality and audit-corrected roadmap are tracked in
 > `docs/ARCHITECTURE_V3.1_CHARTER.md` (status-tagged SHIPPED/PARTIAL/PROPOSED).
