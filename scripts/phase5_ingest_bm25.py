@@ -45,6 +45,11 @@ DEFAULT_COLLECTION = "mmrag_v3__bm25_sparse"
 DEFAULT_DENSE_COLLECTION = "mmrag_v3__qwen3_local"
 DEFAULT_QDRANT = "http://127.0.0.1:6333"
 BASE_DIR = REPO_ROOT / "output" / "phase5_reextract"
+# The query-side BM25 index MUST be persisted: hybrid retrieval
+# (retrieve_hybrid_reranked) loads it to encode queries for the sparse leg.
+# Earlier this index was built in-memory and discarded, so the sparse leg never
+# had a matching query encoder and hybrid silently fell back to dense-only.
+INDEX_PATH = REPO_ROOT / "tests" / "fixtures" / "bm25_index_v3.json"
 
 
 def _http(method: str, url: str, body=None) -> dict:
@@ -185,6 +190,11 @@ def main() -> int:
         f"BM25 index: vocab={len(index.vocab)}, avgdl={index.avgdl:.1f}, "
         f"n_docs={index.n_docs} ({time.perf_counter()-t0:.1f}s)"
     )
+    # 2a. PERSIST the query-side index so hybrid retrieval can encode queries
+    # against the SAME vocab/IDF used to encode these chunks. Without this the
+    # sparse leg is unusable and hybrid degrades to dense-only.
+    index.save(INDEX_PATH)
+    print(f"Saved query-side BM25 index -> {INDEX_PATH}")
 
     # 3. Recreate sparse collection.
     ensure_collection(a.qdrant_url, a.collection)
