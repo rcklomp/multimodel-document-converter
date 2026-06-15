@@ -43,6 +43,7 @@ Hybrid usage (v2.12 Phase 2 retrieval shape, v2.13.0 embedder):
 """
 from __future__ import annotations
 
+import math
 import os
 import sys
 from pathlib import Path
@@ -85,6 +86,32 @@ def _embed_query(
     raise ValueError(f"Unsupported embed provider: {provider!r}")
 
 
+def _l2_normalize(v: list[float]) -> list[float]:
+    norm = math.sqrt(sum(x * x for x in v))
+    if norm == 0.0:
+        return v
+    return [x / norm for x in v]
+
+
+def _blend_vectors(
+    query_vec: list[float], hyde_vec: list[float], weight: float = 0.5
+) -> list[float]:
+    """Blend the literal-query embedding with the HyDE-answer embedding.
+
+    L2-normalizes each side, takes the weighted average (default equal
+    weight), and re-normalizes. Blending BEATS replacing the query with
+    the hypothetical (the original v2.12 HyDE behavior): on the v3 soak
+    (514 queries, judge-free gold-chunk@10) blend = 86.4% vs literal
+    82.9% (+3.5pp, McNemar exact p=0.0021), and it loses only 7 queries
+    where pure-replace lost 11 — keeping the query's exact-token signal
+    protects identifier/specific queries while still adding the
+    answer-space bridge. See memory project_retrieval_findings (2026-06-16).
+    """
+    qn = _l2_normalize(query_vec)
+    hn = _l2_normalize(hyde_vec)
+    return _l2_normalize([weight * a + (1.0 - weight) * b for a, b in zip(qn, hn)])
+
+
 def retrieve_reranked(
     query: str,
     *,
@@ -100,6 +127,7 @@ def retrieve_reranked(
     fall_back_on_rerank_error: bool = True,
     use_hyde: bool = False,
     hyde_api_key: str | None = None,
+    hyde_provider: str = "vllm",
 ) -> list[dict]:
     """Embed → Qdrant top-K → rerank → top-N.
 
@@ -156,19 +184,30 @@ def retrieve_reranked(
                 "explicit embed_api_key arg"
             )
 
-    # Optional Step 0: HyDE — generate a hypothetical answer and embed
-    # that instead of the literal query. Falls back to the literal
-    # query on any HyDE failure (network, parse, refusal).
-    embed_text = query
-    if use_hyde:
-        from mmrag_v2.retrieval.hyde import generate_with_fallback
-        embed_text = generate_with_fallback(query, hyde_api_key or embed_api_key)
-
-    # Step 1: embed the query (or the HyDE-generated answer).
+    # Step 1: embed the literal query.
     vector = _embed_query(
-        embed_text, embed_provider, embed_model,
+        query, embed_provider, embed_model,
         api_key=embed_api_key or "",
     )
+
+    # Optional Step 0b: HyDE — generate a hypothetical answer, embed it,
+    # and BLEND it with the literal-query vector (v3 2026-06-16: blend
+    # beats the original replace-the-query behavior — see `_blend_vectors`).
+    # `generate_with_fallback` returns the literal query verbatim on any
+    # HyDE failure (network, parse, refusal); the `!= query` guard then
+    # skips the redundant second embed and the blend collapses to the
+    # literal-query vector, preserving the no-HyDE result exactly.
+    if use_hyde:
+        from mmrag_v2.retrieval.hyde import generate_with_fallback
+        hypo = generate_with_fallback(
+            query, hyde_api_key or embed_api_key, provider=hyde_provider,
+        )
+        if hypo and hypo != query:
+            hypo_vec = _embed_query(
+                hypo, embed_provider, embed_model,
+                api_key=embed_api_key or "",
+            )
+            vector = _blend_vectors(vector, hypo_vec)
 
     # Step 2: Qdrant vector search → top-K candidates.
     candidates = qdrant_search(
@@ -326,7 +365,7 @@ def retrieve_hybrid_reranked(
     use_hyde: bool = False,
     hyde_api_key: str | None = None,
     auto_intent_hyde: bool = False,
-    hyde_provider: str = "dashscope",
+    hyde_provider: str = "vllm",
 ) -> list[dict]:
     """Dense + BM25 sparse + RRF + reranker.
 
@@ -347,7 +386,9 @@ def retrieve_hybrid_reranked(
     defaults equal weight (1, 1). Higher dense weight = embedder-led;
     higher sparse weight = BM25-led.
 
-    HyDE knobs (v2.14):
+    HyDE knobs (v2.14; v3 2026-06-16: HyDE now BLENDS the hypothetical-
+    answer embedding with the literal-query embedding rather than
+    REPLACING it — see `_blend_vectors`):
       - `use_hyde=True`              — always-on HyDE (the original v2.12
                                        Phase 3 knob); applies to the dense
                                        leg only.
@@ -363,9 +404,10 @@ def retrieve_hybrid_reranked(
                                        + code-dense docs (~-12pp R@1) at
                                        query time, no permanent embedder
                                        routing infra needed.
-      - `hyde_provider`              — "dashscope" (default, $ per call)
-                                       or "vllm" (local 27B, $0). Used by
-                                       both manual and auto-intent paths.
+      - `hyde_provider`              — "vllm" (default — local GX10, $0;
+                                       v3 2026-06-16) or "dashscope"
+                                       ($ per call). Used by both manual
+                                       and auto-intent paths.
     """
     import os as _os
     from pathlib import Path as _Path
@@ -399,26 +441,36 @@ def retrieve_hybrid_reranked(
     # queries whose intent matches the code/minority-language target
     # set. Default queries (intent=None) skip HyDE entirely → no
     # latency hit for the ~90% of queries that don't need it.
-    dense_query = query
     intent: str | None = None
     if auto_intent_hyde:
         from mmrag_v2.retrieval.intent import classify_intent
         intent = classify_intent(query)
     effective_use_hyde = use_hyde or (intent is not None)
+
+    # Step 1: embed the literal query for the dense arm.
+    vector = _embed_query(
+        query, embed_provider, embed_model,
+        api_key=embed_api_key or "",
+    )
+    # HyDE BLENDS the hypothetical-answer embedding into the dense vector
+    # (v3 2026-06-16: blend beats replace — see `_blend_vectors`). The
+    # SPARSE arm always uses the literal query (Step 3 below) — HyDE would
+    # distort BM25's keyword distribution. Falls back to the literal query
+    # vector on any HyDE failure.
     if effective_use_hyde:
         from mmrag_v2.retrieval.hyde import generate_with_fallback
-        dense_query = generate_with_fallback(
+        hypo = generate_with_fallback(
             query,
             hyde_api_key or embed_api_key,
             provider=hyde_provider,
             intent=intent,
         )
-
-    # Step 1: embed (the HyDE answer or the literal query).
-    vector = _embed_query(
-        dense_query, embed_provider, embed_model,
-        api_key=embed_api_key or "",
-    )
+        if hypo and hypo != query:
+            hypo_vec = _embed_query(
+                hypo, embed_provider, embed_model,
+                api_key=embed_api_key or "",
+            )
+            vector = _blend_vectors(vector, hypo_vec)
 
     # Step 2: dense top-K.
     dense_hits = qdrant_search(

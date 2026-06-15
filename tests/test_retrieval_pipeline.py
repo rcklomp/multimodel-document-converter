@@ -568,3 +568,117 @@ def test_adjacency_empty_results_returns_empty_list():
     assert _apply_partial_code_adjacency(
         [], qdrant_url="http://x", dense_collection="c",
     ) == []
+
+
+# ── HyDE blend (v3 2026-06-16) ───────────────────────────────────────────────
+
+
+def test_blend_vectors_is_unit_norm_and_symmetric():
+    """`_blend_vectors` L2-normalizes each side, averages, re-normalizes.
+    Orthogonal unit inputs blend to the 45-degree bisector (unit norm)."""
+    import math
+
+    from mmrag_v2.retrieval.pipeline import _blend_vectors
+
+    out = _blend_vectors([3.0, 0.0], [0.0, 5.0])  # different magnitudes
+    # Result is unit-norm.
+    assert math.isclose(math.hypot(*out), 1.0, rel_tol=1e-9)
+    # Equal weight on two orthogonal directions → equal components.
+    assert math.isclose(out[0], out[1], rel_tol=1e-9)
+
+
+def test_blend_vectors_identical_inputs_returns_same_direction():
+    """Blending a vector with itself yields the same (normalized)
+    direction — so the HyDE-failure fallback (hypo == query) is a no-op."""
+    import math
+
+    from mmrag_v2.retrieval.pipeline import _blend_vectors
+
+    out = _blend_vectors([0.6, 0.8], [0.6, 0.8])
+    assert math.isclose(out[0], 0.6, rel_tol=1e-9)
+    assert math.isclose(out[1], 0.8, rel_tol=1e-9)
+
+
+def test_blend_vectors_zero_vector_safe():
+    """A zero vector must not divide-by-zero; it passes through."""
+    from mmrag_v2.retrieval.pipeline import _blend_vectors
+
+    out = _blend_vectors([0.0, 0.0], [0.0, 0.0])
+    assert out == [0.0, 0.0]
+
+
+def test_retrieve_reranked_hyde_blends_not_replaces(monkeypatch):
+    """With use_hyde=True the search vector must be the BLEND of the
+    literal-query embedding and the HyDE-answer embedding — NOT the
+    HyDE embedding alone (the original replace behavior). Embed is
+    called twice (query + hypothetical)."""
+    import math
+
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-test")
+
+    # Distinguishable embeddings: query → x-axis, hypo → y-axis.
+    def fake_embed(text, model, api_key):
+        return [1.0, 0.0] if text == "literal query" else [0.0, 1.0]
+
+    captured = {}
+
+    def fake_search(vector, collection, *, limit, qdrant_url):
+        captured["vector"] = vector
+        return [_qdrant_result(0, "c00", "d0")]
+
+    with patch("mmrag_v2.retrieval.pipeline.embed_text_dashscope",
+               side_effect=fake_embed) as embed_mock, \
+         patch("mmrag_v2.retrieval.pipeline.qdrant_search",
+               side_effect=fake_search), \
+         patch("mmrag_v2.retrieval.hyde.generate_with_fallback",
+               return_value="a hypothetical answer passage") as gen_mock:
+        retrieve_reranked(
+            query="literal query",
+            collection="test-coll",
+            embed_provider="dashscope",
+            embed_model="text-embedding-v4",
+            reranker=_FixedScoreReranker(),
+            use_hyde=True,
+        )
+
+    gen_mock.assert_called_once()
+    # Blend of orthogonal unit vectors → both components equal, unit norm.
+    v = captured["vector"]
+    assert math.isclose(v[0], v[1], rel_tol=1e-9)
+    assert math.isclose(math.hypot(*v), 1.0, rel_tol=1e-9)
+    # Embedded BOTH the query and the hypothetical (proves blend, not replace).
+    assert embed_mock.call_count == 2
+    embedded_texts = {c[0][0] for c in embed_mock.call_args_list}
+    assert embedded_texts == {"literal query", "a hypothetical answer passage"}
+
+
+def test_retrieve_reranked_hyde_failure_falls_back_to_literal(monkeypatch):
+    """When HyDE fails, `generate_with_fallback` returns the literal
+    query verbatim; the `!= query` guard then skips the second embed and
+    the search vector equals the plain literal-query embedding."""
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-test")
+
+    captured = {}
+
+    def fake_search(vector, collection, *, limit, qdrant_url):
+        captured["vector"] = vector
+        return [_qdrant_result(0, "c00", "d0")]
+
+    with patch("mmrag_v2.retrieval.pipeline.embed_text_dashscope",
+               return_value=[0.5, 0.5]) as embed_mock, \
+         patch("mmrag_v2.retrieval.pipeline.qdrant_search",
+               side_effect=fake_search), \
+         patch("mmrag_v2.retrieval.hyde.generate_with_fallback",
+               return_value="literal query"):  # HyDE failure sentinel
+        retrieve_reranked(
+            query="literal query",
+            collection="test-coll",
+            embed_provider="dashscope",
+            embed_model="text-embedding-v4",
+            reranker=_FixedScoreReranker(),
+            use_hyde=True,
+        )
+
+    # Only the literal query was embedded (no redundant hypo embed).
+    assert embed_mock.call_count == 1
+    assert captured["vector"] == [0.5, 0.5]
