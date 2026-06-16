@@ -111,12 +111,20 @@ def _blend_vectors(
 
     L2-normalizes each side, takes the weighted average (default equal
     weight), and re-normalizes. Blending BEATS replacing the query with
-    the hypothetical (the original v2.12 HyDE behavior): on the v3 soak
-    (514 queries, judge-free gold-chunk@10) blend = 86.4% vs literal
-    82.9% (+3.5pp, McNemar exact p=0.0021), and it loses only 7 queries
-    where pure-replace lost 11 — keeping the query's exact-token signal
-    protects identifier/specific queries while still adding the
-    answer-space bridge. See memory project_retrieval_findings (2026-06-16).
+    the hypothetical (the original v2.12 HyDE behavior): keeping the
+    query's exact-token signal protects identifier/specific queries while
+    still adding the answer-space bridge (it loses only 7 queries where
+    pure-replace lost 11).
+
+    HOWEVER, HyDE itself is OPT-IN and stays OFF by default. Its apparent
+    +3.5pp (judge-free gold-chunk@10, McNemar p=0.0021) was measured
+    against the OLD default-ef baseline that suffered the HNSW empty-chunk
+    trap. Once that bug is fixed (`_DEFAULT_HNSW_EF`=512), HyDE-blend adds
+    only +1.4pp on top (won 12 / lost 5, p=0.14 NOT significant,
+    2026-06-16) - it was largely recovering the same buried chunks ef=512
+    now gets for free, and it costs a per-query LLM generation. Do NOT
+    turn HyDE on by default on the strength of the +3.5pp figure. See
+    memory project_doc_recall_floor + project_retrieval_findings.
     """
     qn = _l2_normalize(query_vec)
     hn = _l2_normalize(hyde_vec)
