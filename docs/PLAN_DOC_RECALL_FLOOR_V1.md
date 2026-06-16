@@ -1,6 +1,23 @@
 # PLAN - the ~6% doc-recall floor (the "bigger lever"), evidence-grounded
 
-Status: DRAFT (2026-06-16). Branch `feat/omnidocbench-phase0`.
+> **RESOLVED 2026-06-16 (commit 3278383). The floor was an HNSW
+> search-parameter bug, NOT an embedder/representation ceiling.** The
+> large cluster of near-identical EMPTY image-placeholder chunks
+> degrades HNSW graph navigability, so approximate search at the
+> collection-default ef gets trapped in that cluster and never reaches
+> higher-cosine text chunks (a gold chunk at cosine **0.6226** was
+> returned ABSENT while 0.36-scored empties filled the top-100).
+> Raising `hnsw_ef` to 512 recovers them: full-514 production
+> gold-chunk@10 **82.9% -> 87.7% (+4.9pp, McNemar 25-0, p<1e-5)**, zero
+> re-ingest. Shipped as `_DEFAULT_HNSW_EF=512` in the retrieval pipeline.
+> **Sections 3-4 below (contextual re-embed / embedder swap / "accept
+> the floor") were aimed at the WRONG cause and are RETAINED ONLY as a
+> record of the dead-ends - do NOT execute them.** The lesson: test the
+> hypothesis (here: the cheap "contextualize only the gold chunk" screen
+> exposed that gold had cosine 0.62 yet ranked absent -> pointed at the
+> index, not the embedding) before betting a multi-hour re-embed.
+
+Status: RESOLVED (2026-06-16). Branch `feat/omnidocbench-phase0`.
 Companion to the shipped HyDE-blend work (commit c2cb870) and memory
 `project_retrieval_findings`. This plan is deliberately honest: the
 characterization below shows the obvious cheap fixes are MARGINAL and
