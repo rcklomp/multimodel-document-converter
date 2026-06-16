@@ -65,6 +65,17 @@ from search_qdrant import search as qdrant_search  # noqa: E402
 
 _OMLX_DEFAULT_URL = "http://10.0.10.246:8000/v1/embeddings"
 
+# Search-time HNSW exploration depth for dense retrieval. The Qdrant
+# collection default gets trapped in the large near-identical
+# empty-image-chunk cluster and silently fails to reach higher-cosine
+# text chunks (the ~6% doc-recall floor: gold chunks at cosine 0.62
+# returned ABSENT while 0.36-scored empty placeholders filled the
+# top-100). 512 recovers them to near-exact-search quality at
+# negligible latency on this corpus size: full-514 production
+# gold-chunk@10 82.9% -> 87.7% (+4.9pp, McNemar 25 wins / 0 losses,
+# p<1e-5, 2026-06-16). See docs/PLAN_DOC_RECALL_FLOOR_V1.md.
+_DEFAULT_HNSW_EF = 512
+
 
 def _embed_query(
     text: str,
@@ -128,6 +139,7 @@ def retrieve_reranked(
     use_hyde: bool = False,
     hyde_api_key: str | None = None,
     hyde_provider: str = "vllm",
+    hnsw_ef: int | None = _DEFAULT_HNSW_EF,
 ) -> list[dict]:
     """Embed → Qdrant top-K → rerank → top-N.
 
@@ -213,6 +225,7 @@ def retrieve_reranked(
     candidates = qdrant_search(
         vector, collection,
         limit=top_k_retrieve, qdrant_url=qdrant_url,
+        hnsw_ef=hnsw_ef,
     )
     if not candidates:
         return []
@@ -366,6 +379,7 @@ def retrieve_hybrid_reranked(
     hyde_api_key: str | None = None,
     auto_intent_hyde: bool = False,
     hyde_provider: str = "vllm",
+    hnsw_ef: int | None = _DEFAULT_HNSW_EF,
 ) -> list[dict]:
     """Dense + BM25 sparse + RRF + reranker.
 
@@ -476,6 +490,7 @@ def retrieve_hybrid_reranked(
     dense_hits = qdrant_search(
         vector, dense_collection,
         limit=top_k_retrieve, qdrant_url=qdrant_url,
+        hnsw_ef=hnsw_ef,
     )
 
     # Step 3+4: sparse query (LITERAL query, never the HyDE answer) → sparse top-K.

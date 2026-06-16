@@ -81,7 +81,8 @@ def find_collection(name_fragment: str, qdrant_url: str) -> str | None:
 
 def search(query_vector: list[float], collection: str, limit: int = 5,
            modality: str | None = None, keyword: str | None = None,
-           qdrant_url: str = "http://localhost:6333") -> list[dict]:
+           qdrant_url: str = "http://localhost:6333",
+           hnsw_ef: int | None = None) -> list[dict]:
     body: dict = {"vector": query_vector, "limit": limit, "with_payload": True}
     must_filters = []
     if modality:
@@ -90,6 +91,15 @@ def search(query_vector: list[float], collection: str, limit: int = 5,
         must_filters.append({"key": "content", "match": {"text": keyword}})
     if must_filters:
         body["filter"] = {"must": must_filters}
+    if hnsw_ef is not None:
+        # Search-time HNSW exploration depth. The default (collection
+        # ef) gets trapped in the large near-identical empty-image-chunk
+        # cluster and never reaches higher-cosine text chunks (measured
+        # 2026-06-16: gold chunk cosine 0.62 returned ABSENT while
+        # 0.36-scored empties filled the top-100). Raising ef recovers
+        # them: full-514 prod gold-chunk@10 82.9% -> 87.7% (+4.9pp,
+        # McNemar 25-0, p<1e-5). See docs/PLAN_DOC_RECALL_FLOOR_V1.md.
+        body["params"] = {"hnsw_ef": hnsw_ef}
     data = json.dumps(body).encode()
     req = urllib.request.Request(f"{qdrant_url}/collections/{collection}/points/search", data=data)
     req.add_header("Content-Type", "application/json")

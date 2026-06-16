@@ -622,7 +622,7 @@ def test_retrieve_reranked_hyde_blends_not_replaces(monkeypatch):
 
     captured = {}
 
-    def fake_search(vector, collection, *, limit, qdrant_url):
+    def fake_search(vector, collection, *, limit, qdrant_url, hnsw_ef=None):
         captured["vector"] = vector
         return [_qdrant_result(0, "c00", "d0")]
 
@@ -660,7 +660,7 @@ def test_retrieve_reranked_hyde_failure_falls_back_to_literal(monkeypatch):
 
     captured = {}
 
-    def fake_search(vector, collection, *, limit, qdrant_url):
+    def fake_search(vector, collection, *, limit, qdrant_url, hnsw_ef=None):
         captured["vector"] = vector
         return [_qdrant_result(0, "c00", "d0")]
 
@@ -682,3 +682,43 @@ def test_retrieve_reranked_hyde_failure_falls_back_to_literal(monkeypatch):
     # Only the literal query was embedded (no redundant hypo embed).
     assert embed_mock.call_count == 1
     assert captured["vector"] == [0.5, 0.5]
+
+
+def test_retrieve_reranked_forwards_default_hnsw_ef(monkeypatch):
+    """The dense search must pass hnsw_ef=512 by default — the Qdrant
+    collection-default ef gets trapped in the empty-image-chunk cluster
+    and silently drops higher-cosine text chunks (the 6% doc-recall
+    floor). 512 recovered +4.9pp, McNemar 25-0, p<1e-5 (2026-06-16)."""
+    from mmrag_v2.retrieval.pipeline import _DEFAULT_HNSW_EF
+
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-test")
+    assert _DEFAULT_HNSW_EF == 512
+
+    captured = {}
+
+    def fake_search(vector, collection, *, limit, qdrant_url, hnsw_ef=None):
+        captured["hnsw_ef"] = hnsw_ef
+        return [_qdrant_result(0, "c00", "d0")]
+
+    with patch("mmrag_v2.retrieval.pipeline.embed_text_dashscope",
+               return_value=[0.1, 0.2]), \
+         patch("mmrag_v2.retrieval.pipeline.qdrant_search",
+               side_effect=fake_search):
+        # Default call — no explicit hnsw_ef.
+        retrieve_reranked(
+            query="q", collection="c", embed_provider="dashscope",
+            embed_model="text-embedding-v4", reranker=_FixedScoreReranker(),
+        )
+    assert captured["hnsw_ef"] == 512
+
+    # Explicit override is honored.
+    with patch("mmrag_v2.retrieval.pipeline.embed_text_dashscope",
+               return_value=[0.1, 0.2]), \
+         patch("mmrag_v2.retrieval.pipeline.qdrant_search",
+               side_effect=fake_search):
+        retrieve_reranked(
+            query="q", collection="c", embed_provider="dashscope",
+            embed_model="text-embedding-v4", reranker=_FixedScoreReranker(),
+            hnsw_ef=128,
+        )
+    assert captured["hnsw_ef"] == 128
