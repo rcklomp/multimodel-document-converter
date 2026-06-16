@@ -14,7 +14,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from mmrag_v2.config.endpoints import (  # noqa: E402
+from mmrag_v2.endpoints import (  # noqa: E402
     ROLES,
     all_endpoints,
     endpoint,

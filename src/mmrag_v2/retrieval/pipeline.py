@@ -49,6 +49,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from mmrag_v2.endpoints import endpoint as _endpoint
 from mmrag_v2.retrieval.config import get_reranker
 from mmrag_v2.retrieval.reranker import Reranker, RerankerError
 
@@ -63,7 +64,9 @@ from ingest_to_qdrant import embed_text_dashscope, embed_text_omlx  # noqa: E402
 from search_qdrant import embed as embed_ollama  # noqa: E402
 from search_qdrant import search as qdrant_search  # noqa: E402
 
-_OMLX_DEFAULT_URL = "http://10.0.10.246:8000/v1/embeddings"
+# Resolved from the central endpoint registry (mmrag_v2.endpoints);
+# default is the Mini-hosted oMLX embeddings server, env-overridable.
+_OMLX_DEFAULT_URL = _endpoint("embed").embeddings_url
 
 # Search-time HNSW exploration depth for dense retrieval. The Qdrant
 # collection default gets trapped in the large near-identical

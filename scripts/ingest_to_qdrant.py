@@ -138,7 +138,11 @@ def embed_text_dashscope(text: str, model: str, api_key: str,
 
 # ── omlx local embedding (v2.13 Phase 1) ───────────────────────────────────
 
-_OMLX_DEFAULT_URL = "http://10.0.10.246:8000/v1/embeddings"
+# Resolved from the central endpoint registry (mmrag_v2.endpoints),
+# env-overridable; default is the Mini-hosted oMLX embeddings server.
+from mmrag_v2.endpoints import endpoint as _endpoint  # noqa: E402
+
+_OMLX_DEFAULT_URL = _endpoint("embed").embeddings_url
 
 
 def embed_text_omlx(text: str, model: str, api_key: str,

@@ -49,6 +49,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from mmrag_v2.endpoints import endpoint as _endpoint
+
 
 class RerankerError(RuntimeError):
     """Raised by Reranker implementations on unrecoverable HTTP / network
@@ -235,8 +237,10 @@ class LocalOmlxReranker:
     """Local cross-encoder via omlx-server's Cohere-style /v1/rerank
     endpoint. Default model: `gte-reranker-modernbert-base-mlx`."""
 
-    DEFAULT_URL = "http://10.0.10.246:8000/v1/rerank"
-    DEFAULT_MODEL = "gte-reranker-modernbert-base-mlx"
+    # Resolved from the central endpoint registry (env-overridable);
+    # default is the Mini-hosted oMLX ModernBERT reranker.
+    DEFAULT_URL = _endpoint("rerank").rerank_url
+    DEFAULT_MODEL = _endpoint("rerank").model
     name = "omlx"
 
     def __init__(

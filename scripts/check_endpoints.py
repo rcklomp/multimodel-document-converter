@@ -2,7 +2,7 @@
 """Health probe for every configured model endpoint + Qdrant.
 
 One command to see what's alive across the distributed stack (GX10 / M5 /
-Mini). Reads the single source of truth in `mmrag_v2.config.endpoints`, so
+Mini). Reads the single source of truth in `mmrag_v2.endpoints`, so
 it always reflects the real configuration (incl. env overrides).
 
     python scripts/check_endpoints.py
@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from mmrag_v2.config.endpoints import all_endpoints  # noqa: E402
+from mmrag_v2.endpoints import all_endpoints  # noqa: E402
 
 QDRANT_URL = "http://localhost:6333"
 
