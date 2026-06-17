@@ -53,7 +53,11 @@ The one open retrieval problem is the ~6% of queries that never retrieve the rig
 - **Chaubal-type code residual** (REPL/notebook transcripts + engine token corruption):
   fullwidth scrub shipped; de-LaTeX `\(\equiv\)` + CJK strip DEFERRED (need a trustworthy
   code-fidelity measure first).
-- **Code books mostly NOT ingested**, so code retrieval is essentially unmeasured.
+- **Code books mostly NOT ingested**, so code retrieval is essentially unmeasured. The R3
+  code-router gap is diagnosed (LOG 2026-06-11): the fix is a post-extraction quality-flag
+  re-extraction lane (degraded code -> re-do that page via the Qwen lane), NOT a router tweak;
+  not yet built. The doc-level `ProfileClassifier` profile is also dropped at the
+  `mmrag_v3.extract(path)` seam, so the engine routes code-vs-table blind.
 - **No omission-sensitive labelled GT for the internal classes** (German/Dutch/automotive) -
   OmniDocBench is EN-only; the deep, deferred measurement gap.
 

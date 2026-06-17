@@ -1501,6 +1501,59 @@ Lessons / dead-ends:
 
 ---
 
+## 2026-06-11 - R3 code-router gap: 3 distinct causes; the lever is the post-extraction quality flag, NOT the router  `[Method][Architecture][Lessons]`
+
+(Folded in 2026-06-17 from the standalone `docs/FINDINGS_R3_ROUTER_DIAGNOSIS.md`, now removed.)
+
+Triggered by the Phase 5 full-corpus run: code-heavy books fail the R3 code-indentation
+gate (`QA_FAIL`, "degraded code indentation") on cleanly-extracted (`degraded=0`) output.
+The obvious read - "the 0.10 monospace router threshold is wrong, lower it" - is WRONG. The
+router is sound; the failure decomposes into three distinct causes, only one an unaddressed gap.
+(Offline analysis: PyMuPDF page signals + the in-tree router functions; no inference server.)
+
+**Production routing (MineruQwenHybridEngine, router.py:383+).** Per page: `mono_ratio >= 0.10`
+-> Qwen (code); ELIF `page_has_code_block` AND NOT `page_has_table` -> Qwen (diluted code block);
+ELSE -> MinerU. Two font-based code signals, the second table-guarded (Qwen empties dense tables).
+
+**The three causes (measured):**
+
+| doc | pages | code pages | residual code->MinerU | reason |
+|---|--:|--:|--:|---|
+| FluentPython | 766 | 450 | 11 (1.4%) | font-blind text |
+| PythonDistilled | 1411 | 341 | 2 (0.1%) | font-blind text |
+| HarryPotter (prose) | 327 | 0 | 0 | (no over-trigger) |
+| **C++ Manual (R3-FAIL)** | 148 | **0 by text** | **148 (100%)** | **image-only scan** |
+
+1. **Dilution - ALREADY FIXED.** Monospace code block whose page-average ratio is pulled <0.10
+   by surrounding prose. `page_has_code_block` (>=4 contiguous lines each >=0.6 mono) recovers
+   these (FluentPython: 456 pages caught), table-guarded. Was the first thing to "fix" - already there.
+2. **Font-blind text code - TINY residual.** Code in a font not in `MONO_FONT_TOKENS` -> both font
+   signals read 0. Measured 11 FluentPython + 2 PythonDistilled pages (~1% of code pages). A
+   font-independent content detector (indentation + code punctuation + keywords) catches them at
+   0% prose false-positive (HarryPotter 0, Grundlagen 0). Small, optional.
+3. **Image-only scanned code - THE REAL GAP.** The C++ manual is 100% image-only (0 text chars/page,
+   full-page image). NO text layer -> every font-based signal is blind by construction -> all pages
+   to MinerU -> MinerU's 1.2B OCR mangles indentation (R3 0.44). A threshold tweak can't touch this -
+   there are no glyphs to weigh.
+
+**The fix (the lever):** post-extraction quality-flag re-extraction, NOT a better pre-flight router.
+The R3 metric ALREADY detects degraded code after extraction (it is what fails these docs). Wire that
+flag to a bounded re-extraction of the flagged page(s) through the Qwen code lane, accept the better of
+the two. No new routing signal, no per-page image classifier - reuses the existing R3 detector as
+trigger + existing Qwen lane as specialist. Fixes both the image-only scan (cause 3) and the font-blind
+residual (cause 2) for free (both surface as the same post-extraction R3 signal). This is
+`PLAN_EXTRACTION_FIDELITY_V1` Section 5.4 / charter 4.3 "action-on-flag specialist re-extraction" made
+concrete. (NOTE 2026-06-17: this is the same lever re-derived from scratch during the code-book trial -
+see the reliability lesson; reading THIS would have grounded it immediately, though today's framing goes
+one level deeper: the doc-level ProfileClassifier already labels these `technical_manual` but that profile
+is dropped at the `mmrag_v3.extract(path)` seam, so the engine routes blind.)
+
+**What NOT to do:** do NOT lower the 0.10 threshold (calibrated: AIOS non-code <=0.02, code 0.19-0.98;
+lowering floods Qwen with prose, does nothing for the image-only case). Do NOT route all image-only pages
+to Qwen (most scans are prose/forms where MinerU is right). The lever is the post-extraction quality flag.
+
+---
+
 ## 2026-06-14 - WS3 render-tail PROVEN: cap1600 is BEST on the dense academic class, the n=1 break did not generalize  `[Results][Decision][Lessons]`
 
 The 2026-06-10 sweep left I6 "CONFIRMED for one page class" - cap1600 catastrophically
