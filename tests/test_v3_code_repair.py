@@ -122,6 +122,29 @@ def test_table_guard_allows_swap_when_table_preserved(stub_fitz, monkeypatch):
     assert out.metadata.extra["extraction_code_repaired_pages"] == 1
 
 
+def test_no_swap_when_vlm_drops_surrounding_prose(stub_fitz, monkeypatch):
+    # DEFECT 1 (adversarial): VLM fixes the code but sheds the page's prose. The
+    # content-preservation guard must refuse the swap rather than lose paragraphs.
+    prose = "This is a long paragraph of explanatory prose. " * 40  # ~1900 chars
+    doc = _doc([_page(1, [_el(_FLAT), _el(prose)])])
+    _patch_vlm(monkeypatch, {1: _page(1, [_el(_NESTED)])})  # better code, prose gone
+    out = processor._repair_degraded_code(doc, "d.pdf")
+    assert out.metadata.extra["extraction_code_repaired_pages"] == 0
+    assert any((e.content or "").startswith("This is a long") for e in out.pages[0].elements)
+
+
+def test_no_swap_when_vlm_empties_table_cells(stub_fitz, monkeypatch):
+    # DEFECT 2 (adversarial): same table COUNT but gutted cells must not pass.
+    doc = _doc([_page(1, [_el(_FLAT), _el("r1c1|r1c2|r1c3|r2c1|r2c2|r2c3", ElementType.TABLE)])])
+    _patch_vlm(monkeypatch, {1: _page(1, [_el(_NESTED), _el("", ElementType.TABLE)])})
+    out = processor._repair_degraded_code(doc, "d.pdf")
+    assert out.metadata.extra["extraction_code_repaired_pages"] == 0
+    assert any(
+        e.type == ElementType.TABLE and (e.content or "").strip()
+        for e in out.pages[0].elements
+    )
+
+
 def test_clean_code_page_not_flagged(stub_fitz, monkeypatch):
     called = []
     monkeypatch.setattr(processor, "extract_page_vlm",

@@ -422,14 +422,35 @@ def _code_page_score(page) -> "tuple[int, int]":
     return judge, fail
 
 
-def _page_table_count(page) -> int:
-    """Number of TABLE elements on a page — the table-guard signal for the swap.
+def _page_table_chars(page) -> int:
+    """Total TABLE cell-text on a page — the table-guard signal for the swap.
 
     MinerU is the table specialist; Qwen can EMPTY a dense table (the very reason
-    the default route is a per-page hybrid, not pure VLM). A flagged page that mixes
-    code with a table must NOT trade its MinerU table for repaired code, so a swap
-    is refused when the VLM re-extraction drops a table the primary had."""
-    return sum(1 for e in page.elements if e.type == ElementType.TABLE)
+    the default route is a per-page hybrid, not pure VLM). Counting TABLE *elements*
+    is not enough: Qwen can return the same number of tables with gutted cells. A
+    swap is refused unless the VLM page carries at least as much table cell-text as
+    the primary, so repaired code never costs a MinerU table's data."""
+    return sum(
+        len((e.content or "").strip()) for e in page.elements if e.type == ElementType.TABLE
+    )
+
+
+def _page_noncode_chars(page) -> int:
+    """Content chars of NON-code elements (prose, captions, table cells) on a page.
+
+    The repair targets CODE, so the swap guard must not reduce the page's non-code
+    text — that is the documented Qwen-under-extraction failure (sheds paragraphs /
+    empties tables). Code chars are EXCLUDED: a repaired listing legitimately grows
+    (restored indentation) or shrinks (de-duplicated mangle), so guarding on total
+    chars would block real repairs. Guarding non-code chars isolates the loss we
+    actually fear from the change we want."""
+    total = 0
+    for e in page.elements:
+        c = e.content or ""
+        if has_code_structure(c) and is_judgeable(c):
+            continue
+        total += len(c.strip())
+    return total
 
 
 def _repair_degraded_code(doc: UniversalDocument, path: str) -> UniversalDocument:
@@ -442,9 +463,16 @@ def _repair_degraded_code(doc: UniversalDocument, path: str) -> UniversalDocumen
     extra = doc.metadata.extra
     if extra.get("extraction_engine") == "vlm_native":
         return doc  # the VLM is already the specialist; nothing to escalate to
+    # Every degraded-code page is flagged for the gate AND attempted: one bounded
+    # VLM call each (never loops). NOTE: a page the default hybrid already routed to
+    # the Qwen specialist is indistinguishable here (MinerU and Qwen both stamp
+    # ExtractionMethod.VLM), so it may be re-extracted once — wasted but harmless,
+    # the swap guard below rejects any non-improvement. Cost scales with the count
+    # of degraded code pages; on a heavily-mangled book that is one call per page.
     flagged = [i for i, p in enumerate(doc.pages) if _code_page_score(p)[1] > 0]
     extra["extraction_quality_risk_pages"] = len(flagged)
     if not flagged:
+        extra["extraction_code_repaired_pages"] = 0
         return doc
 
     try:
@@ -481,17 +509,31 @@ def _repair_degraded_code(doc: UniversalDocument, path: str) -> UniversalDocumen
                     doc.pages[i].page_number, exc,
                 )
                 continue
-            pj, pf = _code_page_score(doc.pages[i])
+            primary = doc.pages[i]
+            pj, pf = _code_page_score(primary)
             vj, vf = _code_page_score(vpage)
-            # Swap ONLY when the VLM page carries content, has strictly more
-            # correctly-indented judgeable code than the primary, AND does not drop a
-            # table the primary extracted (the table-guard: never trade a MinerU table
-            # for repaired code). Never trade a page's text for an empty re-extraction.
+            # Swap ONLY when the VLM page has strictly more correctly-indented
+            # judgeable code than the primary AND preserves the rest of the page:
+            #   * keeps_text  — does not shed the surrounding prose (Qwen can
+            #     under-extract dense pages; a code win must not cost paragraphs);
+            #   * keeps_tables — does not drop or gut a MinerU table's cell-text.
+            # These guards close the "repair empties the page" failure the per-page
+            # hybrid exists to prevent. ``0.8`` allows benign re-formatting drift
+            # (repaired indentation usually ADDS chars) while blocking real loss.
             better_code = (vj - vf) > (pj - pf)
-            keeps_tables = _page_table_count(vpage) >= _page_table_count(doc.pages[i])
-            if _page_content_chars(vpage) > 0 and better_code and keeps_tables:
+            keeps_text = _page_noncode_chars(vpage) >= 0.8 * _page_noncode_chars(primary)
+            keeps_tables = _page_table_chars(vpage) >= _page_table_chars(primary)
+            if better_code and keeps_text and keeps_tables:
                 doc.pages[i] = vpage
                 repaired += 1
+            elif better_code and not (keeps_text and keeps_tables):
+                logger.warning(
+                    "code-repair: page %d VLM fixed code but would lose content "
+                    "(non-code text %d->%d, table_chars %d->%d); keeping primary",
+                    primary.page_number,
+                    _page_noncode_chars(primary), _page_noncode_chars(vpage),
+                    _page_table_chars(primary), _page_table_chars(vpage),
+                )
     finally:
         fdoc.close()
 
