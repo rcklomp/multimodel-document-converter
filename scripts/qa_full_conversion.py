@@ -1051,10 +1051,19 @@ def _print_extraction_provenance(metadata: dict[str, Any]) -> None:
             return f"{n}/{total} ({100.0 * n / total:.1f}%)"
         return f"{n}"
 
+    quality_risk = int(metadata.get("extraction_quality_risk_pages") or 0)
+    code_repaired = int(metadata.get("extraction_code_repaired_pages") or 0)
+
     print(f"engine: {engine}")
     print(f"ladder fallback: {fallback or 'none (primary engine served every page)'}")
     print(f"ladder-served pages (primary could not serve): {_frac(degraded)}")
     print(f"ladder-recovered pages: {_frac(recovered)}")
+    # §5.4 consumer 1 outcome: R3-flagged degraded-code pages and how many the
+    # bounded VLM re-extraction repaired. A flagged page that was NOT repaired ships
+    # with degraded code (visible here; the offline R3 gate is the hard authority).
+    print(f"code-degraded pages flagged (R3): {_frac(quality_risk)}")
+    print(f"  of those, VLM-repaired: {code_repaired}/{quality_risk}"
+          if quality_risk else "  of those, VLM-repaired: 0/0")
     print()
 
 

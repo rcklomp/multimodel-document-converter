@@ -1044,6 +1044,11 @@ class IngestionMetadata(BaseModel):
     extraction_fallback: Optional[str] = None
     extraction_degraded_pages: Optional[int] = None  # pages the primary left degraded
     extraction_recovered_pages: Optional[int] = None  # degraded pages the ladder recovered
+    # PLAN_EXTRACTION_FIDELITY_V1 §5.4 consumer 1: pages the R3 detector flagged as
+    # degraded code (present-but-flattened) and how many were repaired by the
+    # bounded VLM re-extraction. ADVISORY observability; absent (None) on legacy.
+    extraction_quality_risk_pages: Optional[int] = None  # R3-flagged degraded-code pages
+    extraction_code_repaired_pages: Optional[int] = None  # of those, VLM-repaired
 
 
 # ============================================================================

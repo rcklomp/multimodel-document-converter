@@ -1937,6 +1937,8 @@ class BatchProcessor:
             acc["fallback"] = fallback
         acc["degraded"] += int(extra.get("extraction_degraded_pages") or 0)
         acc["recovered"] += int(extra.get("extraction_recovered_pages") or 0)
+        acc["quality_risk"] += int(extra.get("extraction_quality_risk_pages") or 0)
+        acc["code_repaired"] += int(extra.get("extraction_code_repaired_pages") or 0)
 
     def _process_single_batch(
         self,
@@ -2115,6 +2117,8 @@ class BatchProcessor:
             "fallback": None,
             "degraded": 0,
             "recovered": 0,
+            "quality_risk": 0,
+            "code_repaired": 0,
         }
 
         # Workstream B: legacy callers still get the cheap pre-pass here.
@@ -2924,6 +2928,8 @@ class BatchProcessor:
                 extraction_fallback=self._extraction_provenance.get("fallback"),
                 extraction_degraded_pages=self._extraction_provenance.get("degraded"),
                 extraction_recovered_pages=self._extraction_provenance.get("recovered"),
+                extraction_quality_risk_pages=self._extraction_provenance.get("quality_risk"),
+                extraction_code_repaired_pages=self._extraction_provenance.get("code_repaired"),
             )
             f.write(json.dumps(meta_record.model_dump(mode="json"), ensure_ascii=False) + "\n")
 

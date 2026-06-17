@@ -46,6 +46,8 @@ class _Acc:
             "fallback": None,
             "degraded": 0,
             "recovered": 0,
+            "quality_risk": 0,
+            "code_repaired": 0,
         }
 
 
@@ -70,6 +72,8 @@ def test_single_healthy_batch_records_engine_no_fallback():
         "fallback": None,
         "degraded": 0,
         "recovered": 0,
+        "quality_risk": 0,
+        "code_repaired": 0,
     }
 
 
@@ -92,6 +96,8 @@ def test_counts_sum_and_first_engine_wins_across_batches():
                 "extraction_fallback": "docling_fast",
                 "extraction_degraded_pages": 2,
                 "extraction_recovered_pages": 1,
+                "extraction_quality_risk_pages": 5,
+                "extraction_code_repaired_pages": 4,
             }
         )
     )
@@ -100,6 +106,9 @@ def test_counts_sum_and_first_engine_wins_across_batches():
     assert prov["fallback"] == "docling_fast"
     assert prov["degraded"] == 2
     assert prov["recovered"] == 1
+    # §5.4 consumer 1 counts also sum across batches.
+    assert prov["quality_risk"] == 5
+    assert prov["code_repaired"] == 4
 
 
 def test_most_severe_ladder_tier_is_kept():
@@ -120,6 +129,8 @@ def test_missing_extra_keys_preserve_defaults():
         "fallback": None,
         "degraded": 0,
         "recovered": 0,
+        "quality_risk": 0,
+        "code_repaired": 0,
     }
 
 
@@ -135,12 +146,16 @@ def test_schema_carries_extraction_provenance_fields():
         extraction_fallback="docling_fast",
         extraction_degraded_pages=3,
         extraction_recovered_pages=2,
+        extraction_quality_risk_pages=5,
+        extraction_code_repaired_pages=4,
     )
     dumped = m.model_dump(mode="json")
     assert dumped["extraction_engine"] == "mineru"
     assert dumped["extraction_fallback"] == "docling_fast"
     assert dumped["extraction_degraded_pages"] == 3
     assert dumped["extraction_recovered_pages"] == 2
+    assert dumped["extraction_quality_risk_pages"] == 5
+    assert dumped["extraction_code_repaired_pages"] == 4
 
 
 def test_schema_defaults_to_none_on_legacy_output():
@@ -150,6 +165,8 @@ def test_schema_defaults_to_none_on_legacy_output():
     assert dumped["extraction_fallback"] is None
     assert dumped["extraction_degraded_pages"] is None
     assert dumped["extraction_recovered_pages"] is None
+    assert dumped["extraction_quality_risk_pages"] is None
+    assert dumped["extraction_code_repaired_pages"] is None
 
 
 # --------------------------------------------------------------------------- #
@@ -162,6 +179,8 @@ def test_qa_advisory_surfaces_engine_and_ladder_fraction(capsys):
             "extraction_fallback": "docling_fast",
             "extraction_degraded_pages": 2,
             "extraction_recovered_pages": 1,
+            "extraction_quality_risk_pages": 5,
+            "extraction_code_repaired_pages": 4,
             "total_pages": 10,
         }
     )
@@ -172,6 +191,8 @@ def test_qa_advisory_surfaces_engine_and_ladder_fraction(capsys):
     assert "docling_fast" in captured
     assert "2/10 (20.0%)" in captured  # ladder-served fraction
     assert "ladder-recovered pages: 1/10" in captured
+    assert "5/10 (50.0%)" in captured  # §5.4 code-degraded flagged fraction
+    assert "VLM-repaired: 4/5" in captured
 
 
 def test_qa_advisory_handles_legacy_output_without_stamps(capsys):

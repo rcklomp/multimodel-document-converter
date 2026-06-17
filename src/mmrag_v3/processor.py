@@ -33,11 +33,17 @@ from mmrag_v2.universal.intermediate import (
     UniversalDocument,
     UniversalPage,
 )
+from mmrag_v2.validators.code_quality import (
+    has_code_structure,
+    indentation_ok,
+    is_judgeable,
+)
 
 from .engines.docling_fast import DoclingFastEngine
 from .engines.mineru_native import MineruNativeEngine
 from .engines.router import HybridEngine, MineruQwenHybridEngine
-from .engines.vlm_native import VlmNativeEngine
+from .engines.vlm_native import VlmNativeEngine, extract_page_vlm
+from .engines.vlm_provider import VlmInfraError
 
 logger = logging.getLogger(__name__)
 
@@ -259,7 +265,7 @@ def _indices_with_text_layer(path: str, doc: UniversalDocument, indices: list) -
         fdoc.close()
 
 
-def extract(file_path: Union[str, "os.PathLike[str]"]) -> UniversalDocument:
+def _extract_fail_closed(file_path: Union[str, "os.PathLike[str]"]) -> UniversalDocument:
     """Run the Phase C pipeline and return a v2-UIR document, FAIL-CLOSED.
 
     Routing precedence (first match wins):
@@ -383,3 +389,131 @@ def extract(file_path: Union[str, "os.PathLike[str]"]) -> UniversalDocument:
         doc, engine=engine_name, fallback=fallback,
         degraded=len(degraded), recovered=recovered,
     )
+
+
+# --- Conversion-time code-fidelity repair (PLAN §5.4 consumer 1) -------------
+# The fail-closed ladder above guarantees no page that HAS text is zeroed, but it
+# is blind to a page whose text is PRESENT yet DEGRADED: MinerU-1.2B reads a code
+# page set in a proportional font (font-blind to the router, so it never escalates
+# to the VLM) and flattens the indentation / mangles tokens (Devlin: R3 0.45). The
+# code IS recoverable — a vision model reads the rendered page regardless of font.
+# This pass reuses the SAME R3 detector that the audit gate uses to FAIL these docs
+# (mmrag_v2.validators.code_quality) as the trigger, and the EXISTING Qwen VLM lane
+# as the specialist: each flagged page gets ONE bounded re-extraction attempt and
+# the better-of-the-two is kept (never loops; PLAN §5.4 "never primary-equivalent"
+# is satisfied because a page only swaps when it is STRICTLY better). It is a
+# best-effort correction, NOT a reliability tier: if the VLM is unconfigured or
+# down, the flagged-but-degraded primary page ships as-is (already has its text).
+
+
+def _code_page_score(page) -> "tuple[int, int]":
+    """(judgeable_code_elements, of_those_failing_indentation) for one UIR page.
+
+    Per-element (a code listing is one layout element), matching the audit gate's
+    per-chunk population. ``fail > 0`` marks a page whose code was extracted with
+    destroyed nesting — the exact R3 signal that hard-fails these docs offline."""
+    judge = fail = 0
+    for e in page.elements:
+        c = e.content or ""
+        if has_code_structure(c) and is_judgeable(c):
+            judge += 1
+            if not indentation_ok(c):
+                fail += 1
+    return judge, fail
+
+
+def _page_table_count(page) -> int:
+    """Number of TABLE elements on a page — the table-guard signal for the swap.
+
+    MinerU is the table specialist; Qwen can EMPTY a dense table (the very reason
+    the default route is a per-page hybrid, not pure VLM). A flagged page that mixes
+    code with a table must NOT trade its MinerU table for repaired code, so a swap
+    is refused when the VLM re-extraction drops a table the primary had."""
+    return sum(1 for e in page.elements if e.type == ElementType.TABLE)
+
+
+def _repair_degraded_code(doc: UniversalDocument, path: str) -> UniversalDocument:
+    """Re-extract R3-flagged code pages through the VLM specialist; keep the better.
+
+    Stamps ``extraction_quality_risk_pages`` (flagged) and
+    ``extraction_code_repaired_pages`` (swapped) on ``doc.metadata.extra``. No-op
+    when the served engine is already the VLM, when nothing is flagged, or when the
+    VLM lane is unreachable (the flag count is still recorded for the gate)."""
+    extra = doc.metadata.extra
+    if extra.get("extraction_engine") == "vlm_native":
+        return doc  # the VLM is already the specialist; nothing to escalate to
+    flagged = [i for i, p in enumerate(doc.pages) if _code_page_score(p)[1] > 0]
+    extra["extraction_quality_risk_pages"] = len(flagged)
+    if not flagged:
+        return doc
+
+    try:
+        import fitz
+
+        vlm = VlmNativeEngine()
+        fdoc = fitz.open(path)
+    except Exception as exc:  # noqa: BLE001 — no VLM / unreadable file: ship flagged primary
+        logger.warning(
+            "code-repair: cannot start repair (%s) for %s; %d flagged page(s) ship as-is",
+            type(exc).__name__, path, len(flagged),
+        )
+        extra["extraction_code_repaired_pages"] = 0
+        return doc
+
+    repaired = 0
+    try:
+        for i in flagged:
+            pidx = doc.pages[i].page_number - 1
+            if not (0 <= pidx < fdoc.page_count):
+                continue
+            try:
+                vpage = extract_page_vlm(vlm, fdoc[pidx], doc.pages[i].page_number)
+            except VlmInfraError:
+                # Transport/endpoint outage: abort the repair pass (do not hammer a
+                # down server once per flagged page). Remaining pages ship flagged.
+                logger.warning(
+                    "code-repair: VLM infrastructure failure; aborting repair pass for %s", path
+                )
+                break
+            except Exception as exc:  # noqa: BLE001 — semantic failure: keep this primary page
+                logger.warning(
+                    "code-repair: VLM failed on page %d (%s); keeping primary",
+                    doc.pages[i].page_number, exc,
+                )
+                continue
+            pj, pf = _code_page_score(doc.pages[i])
+            vj, vf = _code_page_score(vpage)
+            # Swap ONLY when the VLM page carries content, has strictly more
+            # correctly-indented judgeable code than the primary, AND does not drop a
+            # table the primary extracted (the table-guard: never trade a MinerU table
+            # for repaired code). Never trade a page's text for an empty re-extraction.
+            better_code = (vj - vf) > (pj - pf)
+            keeps_tables = _page_table_count(vpage) >= _page_table_count(doc.pages[i])
+            if _page_content_chars(vpage) > 0 and better_code and keeps_tables:
+                doc.pages[i] = vpage
+                repaired += 1
+    finally:
+        fdoc.close()
+
+    extra["extraction_code_repaired_pages"] = repaired
+    if repaired:
+        logger.info(
+            "code-repair: re-extracted %d/%d flagged page(s) via VLM for %s",
+            repaired, len(flagged), path,
+        )
+    return doc
+
+
+def extract(file_path: Union[str, "os.PathLike[str]"]) -> UniversalDocument:
+    """Public entry: fail-closed extraction, then conversion-time code repair.
+
+    1. ``_extract_fail_closed`` — the three-tier reliability ladder (guarantees no
+       textful page is zeroed; stamps the served engine + fallback tier).
+    2. ``_repair_degraded_code`` — PLAN §5.4 consumer 1: any page whose code was
+       extracted with destroyed indentation (the R3 gate's own signal) gets ONE
+       bounded VLM re-extraction; the better-of-the-two is kept. Profile-independent
+       and per-page, so it fixes prose-dominant code books (Devlin classifies
+       ``digital_literature``, not ``technical_manual``) that doc-level routing misses.
+    """
+    doc = _extract_fail_closed(file_path)
+    return _repair_degraded_code(doc, str(file_path))
