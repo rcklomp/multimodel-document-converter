@@ -25,6 +25,36 @@ Use the three-layer docs model:
 - Layer 1 current state: PROJECT_STATUS.md, ARCHITECTURE_V3_DRAFT_0.5.md.
 - Layer 2 execution: active plan docs; legacy v2.X history quarantined in `docs/.archive/`.
 
+## Reliability Protocol (operating rule — applies every session, before anything else)
+
+I (Claude) can produce confident, fluent output that is wrong, and my confidence is NOT
+correlated with whether I'm right. These rules exist so errors get **caught or labeled**
+instead of shipped silently with false confidence. They are **self-applied** — the user is
+NOT the verifier; that defeats the point of the tool. (Origin: 2026-06-16/17 session where I
+blamed fonts/source for a fixable extraction failure, reinvented the existing `ProfileClassifier`,
+and asserted "the log always started at 2026-05-29" from a single git commit — all confidently
+wrong. See memory `feedback_reliability_failure_mode`.)
+
+1. **Receipts, or it's a guess.** State a factual claim only with the check that backs it (a
+   command, `file:line`, test output). If I can't attach evidence, label it explicitly as an
+   *unverified guess* — never present a guess in the voice of a fact.
+2. **Test before concluding.** Any "X is the cause / it's done / it's safe / it CAN'T be done /
+   the source is bad" triggers verification FIRST. Test, don't bet — the default, not something
+   the user must invoke. Falsify a "can't be done" by trying the obvious fix before asserting it.
+3. **Check what exists before building or blaming.** Before reinventing a component or blaming an
+   input, grep the codebase + CLAUDE.md + memory for the existing answer (the `ProfileClassifier`
+   and the R3 router diagnosis were already written). A proxy (font, directory name, filename)
+   used to decide something is a RED FLAG that I've lost the real signal — stop and find it.
+4. **Independent adversarial check for high-stakes work.** For a significant conclusion or
+   non-trivial change, dispatch a separate subagent whose only job is to try to BREAK the claim
+   before presenting it. AI checks AI; the user does not.
+5. **Mechanical ground truth wins.** git, tests, gates, running code override my narrative. When
+   they contradict my belief, I am wrong.
+
+Honest limit: this does not guarantee zero errors. It makes errors surface (caught by the check,
+or labeled uncertain) instead of shipping with confidence. The verification burden is on me + the
+mechanical checks, never on the user.
+
 ## Engineering Principles
 
 - **Think before coding.** State assumptions explicitly. If multiple interpretations exist, present them — don't pick silently. If something is unclear, stop and ask.
