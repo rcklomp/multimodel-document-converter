@@ -3237,3 +3237,34 @@ irrelevant to fusion (an earlier deferral on that basis was wrong - corrected); 
 alignment verified 20/20. Deferred: the full-corpus reconciliation (~32 docs + authoritative
 production-set enumeration). The permanent network fix is the VPN split-tunnel (exclude
 `10.0.10.0/24`). See `HANDOVER_PHASE5_REEXTRACT_REPORT.md` for the full runbook.
+
+## R3 Accept-With-Remark Band (2026-06-17, user-signed)
+**Decision:** For code-bearing documents, R3 code-indentation fidelity in the band
+`[0.65, 0.90)` is **accepted but flagged with a remark** (advisory `WARN`,
+non-blocking) instead of hard-failing. Below `0.65` the original Policy B
+density-gated hard-fail still applies; at/above `0.90` is a clean `PASS`. Implemented
+as `DEFAULT_ACCEPT_FIDELITY_FLOOR = 0.65` in
+`src/mmrag_v2/validators/code_quality.py::gate_verdict`.
+
+**Rationale:**
+- The `0.90` clean floor is the right bar for code a reader/agent would reproduce
+  verbatim, and nearly every monospace code book already clears it (Ayeva 0.95,
+  Sekar 0.94, AIOS 1.0). It stays the standard.
+- The hard exception is reflowed **proportional-font** code (e.g. Devlin sets code in
+  Times New Roman): MinerU flattens it and even the VLM-specialist repair (Fix b,
+  `mmrag_v3.processor`) only reaches ~0.69. Hard-failing such a book discards
+  otherwise-correct, retrievable content — code-query retrieval on Devlin is 5/5
+  top-10 at R3 0.69. Token correctness (the retrieval-relevant property) is largely
+  recovered by the repair even where indentation is not.
+- So a code book between 0.65 and 0.90 is ACCEPTED and SHIPPED, with the quality drop
+  made visible (the `ACCEPT-WITH-REMARK` line in `qa_conversion_audit`, plus the
+  `extraction_quality_risk_pages` / `extraction_code_repaired_pages` header stamps).
+
+**Anti-weakening:** this is NOT lowering the gate to make a run pass — `< 0.65`
+non-incidental broken code still hard-fails, and the `0.90` clean floor is unchanged.
+It is an explicit, user-signed acceptance band for a known content class.
+
+**Follow-up (deferred, when time allows):** focused tests on these accept-band
+exceptions to measure how NOTICEABLE the realised-quality drop is in practice
+(retrieval correctness + downstream verbatim-reproduction fidelity), to decide
+whether 0.65 is the right floor or whether targeted repair effort is warranted.

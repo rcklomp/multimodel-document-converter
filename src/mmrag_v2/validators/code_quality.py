@@ -82,6 +82,13 @@ DEFAULT_MIN_JUDGEABLE = 3
 # code; a sub-floor failure is advisory (per-chunk flag + WARN) so a prose
 # document's good content is not discarded over one or two mangled snippets (F3).
 DEFAULT_HARDFAIL_DENSITY = 0.04
+# Accept-with-remark floor (docs/DECISIONS.md "R3 Accept-With-Remark Band",
+# user-signed 2026-06-17). For code-bearing docs, indentation fidelity in
+# [ACCEPT_FLOOR, INDENT_FIDELITY_FLOOR) is ACCEPTED but flagged with a remark
+# (advisory WARN, non-blocking) instead of hard-failing: a code book degrades
+# gracefully and the realised-quality drop is tracked for targeted follow-up.
+# Below this floor the original density-gated hard-fail still applies.
+DEFAULT_ACCEPT_FIDELITY_FLOOR = 0.65
 
 
 def has_code_structure(text: str) -> bool:
@@ -261,24 +268,34 @@ def gate_verdict(
     fidelity_floor: float = DEFAULT_INDENT_FIDELITY_FLOOR,
     min_judgeable: int = DEFAULT_MIN_JUDGEABLE,
     hardfail_density: float = DEFAULT_HARDFAIL_DENSITY,
+    accept_floor: float = DEFAULT_ACCEPT_FIDELITY_FLOOR,
 ) -> str:
     """Policy B verdict for the R3 code-indentation gate.
 
     Returns one of:
-        "pass" — fidelity at/above floor, or too few judgeable chunks to gate.
-        "warn" — fidelity below floor but judgeable-code density below the
-                 hard-fail floor (incidental code → per-chunk flag + WARN).
-        "fail" — fidelity below floor AND judgeable-code density at/above the
-                 hard-fail floor (non-incidental broken code → hard-fail).
+        "pass" — fidelity at/above the clean floor, or too few judgeable chunks.
+        "warn" — accepted but flagged. Two cases: (a) the accept-with-remark band,
+                 fidelity in [accept_floor, fidelity_floor) (user-signed 2026-06-17:
+                 a code book degrades gracefully rather than hard-failing, and the
+                 quality drop is tracked for targeted follow-up); or (b) fidelity
+                 below accept_floor but judgeable-code density below the hard-fail
+                 floor (incidental code).
+        "fail" — fidelity below accept_floor AND judgeable-code density at/above the
+                 hard-fail floor (non-incidental, genuinely broken code).
 
     The metric (fidelity) is reported identically in every case; only the
-    document-level escalation differs. This is strictly more enforcement than
-    the legacy dead gate, not a relaxation. See the DECISIONS.md entry.
+    document-level escalation differs. See the DECISIONS.md entries "R3
+    Code-Indentation Gate Redesign" and "R3 Accept-With-Remark Band".
     """
     if cq.n_judgeable < min_judgeable:
         return "pass"
     if cq.indentation_fidelity >= fidelity_floor:
         return "pass"
+    # Accept-with-remark band: code present, fidelity below the clean floor but at or
+    # above the accept floor — accepted (non-blocking WARN), drop tracked.
+    if cq.indentation_fidelity >= accept_floor:
+        return "warn"
+    # Below the accept floor: genuinely broken. Hard-fail only when non-incidental.
     if cq.judgeable_density >= hardfail_density:
         return "fail"
     return "warn"

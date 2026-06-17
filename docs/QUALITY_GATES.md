@@ -11,22 +11,31 @@
 ## R3 — Code-Indentation Fidelity (redesigned 2026-06-05)
 
 R3 ("indentation fidelity + syntax preservation") is enforced by the shared
-metric in `scripts/_code_quality.py`, imported by `qa_conversion_audit.py` (the
-authoritative HARD gate) and `qa_semantic_fidelity.py` (advisory). It measures
+metric in `src/mmrag_v2/validators/code_quality.py` (single source of truth;
+`scripts/_code_quality.py` is a re-export shim), imported by `qa_conversion_audit.py`
+(the authoritative HARD gate), `qa_semantic_fidelity.py` (advisory), and the
+conversion-time code-repair pass in `mmrag_v3.processor`. It measures
 code over the FULL population (`modality=="code"` + legacy `modality=="text"`
 code), POSITIVELY identifies code (keywords / code punctuation / `>>>` REPL) so
 extractor-mislabelled equations are excluded, and scores indentation ONLY on
 judgeable code (multi-line `:`-suite / brace blocks; flat/single-statement and
 REPL transcripts are exempt — no nesting to assess).
 
-**Fidelity floor:** `0.90` (unchanged). **Gate verdict (Policy B):** at/above the
-floor, or fewer than 3 judgeable chunks → PASS. Below the floor → each degraded
-chunk is flagged, and the document hard-fails ONLY when judgeable-code density
-`>= 0.04`; below that density it is an advisory WARN (code is always minority
-content, so a prose document is not discarded over incidental mangled code).
+**Clean-pass floor:** `0.90` (unchanged). **Accept-with-remark floor:** `0.65`
+(user-signed 2026-06-17). **Gate verdict (Policy B):**
+- fidelity `>= 0.90`, or fewer than 3 judgeable chunks → **PASS**.
+- fidelity in `[0.65, 0.90)` → **WARN, accepted with a remark** (non-blocking): a
+  code-bearing doc degrades gracefully rather than hard-failing, and the
+  realised-quality drop is tracked for targeted follow-up. This band is accepted
+  regardless of density.
+- fidelity `< 0.65` → each degraded chunk is flagged, and the document hard-**FAIL**s
+  ONLY when judgeable-code density `>= 0.04`; below that density it is an advisory
+  WARN (code is always minority content, so a prose doc is not discarded over
+  incidental mangled code).
+
 The verdict is INDEPENDENT of `content_type`. Full rationale, anti-weakening
 note, and the rejected alternatives: `docs/DECISIONS.md` "R3 Code-Indentation
-Gate Redesign" and `docs/PLAN_R3_CODE_GATE_REDESIGN.md`.
+Gate Redesign" + "R3 Accept-With-Remark Band".
 
 ## Fidelity Outcome Gate + Quality-Risk Proxies (ADVISORY; F5)
 

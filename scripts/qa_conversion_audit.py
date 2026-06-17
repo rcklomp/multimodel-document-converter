@@ -844,10 +844,21 @@ def print_report(r: AuditResult, path: Path) -> bool:
         for cid in cq.degraded_ids[:5]:
             r.add_issue("CODE", f"degraded code indentation: {cid}")
     elif indent_verdict == "warn":
-        code_warnings.append(
-            f"indent_fidelity={cq.indentation_fidelity:.2f} (<{indent_floor:.2f}; "
-            f"density {cq.judgeable_density:.3f} below hard-fail floor)"
-        )
+        accept_floor = code_quality_mod.DEFAULT_ACCEPT_FIDELITY_FLOOR
+        if cq.indentation_fidelity >= accept_floor:
+            # Accept-with-remark band (DECISIONS.md "R3 Accept-With-Remark Band",
+            # 2026-06-17): code-bearing doc accepted despite sub-0.90 fidelity; the
+            # realised-quality drop is tracked for targeted follow-up.
+            code_warnings.append(
+                f"indent_fidelity={cq.indentation_fidelity:.2f} ACCEPT-WITH-REMARK "
+                f"(R3 in [{accept_floor:.2f},{indent_floor:.2f}); code-quality drop "
+                f"tracked for targeted follow-up)"
+            )
+        else:
+            code_warnings.append(
+                f"indent_fidelity={cq.indentation_fidelity:.2f} (<{accept_floor:.2f}; "
+                f"density {cq.judgeable_density:.3f} below hard-fail floor)"
+            )
         for cid in cq.degraded_ids[:5]:
             r.add_issue("CODE", f"degraded code indentation (advisory): {cid}")
 
