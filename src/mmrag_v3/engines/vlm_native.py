@@ -40,6 +40,7 @@ from mmrag_v2.universal.intermediate import (
     create_page,
 )
 
+from ._deadline import deadline_seconds, run_with_deadline
 from .vlm_provider import (
     VlmProvider,
     VlmProviderConfig,
@@ -409,11 +410,26 @@ def extract_page_vlm(
     render_dpi = getattr(vlm_engine, "render_dpi", PAGE_RENDER_DPI)
     image_bytes, pixel_w, pixel_h = render_page_png(page, render_dpi)
     prompt = _build_schema_prompt(pixel_w, pixel_h)
-    payload = _describe_and_parse(
-        provider,
-        image_bytes,
-        prompt,
-        max_tokens=estimate_output_budget(page),
+    # Hard wall-clock backstop: ``requests`` timeout is not a reliable TOTAL bound
+    # (a stalled socket hung a page for 3h, 2026-06-18). Cap the whole per-page VLM
+    # call just above the configured request timeout; on overrun raise
+    # DeadlineExceeded, which the caller treats as a per-page failure (demote /
+    # fail-closed), never an infinite block. See engines/_deadline.py.
+    _req_timeout = getattr(getattr(provider, "config", None), "timeout_seconds", 600.0)
+    try:
+        _req_timeout = float(_req_timeout)
+    except (TypeError, ValueError):
+        _req_timeout = 600.0
+    _deadline = deadline_seconds("VLM_PAGE_DEADLINE_SECONDS", _req_timeout)
+    payload = run_with_deadline(
+        lambda: _describe_and_parse(
+            provider,
+            image_bytes,
+            prompt,
+            max_tokens=estimate_output_budget(page),
+        ),
+        _deadline,
+        label=f"vlm_page_{page_number}",
     )
     return VlmNativeEngine._page_from_payload(
         payload,

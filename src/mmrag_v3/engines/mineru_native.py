@@ -65,6 +65,7 @@ from mmrag_v2.universal.table_markdown import rows_to_markdown_grid
 
 # Single-source the degenerate-repeat collapse (a unit repeated >= 8x in a
 # row) from the VLM adapter so both vision-native engines share one detector.
+from ._deadline import deadline_seconds, run_with_deadline
 from .vlm_native import _collapse_degenerate_repeats
 
 logger = logging.getLogger(__name__)
@@ -143,6 +144,7 @@ _DEFAULT_CONFIDENCE = 0.9
 # intermittent ``broadcast_shapes`` 500 (fcd4207), not a mask. Retry lives in the
 # ENGINE so it PRECEDES any cross-engine move in ``processor.extract()`` - the
 # fail-closed ladder still engages once these bounded attempts are exhausted.
+MINERU_HTTP_TIMEOUT = 600  # MinerUClient http_timeout default; deadline backstop basis
 MINERU_MAX_RETRIES = 3  # mirrors VlmProviderConfig.max_retries
 MINERU_RETRY_BACKOFF_SECONDS = 2.0  # mirrors VlmProviderConfig.retry_backoff_seconds
 # A read timeout means the server is generating but too slowly; a retry just burns
@@ -498,7 +500,16 @@ def extract_page_mineru(
     callers off the engine's private surface (``_render_page``, ``client``).
     """
     image, pixel_w, pixel_h = mineru_engine._render_page(page)
-    elements = mineru_engine.two_step_extract(image)
+    # Hard wall-clock backstop (see engines/_deadline.py): the MinerU HTTP client's
+    # http_timeout is not a reliable TOTAL bound on a stalled socket, so cap the
+    # whole per-page call. On overrun raise DeadlineExceeded -> the fail-closed
+    # ladder recovers the page, never an infinite block.
+    _deadline = deadline_seconds("MINERU_PAGE_DEADLINE_SECONDS", float(MINERU_HTTP_TIMEOUT))
+    elements = run_with_deadline(
+        lambda: mineru_engine.two_step_extract(image),
+        _deadline,
+        label=f"mineru_page_{page_number}",
+    )
     return mineru_page_to_universal_page(list(elements), page_number, (pixel_w, pixel_h))
 
 
