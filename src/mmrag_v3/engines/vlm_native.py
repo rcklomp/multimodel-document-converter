@@ -40,7 +40,7 @@ from mmrag_v2.universal.intermediate import (
     create_page,
 )
 
-from ._deadline import deadline_seconds, run_with_deadline
+from ._deadline import DeadlineExceeded, deadline_seconds, run_with_deadline
 from .vlm_provider import (
     VlmProvider,
     VlmProviderConfig,
@@ -52,6 +52,18 @@ logger = logging.getLogger(__name__)
 
 
 PAGE_RENDER_DPI = 200
+
+
+def _stall_retry_count() -> int:
+    """Retries for a stalled (deadline-exceeded) VLM page — re-issued on a FRESH
+    connection, since the server serves new requests instantly. Default 2."""
+    raw = (os.environ.get("VLM_PAGE_STALL_RETRIES") or "").strip()
+    if raw:
+        try:
+            return max(0, int(raw))
+        except ValueError:
+            pass
+    return 2
 
 # Longest-side render cap (px) for the VLM lane — INTERIM default per
 # DECISIONS.md "cap1600 interim render setting" (2026-06-10). The uncapped
@@ -421,16 +433,39 @@ def extract_page_vlm(
     except (TypeError, ValueError):
         _req_timeout = 600.0
     _deadline = deadline_seconds("VLM_PAGE_DEADLINE_SECONDS", _req_timeout)
-    payload = run_with_deadline(
-        lambda: _describe_and_parse(
-            provider,
-            image_bytes,
-            prompt,
-            max_tokens=estimate_output_budget(page),
-        ),
-        _deadline,
-        label=f"vlm_page_{page_number}",
-    )
+    # Stall recovery (2026-06-18): mlx_vlm.server intermittently receives a request
+    # in full but its handler deadlocks BEFORE generation (TCP-proven: server Recv-Q=0
+    # request delivered, Send-Q=0 no reply, MLX threadpool idle, generation lock free)
+    # while serving every OTHER request instantly. So a stalled call is NOT a dead
+    # server: abandon it and retry on a FRESH connection (new requests.post), which
+    # the evidence shows succeeds. Only after exhausting retries do we surface the
+    # stall to the caller (router demotes the page to MinerU). Override count via
+    # ``VLM_PAGE_STALL_RETRIES`` (default 2 retries = 3 attempts).
+    _stall_retries = _stall_retry_count()
+    _budget = estimate_output_budget(page)
+    attempt = 0
+    while True:
+        try:
+            payload = run_with_deadline(
+                lambda: _describe_and_parse(provider, image_bytes, prompt, max_tokens=_budget),
+                _deadline,
+                label=f"vlm_page_{page_number}_try{attempt + 1}",
+            )
+            break
+        except DeadlineExceeded:
+            attempt += 1
+            if attempt > _stall_retries:
+                logger.warning(
+                    "VLM page %d stalled on all %d attempt(s) (server handler wedged "
+                    "per-request); surfacing to caller for fallback",
+                    page_number, _stall_retries + 1,
+                )
+                raise
+            logger.warning(
+                "VLM page %d stalled (no response in %.0fs) but the server is healthy "
+                "for fresh requests; retrying on a NEW connection (attempt %d/%d)",
+                page_number, _deadline, attempt + 1, _stall_retries + 1,
+            )
     return VlmNativeEngine._page_from_payload(
         payload,
         fallback_page_number=page_number,

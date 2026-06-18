@@ -50,6 +50,57 @@ def test_deadline_seconds_resolution(monkeypatch):
     assert deadline_seconds("VLM_PAGE_DEADLINE_SECONDS", 600.0) == 90.0
 
 
+def test_vlm_page_retries_on_stall_then_succeeds(tmp_path, monkeypatch):
+    """A stalled VLM page is re-issued on a FRESH connection (the server serves new
+    requests instantly); recovery keeps the page on the VLM instead of demoting."""
+    import fitz
+    from types import SimpleNamespace
+    from mmrag_v3.engines import vlm_native as vn
+
+    calls = {"n": 0}
+
+    def fake_rwd(fn, seconds, label="call"):
+        calls["n"] += 1
+        if calls["n"] <= 2:  # first two attempts stall
+            raise DeadlineExceeded("stall")
+        return {"elements": []}  # third attempt (fresh connection) succeeds
+
+    monkeypatch.setattr(vn, "run_with_deadline", fake_rwd)
+    monkeypatch.setattr(vn.VlmNativeEngine, "_page_from_payload",
+                        staticmethod(lambda payload, **k: "PAGE_OK"))
+    doc = fitz.open(); doc.new_page()
+    eng = SimpleNamespace(_provider=SimpleNamespace(config=SimpleNamespace(timeout_seconds=10)),
+                          render_dpi=72)
+    out = vn.extract_page_vlm(eng, doc[0], 1)
+    doc.close()
+    assert out == "PAGE_OK"
+    assert calls["n"] == 3  # 2 stalls + 1 success (default 2 retries)
+
+
+def test_vlm_page_stall_exhausts_retries_then_raises(tmp_path, monkeypatch):
+    """If every attempt stalls (genuinely input-specific wedge), the stall surfaces
+    after the bounded retries so the caller can demote — never an infinite loop."""
+    import fitz
+    from types import SimpleNamespace
+    from mmrag_v3.engines import vlm_native as vn
+
+    monkeypatch.setenv("VLM_PAGE_STALL_RETRIES", "1")  # 2 attempts total
+    calls = {"n": 0}
+
+    def always_stall(fn, seconds, label="call"):
+        calls["n"] += 1
+        raise DeadlineExceeded("stall")
+
+    monkeypatch.setattr(vn, "run_with_deadline", always_stall)
+    doc = fitz.open(); doc.new_page()
+    eng = SimpleNamespace(_provider=SimpleNamespace(config=SimpleNamespace(timeout_seconds=10)),
+                          render_dpi=72)
+    with pytest.raises(DeadlineExceeded):
+        vn.extract_page_vlm(eng, doc[0], 1)
+    doc.close()
+    assert calls["n"] == 2  # 1 retry => 2 attempts, then raise
+
+
 def test_black_hole_socket_does_not_hang_forever():
     """The exact 3h-hang shape: a server that ACCEPTS the connection but never
     sends a byte. ``requests.post`` would block in readinto; the deadline frees us."""
