@@ -1,8 +1,20 @@
 # Project Status
 
-Last updated: 2026-06-15 (branch `feat/omnidocbench-phase0`, not pushed). Two things
-closed this cycle: the residual-burndown plan, and a measured RAG/retrieval investigation
-that reframed where the real bottleneck is.
+Last updated: 2026-06-18 (branch `feat/omnidocbench-phase0`, pushed). Code-book coverage
+expanded (14 code books converted + ingested; production dense ~37k / sparse ~26k pts),
+plus extraction-reliability hardening and a code-fidelity audit (see the deferred note).
+
+> **DEFERRED to post-first-production-release (user-directed 2026-06-18):** the VLM
+> (mlx_vlm.server / Qwen3-VL-8B on the M5) is the recurring reliability/quality liability -
+> intermittent per-request handler wedge (mitigated by a client hard deadline +
+> retry-on-fresh-connection, `4bfd7c8`/`b8160aa`), non-deterministic double-transcription of
+> page furniture into code chunks (mitigated by `_strip_code_furniture`), and weaker
+> non-Python (C/C++) code fidelity (unaddressed). Tackle the VLM properly (server
+> logging+watchdog / more robust serving path / model+prompt work) as an improvement only
+> once the first production-level release is achieved. Details in the open-issues memory backlog.
+
+Earlier (2026-06-15) two things closed: the residual-burndown plan, and a measured
+RAG/retrieval investigation that reframed where the real bottleneck is.
 
 ## Current state (2026-06-15) - residual burndown DONE; RAG measured; the lever is "feed top-10", not conversion
 

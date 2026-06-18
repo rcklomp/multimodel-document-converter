@@ -54,3 +54,17 @@ def test_interior_bare_number_not_adjacent_to_furniture_is_kept():
 def test_all_furniture_collapses_to_empty():
     raw = "66\n                               Chapter 3  Building applications on Kubernetes"
     assert strip(raw).strip() == ""
+
+
+def test_strip_is_idempotent():
+    # Removing a header can expose a new edge page-number, so the stripper iterates
+    # to a fixpoint; a second application must be a no-op.
+    raw = ("Listing 3.2 Caption\n"
+           "Chapter 3  Building applications\n"
+           "50\n"
+           "FROM python:3.10-slim-buster\n"
+           "51")
+    once = strip(raw)
+    assert strip(once) == once
+    assert "FROM python:3.10-slim-buster" in once
+    assert "Chapter 3" not in once and "Listing 3.2" not in once

@@ -858,7 +858,19 @@ def _strip_code_furniture(content: str) -> str:
     """Drop page-furniture lines (running headers, captions, edge page numbers) that
     the extractor inlined into a code element. Lines with any code signal are kept
     verbatim; indentation of real code is untouched. Lossless (furniture is captured
-    separately as its own element)."""
+    separately as its own element). Iterates to a fixpoint: removing a header can
+    expose a new edge page-number, so one pass is not idempotent."""
+    prev = None
+    cur = content
+    for _ in range(5):  # converges in <=2 passes in practice; bounded for safety
+        prev = cur
+        cur = _strip_code_furniture_once(prev)
+        if cur == prev:
+            break
+    return cur
+
+
+def _strip_code_furniture_once(content: str) -> str:
     lines = content.split("\n")
     is_furn = []
     for ln in lines:
