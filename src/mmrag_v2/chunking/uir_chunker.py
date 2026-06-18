@@ -832,6 +832,60 @@ def _table_element_to_uirchunk(
     )
 
 
+# Page furniture the VLM intermittently transcribes INTO a code element (it also
+# emits it as its own heading/caption element, so removing it here is LOSSLESS):
+# running headers ("[50] Chapter 3 Building ..."), publisher listing captions
+# ("Listing 3.2 ...", "Figure/Table N.N ..."), and bare page-number lines at the
+# block edges or adjacent to such furniture. Proven 2026-06-18 (Hao p71: the header
+# appeared both as a heading chunk AND inlined in the code chunk). Engine-agnostic.
+_FURNITURE_LINE_RE = re.compile(
+    r"^(?:\d{1,4}\s+)?(?:chapter|part|section|appendix|unit|module)\s+\d+\b"
+    r"|^(?:listing|figure|table|example)\s+\d+(?:\.\d+)?\b",
+    re.IGNORECASE,
+)
+_BARE_PAGENO_RE = re.compile(r"^\d{1,4}$")
+# A line carrying any of these is real code and is NEVER stripped, even if it also
+# matches a furniture pattern (defensive: a string/comment mentioning "Chapter").
+_CODE_SIGNAL_RE = re.compile(
+    r"[=(){}\[\];]|->|=>|::|\bself\.|\.\w+\(|#include|std::|"
+    r"^\s*(?:def|class|import|from|return|if|elif|else|for|while|with|try|except|"
+    r"finally|raise|yield|assert|print|lambda|async|await|int|void|char|struct|"
+    r"public|private|func|var|const|let)\b"
+)
+
+
+def _strip_code_furniture(content: str) -> str:
+    """Drop page-furniture lines (running headers, captions, edge page numbers) that
+    the extractor inlined into a code element. Lines with any code signal are kept
+    verbatim; indentation of real code is untouched. Lossless (furniture is captured
+    separately as its own element)."""
+    lines = content.split("\n")
+    is_furn = []
+    for ln in lines:
+        s = ln.strip()
+        if not s:
+            is_furn.append(False)
+            continue
+        if _CODE_SIGNAL_RE.search(s):
+            is_furn.append(False)
+            continue
+        is_furn.append(bool(_FURNITURE_LINE_RE.match(s)))
+    # Bare page-number lines are furniture only at a block edge or next to a header.
+    nonempty_idx = [i for i, ln in enumerate(lines) if ln.strip()]
+    edge = {nonempty_idx[0], nonempty_idx[-1]} if nonempty_idx else set()
+    for i, ln in enumerate(lines):
+        s = ln.strip()
+        if not s or is_furn[i] or not _BARE_PAGENO_RE.match(s):
+            continue
+        if _CODE_SIGNAL_RE.search(s):
+            continue
+        adj_furn = (i - 1 >= 0 and is_furn[i - 1]) or (i + 1 < len(lines) and is_furn[i + 1])
+        if i in edge or adj_furn:
+            is_furn[i] = True
+    cleaned = [ln for i, ln in enumerate(lines) if not is_furn[i]]
+    return "\n".join(cleaned)
+
+
 def _fence_code(content: str) -> str:
     """Wrap code in a Markdown fence (idempotent), engine-agnostically (F4).
 
@@ -865,7 +919,7 @@ def _code_element_to_uirchunk(
     pw, ph = _page_dims_px(page)
     return UIRChunk(
         modality=Modality.CODE,
-        content=_fence_code(element.content or ""),
+        content=_fence_code(_strip_code_furniture(element.content or "")),
         locator=Locator(
             type=LocatorType.BBOX,
             bbox=bbox,
