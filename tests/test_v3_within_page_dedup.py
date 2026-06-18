@@ -54,6 +54,29 @@ def test_exact_long_duplicates_on_page_are_collapsed():
     assert _contents(out) == [LONG, "distinct tail."]  # first kept, 2 dropped
 
 
+CODE = ("def best_promo(order):\n    "
+        '"""Select best discount available."""\n    '
+        "return max(promo(order) for promo in promos)  # long enough to exceed the floor")
+assert len(CODE) >= _DEDUP_MIN_CHARS
+
+
+def test_degenerate_code_duplication_on_page_is_collapsed():
+    # Fluent Python p214: the VLM emitted the same code block 90x. Dedup was
+    # TEXT-only, so they all survived. CODE is now deduped within a page too.
+    chunks = [_txt(CODE, 1, Modality.CODE) for _ in range(90)] + [
+        _txt("def other(x):\n    return x + 1  # a genuinely different code block here too", 1, Modality.CODE)
+    ]
+    out = _dedupe_within_page_text(chunks)
+    assert len(out) == 2  # 90 identical -> 1, plus the distinct block
+    assert out[0].content == CODE
+
+
+def test_distinct_code_on_page_is_preserved():
+    a = _txt("import os\nfrom pathlib import Path  # first distinct import block, long enough", 1, Modality.CODE)
+    b = _txt("import sys\nfrom typing import Any  # second distinct import block, long enough", 1, Modality.CODE)
+    assert len(_dedupe_within_page_text([a, b])) == 2
+
+
 def test_whitespace_variant_duplicates_collapse():
     spaced = LONG.replace(" ", "  ").replace("service", "service\n")
     out = _dedupe_within_page_text([_txt(LONG, 1), _txt(spaced, 1)])

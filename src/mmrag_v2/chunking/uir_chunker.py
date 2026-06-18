@@ -727,15 +727,18 @@ def _dedupe_within_page_text(chunks: List[UIRChunk]) -> List[UIRChunk]:
         text dupe is a hard fail - no length floor;
       * qa_full_conversion: whitespace-normalized dupes >= 120 chars.
     Dedup at the union: drop on an exact ``content.strip()`` match (any length)
-    OR a whitespace-normalized match >= ``_DEDUP_MIN_CHARS``. TEXT only;
-    IMAGE/TABLE/CODE/FORM, empty text, and cross-page repeats (headers/footers)
-    are untouched; order preserved.
+    OR a whitespace-normalized match >= ``_DEDUP_MIN_CHARS``. TEXT and CODE (the VLM
+    loops on dense CODE pages too - Fluent Python p214 emitted the same
+    ``def best_promo`` block 90x, surviving because dedup was TEXT-only); IMAGE/TABLE/
+    FORM, empty content, and cross-page repeats (headers/footers) are untouched. A
+    code book never legitimately repeats a 120+ char block within ONE page, so this
+    cannot drop real content; order preserved.
     """
     seen_exact: Dict[int, Set[str]] = {}
     seen_norm: Dict[int, Set[str]] = {}
     out: List[UIRChunk] = []
     for c in chunks:
-        if c.modality is not Modality.TEXT:
+        if c.modality not in (Modality.TEXT, Modality.CODE):
             out.append(c)
             continue
         stripped = (c.content or "").strip()
