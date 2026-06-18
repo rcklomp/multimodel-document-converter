@@ -47,16 +47,55 @@ import _code_quality as cq  # noqa: E402
 
 _MIN_SIG_LEN = 4  # stripped length below which a line is too trivial to attribute
 
-# Book callout markers appended to code lines, e.g. "...  # 1" or "...  # <3>".
-# Publishers (O'Reilly AsciiDoc) annotate listings this way; the repo source does
-# not, so they are book-vs-repo divergence, not extraction error. Normalizing them
-# is the honest move for an ABSOLUTE fidelity number (it does not change the
-# engine-comparative ranking, which is common-mode to all arms).
-_CALLOUT_RE = re.compile(r"\s*#\s*<?\d{1,3}>?\s*$")
+# Book callout markers appended to code lines, e.g. "...  # 1", "...  # <3>", or the
+# unicode circled forms O'Reilly/Packt use in print ("...  # ①"). The repo source
+# has none of these, so they are book-vs-repo divergence, not extraction error.
+# Normalizing them is the honest move for an ABSOLUTE fidelity number.
+_CIRCLED = "①-⑳❵-❿⓪⓵-⓾➀-➓"
+_CALLOUT_RE = re.compile(
+    r"\s*#\s*<?\d{1,3}>?\s*$"            # "# 3" / "# <3>"
+    r"|\s*#?\s*[" + _CIRCLED + r"]+\s*$"  # "# ①" / trailing "①" (no #)
+)
 
 
 def _norm_callout(line: str, strip: bool) -> str:
     return _CALLOUT_RE.sub("", line) if strip else line
+
+
+# True-corruption refinement: a code chunk can carry NON-code lines (interleaved
+# prose, page furniture like "12 | Chapter 1: ..."). Those are never in a .py repo,
+# so counting them as "content loss" overstates corruption. ``_is_code_line`` keeps
+# only plausibly-code lines so the refined denominator isolates token corruption
+# (a code line absent even de-indented = real OCR/engine corruption or edition diff,
+# not prose). Conservative: keep anything with code punctuation/keywords; drop
+# multi-word natural-language sentences and page furniture.
+_FURNITURE_RE = re.compile(
+    r"^\s*\d{1,4}\s*[|│｜]"               # "12 | ..." running header/footer
+    r"|^(?:chapter|figure|table|example|listing|part|section)\b",
+    re.IGNORECASE,
+)
+_CODE_SIGNAL_RE = re.compile(
+    r"[=(){}\[\]:;]|->|=>|::|\bself\.|\.\w+\("
+    r"|^\s*(?:def|class|import|from|return|if|for|while|with|try|except|finally|"
+    r"elif|else|raise|yield|assert|lambda|async|await|print|pass|break|continue)\b"
+)
+
+
+def _is_code_line(stripped: str) -> bool:
+    s = stripped
+    if not s:
+        return False
+    if _FURNITURE_RE.match(s):
+        return False
+    if _CODE_SIGNAL_RE.search(s):
+        return True
+    # No code signal: treat a multi-word sentence as prose (exclude).
+    alpha_words = [w for w in s.split() if w.replace("'", "").isalpha()]
+    if len(alpha_words) >= 5:
+        return False
+    if len(alpha_words) >= 3 and s[-1:] in ".!?":
+        return False
+    return True
 
 
 def _iter_chunks(jsonl: Path):
@@ -108,9 +147,13 @@ def score(
     d_hit = 0
     repl_chunks = 0
     code_chunks = 0
-    # per-line provenance for the artifact: (status, line)
+    # Refined (code-shaped lines only) — isolates TRUE token corruption.
+    csig = 0
+    cv_hit = 0
+    cd_hit = 0
+    noncode_lines = 0
     examples_indent_loss: list[str] = []
-    examples_content_loss: list[str] = []
+    examples_content_loss: list[str] = []  # code-shaped only (true corruption)
 
     for ch in _iter_chunks(jsonl):
         if not cq.is_code_population(ch):
@@ -134,11 +177,22 @@ def score(
                 d_hit += 1
             if d and not v and len(examples_indent_loss) < 25:
                 examples_indent_loss.append(line)
-            if not d and len(examples_content_loss) < 25:
-                examples_content_loss.append(line)
+            # Refined pass: only score plausibly-code lines.
+            if _is_code_line(s):
+                csig += 1
+                if v:
+                    cv_hit += 1
+                if d:
+                    cd_hit += 1
+                if not d and len(examples_content_loss) < 25:
+                    examples_content_loss.append(line)
+            else:
+                noncode_lines += 1
 
     vf = v_hit / sig if sig else 0.0
     df = d_hit / sig if sig else 0.0
+    cvf = cv_hit / csig if csig else 0.0
+    cdf = cd_hit / csig if csig else 0.0
     return {
         "code_chunks": code_chunks,
         "repl_chunks_excluded": repl_chunks,
@@ -147,6 +201,13 @@ def score(
         "deindented_fidelity": df,
         "indentation_gap": df - vf,
         "content_loss": 1.0 - df,
+        # refined (code-shaped lines only)
+        "codeline_lines": csig,
+        "noncode_lines_excluded": noncode_lines,
+        "codeline_verbatim": cvf,
+        "codeline_deindented": cdf,
+        "codeline_indentation_gap": cdf - cvf,
+        "codeline_corruption": 1.0 - cdf,
         "_indent_loss_examples": examples_indent_loss,
         "_content_loss_examples": examples_content_loss,
     }
@@ -181,11 +242,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     print(f"  deindented_fidelity (content only):   {r['deindented_fidelity']:.3f}")
     print(f"  indentation_gap (silent killer):      {r['indentation_gap']:.3f}")
     print(f"  content_loss (corruption/off-repo):   {r['content_loss']:.3f}")
+    print(f"  --- refined: code-shaped lines only (non-code excluded: {r['noncode_lines_excluded']}) ---")
+    print(f"  codeline_verbatim   (content+indent): {r['codeline_verbatim']:.3f}")
+    print(f"  codeline_deindented (content only):   {r['codeline_deindented']:.3f}")
+    print(f"  codeline_indentation_gap:             {r['codeline_indentation_gap']:.3f}")
+    print(f"  codeline_corruption (TRUE token loss):{r['codeline_corruption']:.3f}  "
+          f"(over {r['codeline_lines']} code lines)")
     if args.examples:
         print("  --- indentation-loss lines (content right, indent wrong) ---")
         for ln in r["_indent_loss_examples"]:
             print(f"    |{ln}")
-        print("  --- content-loss lines (absent even de-indented) ---")
+        print("  --- TRUE corruption candidates (code-shaped, absent even de-indented) ---")
         for ln in r["_content_loss_examples"]:
             print(f"    |{ln}")
     return 0
