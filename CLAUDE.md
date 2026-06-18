@@ -14,7 +14,9 @@ This file provides guidance to Claude Code when working with this repository.
 7. `docs/TESTING.md` — test conventions.
 8. `docs/QUALITY_GATES.md` — gate definitions.
 9. `docs/ARCHITECTURE.md` — v2.X pipeline architecture (production baseline being evolved).
-10. **Committed-Truth convention** — repo-integrity guards in `tests/test_repo_integrity.py` (its docstring documents G1–G6 + author conventions); the contract is AGENTS.md `AGENT-INTEGRITY-01` (assert outcomes, not proxies).
+10. **Committed-Truth convention** — repo-integrity guards in `tests/test_repo_integrity.py` (its docstring documents G1–G7 + author conventions); the contract is AGENTS.md `AGENT-INTEGRITY-01` (assert outcomes, not proxies).
+11. `docs/paper/FINDINGS_DIGEST.md` — **anti-circle cold-start index** (`## SETTLED` / `## DEAD ENDS` / `## OPEN`). Read it before proposing any fix, component, or plan (per `AGENT-PRECEDENT-01`); its structure is G7-enforced so a "condensing edit" cannot silently neuter it.
+12. `docs/DECISIONS.md` opens with a **"Settled Precedents"** index pointing at the load-bearing anti-circle entries — the map into the ~3300-line append-only log.
 
 All v2.14–v2.16 history, telemetry, calibration reports, and legacy
 quality snapshots are quarantined in `docs/.archive/` and blocked by
@@ -45,6 +47,11 @@ wrong. See memory `feedback_reliability_failure_mode`.)
    input, grep the codebase + CLAUDE.md + memory for the existing answer (the `ProfileClassifier`
    and the R3 router diagnosis were already written). A proxy (font, directory name, filename)
    used to decide something is a RED FLAG that I've lost the real signal — stop and find it.
+   This is the named contract `AGENT-PRECEDENT-01` in `AGENTS.md`: before proposing a substantive
+   fix/build/plan, read `docs/paper/FINDINGS_DIGEST.md` (`## SETTLED` / `## DEAD ENDS`) and cite
+   the prior `DECISIONS.md` heading / `FINDINGS_LOG` date / `file:line` that established the
+   current state, OR state explicitly that this is new ground. Re-proposing a measured-and-rejected
+   dead-end without new evidence (a different corpus / model / a measured reversal) is a defect.
 4. **Independent adversarial check for high-stakes work.** For a significant conclusion or
    non-trivial change, dispatch a separate subagent whose only job is to try to BREAK the claim
    before presenting it. AI checks AI; the user does not.

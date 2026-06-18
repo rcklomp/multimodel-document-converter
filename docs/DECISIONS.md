@@ -1,5 +1,72 @@
 # Decisions and Guardrails
 
+> **Read this index first (added 2026-06-18, `AGENT-PRECEDENT-01`).** The full
+> log below is append-only and ~3300 lines. This curated index points at the
+> load-bearing entries that prevent re-litigation circles — the questions an
+> agent is most likely to re-ask and re-derive. For the one-page cold-start
+> summary (SETTLED / DEAD ENDS / OPEN), read `docs/paper/FINDINGS_DIGEST.md`
+> first; for measured dead-ends with data, `docs/paper/FINDINGS_LOG.md`. This
+> index is a map, not a substitute for the entries it names.
+
+## Settled Precedents (anti-circle index)
+
+**Process discipline (the rules of HOW we decide):**
+- **No gate weakening to make a failing run pass** — profile-scoping or
+  sparseness-conditioning a threshold so a failing doc passes is forbidden;
+  the only close paths are fix-the-defect or defer-with-sign-off. *See the
+  heading of the same name (2026-05-09).*
+- **Retrieval-Value Test** — when a page's content adds no retrieval value
+  (cosmetic artifacts, boilerplate, publisher ads), omit + mark advisory
+  rather than backfill a chunk to satisfy a mechanical page-coverage gate.
+  *See the heading of the same name (2026-05-11).*
+- **Structural Pathology over Semantic Profiling** — the PDF extraction
+  pathway is decided by structural-integrity flags, NOT by semantic profile.
+  *See the heading of the same name (v2.5.0).*
+
+**Architecture choices (do NOT rebuild these):**
+- **Shared PDF Extraction Plan** — Docling options/converter construction is
+  centralized in `DoclingPdfAdapter`; nothing else may instantiate them.
+- **Selective Code Enrichment Lane** — `do_code_enrichment` is gated on a
+  cheap code-evidence pass, never on `has_encoding_corruption` alone.
+- **v3.0 Phase C — Vision-Native Extraction** — the default route is
+  `MineruQwenHybridEngine` when `MINERU_ENDPOINT` is set; `ElementType`
+  stays 3-value (code/form smuggle-and-promote, NOT an enum widening).
+- **MinerU+Qwen-for-code hybrid is the default extraction route** —
+  MinerU does tables/layout, Qwen does code; neither alone passes both.
+- **VLM code/form: smuggle-and-promote** — do NOT widen `ElementType`.
+- **Spatial proximity boundary-repair bridge DEPRECATED for VLM-native**
+  — geometric merging over-merges distinct concepts on VLM output; the
+  heuristic was reverted (F12). `_apply_spatial_refiner` (AGENT-SPATIAL-20)
+  is a SEPARATE live path and is unaffected.
+
+**Measured-and-rejected dead ends (do NOT re-propose without new evidence):**
+- **OCR / `do_ocr=True` as the default** — its 0.301/0.563 ceiling drove the
+  V3 pivot (FINDINGS_LOG 2026-06-09). Re-defaulting to it is a regression.
+- **HyDE bridging (v2.15 Phase 1) — CLOSED as a dead lever** (+0.4pp agg,
+  −20pp on the targeted minority-language subset).
+- **Query-rewriting for the omlx −12pp deficit (v2.16 Phase 6) — CLOSED**
+  (2nd dead lever; the deficit is multi-factor).
+- **Dynamic top-k pre-flight (v2.16 Phase 5) — KILLed** (0 PASS baseline).
+- **Image re-read (v2.16 Phase 7) — KILLed by default** (no opt-in earned).
+- **ColPali page-level visual retrieval — FAILED at page granularity**
+  (FINDINGS_LOG: C-spike; redirect was VLM-native extraction).
+- **Filtering empty image chunks to help retrieval — measured +0.0pp.**
+- **Sorting reranker output by `rerank_score` — measured −10pp.**
+- **Online FP8 quantization of the VLM — 1.73× speedup on garbage output**
+  (FINDINGS_LOG F4; the canonical "assert OUTCOMES, not PROXIES" example).
+- **Hybrid/BM25 as the retrieval default for THIS corpus** — no gain over
+  plain top-10 and regresses German docs (the BM25-index persistence fix
+  was a real bug fix, but hybrid is not needed for the answer win).
+
+**Carry-forward / deferral discipline:**
+- Deferred v2.16 heuristics and skipped tests are **DISPOSITIONED**
+  (restored / deleted-by-decision / deferred-with-trigger), never
+  "permanent" — see `docs/V3_EXECUTION_MANDATE.md` §3 and the registry at
+  `docs/V3_DEFERRED_TESTS.md`. Re-opening one requires naming its un-defer
+  trigger.
+
+---
+
 ## OCR Cascade Order
 **Decision:** Docling → Tesseract → Doctr for layout-aware OCR.
 **Rationale:** Keeps Docling layout awareness first, with progressive fallback when confidence is low.

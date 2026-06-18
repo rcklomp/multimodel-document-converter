@@ -76,3 +76,32 @@ The one open retrieval problem is the ~6% of queries that never retrieve the rig
   FIDELITY on failing classes; residual burndown (green-gate integrity + named residuals); WS3 cap1600 proven.
 - **2026-06-15:** REFRAME to a retrieval bar; measured the RAG → conversion isn't the bottleneck;
   answer lever = feed top-10; three clever levers rejected by measurement; 6% doc-recall is next.
+
+---
+
+## How to maintain this doc (the contract behind it)
+
+This digest is the project's **anti-circle cold-start index** — the one page an
+agent reads first to avoid re-litigating settled decisions and re-proposing
+measured-and-rejected approaches. Its function lives entirely in the three
+load-bearing sections above: **SETTLED**, **DEAD ENDS**, **OPEN**.
+
+- **It is not a Layer-0 contract that wins conflicts.** The conflict-resolution
+  authority is `docs/V3_EXECUTION_MANDATE.md`; this doc does not override it. It
+  is *required-present* knowledge (G2-enforced tracked) referenced by
+  `AGENT-PRECEDENT-01` in `AGENTS.md` and Read-First #11 in `CLAUDE.md`.
+- **The three section headers + the back-references to `FINDINGS_LOG.md`,
+  `docs/PROJECT_STATUS.md`, and `docs/DECISIONS.md` are mechanically enforced**
+  by `tests/test_repo_integrity.py::test_g7_findings_digest_anti_circle_structure_intact`
+  (guard G7). A "condensing edit" that folds them into prose will fail the suite
+  instead of silently neutering the anti-circle function.
+- **Update trigger.** When an approach is measured-and-rejected OR a decision is
+  settled: add it here (`## DEAD ENDS` / `## SETTLED`), append the full data to
+  `docs/paper/FINDINGS_LOG.md`, and add the load-bearing entry to the "Settled
+  Precedents" index at the top of `docs/DECISIONS.md`. Re-opening a SETTLED or
+  DEAD-END item requires **new evidence** (a different corpus / model / a measured
+  reversal of the prior result) — per `AGENT-PRECEDENT-01`, restating the old
+  argument is a defect, not a proposal.
+- **Keep it a digest.** If an item's full rationale does not fit one line, the
+  line points at the DECISIONS heading or the FINDINGS_LOG date; the detail lives
+  there, not here. This file is the index; the others are the source.

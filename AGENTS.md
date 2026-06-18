@@ -32,7 +32,7 @@ Companion docs:
 8. **AGENT-STATUS-01:** There is no "in-progress," "rebooked," or "implemented but not validated." A phase either passes the gates in `docs/V3_EXECUTION_MANDATE.md` or it has failed.
 9. **AGENT-DOCS-01:** Keep documentation minimal and indexed. Do not proliferate overlapping *contract* docs. The governance SET is the Layer-0 contracts listed in `docs/README.md`; `docs/V3_EXECUTION_MANDATE.md` is the **conflict-resolution authority** within it (it wins on conflict), NOT the only governance file. Plans (`docs/PLAN_*`), audits (`docs/AUDIT_*`), and execution docs are not governance docs and may be added freely.
 10. **AGENT-TEST-01 (Test Contract Integrity):** Negative tests, regression tests, and acceptance fixtures are executable requirements. Do not remove, loosen, rewrite, or reframe their core assertions to match the current implementation. If such a test fails, fix the implementation or stop and document why the requirement is wrong. Any expectation change requires explicit rationale and must make the contract clearer or stricter, not easier. **Sanctioned exception (removal/skip):** a test may be deleted or skipped ONLY when the behavior it pins was intentionally removed via a `docs/DECISIONS.md` entry, or registered as a dispositioned deferral per `docs/V3_EXECUTION_MANDATE.md` §3 (owner + un-defer trigger, listed in `docs/V3_DEFERRED_TESTS.md`). Skipping or deleting a test to make a failing implementation pass is never allowed - that is the hollow-green failure (#7) the integrity guards exist to stop.
-11. **AGENT-INTEGRITY-01 (Committed-Truth):** The repo-integrity guards in `tests/test_repo_integrity.py` are executable contracts: they assert against the *committed* tree (`git ls-files`), because a clean clone of `HEAD` — not your dirty working tree — is the truth. Do not weaken them; that test's module docstring documents the guards (G1–G6) and the author conventions they enforce (forward-ref annotation, `SUPERSEDED … by <doc>` markers placed *at the conflict*, `V3_DEFERRED` skip-registration). Corollary no guard can mechanize: **quality gates must assert OUTCOMES, not PROXIES** — verify the content the pipeline must produce, never a cheaper correlated signal (the online-FP8 "1.73× speedup on blank-page garbage" trap; `docs/paper/FINDINGS_LOG.md` F4).
+11. **AGENT-INTEGRITY-01 (Committed-Truth):** The repo-integrity guards in `tests/test_repo_integrity.py` are executable contracts: they assert against the *committed* tree (`git ls-files`), because a clean clone of `HEAD` — not your dirty working tree — is the truth. Do not weaken them; that test's module docstring documents the guards (G1–G7) and the author conventions they enforce (forward-ref annotation, `SUPERSEDED … by <doc>` markers placed *at the conflict*, `V3_DEFERRED` skip-registration, the FINDINGS_DIGEST three-section structure). Corollary no guard can mechanize: **quality gates must assert OUTCOMES, not PROXIES** — verify the content the pipeline must produce, never a cheaper correlated signal (the online-FP8 "1.73× speedup on blank-page garbage" trap; `docs/paper/FINDINGS_LOG.md` F4).
 
 12. **AGENT-GATE-PROGRESSION (2026-06-08):** A content-quality signal enters the gate suite as an ADVISORY metric in `qa_semantic_fidelity.py`, calibrated on the crucible corpus with a frozen regression fixture under `tests/`. It is promoted to a HARD gate only after (a) the extraction path can pass it on the full corpus and (b) the threshold is shown stable across doc classes. HARD gates are reserved for deterministic schema invariants. No hard gate may be introduced that would be passed by *weakening extraction* rather than improving it (the no-weaken rule from the other direction). See `docs/PLAN_GATE_QUALITY_V1.md`.
 
@@ -130,17 +130,22 @@ disposition sections — they shift every cycle and are not stable
 contracts. Don't duplicate that state here; it goes stale by next
 cycle-open.
 
-### Recently Completed (Do Not Reopen)
-1. `--force-ocr` override is implemented.
-2. QA strictness knobs are implemented (`--qa-tolerance`, `--qa-noise-allowance`, `--strict-qa`).
-3. `--profile-override` is implemented (debugging use only).
-4. `IngestionMetadata` record implemented (v2.6).
-5. Multi-profile smoke test + universal invariant checker implemented (`scripts/smoke_multiprofile.sh`, `scripts/qa_universal_invariants.py`).
-6. `digital_magazine` 18% token variance waiver retired — IMAGE-bbox-aware source text extraction brings all magazines under 10%.
-7. Docling upgrade 2.66.0 → 2.86.0 with picture classification and code/formula enrichment options.
-8. TOC-based heading hierarchy (PDF bookmarks + content-based magazine TOC).
-9. Output provenance (`pipeline_version`, `source_file_hash`, `config_hash`).
-10. 4 multimodal validation layers replacing heuristic-loop patching.
+### Settled work + dead ends (do NOT re-litigate / re-propose)
+
+The canonical "what is already settled and what has been measured-and-rejected"
+view lives in **`docs/paper/FINDINGS_DIGEST.md`** (`## SETTLED` and `##
+DEAD ENDS`). Read it at session start (it is in the Read-First set and
+G2-enforced as required-present). The load-bearing entries behind it are
+indexed at the top of `docs/DECISIONS.md` ("Settled Precedents"). This
+replaces the older v2.X-only "Recently Completed (Do Not Reopen)" list,
+which had drifted out of sync with the V3 era. Per `AGENT-PRECEDENT-01`,
+re-proposing a dead-end item without new evidence is a defect.
+
+The previously-inline v2.X completions (force-ocr, QA strictness knobs,
+profile-override, IngestionMetadata, multi-profile smoke, magazine waiver
+retirement, Docling 2.86 upgrade, TOC heading hierarchy, output provenance,
+4 multimodal validation layers) are all shipped and remain in force; their
+authoritative records are in `docs/DECISIONS.md` and `docs/paper/FINDINGS_LOG.md`.
 
 ---
 
