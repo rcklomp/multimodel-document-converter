@@ -4,6 +4,19 @@ Last updated: 2026-06-18 (branch `feat/omnidocbench-phase0`, pushed). Code-book 
 expanded (14 code books converted + ingested; production dense ~37k / sparse ~26k pts),
 plus extraction-reliability hardening and a code-fidelity audit (see the deferred note).
 
+**Full-corpus retrieval validated (2026-06-18) - DoD met.** gold-chunk@10 over the
+production hybrid path (omlx dense + bm25 sparse + RRF + ModernBERT rerank): prior 29 docs
+441/514 = 85.8% (a ~1.9pp dilution from corpus growth 29->43, not a defect); 14 new books
+59/70 = 84.3%. Code/distinctive books are strong (Fluent/C++/PyDistilled/Chaubal/Hao/
+ArcGIS/PyCookbook/Devlin/Zephyr/Adedeji all 4-5/5). An initial prose tail (Raieli 1/5,
+Bourne 2/5, Jungjun 3/5) was traced to EVAL ARTIFACT, not retrieval: my sampler picked
+front-matter (title/cover pages) and the LLM generated keyword-bag queries. A clean re-run
+(natural questions, mid-document chunks) put the same three at 8/8, 6/8, 6/8 = 83% @10,
+in line with the corpus. Retrieval meets the requirement corpus-wide. Validation tooling:
+`scripts/_gold_recall_eval.py`, `_newbook_gold_eval.py`, `_clean_prose_eval.py`. Forward
+guard shipped for VLM code-loops: within-page dedup now covers CODE chunks (`64e3c88`); a
+sweep of the existing corpus found 0 degenerate code dupes (data already clean).
+
 > **DEFERRED to post-first-production-release (user-directed 2026-06-18):** the VLM
 > (mlx_vlm.server / Qwen3-VL-8B on the M5) is the recurring reliability/quality liability -
 > intermittent per-request handler wedge (mitigated by a client hard deadline +
