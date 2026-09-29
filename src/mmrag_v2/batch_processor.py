@@ -2070,10 +2070,13 @@ class BatchProcessor:
                 "page_offset": batch_info.page_offset,
             },
         )
+        furniture_report: List[Any] = []
         uir_chunks = chunk_universal_document(
             universal_doc,
             profile_type=profile_type,
             toc_headings=local_toc,
+            drop_furniture=getattr(self, "_drop_running_furniture", True),
+            furniture_report=furniture_report,
             # Cluster B (2026-06-07): heading assignment runs per batch, so seed
             # it with the last active heading from the previous batch. Without
             # this, a batch whose chapter title appears only as a glued running
@@ -2083,6 +2086,8 @@ class BatchProcessor:
             carry_in_heading=self._carry_heading,
             carry_in_breadcrumb=self._carry_breadcrumb,
         )
+        self._register_furniture_drops(furniture_report, batch_info.page_offset)
+
         # Capture carry-out: the last text chunk that received a heading becomes
         # the seed for the next batch.
         for _uir in reversed(uir_chunks):
@@ -7949,6 +7954,32 @@ class BatchProcessor:
                 sc["next_text_snippet"] = succ_text[:300]
                 changed += 1
         return changed
+
+    def _register_furniture_drops(self, drops: List[Any], page_offset: int) -> None:
+        """WP-B2: account for element-level furniture removal (QA-CHECK-01) and log it.
+
+        The removed text is registered with the quality-filter tracker as NOISE_PATTERN so the
+        token-balance check reads it as an intentional filter, not as lost content.
+        """
+        if not drops:
+            return
+        tracker = getattr(self, "_quality_filter_tracker", None)
+        if tracker is not None:
+            for d in drops:
+                tracker.track_filtered_content(
+                    d.text,
+                    d.page + page_offset,
+                    FilterCategory.NOISE_PATTERN,
+                    chunk_id=f"furniture_p{d.page + page_offset}_e{d.element_index}",
+                )
+        by_rule: Dict[str, int] = {}
+        for d in drops:
+            by_rule[d.rule] = by_rule.get(d.rule, 0) + 1
+        signatures = sorted({d.signature[:50] for d in drops})[:4]
+        logger.info(
+            f"[FURNITURE] Removed {len(drops)} running header/footer element(s) before "
+            f"chunking ({by_rule}); e.g. {signatures}"
+        )
 
     def _image_drop_ledger(self) -> ImageDropLedger:
         ledger = getattr(self, "_image_drops", None)

@@ -19,6 +19,7 @@ Design:
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import logging
 import re
@@ -40,6 +41,7 @@ from ..universal.intermediate import (
     UniversalPage,
 )
 from ..universal.table_markdown import ensure_table_separator
+from .furniture import FurnitureDrop, find_running_furniture
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +140,8 @@ def chunk_universal_document(
     toc_headings: Optional[Dict[Any, Any]] = None,
     carry_in_heading: Optional[str] = None,
     carry_in_breadcrumb: Optional[List[str]] = None,
+    drop_furniture: bool = True,
+    furniture_report: Optional[List[FurnitureDrop]] = None,
 ) -> List[UIRChunk]:
     """Chunk a UniversalDocument into UIRChunks — pure UIR-native.
 
@@ -166,6 +170,11 @@ def chunk_universal_document(
             Seeds carry-forward so a chapter heading propagates across batch
             boundaries. ``None`` for the first batch.
         carry_in_breadcrumb: Breadcrumb paired with ``carry_in_heading``.
+        drop_furniture: Remove running headers/footers/folios at ELEMENT level before
+            chunking (PLAN_QUALITY_REMEDIATION_V1 WP-B2; engine labels first, then rank-based
+            repetition; headings and heading strings are never removed).
+        furniture_report: Optional out-parameter; the removed elements are appended so the
+            caller can account for them (QA-CHECK-01). The input document is never mutated.
 
     Returns:
         List of UIRChunk objects ready for ingestion.
@@ -173,12 +182,29 @@ def chunk_universal_document(
     chunks: List[UIRChunk] = []
     reading_order: int = 0
 
+    pages = universal_doc.pages
+    if drop_furniture:
+        furniture = find_running_furniture(pages, toc_headings=toc_headings)
+        if furniture:
+            doomed = {(d.page, d.position) for d in furniture}
+            pages = [
+                dataclasses.replace(
+                    pg,
+                    elements=[
+                        e for i, e in enumerate(pg.elements) if (pg.page_number, i) not in doomed
+                    ],
+                )
+                for pg in pages
+            ]
+            if furniture_report is not None:
+                furniture_report.extend(furniture)
+
     doc_title: Optional[str] = None
     meta = getattr(universal_doc, "metadata", None)
     if meta is not None:
         doc_title = getattr(meta, "title", None)
 
-    for page in universal_doc.pages:
+    for page in pages:
         page_chunks = _chunk_page(
             page,
             doc_id=universal_doc.doc_id,
