@@ -25,6 +25,14 @@ from typing import Any, Dict, List, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _code_quality as code_quality_mod  # noqa: E402
 
+# PLAN_QUALITY_REMEDIATION_V1 WP-0.2 regression guards. Guarded import: advisory code must
+# never be able to flip the strict gate (qa_full_conversion treats "Traceback" in this
+# script's output as a failure marker).
+try:
+    from mmrag_v2.validators import structural_outcomes  # noqa: E402
+except Exception:  # pragma: no cover - environment without the package on sys.path
+    structural_outcomes = None  # type: ignore[assignment]
+
 
 LABEL_RE = re.compile(r"^[A-Z][A-Za-z0-9/&()' .,-]{1,50}:?$")
 
@@ -393,6 +401,19 @@ def main() -> int:
         f"code_chunks={len(code_chunks)} code_fenced={code_fenced} "
         f"code_fence_consistency={code_fence_consistency:.4f}"
     )
+
+    # WP-0.2 structural regression guards: REPORT-ONLY (no threshold, never in `fails`).
+    # Thresholds are set only after the calibration recorded in FINDINGS_LOG. Several of
+    # these restate the predicate of the fix they protect, so they are guards, never the
+    # acceptance evidence (which is anchored in the source PDF: qa_gold_anchor_smoke.py).
+    if structural_outcomes is None:
+        print("structural_outcomes=UNAVAILABLE (package import failed)")
+    else:
+        try:
+            for _line in structural_outcomes.compute_all(rows).summary_lines():
+                print(_line)
+        except Exception as exc:  # noqa: BLE001 - advisory code must not flip the gate
+            print(f"structural_outcomes=UNAVAILABLE ({type(exc).__name__})")
 
     fails: List[str] = []
     if image_placeholder_ratio > args.max_image_placeholder_ratio:
