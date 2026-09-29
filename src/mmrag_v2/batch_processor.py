@@ -7469,11 +7469,14 @@ class BatchProcessor:
                         if ch.metadata.hierarchy
                         else []
                     )
-                    _new_breadcrumb = _orig_breadcrumb + [
-                        f"[Oversize Split {idx+1}/{len(parts)}]"
-                    ]
+                    # The parts of one chunk keep the PARENT's breadcrumb and level: a positional
+                    # "[Oversize Split n/m]" leaf (and the level bump that kept level == depth) put a
+                    # synthetic node into breadcrumb_path, which is embedded into the vectors
+                    # (to_embedding_text / ingest prefix). Adjacency is carried by the "_o<n>" chunk_id
+                    # suffix (retrieval-side), which is unchanged. PLAN_QUALITY_REMEDIATION WP-B3.
+                    _new_breadcrumb = list(_orig_breadcrumb)
                     _new_level = (
-                        (ch.metadata.hierarchy.level or 2) + 1
+                        (ch.metadata.hierarchy.level or 2)
                         if ch.metadata and ch.metadata.hierarchy
                         else 3
                     )
@@ -10099,8 +10102,9 @@ class BatchProcessor:
                     if chunk.metadata.hierarchy
                     else []
                 )
+                # Same rule as the oversize breaker (WP-B3): parts keep the parent's level.
                 _new_level = (
-                    (chunk.metadata.hierarchy.level or 2) + 1
+                    (chunk.metadata.hierarchy.level or 2)
                     if chunk.metadata.hierarchy
                     else 3
                 )
@@ -10150,9 +10154,7 @@ class BatchProcessor:
                         if chunk.semantic_context
                         else None
                     ),
-                    breadcrumb_path=(
-                        _orig_breadcrumb + [f"[Split {idx+1}/{len(sub_chunks)}]"]
-                    ),
+                    breadcrumb_path=list(_orig_breadcrumb),
                     **{k: v for k, v in self._intelligence_metadata.items() if v is not None},
                 )
                 new_chunk.metadata.content_classification = getattr(
