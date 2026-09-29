@@ -984,33 +984,56 @@ def _form_element_to_uirchunk(
 # ---------------------------------------------------------------------------
 
 
-def _partition_text_elements(
+def _is_heading_element(e: Element) -> bool:
+    """True for a non-empty element the engine labelled as a heading."""
+    label = (e.source_label or "").lower().replace("-", "_").replace(" ", "_")
+    return label in _HEADING_LABELS and bool(e.content.strip())
+
+
+def _split_into_heading_sections(
     elements: List[Element],
-    page_number: int,
+) -> List[Tuple[Optional[str], List[Element]]]:
+    """Split a text buffer into heading-led sections (PLAN_QUALITY_REMEDIATION WP-B1).
+
+    A heading element opens a new section. Consecutive headings with no body between
+    them join ONE section (a title split over two elements stays together and no
+    heading-only micro chunk appears); the section's heading is the LAST heading of
+    that run, the more specific one. Elements before the first heading form a leading
+    section whose heading is ``None``: carry-forward / TOC fill it later
+    (``_assign_headings``) or it stays honestly null. The section heading is a
+    property of the section, never of the whole buffer.
+    """
+    sections: List[Tuple[Optional[str], List[Element]]] = []
+    current: List[Element] = []
+    heading: Optional[str] = None
+    has_body = False
+    for e in elements:
+        if _is_heading_element(e):
+            if current and has_body:
+                sections.append((heading, current))
+                current, has_body = [], False
+            current.append(e)
+            heading = e.content.strip()
+        else:
+            current.append(e)
+            has_body = True
+    if current:
+        sections.append((heading, current))
+    return sections
+
+
+def _partition_group(
+    elements: List[Element],
+    parent_heading: Optional[str],
     page_w: float,
     page_h: float,
     max_chars: int,
     min_chars: int,
 ) -> List[Tuple[str, str, List[int], Optional[str], Dict[str, Any]]]:
-    """Partition consecutive TEXT elements into chunk-sized groups.
-
-    Returns list of (content, label, bbox, parent_heading, metadata) tuples.
-    Each tuple represents one candidate chunk.
-    """
-    if not elements:
-        return []
-
+    """Chunk-size partition of ONE section (label, provenance, text, bbox, size split)."""
     # Determine the dominant label for this group
     labels = [e.source_label for e in elements if e.source_label]
     dominant_label = _most_common(labels) if labels else "text"
-
-    # Find the most-recent heading element before this text group
-    # (heading is typically a separate element with section_header label)
-    parent_heading: Optional[str] = None
-    for e in elements:
-        if e.source_label.lower().replace("-", "_").replace(" ", "_") in _HEADING_LABELS:
-            if e.content.strip():
-                parent_heading = e.content.strip()
 
     # Aggregate any original_vlm_type provenance markers carried by the
     # constituent elements (a degraded-unknown VLM type smuggled in as TEXT).
@@ -1033,6 +1056,30 @@ def _partition_text_elements(
     for part in parts:
         result.append((part, dominant_label, current_bbox, parent_heading, group_metadata))
 
+    return result
+
+
+def _partition_text_elements(
+    elements: List[Element],
+    page_number: int,
+    page_w: float,
+    page_h: float,
+    max_chars: int,
+    min_chars: int,
+) -> List[Tuple[str, str, List[int], Optional[str], Dict[str, Any]]]:
+    """Partition consecutive TEXT elements into chunk-sized groups.
+
+    Returns list of (content, label, bbox, parent_heading, metadata) tuples.
+    Each tuple represents one candidate chunk. Headings are chunk boundaries
+    (WP-B1): the buffer is first split into heading-led sections, each section is
+    then size-partitioned on its own, and every part inherits ITS section's heading
+    and bounding box (never the last heading / union of the whole buffer).
+    """
+    if not elements:
+        return []
+    result: List[Tuple[str, str, List[int], Optional[str], Dict[str, Any]]] = []
+    for heading, group in _split_into_heading_sections(elements):
+        result.extend(_partition_group(group, heading, page_w, page_h, max_chars, min_chars))
     return result
 
 
