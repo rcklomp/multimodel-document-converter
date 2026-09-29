@@ -1,0 +1,49 @@
+{
+  "doc": "IRJET_Modeling_of_Solar_PV_system_under.pdf",
+  "derivation": "Anchors are read from the SOURCE PDF (text layer + rendered pages), never from a conversion run. Section membership follows the source layout: page 3 column 0 holds the tail of section 2 (Fig. 4 paragraph) before the III heading; page 4 column 0 is section A; the B heading sits at the end of page 4 column 1.",
+  "min_evaluable_section_anchors": 6,
+  "sections": {
+    "intro": "^\\s*1\\.\\s*INTRODUCTION",
+    "model": "^\\s*2\\.\\s*SOLAR PV ARRAY MODELING",
+    "method": "^\\s*III\\.\\s*PROPOSED MPPT METHOD",
+    "pso": "^\\s*A\\.\\s*Particle Swarm Optimization",
+    "mppt": "^\\s*B\\.\\s*PSO applied to MPPT",
+    "sim": "^\\s*IV\\.\\s*SIMULATION",
+    "results": "^\\s*V\\.\\s*RESULTS AND DISCUSSION",
+    "conclusion": "^\\s*VI\\.\\s*CONCLUSION",
+    "references": "^\\s*REFERENCES"
+  },
+  "section_anchors": [
+    {"id": "intro_partial_shading", "phrase": "output P-V characteristic of the array exhibits local multiple peaks", "section": "intro"},
+    {"id": "model_equivalent_circuit", "phrase": "equivalent circuit of a solar cell contains a current source", "section": "model"},
+    {"id": "model_math_modeling", "phrase": "Mathematical modeling for PV module is done by using", "section": "model"},
+    {"id": "model_fig4_paragraph", "phrase": "Fig\\. 4 shows simulation of 2\\S1 PV array consists of four groups", "section": "model"},
+    {"id": "method_track_mpp", "phrase": "To track the maximum power from the output P-V", "section": "method"},
+    {"id": "pso_kennedy", "phrase": "PSO was originally developed by James Kennedy", "section": "pso"},
+    {"id": "pso_loop", "phrase": "After that a loop starts to find the optimal solution", "section": "pso"},
+    {"id": "pso_particles_fly", "phrase": "All particles fly through a multidimensional search space", "section": "pso"},
+    {"id": "mppt_constrained", "phrase": "is constrained to", "section": "mppt"},
+    {"id": "sim_matlab", "phrase": "Modeling and simulation of the system has been done in MATLAB", "section": "sim"},
+    {"id": "sim_pwm", "phrase": "high frequency signal of 20\\s?kHz", "section": "sim"},
+    {"id": "conclusion_scheme", "phrase": "Developed scheme provides an efficient and accurate way", "section": "conclusion"}
+  ],
+  "front_matter_anchors": [
+    {"id": "abstract_not_intro", "phrase": "presents the effects of changing environmental conditions", "must_not_parent": "^\\s*1\\.\\s*INTRODUCTION"}
+  ],
+  "furniture_absent": [
+    "International Research Journal of Engineering and Technology",
+    "Impact Factor value",
+    "ISO 9001:2008 Certified Journal",
+    "e-ISSN",
+    "p-ISSN"
+  ],
+  "reference_anchors": [
+    {"id": "ref1_tsai", "all_of": ["Tsai", "World Congress on Engineering and Computer Science", "2008"]},
+    {"id": "ref9_miyatake", "all_of": ["Miyatake", "Veerachary", "Aerospace and Electronic Systems", "vol\\.\\s*47"]},
+    {"id": "ref11_mandour", "all_of": ["Mandour", "Elamvazuthi", "vol\\.\\s*4,\\s*no\\.\\s*8", "2013"]}
+  ],
+  "table_anchors": [
+    {"id": "table1_module", "all_of": ["37\\.08", "16\\.56", "2\\.25"], "min_rows": 8},
+    {"id": "table2_pso", "all_of": ["No\\. of particles", "0\\.15", "1\\.6"], "min_rows": 10}
+  ]
+}
