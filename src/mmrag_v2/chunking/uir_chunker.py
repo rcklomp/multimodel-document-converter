@@ -1051,7 +1051,12 @@ def _partition_group(
         return [(full_text, dominant_label, current_bbox, parent_heading, group_metadata)]
 
     # Split at sentence boundaries
-    parts = _split_at_sentence_boundaries(full_text, max_chars, min_chars)
+    parts = _split_at_sentence_boundaries(
+        full_text,
+        max_chars,
+        min_chars,
+        entry_labels=_is_reference_section(parent_heading, full_text),
+    )
     result: List[Tuple[str, str, List[int], Optional[str], Dict[str, Any]]] = []
     for part in parts:
         result.append((part, dominant_label, current_bbox, parent_heading, group_metadata))
@@ -1088,15 +1093,42 @@ def _partition_text_elements(
 # ---------------------------------------------------------------------------
 
 
+# Reference-list entry labels (PLAN_QUALITY_REMEDIATION WP-C2). A bracketed label counts at a
+# line start OR inline right after a sentence end (a list emitted as ONE element has no newline
+# before "[11]"); "(n)" / "n." labels count only at a line start. All need a capital after them,
+# so a body citation such as "Reference [10] presented ..." is never an entry.
+_ENTRY_LABEL_RE = re.compile(
+    r"(?:(?<=\n)|(?<=[.] ))\[\d+\]\s+(?=[A-Z])"
+    r"|(?<=\n)(?:\(\d+\)|\d+\.)\s+(?=[A-Z])"
+)
+_BRACKET_LABEL_RE = re.compile(r"\[\d+\]\s+[A-Z]")
+_REFERENCE_HEADING_RE = re.compile(
+    r"^\W*(?:\d+\.?\s*)?(?:references|bibliography|literature cited|works cited|"
+    r"literaturverzeichnis|referenties|literatuur)\b",
+    re.I,
+)
+
+
+def _is_reference_section(parent_heading: Optional[str], text: str) -> bool:
+    """True for a bibliography: a References-class heading or >= 3 bracketed entry labels."""
+    if parent_heading and _REFERENCE_HEADING_RE.match(parent_heading):
+        return True
+    return len(_BRACKET_LABEL_RE.findall(text)) >= 3
+
+
 def _split_at_sentence_boundaries(
     text: str,
     max_chars: int,
     min_chars: int,
+    entry_labels: bool = False,
 ) -> List[str]:
     """Split text at sentence boundaries, respecting the char budget.
 
     Prefers splitting at `. `, `! `, `? `; falls back to newline splits
-    when no sentence boundary is found within the budget.
+    when no sentence boundary is found within the budget. With ``entry_labels``
+    (a references-class section) a boundary immediately BEFORE the last entry
+    label inside the window wins over any sentence end, so a citation is never
+    cut mid-record ("vol. 4, no." | "8, August 2013").
     """
     if len(text) <= max_chars:
         return [text]
@@ -1114,7 +1146,15 @@ def _split_at_sentence_boundaries(
         search_end = cursor + max_chars
         best_split = -1
 
+        if entry_labels:
+            # Rank 1 (WP-C2): the last entry label starting inside the window.
+            for m in _ENTRY_LABEL_RE.finditer(text, search_start, search_end):
+                if m.start() > cursor:
+                    best_split = m.start()
+
         for i in range(search_end - 1, search_start - 1, -1):
+            if best_split >= 0:
+                break
             if i >= len(text):
                 continue
             ch = text[i]
