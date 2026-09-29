@@ -1660,3 +1660,80 @@ construction: acceptance must be anchored in the source. (3) The first draft of 
 (`crop_prose_fraction`) scores a header-logo crop and a text-strip crop as success because neither contains prose; a
 check must be tried against the actual defect before it is trusted. (4) `git log HEAD..origin/<branch>` first: the
 working tree was 45 commits stale and a third lineage (`github/laptop-travel`) existed that no document mentioned.
+
+## 2026-09-29 (later) - IRJET-class remediation: measured predicates, a fixed-extraction A/B, and what the cloud frame still breaks  `[Results][Method][Dead-ends]`
+
+Continuation of the entry above (commits `7180aee` .. `c367b12`). Every behavior change was chosen by measurement
+or a red-first fixture; the acceptance evidence is a deterministic A/B on the FIXED extraction (UIR dump) of one
+live run, because two live IRJET extractions are only 84% identical.
+
+**1. Crop predicate study (WP-A1), 673 local IMAGE/TABLE crops, 359 replayable** (the sliced source PDFs of the
+other 314 are absent; the replay reproduces the asset's pixel size or aspect from the current B1 code). Candidate
+predicates against the current picker (P0):
+
+| predicate | crops changed | of which tables | verdict |
+|---|--:|--:|---|
+| P1 area floor (candidate >= 0.5 x VLM box) | 49 (13.6%) | 20 | rejected: turns correct no-overlap rescues into wrong-region crops on the cloud frame |
+| P2 dominance vs union of all graphics | 71 (19.8%) | 13 | rejected: breaks the Fluent Python sidebar rescues (union reference too crude) |
+| P3 page-chrome exclusion (same xref/bbox on >= 3 pages) | 5 (1.4%) | 0 | rejected: swaps the logo for another sprite, recovers no figure |
+| P4 = P2 + P3 | 68 (18.9%) | 10 | rejected with P2 |
+| **P5 graphics-evidence guard (IMAGE)** | **27 (7.5%)** | 0 | **shipped** |
+| **P6 = P5 + table text-evidence guard** | 60 with P5 | 33 | **shipped** (9 distinct table crops) |
+
+Every changed crop was viewed against the rendered page. Recovered: IRJET Figs 4/5/7 and Table I (correct-frame
+boxes), HarryPotter p7 (a raster strip inside a larger illustration) and AIOS p7 (a sub-panel raster of a vector
+diagram), AIOS p4/p9/p33 tables (find_tables had returned a neighbouring chart or a diagram fragment), Fluent
+Python's list/array table (a black header strip). Unchanged: the pinned B1 rescues over blank space, the Fluent
+sidebar rescues (VLM box on prose, real picture elsewhere), HarryPotter p2 (oversized box around one raster).
+Dead end: a "tiny rescue" floor would break the Fluent scorpion (2,419 pt^2) and lemur images.
+
+**2. Furniture rule replay (WP-B2), 40 local outputs, elements reconstructed from chunks.** Rank window k sweep:
+
+| k (top/bottom TEXT elements) | elements flagged | outputs with more headless chunks | IRJET furniture strings left (3 outputs) |
+|--:|--:|--:|--:|
+| 2 | 872 | 0 | 5 / 7 / 19 |
+| 3 | 1017 | 0 | 5 / 7 / 14 |
+| 4 (shipped) | 1111 | 0 | 5 / 7 / 0 |
+| 6 | 1245 | 0 | 5 / 7 / 1 |
+
+A stricter "same exact rank on every page" variant flags 57 fewer elements and leaves 11 more IRJET strings. The
+first design flagged AIOS's repeated sub-caption "(a) Normalized throughput. Higher is better." (5x): captions and
+footnotes are now protected; a copyright footer "(c) 2017 ..." must not match the sub-caption guard (it needs a
+letter after the marker). The raw HEADING coverage ratio dips 0.1-1.4 points on some outputs only because headed
+furniture-only chunks leave the denominator; the number of headless chunks never rises, which is the property that
+matters for the 0.80 gate.
+
+**3. Live run (WP-V1) on the current tree, cloud route, validity preconditions met.** Header: engine hybrid,
+degraded 0, fallback null, model `qwen3-vl-flash`, 7 of 7 pages served, 0 demoted, `pipeline_version` 2.16.0,
+`config_hash` set. 42 chunks (before: 30-34). Strict gate `QA_PASS`; the new guard metrics read real values:
+`furniture_line_chunks` 0, `heading_inside_body` 0, `orphan_snippet_chunks` 0, `reference_split_entries` 0,
+`figure_deficit_pages` 1 (page 3). QA-CHECK-01 reads -27.7% (logged -23.0% before; the removed furniture tokens
+now leave the source side; a warning, an error only under `--strict-qa`). `[IMAGE-DROPS] in=11 written=9
+itemized_drops=2 unaccounted=0`. Engine-label rule on the real UIR: 13 elements (6 headers, 7 footers), identical to
+the 13 the repetition rule finds on its own.
+
+**4. Fixed-UIR A/B (deterministic; base `499a5fa` chunker vs the tip on the same `UniversalDocument`).**
+
+| | text chunks | headless | headings inside body chunks | chunks with furniture strings | chunker-owned gold anchors failing |
+|---|--:|--:|--:|--:|--:|
+| base chunker | 29 | 0 | 9 | 14 | 12 |
+| tip, furniture pass off | 37 | 1 | 0 | 14 | 7 |
+| tip | 34 | 0 | 0 | 0 | 2 |
+
+The 2 remaining chunker-side anchors are not chunker-owned: the intro paragraphs are emitted by the VLM before the
+"1. INTRODUCTION" heading (reading order), and reference [9] arrives truncated inside one VLM element. Full
+source-anchored smoke on the live output: 5 failures (was 23-24): the 2 above plus Figs 3, 5, 6.
+
+**5. What the cloud frame still breaks (not fixable in the engine-agnostic layers; owner decision D-4/D-12).** The VLM
+answers bboxes in a 0-1000 grid, so page-3 boxes land 100-150 pt above the drawings: Figs 3/5/6 (vector art) and Table I
+get the header logo (67x68), two sprites (dropped as icon-class) and a header-plus-first-row crop. On page 6 the four
+figure crops pass the size band (area ratio 0.56-0.67) but show the wrong region (the advisory
+`qa_crop_fidelity.py` flags one as prose-dominated, prose fraction 0.67). A size band alone reads these as success;
+the source-vs-crop view (`human_review_page{2,3,5,6}.png` in the run directory) is what shows it.
+
+Lessons: (1) an acceptance number computed on the artifact a fix produced (size ratio, coverage ratio) can read
+success on a wrong region; only a source-anchored view or a frame-invariant sidecar shows it. (2) Measure the
+candidate predicates on the real corpus before choosing: the plausible one-line fix (area floor) was the worst
+performer. (3) A/B chunker changes on a fixed extraction: two live extractions of the same page differ enough to
+hide or fake a chunker effect. (4) Register every removal with the token-balance accountant, and say out loud that
+doing so makes the logged variance worse when the loss is upstream.

@@ -455,6 +455,10 @@ AGENT-GATE-PROGRESSION:
   with advisory thresholds; aggregates in the smoke/QA summary) - a flag with no
   consumer fails this DoD; full suite green (the existing 1 known
   `test_v3_vlm_code_form` failure fixed or registered first); `SMOKE_PRODUCTION_PASS`.
+
+  > STATUS 2026-09-29: that failure was resolved 2026-06-10 (commit `4f20801`, F4 fenced contract);
+  > `tests/test_v3_vlm_code_form.py` passes (7 passed on 2026-09-29). (plan WP-G3, AP-34)
+
 - **Phase 4 - Re-route the default.** Flip the default route ONLY to whatever Phase 1
   proved (pipeline-primary + evidence-based specialist lanes, or validated
   VLM-primary). Production-flip controls (rev. 4, A11 - the flip is validated on two
@@ -600,6 +604,11 @@ the bake-off, not pre-decided here.
 - `docs/PROJECT_STATUS.md`: fix the self-contradiction at lines 415-420 vs 5-27 (F1),
   the stale test-command count at 425 (F6), and soften the "two-axis acceptance /
   fidelity floor wired" claim at 96-97 (F5).
+
+  > STATUS 2026-09-29: F1, F5 and F6 are CLOSED in `docs/DECISIONS.md` "Phase 5 - spec rewrite closure: docs
+  > reconciled to the Phase 4 reality"; the PROJECT_STATUS line numbers above refer to the file as it was then.
+  > (plan WP-G3, AP-34)
+
 - `AGENTS.md`: add `ARCHITECTURE_V3.1_CHARTER.md` to the Layer-0 list, drop the
   phantom `SRS` (F4); mark Principle F `shadow_ocr` as legacy / point V3 recovery at
   the ladder (F8).
@@ -634,6 +643,11 @@ USER-DECISION-REQUIRED still open:
    smoke) or (b) the current MinerU+Qwen hybrid plus Phase 0.5 retry (higher
    quality ceiling, M5-dependent). Either answer ships a production posture NOW;
    the choice is the user's risk trade between reliability and ceiling.
+
+> STATUS 2026-09-29: both were answered 2026-06-10 in `docs/DECISIONS.md` "Phase 0B interim default + MinerU
+> serving home + cap1600 render" (item 1 there: interim default = offline floor; item 2: MinerU serving home =
+> GX10 vLLM); the interim default was retired by the Phase 4 flip (2026-06-11). The GX10 host was unreachable on
+> 2026-09-29 (plan decision D-1). (plan WP-G3, AP-34)
 
 ---
 

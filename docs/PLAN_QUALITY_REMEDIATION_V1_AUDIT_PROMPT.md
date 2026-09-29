@@ -1,7 +1,8 @@
 # Audit prompt: PLAN_QUALITY_REMEDIATION_V1 (external, adversarial, Round 1)
 
 > Hand this whole file to a fresh frontier-model session that has READ access to the repository
-> `MM-Converter-V2.4.1` (branch `fix/quality-remediation-v1`, base `499a5fa`) and to the attachment folder
+> `MM-Converter-V2.4.1` (branch `fix/quality-remediation-v1`, base `499a5fa`, audit the FROZEN TIP: the last commit
+> named in plan Section 14, after the Wave 1 documentation commit) and to the attachment folder
 > `output/audit_2026-09-29/` (gitignored; copy it into the auditor's session). The prompt is standalone.
 > It produces an audit report; it edits nothing. Run it on at least TWO auditors from different model
 > families; Round 1 is not complete until both have reported (Section 2).
@@ -31,6 +32,11 @@ Scrutiny bar: *"the maintainer who opens this repo in six months, without any of
 verify every closure and must be unable to mistake a soft deferral for a fix; a plan that cannot fail its own
 acceptance is worthless."*
 
+Since rev. 3 the executor has landed Waves 0, 1, 2 and the Wave 4 evidence (plan Section 14 lists every commit; Section 14.1
+records the acceptance). You audit BOTH the plan and its execution: does the code, the test set and the recorded evidence
+actually support each claim the plan and its execution log make (lens L17)? Decision-gated work packages (Wave 3) are
+deliberately unexecuted; judge whether that is a legitimate state or a deferral in disguise.
+
 You must NOT read, cite, or recommend reading anything under `docs/.archive/` or `tests/.archive_*` (blocked by
 `.aiignore`). A finding that requires archive content is out of scope.
 
@@ -48,8 +54,13 @@ Precedents" index at the top of `docs/DECISIONS.md`, `docs/QUALITY_GATES.md`, `d
 Attachments (`output/audit_2026-09-29/`): the four read-only audit registers (`r_issue_inventory.md`,
 `r_gov_layer0.md`, `r_gov_decisions.md`, `r_gov_arch_plans_status.md`), the three root-cause reports
 (`r_rc_figures.md`, `r_rc_order_headings.md`, `r_rc_equations_refs.md`), the lineage report
-(`r_lineage_laptop_travel.md`), the verified-facts note (`irjet_verified_facts.md`) and two IRJET outputs
-(`irjet_cloud_probe_ingestion.jsonl`, `irjet_baseline_499a5fa.jsonl`). The source PDF `data/academic_journal/IRJET_Modeling_of_Solar_PV_system_under.pdf`
+(`r_lineage_laptop_travel.md`), the verified-facts note (`irjet_verified_facts.md`), two pre-fix IRJET outputs
+(`irjet_cloud_probe_ingestion.jsonl`, `irjet_baseline_499a5fa.jsonl`), the Wave 1 logs (`wave1_G1.md`, `wave1_G2.md`,
+`wave1_G3.md`) and the independent review of those documentation edits (`wave1_review.md`). Evidence of the live acceptance
+run lives in gitignored run directories (`output/wpv1_irjet/`, `output/wpv1_irjet_uir/`, `output/wpv3_smoke_production.log`,
+`output/wpv5a_before/`, `output/wpv5a_after/`); the committed record of those numbers is plan Section 14.1 and the FINDINGS_LOG
+entries dated 2026-09-29. The regression-guard metrics live in `src/mmrag_v2/validators/structural_outcomes.py`, the
+source-anchored smoke in `scripts/qa_gold_anchor_smoke.py` with `tests/fixtures/gold_anchor_specs/irjet.json`. The source PDF `data/academic_journal/IRJET_Modeling_of_Solar_PV_system_under.pdf`
 is gitignored: it may be absent on your machine; say so if you cannot run a PDF-dependent check rather than assuming.
 
 ---
@@ -86,7 +97,20 @@ Round 0 findings (internal review by two subagents on plan rev. 1; 6 HIGH / 19 M
 - R0-H5 gate 5 "run as-is" -> pinned offline before/after with a pass criterion.
 - R0-H6 WP-B2 deletes the HarryPotter heading source -> label-aware, heading-excluding, measure-first.
 - R0-B (feasibility): frame-dependent asset metric, inline reference shape, QA-CHECK-01 -23% to about -31% after B2, boilerplate hardening regressing real copyright pages, E1 scope/rounding/per-batch, A2 in-loop drops and missing drop sites, D6 per-chunk attribution impossible, B3 sub-items without consumers.
-Round 0b (verification that rev. 2 fixes hold) results, if any, are appended below by the plan author as `R0b-*`.
+Round 0b (a second internal pass that verified whether the rev. 2 fixes hold: 46 FIXED / 14 PARTLY / 0 NOT FIXED of 61; 4 HIGH,
+11 MED, 7 LOW new findings) produced rev. 3. Treat each as FIXED unless you can show the stated fix does not hold:
+- R0b-1 the figure acceptance (`crop_prose_fraction`) scored the header-logo crop and the text-strip crop as success -> source-anchored size-vs-gold-region figure anchors; prose fraction is only a secondary guard.
+- R0b-2 gate 5 ("run smoke_multiprofile as-is") -> AGENT-VAL-01 as written, pinned offline recipe, before/after via a base-commit tree, no default waiver (D-6).
+- R0b-3 INV-037's own example (a running header equal to the chapter title) -> split out as D-31; the furniture pass keeps such headers.
+- R0b-4 the WP-B1 exit criterion had an "explained" clause -> removed; decided on the real fixed UIR.
+- R0b-5 WP-B2 registration with the QualityFilterTracker makes QA-CHECK-01 worse for IRJET -> stated as an expected effect routed to D-7; the label half of the measurement cannot be replayed offline -> measured on the live UIR.
+- R0b-6 sidecar fields for WP-A1, routing stamps for WP-C4 (a page demoted to Docling by an expired key was invisible), the pinned provenance dict, register mixed-class rows, INV-029 rationale, the executed-commit log.
+- N-15 this prompt was stale against rev. 3 and the execution state -> refreshed against the frozen tip (this file).
+Execution-state facts (verified by the executor with receipts in plan Section 14.1 and the FINDINGS_LOG; audit the claims, do not re-derive the numbers):
+- X1 Code work packages landed with red-first tests: F1, F2, C4, B3, D7, B1, C2, A2, A2b, A1 (IMAGE and TABLE), B2; test baseline 1767 -> 2095 passed / 99 skipped / 0 failed.
+- X2 The crop predicate was chosen by a replay study on 359 of 673 local crops (314 not replayable); a one-sided area floor and a page-chrome predicate were measured and rejected.
+- X3 The live cloud run (7 pages) was valid on every precondition; chunker-owned gold anchors failing on the FIXED UIR went 12 (base chunker) -> 2 (tip; both extraction/order-owned); the source-anchored smoke went from 23-24 failures to 5.
+- X4 Not fixed and stated as such: cloud-frame bbox displacement (Figs 3, 5, 6 and the region of page-6 crops), reading order, equations, QA-CHECK-01 -27.7% (D-7). These need owner decisions (D-4, D-9, D-10, D-12).
 
 ---
 
@@ -142,7 +166,7 @@ WP-A1/A2 (retaining images vs the +0.0pp dead end on filtering empty images); WP
 Is the plan's "new ground" statement honest, or is it the old argument restated?
 
 ### L4. Outcome-metric validity, independence and calibration (metric-validity lens)
-For each of the six metrics (`undersized_asset_ratio`, `orphan_snippet_ratio`, `heading_inside_body_ratio`, `furniture_line_ratio`, `reference_entry_violations`, `figure_deficit_pages`):
+For each delivered instrument (`snippet_consistency` orphans and coverage gaps, `heading_inside_body`, `furniture_line_chunks`, `reference_entry_integrity`, `figure_deficit_pages` in `structural_outcomes.py`; the `figure_anchors` size band and `priority_anchors` of the gold-anchor spec; `crop_audit.json` with `scripts/qa_crop_fidelity.py`; the `[IMAGE-DROPS]` ledger) and for the metric names in the plan text (`undersized_asset_ratio`, `orphan_snippet_ratio`, `heading_inside_body_ratio`, `furniture_line_ratio`, `reference_entry_violations`, `figure_deficit_pages`), whichever survived:
 write the worst-case failure the paired fix could introduce, then decide whether the metric can move when that failure happens BY CONSTRUCTION (not just in practice). Concrete tests to run in your head or on the attachments:
 - `undersized_asset_ratio` divides by the bbox area; the cloud route's bboxes are shrunk by about 0.55 in area. Can a displaced crop of the right size (wrong region) pass? Can a correct crop fail? Is the metric independent of the fix predicate (`rect.area >= 0.5 * vlm_clip.area`), i.e. does it merely re-measure the fix's own rule (AGENT-INTEGRITY-01 "mirrors its own fix")?
 - `furniture_line_ratio` is described as an upper bound: legitimate repeated lines (figure captions, table header rows repeated per page) count. What false-positive rate on the local crucible outputs is acceptable before it is noise, and is the threshold to be set from principle or from the failing document?
@@ -159,7 +183,7 @@ WP-Q1, WP-O1, WP-K1 and the "element-atomic packing only if live output shows cu
 The plan forbids "watch items" (AGENT-STATUS-01) yet uses BLOCKED with owner-answer triggers and DEFER per Mandate 3(c). Count them. Are any of them the deferral pattern relabelled? The plan sets NO spend or wall-clock cap for the cloud route (D-20 is undecided) and defers the multi-document regression (WP-V5) to that answer: is the absence of a cap a hidden unlimited-spend risk, and does deferring the regression set turn "acceptance" into n=1? What is the convergence-compatible alternative (cycle fails / explicit KILL)?
 
 ### L8. Ship-gate vs governance-invariant consistency
-Grep `CLAUDE.md`, `AGENTS.md`, `docs/V3_EXECUTION_MANDATE.md`, `docs/QUALITY_GATES.md`, `docs/TESTING.md` for "must", "required", "invariant", "acceptance", "shall". Verify every named gate/suite/invariant appears in plan Section 8.2. Known tension the plan lists but may mishandle: AGENT-VAL-01 (`smoke_multiprofile.sh`) vs the Mandate's `smoke_production.sh`, and the fact that `smoke_multiprofile.sh` exits 0 with failing rows. Is "run and report as-is" a real gate or an escape hatch? Is QA-CHECK-01 (docs say 0.10 for all profiles; code allows -25% for academic) handled without silently choosing a side?
+Grep `CLAUDE.md`, `AGENTS.md`, `docs/V3_EXECUTION_MANDATE.md`, `docs/QUALITY_GATES.md`, `docs/TESTING.md` for "must", "required", "invariant", "acceptance", "shall". Verify every named gate/suite/invariant appears in plan Section 8.2. Known tension the plan lists but may mishandle: AGENT-VAL-01 (`smoke_multiprofile.sh`) vs the Mandate's `smoke_production.sh`, and the fact that `smoke_multiprofile.sh` exits 0 with failing rows. The plan pins the offline recipe with no default waiver: can the recipe still pass silently (the script exits 0 with failing rows; `data/` is gitignored so a clean worktree finds no PDFs and prints SKIP)? Compare the recorded before/after in plan Section 14.2. Is QA-CHECK-01 (docs say 0.10 for all profiles; code allows -25% for academic) handled without silently choosing a side?
 
 ### L9. Cross-file consumer completeness
 For every canonical constant, schema field or list a WP changes, grep `src/`, `scripts/`, `tests/` and enumerate ALL consumers; list any the plan misses. Minimum set: `_HEADING_LABELS`, `pipeline_version` / `config_hash` consumers (`scripts/build_corpus_manifest.py`, `scripts/qa_conversion_audit.py`, tests with "2.7.0" fixtures, `manifest_status.py`), `breadcrumb_path` / `level` (`to_embedding_text`, ingest prefix, REQ-HIER-04), `content_classification` (which gates key on null vs set), `next_text_snippet` (contextual retrieval at ingest), `visual_description` (ingest embedding text), `_FURNITURE_*` constants and `count_running_furniture`, the whole-dict pin in `test_extraction_provenance_consumers.py`. Is a bridge test needed (memory: cross-object flags need call-site bridge tests)?
@@ -171,7 +195,7 @@ Walk back through the plan docs and the digest and identify every conditional or
 Every KILL / CLOSE rationale in plan Section 10 and Section 7.3 must stand alone (no "per audit", no reference to gitignored files as the ONLY evidence). Sample at least 4 KILL/closure rationales and verify their factual premises against the repo with commands, for example: the pinned tests named in Section 10 exist and assert what is claimed (`test_b1_uses_vlm_bbox_when_no_geometric_object`, `test_icon_class_image_on_content_page_is_dropped`, `test_thin_strip_on_content_page_is_dropped`); commit `2ec40f5` reverted a profile seam; the merge conflict counts for `github/laptop-travel` (`git merge-tree`); `smoke_multiprofile.sh` exit behaviour. Any false premise invalidates the disposition regardless of the conclusion.
 
 ### L12. Operational fragility
-Where is the plan methodologically clean but operationally fragile? Consider: acceptance depends on a paid, non-deterministic cloud call; the metrics are calibrated on local gitignored outputs that differ per machine; the plan says the chunker A/B uses a fixed UIR but the raw UIR of the failing run was never saved (Round 0 recommended persisting it: is that a WP with an owner?); key handling when `DASHSCOPE_API_KEY` is absent; what if the fresh acceptance run itself fails or degrades (`extraction_degraded_pages > 0`)?
+Where is the plan methodologically clean but operationally fragile? Consider: acceptance depends on a paid, non-deterministic cloud call; the metrics are calibrated on local gitignored outputs that differ per machine; the fixed-UIR A/B depends on a dump (`MMRAG_DUMP_UIR`, WP-0.5) that lives in a gitignored run directory: could a maintainer reproduce the 12 -> 2 anchor result from the repository alone?; the crop study's 314 non-replayable crops; key handling when `DASHSCOPE_API_KEY` is absent; what if the fresh acceptance run itself fails or degrades (`extraction_degraded_pages > 0`)?
 
 ### L13. SWE-standard completeness
 Per WP: is there a rollback, is the merge-conflict order for the shared files (`uir_chunker.py`, `batch_processor.py`) real, is there a security review of new code paths, a test-coverage gate (red-first evidence), a documentation strategy, and a migration path for chunk-id churn (D-8)? Name any WP missing one.
@@ -184,6 +208,15 @@ Wave 1 rewrites Layer-0 documents from audit findings. Which SAFE-EDIT classific
 
 ### L16. Route and decision structure
 Are D-1..D-20 the right decisions, correctly owned, with defaults that do not smuggle a policy change? Is any decision missing (for example: what "done" means for this plan if D-1 is never answered; who decides the Round-1 disagreements)? Does the recommended D-1(c) "ratify an interim route with an expiry trigger" itself violate AGENT-STATUS-01 (an interim state with an unmeasured route)?
+
+### L17. Execution against the plan (new since rev. 3)
+For each executed work package in plan Section 14, decide whether the commit does what the plan says and no more: read the commit, its tests and the DECISIONS entry ("Quality remediation cycle: behavior changes and their limits"). Concretely:
+- Run `git log --oneline 499a5fa..HEAD` and reconcile it with Section 14 (every commit listed, none unlisted; the early applications of D-8 and D-12 disclosed).
+- For three WPs of your choice run the M1 test: revert the fix (comment out the guard) and check that a named test fails for the stated reason rather than for a changed reason string (the executor mutation-checked the drop ledger and the crop guard; confirm the furniture pass and heading sections).
+- Compare the plan's design text with the code where they differ (for example: the plan's A1 dominance predicate vs the shipped graphics-evidence guard; the plan's `crop_prose_fraction` definition vs `prose_word_share`; the plan's TABLE statement vs the shipped TABLE rule) and decide whether each deviation is documented with its measurement.
+- Check the claims of Section 14.1 against the committed record: is any number quoted there reproducible from a clean clone with the repository alone? Which are not (gitignored evidence), and is that acceptable under AGENT-EVIDENCE-01?
+- The furniture pass and heading sections change chunk boundaries and ids for essentially every document (D-8): is a migration or re-ingestion note present where a maintainer would look?
+- Look for a fix-induced fault: name one behavior the new code changes for a document class the executor did not measure (magazines, forms, slide decks, code books) and state how you would test it.
 
 ### Required meta-lens M1. Self-deception test
 Take any three "FIX" WPs and ask: if the fix silently did nothing, which acceptance line would still pass? If the answer is "all of them", the acceptance is proxy-based; say so and propose the outcome check.
@@ -219,7 +252,7 @@ For each finding:
 Severity: HIGH = the plan would leave a defect closed-on-paper, or would cause a wrong/irreversible action, or violates a governance invariant; MED = real gap that weakens acceptance; LOW = polish.
 
 Then, mandatory sections:
-1. **Audit lenses with nothing to flag**: one line for EACH of L1-L16 and M1-M3 that produced no finding, stating what you checked and how (so silent skipping is impossible).
+1. **Audit lenses with nothing to flag**: one line for EACH of L1-L17 and M1-M3 that produced no finding, stating what you checked and how (so silent skipping is impossible).
 2. **Structural changes I recommend** (cut, merge, re-disposition, reverse a premise) separated from additive suggestions; state how many of each.
 3. **Disagreements with Round 0**: which Round 0 fixes do not hold.
 4. **Overall stance** (all five required):

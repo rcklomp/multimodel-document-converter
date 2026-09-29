@@ -20,6 +20,16 @@ current ship state + per-cycle deltas. Predecessors: `v2.15.0`
 `5a2ce18`), `v2.11.0` (2026-05-20, `c2a461c`), `v2.10.0`
 (2026-05-16, `db6527c`), `v2.9.0-rc1` (2026-05-12, `3e06d1b`),
 `v2.8.0` (2026-05-04, `645ab2b`).
+
+> STATUS 2026-09-29: this file describes the v2.X baseline (last tag v2.16.0). Since V3 Phase A (commit
+> 813b9ba, 2026-05-29) the batch PDF path extracts through mmrag_v3.extract() and
+> src/mmrag_v2/batch_processor.py has no docling import; current behavior: docs/ARCHITECTURE_V3.1_CHARTER.md
+> (as-built) and docs/PROJECT_STATUS.md. (plan WP-G3, AP-27)
+
+> STATUS 2026-09-29: paths cited in this file that do not exist on 2026-09-29: docs/PLAN_V2.16.md,
+> docs/QUALITY_SNAPSHOT_2026-05-25_v2.16_after.md, docs/TELEMETRY_REPORT_*.md and everything under
+> docs/archive/ (no such directory; per CLAUDE.md the v2.X history is quarantined in docs/.archive/, which
+> agents must not read). (plan WP-G3, AP-28, INV-071)
 **Policy Update (v2.16.0):** Convergence release. Phase 1 introduces a
 `personal_importance: HIGH/MED/LOW` overlay on the documented-
 limitation registry — HIGH forces Option A regardless of telemetry
@@ -71,6 +81,10 @@ KILL'd before code change). See DECISIONS.md "v2.16 …" entries and
 ## 1. Executive Summary
 
 This document describes the current MM-Converter architecture for robust multimodal ingestion across supported formats; current shipping version is in `docs/PROJECT_STATUS.md`. (Section headers below tagged "(v2.7.0)" reflect when individual subsystems were introduced; they are still accurate descriptions of current behavior unless explicitly noted. v2.11.0 changed the *retrieval-side* embedder; v2.12.0 added the retrieval-side stack on top — cross-encoder reranker, BM25 sparse, RRF fusion; v2.13.0 swapped the cloud embedder for a local one and fixed OCR auto-routing for scanned profiles; v2.14.0 layered a local-LLM accelerator stack (HyDE/gen/judge on local vLLM at the GX10 endpoint) with no retrieval-stack changes; v2.15.0 added Option F document-class telemetry observability with no retrieval-stack changes; v2.16.0 is the convergence release — Phase 1 personal_importance overlay, Phase 3 partial_code adjacency-fetch mechanism (inert on current corpus), Phase 4 VLM-table IoU dedup, Phase 0 corpus expansion to 41 docs; Phases 2/5/6/7 KILL'd. Text/image extraction, chunking, validation, and enrichment lanes are unchanged from v2.10.)
+
+> STATUS 2026-09-29: the last sentence does not hold for the batch PDF path since V3 Phase A (commit 813b9ba):
+> extraction and chunking there run through mmrag_v3.extract() and src/mmrag_v2/chunking/uir_chunker.py.
+> (plan WP-G3, AP-27)
 
 ### Problem Statement
 
@@ -613,6 +627,10 @@ class HTMLEngine(FormatEngine):
 | `src/mmrag_v2/vision/vision_prompts.py` | Defines VISUAL_ONLY_PROMPT policy and response validation helpers |
 | `src/mmrag_v2/refiner.py` | Optional post-OCR text repair layer with edit-budget guardrails |
 
+> STATUS 2026-09-29: the batch_processor.py row is not current: that file has no docling import and delegates
+> extraction to mmrag_v3.extract() (V3 Phase A, commit 813b9ba); no ElementProcessor runs on that path. (plan WP-G3,
+> AP-27)
+
 ### 6.3 UIR Components
 
 | Module | Purpose |
@@ -840,6 +858,10 @@ def test_scanned_pdf_produces_text():
 ## 12. Appendix: File Structure (Current Branch)
 
 This snapshot reflects files currently present under `src/mmrag_v2/` in this branch.
+
+> STATUS 2026-09-29: this tree is not current: src/mmrag_v2/chunking/uir_chunker.py, src/mmrag_v2/endpoints.py,
+> src/mmrag_v2/retrieval/, src/mmrag_v2/universal/asset_materializer.py, src/mmrag_v2/validators/code_quality.py
+> and the src/mmrag_v3/ namespace exist but are not listed; use git ls-files src/. (plan WP-G3, AP-29)
 
 ```
 src/mmrag_v2/

@@ -199,6 +199,10 @@ ED 0.249 / table TEDS 0.669) and recorded with all five caveat labels; F1<->aban
 sanity pass clean. REMAINING: full 755-page English run (~8h, sequential),
 then Phase 1 extractor bake-off.
 
+> STATUS 2026-09-29: both done: the full 755-page English run gave text ED 0.301 / TEDS 0.563 (produced by
+> the OCR-enabled legacy offline route, a corpus reference only; see the 13.2 correction), and Phase 1 ran
+> (Section 13 status below). (plan WP-G3, AP-38)
+
 ### 12.1 Grounding corrections (verified against the repo + demo, 2026-06-09)
 
 Three facts override assumptions in Sections 3-5 above:
@@ -309,6 +313,11 @@ substitution. The re-run is PLAN_EXTRACTION_FIDELITY_V1 Phase 1, governed by the
 `scripts/omnidocbench_bakeoff.py` (standalone, R4-clean) drives prep/smoke/run/
 score/report and is correct — the faults are downstream of it.
 
+> STATUS 2026-09-29: the re-run was PLAN_EXTRACTION_FIDELITY_V1 Phase 1 on the 158-page fixed set:
+> INCONCLUSIVE pipeline-vs-hybrid, both pure extremes refuted, ratified 2026-06-11 (`docs/DECISIONS.md` "Phase 1
+> outcome RATIFIED + baseline-provenance correction"); hybrid baseline text-ED 0.2212 / TEDS 0.7933 (DECISIONS
+> "Phase 4 - the MinerU+Qwen hybrid is the production default"). (plan WP-G3, AP-38)
+
 ### 13.1 Premises verified (M5 box 10.0.10.235:8000, `/v1/models`, 2026-06-09)
 
 All four bake-off models are served. Direct endpoint probes (NOT pipeline runs, to
@@ -332,6 +341,9 @@ avoid contending with the in-flight baseline):
 | qwen3vl | `USE_VLM_ENGINE=1` + `VLM_NATIVE_*` | `http://10.0.10.235:8000/v1`, `mlx-community/Qwen3-VL-8B-Instruct-8bit` |
 | hybrid | `MINERU_ENDPOINT` + `VLM_NATIVE_*` (default route, no force flag) | both above -- our shipped default |
 | paddleocr | `USE_VLM_ENGINE=1` + `VLM_NATIVE_MODEL=...PaddleOCR-VL-1.5-8bit` | `.../v1` |
+
+> STATUS 2026-09-29: the M5 and GX10 hosts named in 13.1 / 13.2 were unreachable on 2026-09-29 (plan
+> decision D-2). (plan WP-G3, AP-38)
 
 ### 13.3 Execution plan (runs AFTER the full-755 baseline completes)
 

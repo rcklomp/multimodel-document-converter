@@ -1,5 +1,12 @@
 # Decisions and Guardrails
 
+> **STATUS 2026-09-29:** 28 document paths cited in this log do not exist at the cited path: 23
+> under `docs/archive/` (that directory does not exist), plus `docs/PLAN_V2.9.md`,
+> `docs/QUALITY_SNAPSHOT_2026-05-06_v2.9_strict_gate.md`, `docs/USER_ISSUES.md`, `CONVERSION_PROFILES.md`
+> and `docs/PLAN_R3_CODE_GATE_REDESIGN.md` (archived by `2f6e769`, 2026-06-15). `tests/test_repo_integrity.py`
+> G5 exempts this file from path resolution by design. Two deleted test files are marked at their own
+> entries. (plan WP-G2, DC-31)
+
 > **Read this index first (added 2026-06-18, `AGENT-PRECEDENT-01`).** The full
 > log below is append-only and ~3300 lines. This curated index points at the
 > load-bearing entries that prevent re-litigation circles — the questions an
@@ -26,6 +33,9 @@
 **Architecture choices (do NOT rebuild these):**
 - **Shared PDF Extraction Plan** — Docling options/converter construction is
   centralized in `DoclingPdfAdapter`; nothing else may instantiate them.
+  > **STATUS 2026-09-29:** CONTRADICTED BY CODE: `src/mmrag_v3/engines/docling_fast.py:53,83` builds
+  > `PdfPipelineOptions()` / `DocumentConverter(`, and `tests/test_v3_security.py:54` forbids it from
+  > importing the v2 adapter. (plan decision D-23)
 - **Selective Code Enrichment Lane** — `do_code_enrichment` is gated on a
   cheap code-evidence pass, never on `has_encoding_corruption` alone.
 - **v3.0 Phase C — Vision-Native Extraction** — the default route is
@@ -42,6 +52,9 @@
 **Measured-and-rejected dead ends (do NOT re-propose without new evidence):**
 - **OCR / `do_ocr=True` as the default** — its 0.301/0.563 ceiling drove the
   V3 pivot (FINDINGS_LOG 2026-06-09). Re-defaulting to it is a regression.
+  > **STATUS 2026-09-29:** chronology conflict: the V3 pivot entry is dated 2026-05-29 ("v3.0 Phase C"),
+  > the 0.301/0.563 baseline was first recorded 2026-06-09 (FINDINGS_LOG), and "Phase 1 outcome RATIFIED"
+  > item 4 attributes it to the OCR-enabled legacy route. (plan decision D-23)
 - **HyDE bridging (v2.15 Phase 1) — CLOSED as a dead lever** (+0.4pp agg,
   −20pp on the targeted minority-language subset).
 - **Query-rewriting for the omlx −12pp deficit (v2.16 Phase 6) — CLOSED**
@@ -57,6 +70,9 @@
 - **Hybrid/BM25 as the retrieval default for THIS corpus** — no gain over
   plain top-10 and regresses German docs (the BM25-index persistence fix
   was a real bug fix, but hybrid is not needed for the answer win).
+  > **STATUS 2026-09-29:** conflicts with the unmarked "v2.12 Phase 2 Outcome" ("hybrid retrieval is the
+  > v2.12.0 production default") and with the 2026-06-18 DoD validation, which calls
+  > `retrieve_hybrid_reranked` (`scripts/_gold_recall_eval.py:14,30`, `499a5fa`). (plan decision D-23)
 
 **Carry-forward / deferral discipline:**
 - Deferred v2.16 heuristics and skipped tests are **DISPOSITIONED**
@@ -68,6 +84,13 @@
 ---
 
 ## OCR Cascade Order
+> **STATUS 2026-09-29:** describes the legacy v2 lane only. `EnhancedOCREngine` (the cascade) is
+> constructed only in `mmrag_v2/processor.py` (V2DocumentProcessor: `_extract_table_markdown_with_ocr`,
+> `_process_element_v2`) and `universal/element_processor.py` (no caller in `batch_processor.py`); `ocr/layout_aware_processor.py` also references it but that class is never instantiated in `src/`;
+> `src/mmrag_v3/` has 0 Tesseract/Doctr hits. The V3 ladder (`mmrag_v3/processor.py::_extract_fail_closed`)
+> is engine -> `DoclingFastEngine` (`do_ocr=False`, `docling_fast.py:54`) -> PyMuPDF text layer.
+> (plan WP-G2, DC-16)
+
 **Decision:** Docling → Tesseract → Doctr for layout-aware OCR.
 **Rationale:** Keeps Docling layout awareness first, with progressive fallback when confidence is low.
 
@@ -136,6 +159,11 @@
 
 ## Image Extraction Routing (v2.7.0)
 
+> **STATUS 2026-09-29:** describes the legacy v2 lane only. On the V3 path the HybridEngine router
+> counts `page.get_images()` to send a page to the VLM (`mmrag_v3/engines/router.py:219`), and the
+> IMAGE crop prefers PyMuPDF `page.get_image_info()` rects over the engine bbox
+> (`universal/asset_materializer.py::_geometric_candidates`, B1; since WP-A1 `_select_crop_clip` keeps a VLM box that sits on real graphics instead of swapping it for a detected object). (plan WP-G2, DC-16)
+
 **Decision:** All document types use Docling layout model for image extraction. PyMuPDF `page.get_images()` is not used in the active pipeline.
 
 **Rationale:**
@@ -149,6 +177,10 @@
 ---
 
 ## Heal-Over for Encoding Corruption (v2.7.0)
+
+> **STATUS 2026-09-29:** on the V3 batch path the semantic refiner is never called on a chunk: in
+> `batch_processor.py` only `enable_refiner`, a threshold write and `cleanup` touch `self._refiner`; the
+> CorruptionInterceptor (`patch_corrupted_chunks`) still runs. (plan decision D-13)
 
 **Decision:** When encoding corruption is detected (`has_encoding_corruption`), keep HybridChunker active and force the semantic refiner on all chunks at `threshold=0.0`, instead of disabling HybridChunker and falling back to full OCR.
 
@@ -182,6 +214,9 @@
 - Preserve `_has_fenced_flat_code` only as a provisional fallback marker when native/remote code enrichment is unavailable or still returns flat code.
 - Refactor duplicated PDF extraction policy behind a shared `PdfConversionPlan` and Docling PDF adapter. `batch_processor.py`, `processor.py`, and `engines/pdf_engine.py` must not remain independent sources of Docling `PdfPipelineOptions` / `DocumentConverter` truth.
 - The canonical PDF architecture is diagnostics/config -> `PdfConversionPlan` -> Docling adapter -> `UniversalDocument` -> `ElementProcessor` -> chunks. Direct Docling-item-to-chunk paths are legacy only and must not be expanded.
+  > **STATUS 2026-09-29:** not the production PDF path since `813b9ba`: `BatchProcessor._process_single_batch` calls
+  > `mmrag_v3.processor.extract(path)` with a path only; `src/mmrag_v3/` has 0 references to `PdfConversionPlan`,
+  > `do_code_enrichment` or `force_full_page_ocr`. (plan decision D-13)
 
 **Anti-patterns now explicitly forbidden:**
 - Triggering CodeFormulaV2 from `has_encoding_corruption` alone.
@@ -394,6 +429,8 @@ A companion guard test should follow.
 > decisions. See
 > [`docs/QUALITY_SNAPSHOT_2026-05-06_v2.9_strict_gate.md`](QUALITY_SNAPSHOT_2026-05-06_v2.9_strict_gate.md)
 > for the current strict-gate state.
+>
+> **STATUS 2026-09-29:** the linked snapshot does not exist in the repository. (plan WP-G2, DC-31)
 
 ## chunk_id position component (v2.9 Phase 1, 2026-05-04)
 **Decision:** `_generate_chunk_id` hashes a per-document monotonic
@@ -486,6 +523,12 @@ scorer adjustment, NOT a per-profile spatial-threshold branch. The
 single 20-unit vertical refinement rule is unchanged.
 
 ## Cloud-Only VLM for v2.9 Image Enrichment (v2.9 Phase 5, 2026-05-04)
+> **STATUS 2026-09-29:** no v2.10 entry records the promised re-evaluation; the local lane reappears
+> in "v2.11 Carry-Forward Decisions" 3a (proposed for v2.12) and is CLOSED by "v2.16 Carry-Forward
+> Closures" Item #14. Since `bb33a1c` (2026-06-07) `scripts/enrich_image_chunks_v29.py:63-67` reads the
+> endpoint and model from `MMRAG_ENRICH_BASE_URL` / `MMRAG_ENRICH_MODEL` (default still cloud
+> `qwen3-vl-plus`). (plan WP-G2, DC-29)
+
 **Decision:** v2.9 Phase 5b image enrichment is locked to cloud
 `qwen3-vl-plus` (Alibaba DashScope international endpoint). The
 `scripts/enrich_image_chunks_v29.py` script does NOT branch on local
@@ -557,6 +600,11 @@ pass without fixing the underlying defect.
   the canonical close path for "real defect, out of scope" cases.
 
 ## v2.9.0-rc1 Signed Deferrals (2026-05-11 close-out)
+
+> **STATUS 2026-09-29:** closed outside this file. The annotated tag `v2.10.0` (`db6527c`, 2026-05-16)
+> states "All seven v2.9.0-rc1 named root-cause classes corpus-wide re-verified under the unchanged
+> strict gate" and "Strict gate: 34 PASS / 0 WARN / 0 FAIL". No entry after this one names these
+> classes. (plan WP-G2, DC-30)
 
 **Decision:** `v2.9.0-rc1` is authorized to ship with 8 signed v2.10
 deferrals against the strict gate (instead of the 2 originally
@@ -739,6 +787,14 @@ Until at least one of the three triggers fires, the v2.10 chunker quality bar of
 ---
 
 ## v2.11 Carry-Forward Decisions (2026-05-17)
+
+> **STATUS 2026-09-29:** (1) 3d contradicts itself: its body says "No CLI flag, no code shipped",
+> the summary table says "opt-in flag in v2.11 / `--strict-hybrid-guard`"; that flag has 0 hits in
+> src/scripts/tests. (2) All five items were CLOSED by "v2.16 Carry-Forward Closures" (Items #13, #14,
+> #15, #21, #22). (3) 3c's parent class exists: `PdfConversionPlan(ConversionPlan)`
+> (`engines/pdf_plan.py:36`, base in `universal/conversion_plan.py`, `eb7db72` 2026-05-26); no
+> `EpubConversionPlan` class is defined (named only in a docstring, `conversion_plan.py:45`).
+> (plan WP-G2, DC-18)
 
 The five rc1 carry-forward non-goals from `docs/archive/plans/PLAN_V2.10.md` §5 each get an explicit disposition in v2.11. Per user direction (2026-05-17): "find alternatives where possible, defer with named workaround where not." Pure-defer-without-rationale is forbidden.
 
@@ -1056,6 +1112,13 @@ Reports retained:
 
 ## v2.12 Phase 3 Outcome — HyDE Ships Opt-In Only (2026-05-21)
 
+> **STATUS 2026-09-29:** the "hypothetical answer via qwen-max" premise is stale in code since `c2cb870`
+> (2026-06-16): `retrieve_reranked` / `retrieve_hybrid_reranked` default `hyde_provider="vllm"`
+> (`retrieval/pipeline.py:152,392`), which `retrieval/hyde.py:60-61` maps to a hardcoded LAN vLLM URL
+> serving `RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic`, and the HyDE vector is now BLENDED with the query
+> vector (`_blend_vectors`, `pipeline.py:110`), not substituted. HyDE is still opt-in (`use_hyde=False`,
+> `:150,389`). (plan WP-G2, DC-41)
+
 **Context.** Per the v2.12 Phase 1 close-out, Phase 3 (HyDE) was nominally TRIGGERED because Faithfulness 69.4% fell 0.6pp below the ≥70% floor. After Phase 2 (hybrid retrieval) ran, Faithfulness lifted to 72.6% (floor met), so the trigger no longer fires under the plan's strict logic. The HyDE soak ran as a MEASUREMENT to determine whether HyDE adds anything on top of the strong Phase 2 baseline, since the code is already built.
 
 **Protocol.** Same 518-query × 259-chunk soak fixture, same hybrid retrieval + ModernBERT reranker, same judge (qwen-max). The only difference: `use_hyde=True`. For each query, generate a hypothetical answer via qwen-max (temperature 0.3), embed that answer, then proceed with the standard dense + sparse + RRF + rerank pipeline. Total wall time 52 min (HyDE adds ~1s/query to retrieve stage). Cumulative spend ~$3-4.
@@ -1247,6 +1310,10 @@ anchor is dashscope-on-the-new-fixture (55.0%), not the v2.12 number. The
   Possibly add per-doc language-aware embedder routing if regression deepens.
 - Code-dense + engineering content (Python_Cookbook, IRJET, Hybrid_electric,
   Greenhouse) regress 6-12pp R@1. Acceptable given offsetting wins.
+
+> **STATUS 2026-09-29:** this rollback is not executable: the dashscope collection was dropped 2026-05-23
+> ("v2.16 Phase 2 omlx Deficit"), `retrieval/config.py` has no embedder knob (0 "embed" hits; its only
+> default is the reranker backend), and the omlx-server host is recorded DOWN on 2026-09-29 (`scripts/env_cloud_vlm.sh:5-9`). (plan decision D-14)
 
 **Rollback plan:** the dashscope collection
 (`mmrag_v2_8__qwen3_dashscope`, 31,371 pts) is retained unchanged through
@@ -1828,6 +1895,12 @@ exceeds Phase 3's spec'd scope (retrieval-side only) and exceeds the
 
 ## v2.16 Phase 4 VLM-Table Dedup — SHIPPED (2026-05-25)
 
+> **STATUS 2026-09-29:** inert on the V3 batch path. Both passes are still called from
+> `BatchProcessor.process_pdf`, but `_apply_table_recovery_highlander_dedup` matches only
+> `vlm_table_markdown_forced` and `_apply_vlm_table_iou_dedup` only the four `vlm_table*` methods;
+> every V3 chunk carries `extraction_method="uir_native_chunker"` (`uir_chunker.py:53`), so neither
+> dedup can fire on V3 output. (plan WP-G2, DC-11)
+
 **Decision:** Ship `bbox_iou`-based dedup that suppresses TEXT chunks
 spatially overlapping VLM-extracted TABLE chunks on the same page
 above `dedup_vlm_table_iou_threshold` (default 0.85). Closes the
@@ -1974,6 +2047,11 @@ Per PLAN_V2.16.md §4. Each item's reopen path requires v3.0 re-charter
 
 
 ## v2.16 Post-Tag Rollback Procedure (2026-05-25)
+
+> **STATUS 2026-09-29:** historical. All four revert targets are ancestors of tag `v2.16.0` (`15d1349`,
+> 2026-05-25), 273 commits before `9c4ad03` (2026-09-29); `docs/PLAN_V2.16.md` does not exist; the tracked
+> `corpus_manifest.jsonl` names `mmrag_v3__qwen3_local` for all 44 rows, not the v2 indexes this
+> procedure restores. (plan WP-G2, DC-34)
 
 Per PLAN_V2.16.md §3 Phase N step 9. Each shipped phase that
 mutates production code is committed independently to enable
@@ -2174,6 +2252,11 @@ network phase from Docling's process mutations.
 
 ### 6. `max_completion_tokens=4096` cap on every VLM request
 
+> **STATUS 2026-09-29:** superseded in code on 2026-06-03: the default is
+> `max_completion_tokens: int = 8192` (`vlm_provider.py:193`, A2 `78d6485`) with one escalation
+> on `finish_reason=length` capped at `TRUNCATION_ESCALATION_CAP = 16384` (`:46`, A1 `e9c2257`).
+> See "V3.1 Blocker remediation (A1-A4, B1-B2)". (plan WP-G2, DC-10)
+
 omlx / vLLM servers OOM and close the connection when asked to
 generate unbounded JSON for dense pages. A fixed 4096-token
 output ceiling keeps server memory deterministic; large pages
@@ -2202,6 +2285,10 @@ targets openrouter.ai.
 
 ### 9. AST firewall — two policy classes for V3 engine files
 
+> **STATUS 2026-09-29:** the file list below is stale. `tests/test_v3_security.py:36-41`
+> (`V3_ENGINE_FILES`) also lists `mineru_native.py` (added `b3b5b9b`, 2026-06-05); `_deadline.py`
+> is in neither list; the file now collects and passes 15 tests, not 13. (plan WP-G2, DC-35)
+
 `tests/test_v3_security.py` distinguishes:
 
 - **Vision/glue files** (`vlm_native.py`, `vlm_provider.py`,
@@ -2227,6 +2314,12 @@ self-consistent (0.00% delta against the rebaselined file).
 ---
 
 ## OCR-lane production-wiring pins retired (PLAN_V3.1 P2, 2026-05-31)
+
+> **STATUS 2026-09-29:** the three helpers named in the Note are still defined in `batch_processor.py`
+> with 0 call sites in `src/` (only tests reference them); so is `_infer_headings_from_text`.
+> `docs/PLAN_V3.1_PIPELINE_RECONVERGENCE.md` has 0 mentions of them, so the "owned by P3"
+> restore-or-delete was never recorded. The `[OCR-GOVERNANCE]` log line in `batch_processor.py` still
+> says heading attribution "falls back to `_promote_ocr_section_headers`". (plan WP-G2, DC-25)
 
 **Decision:** Two structural-wiring assertions in
 `tests/test_ocr_path_heading_propagation.py` were DELETED-by-decision
@@ -2359,6 +2452,11 @@ retirement path and the V3 batch path is the one under active test.
 
 ## Phase A orphaned the final-boundary-repair bridge - RE-WIRED (PLAN_V3.1 P3, 2026-06-01)
 
+> **STATUS 2026-09-29:** the re-wiring was reverted the same day (`38623d9`, see "Spatial proximity
+> boundary-repair bridge DEPRECATED for VLM-native" and "Orphaned boundary-repair bridge deleted").
+> `tests/test_cross_chunk_semantic_stitching.py` was deleted in `38623d9`; neither bridge method is
+> defined in `src/` any more (only a comment in `batch_processor.py` names them). (plan WP-G2, DC-33)
+
 **Finding (a regression, found by un-skipping a deferred test):** Adopting
 `tests/test_cross_chunk_semantic_stitching.py` revealed that
 `BatchProcessor._apply_final_boundary_repairs` was DEFINED but had ZERO call
@@ -2391,6 +2489,10 @@ satisfy the test, not the reverse.
 
 
 ## Front-matter wiring pin re-pointed to the V3 architecture (PLAN_V3.1 P3, 2026-06-01)
+
+> **STATUS 2026-09-29:** `tests/test_vision_aided_front_matter.py` (and with it the replacement pin
+> `test_process_pdf_routes_front_matter_after_boundary_repairs`) was deleted in `38623d9` (2026-06-01)
+> together with `_apply_vision_aided_front_matter_detection`. (plan WP-G2, DC-33)
 
 **Finding:** Un-skipping `tests/test_vision_aided_front_matter.py` (P3) passed
 7/8 immediately — `_apply_vision_aided_front_matter_detection` had just been
@@ -2543,6 +2645,10 @@ See "PR #4 code-review hardening" entry below.
 
 ## Fail-Fast Infrastructure Rule for unattended VLM batches (2026-06-01)
 
+> **STATUS 2026-09-29:** CONTRADICTED BY CODE on the production CLI: `mmrag_v3/processor.py::_extract_fail_closed`
+> (`fcd4207`) catches every engine exception, `VlmInfraError` included, and re-serves from `DoclingFastEngine` /
+> PyMuPDF; a never-answering server raises `DeadlineExceeded` (`engines/_deadline.py:26`), a per-page failure. (plan decision D-21)
+
 **Decision:** Any unattended batch script that depends on a network/VLM endpoint
 MUST implement a hard circuit breaker. An infrastructure/transport failure
 (connection refused, connect/read timeout, gateway 502/503/504) MUST halt the
@@ -2626,6 +2732,12 @@ broke the contract test (Test Contract Integrity: do not weaken a guard to ship)
 
 ## V3.1 Blocker remediation (A1-A4, B1-B2) + json_schema default (2026-06-03)
 
+> **STATUS 2026-09-29:** "self-hosted" in code means any endpoint that is not `openrouter.ai` or
+> `openai.com` (`mmrag_v3/engines/vlm_provider.py:274,291,309`); the cloud Dashscope-intl endpoint of
+> `scripts/env_cloud_vlm.sh:26` therefore resolves to structured output `off`, no `response_format`,
+> and repetition penalty 1.1 unless `VLM_NATIVE_REPETITION_PENALTY` overrides it (the env script sets
+> `off`, `:38`). (plan WP-G2, DC-23)
+
 **Decision:** Implemented the Charter (§9.1) remediation for the two Grand-Soak
 blockers, and set the self-hosted structured-output default to OFF (prompt-only)
 based on a live M5 bounded check.
@@ -2701,6 +2813,11 @@ amended). 600s is a ceiling, not a target: fast cloud endpoints still return in
 seconds. Slower-decode / very text-dense workloads can raise it via the env.
 
 ## R3 Code-Indentation Gate Redesign (2026-06-05)
+
+> **STATUS 2026-09-29:** `docs/PLAN_R3_CODE_GATE_REDESIGN.md` (cited below) was archived by `2f6e769`
+> (2026-06-15) and does not exist at that path. The CHARTER section-276 pointer below was a line number of
+> `docs/ARCHITECTURE_V3.1_CHARTER.md` at `9bf330c`; the quoted R3 text is now the `CODE` bullet of
+> Charter section 7 (Modality-Aware Quality Gates). (plan WP-G2, DC-31)
 
 **Problem.** The R3 code-indentation gate was DEAD. Both gate scripts
 (`qa_conversion_audit.py` hard, `qa_semantic_fidelity.py` advisory) scored only
@@ -2858,6 +2975,10 @@ spurious AIOS duplicate scored 0.92-1.00). `tests/test_recovery_vs_primary_dedup
 
 ## MinerU+Qwen-for-code hybrid is the default extraction route (2026-06-06)
 
+> **STATUS 2026-09-29:** this default could not run on 2026-09-29 (LAN MinerU and Qwen servers down;
+> with `MINERU_ENDPOINT` unset the legacy `HybridEngine` runs). Fact record: "Operative extraction route
+> since 2026-09-29" at the end of this file. (plan decision D-1)
+
 **Decision.** The default V3 route (when `MINERU_ENDPOINT` is set) is now
 `MineruQwenHybridEngine`: code-dense pages (monospace-char ratio >= 0.10) extract
 through the Qwen VLM, every other page through MinerU2.5. Pure MinerU remains
@@ -2915,6 +3036,12 @@ the refactor is behaviour-identical on the live path, not just offline.
 
 
 ## Block-aware routing for sub-threshold code blocks (2026-06-06)
+
+> **STATUS 2026-09-29:** the block trigger runs only in `MineruQwenHybridEngine`
+> (`mmrag_v3/engines/router.py:404`). With `MINERU_ENDPOINT` unset (`scripts/env_cloud_vlm.sh:40-45`),
+> `mmrag_v3/processor.py::_select_engine` falls through to the legacy `HybridEngine`, whose
+> `_classify_page` (`router.py:217-241`) routes on tables/images/drawings/page-average monospace ratio
+> only, with no block trigger. (plan WP-G2, DC-23)
 
 **Context.** The shipped hybrid routes a page to Qwen on PAGE-AVERAGE monospace
 ratio (`>= 0.10`). Investigating the deferred sparse-code residual found that a
@@ -3056,6 +3183,10 @@ drops empty-content tables - BOTH behind a page-coverage guard (the empty-table
 case PROMOTES the only-chunk-on-page table to IMAGE, keeping the rendered crop, so
 neither filter can manufacture MISSING_PAGES, and they compose safely in sequence).
 
+> **STATUS 2026-09-29:** CONTRADICTED BY CODE since `51ccef9` (2026-06-12): `uir_chunker.py` fences code
+> (`_fence_code`), then `batch_processor.py::_apply_code_hygiene` -> `_repair_code_content` ->
+> `_strip_code_fences` drops every fence line of code chunks, and nothing re-fences. (plan decision D-13)
+
 **Code fencing contract (resolves PLAN_GATE_QUALITY_V1 F4).** `modality=code`
 chunks MUST be Markdown-fenced (downstream generation models need explicit code
 boundaries; parity with the MinerU `_fence_code` path). The VLM-promoted code lane
@@ -3068,6 +3199,12 @@ threshold relaxation. Review follow-ups #8/#9/#10 are dispositioned deferrals in
 the project backlog, not silent drops.
 
 ## Phase 0B interim default + MinerU serving home + cap1600 render (2026-06-10)
+
+> **STATUS 2026-09-29:** decision 2 rider (a) fired on 2026-06-11 (`2a2e46f`) with a different
+> processor class than the one named: `scripts/gx10/docker-compose.yml:80-81` passes
+> `--logits-processors mineru_vl_utils.logits_processor.vllm_v1_no_repeat_ngram:VllmV1NoRepeatNGramLogitsProcessor`
+> (`MinerULogitsProcessor` has 0 hits in scripts/src). The GX10 MinerU server this configures is
+> recorded DOWN on 2026-09-29 (`scripts/env_cloud_vlm.sh:40`). (plan WP-G2, DC-26)
 
 Three decisions ratified by the user on the two overnight evidence runs
 (FINDINGS_LOG 2026-06-10: n=44 render sweep, 3-way MinerU serving probe,
@@ -3217,6 +3354,10 @@ both arms via the shipping CLI `--vision-provider none`):**
 - **Verdict: the flip is JUSTIFIED.** arm B regresses NO doc and closes the four
   arm-A content failures.
 
+> **STATUS 2026-09-29:** the rollback target below (`USE_DOCLING_FAST=1`) is labelled "offline CI mode
+> (no VLM) - NOT for acceptance" by `scripts/env_cloud_vlm.sh:50`, and the route it rolls back from could
+> not run on 2026-09-29; see "Operative extraction route since 2026-09-29". (plan decision D-1)
+
 **Rollback condition (WP-B; pre-named, numeric; tuned to the shadow table, both
 numbers non-trivially clear of arm B's measured 0%/0% baseline):** production
 reverts to the interim default (`USE_DOCLING_FAST=1` env routing) if, over any 10
@@ -3226,6 +3367,10 @@ shadow baseline 0%), OR ladder-served pages exceed **2% of pages** (arm-B shadow
 baseline 0%). Mechanism: the env-var routing in `processor._select_engine` stays
 ALIVE through Phase 5 - the spec rewrite must not delete the `USE_DOCLING_FAST`
 escape hatch (routing test `test_docling_fast_overrides_mineru_default` pins it).
+
+> **STATUS 2026-09-29:** by this rule every output of the operative route is STALE by construction (its
+> headers stamp `extraction_engine: "hybrid"`); see "Operative extraction route since 2026-09-29".
+> (plan decision D-1)
 
 **Re-extraction policy (WP-B; rule written, execution USER-SCHEDULED, run nothing
 tonight):** a prior JSONL is STALE iff its provenance is NOT (engine=
@@ -3257,6 +3402,12 @@ clean (0.0 across WP-3). Layer-0 spec edits (charter, mandate, QUALITY_GATES) ar
 Phase 5, NOT done here.
 
 ## Phase 5 - spec rewrite closure: docs reconciled to the Phase 4 reality (2026-06-11)
+
+> **STATUS 2026-09-29:** the Scope note's network root cause ("per-process utun/VPN scoped-route
+> fault", permanent fix "VPN split-tunnel") differs from `scripts/phase5_relay.py:17-20`, which
+> records the root cause as confirmed 2026-06-12: macOS Local Network privacy blocking the conda
+> interpreter. The relay forwards only to the M5 and GX10 servers (`phase5_relay.py:29-31`), which
+> `scripts/env_cloud_vlm.sh:9,40` records as DOWN on 2026-09-29. (plan WP-G2, DC-20)
 
 **Decision:** Apply the `PLAN_EXTRACTION_FIDELITY_V1` Section 8 Layer-0 edits so the
 governance docs describe the PROVEN reality, and close the 2026-06-09 governance
@@ -3390,3 +3541,189 @@ Ratification, rollback and staleness rules for this route are owner decision D-1
   into 12 chunks, wrong parent headings). Most of those defects predate the route and are engine-agnostic.
 - Settled engine choice (FINDINGS_DIGEST: MinerU+Qwen hybrid) is NOT reopened by this entry; the open
   question is serving availability and measurement of an interim route (plan D-1, D-2).
+
+## Shipped behaviors with no decision entry (fact record, 2026-09-29)
+**Status: FACT record only; it ratifies nothing.** Each item below is shipped code that no earlier entry
+records as a decision. Ratifying (or reversing) each one is owner decision D-22 of
+`docs/PLAN_QUALITY_REMEDIATION_V1.md` (answer-by 2026-10-20). Line numbers are as of commit `11e9cf7`;
+every test file named below was run and passed on 2026-09-29.
+
+1. **Hard per-page wall-clock deadline and fresh-connection stall retry** (`4bfd7c8`, `b8160aa`, both
+   2026-06-18). `src/mmrag_v3/engines/_deadline.py:31` `run_with_deadline` runs the call in a daemon
+   thread and raises `DeadlineExceeded` (`:26`) if it has not returned in time; the deadline is the
+   client request timeout plus 120 s (`deadline_seconds`, `:59`; overrides `VLM_PAGE_DEADLINE_SECONDS`,
+   `MINERU_PAGE_DEADLINE_SECONDS`, buffer `EXTRACT_PAGE_DEADLINE_BUFFER`). `extract_page_vlm`
+   (`engines/vlm_native.py:406`) re-issues a stalled page as a new request up to `VLM_PAGE_STALL_RETRIES`
+   times (default 2, `:57-66`), then re-raises. `extract_page_mineru` bounds MinerU calls the same way
+   (`engines/mineru_native.py:507-508`). Both hybrid engines in `engines/router.py` re-raise
+   `VlmInfraError` but handle any other exception, `DeadlineExceeded` included, as a per-page failure
+   (HybridEngine: page to Docling, `:303`; MineruQwenHybridEngine: page to MinerU, `:444`).
+   Test: `tests/test_extraction_deadline.py` (7 tests).
+2. **Conversion-time degraded-code repair through the VLM specialist** (`2ec40f5`, `f89a772`, both
+   2026-06-17). `mmrag_v3.processor.extract` (`src/mmrag_v3/processor.py:577`) runs `_extract_fail_closed`
+   and then `_repair_degraded_code` (`:484`) on every route except `vlm_native` (`:492`), including
+   `USE_DOCLING_FAST=1`. Pages with at least one judgeable code element that fails the R3 indentation
+   check (`_code_page_score`, `:437`) are counted into `extraction_quality_risk_pages` and each gets one
+   `extract_page_vlm` call; the VLM page replaces the primary only if it has more correctly indented code
+   AND keeps >= 80% of the non-code text AND at least the table cell-text (`:552-553`). A `VlmInfraError`
+   aborts the pass (`:527`); swaps are counted in `extraction_code_repaired_pages`. The VLM is whatever
+   `VLM_NATIVE_*` configures. Tests: `tests/test_v3_code_repair.py` (10 tests),
+   `tests/test_extraction_provenance_consumers.py`.
+3. **Code-furniture stripper** (`e19f932`, `9cac300`, both 2026-06-18). `_strip_code_furniture`
+   (`src/mmrag_v2/chunking/uir_chunker.py:860`, applied to every CODE element before fencing at `:937`)
+   removes lines matching running-header / "Listing|Figure|Table|Example N" patterns (`:844`) and bare
+   page-number lines at the block edge or next to such a line; any line with a code signal (`:852`) is
+   kept; repeated to a fixpoint (at most 5 passes). Test: `tests/test_code_furniture_strip.py` (7 tests).
+4. **Within-page dedup extended to CODE chunks** (`64e3c88`, 2026-06-18). `_dedupe_within_page_text`
+   (`uir_chunker.py:721`) now also drops later CODE chunks on the same page that match an earlier one
+   exactly (after strip) or whitespace-normalized at >= 120 chars (`_DEDUP_MIN_CHARS`, `:718`; modality
+   check `:741`). Tests: `tests/test_v3_within_page_dedup.py`
+   (`test_degenerate_code_duplication_on_page_is_collapsed`, `test_distinct_code_on_page_is_preserved`).
+5. **Central endpoint registry** (`a0ddbde`, `704f6ad`, both 2026-06-16). `src/mmrag_v2/endpoints.py`
+   resolves five roles (chat, embed, rerank, vlm, mineru) from `MMRAG_<ROLE>_BASE_URL|MODEL|API_KEY` over
+   hardcoded LAN defaults labelled "verified 2026-06-16" (`_DEFAULTS`, `:39-65`; `endpoint()`, `:105`).
+   Importers: `retrieval/pipeline.py:52`, `retrieval/reranker.py:52`, `scripts/ingest_to_qdrant.py:143`,
+   `scripts/check_endpoints.py` and several `scripts/_*` evaluation scripts. **Extraction does not read
+   it:** nothing in `src/mmrag_v3/` or `batch_processor.py` imports it; the page VLM reads `VLM_NATIVE_*`
+   (default OpenRouter, `engines/vlm_provider.py:30,37`), MinerU reads `MINERU_ENDPOINT`
+   (`engines/mineru_native.py:553`), and `retrieval/hyde.py:60` hardcodes its own vLLM URL.
+   Test: `tests/test_endpoints_config.py` (6 tests).
+6. **Hard `EXTRACTION_DEGRADED_CODE` QA verdict and ladder advisories** (`8e954c1` WS1b, `e653fac` WS1a,
+   both 2026-06-13). In `scripts/qa_full_conversion.py`, `_extraction_ladder_issues` (`:1121`) returns a
+   FAIL `EXTRACTION_DEGRADED_CODE` for any output whose header has `extraction_degraded_pages > 0` and
+   that contains a `modality == "code"` chunk; otherwise a WARN `EXTRACTION_LADDER_SERVED`, counted as an
+   advisory only when the laddered fraction is <= 2% (`_LADDER_SERVED_ADVISORY_BOUND`, `:1072`; `:1208`).
+   `_content_emptiness_issues` (`:1079`) adds an advisory WARN `CONTENT_EMPTY_PAGES_UNVERIFIED` when no
+   `--source-pdf` is given and more than 15% of pages have no chunk (`:1076`). Outputs without
+   provenance stamps raise neither. Test: `tests/test_qa_extraction_ladder.py` (12 tests).
+7. **Retrieval defaults: HNSW `ef=512` and HyDE blend** (`3278383`, `c2cb870`, both 2026-06-16).
+   `retrieval/pipeline.py:80` sets `_DEFAULT_HNSW_EF = 512`, the default `hnsw_ef` of `retrieve_reranked`
+   and `retrieve_hybrid_reranked` (`:153`, `:393`), sent to Qdrant as `params.hnsw_ef`. When HyDE is
+   enabled (still default off, `use_hyde=False`, `:150`, `:389`), the hypothetical-answer embedding is
+   averaged with the query embedding after L2 normalization (`_blend_vectors`, `:110`, weight 0.5)
+   instead of replacing it, and the default `hyde_provider` is `"vllm"` (`:152`, `:392`), i.e. the
+   hardcoded URL in `retrieval/hyde.py:60-61`. Tests: `tests/test_retrieval_pipeline.py`
+   (`test_retrieve_reranked_forwards_default_hnsw_ef`, `test_blend_vectors_*`,
+   `test_retrieve_reranked_hyde_blends_not_replaces`, `test_retrieve_reranked_hyde_failure_falls_back_to_literal`).
+
+
+## 2026-09-29 - Quality remediation cycle: behavior changes and their limits
+
+Context. An external audit of one cloud-route conversion of `IRJET_Modeling_of_Solar_PV_system_under.pdf`
+(7 pages, Dashscope `qwen3-vl-flash`, legacy `HybridEngine`) found running headers inside body chunks,
+headings that never led a chunk, wrong figure crops, cut reference entries and dishonest provenance, while
+`qa_full_conversion.py --source-pdf` read `QA_PASS` with 0 failures. The defects predate the cloud route (a
+June MinerU-era run shows the same 67x68 logo asset). The changes below are engine-agnostic and were made
+red-first against a deterministic fixture. Acceptance was measured on a fixed extraction (UIR dump of the
+live run), not on run-to-run identical live output. Detailed measurements: `docs/paper/FINDINGS_LOG.md`
+(entry 2026-09-29). Commits `7180aee` .. `c367b12` on `fix/quality-remediation-v1`.
+
+### Heading sections (`a4db9ea`, `uir_chunker.py::_split_into_heading_sections`, `_partition_group`)
+A heading-labelled element closes the current section and starts a new one; the section's heading is the
+`parent_heading` of every part of that section; elements before the first heading of a batch get `None`
+(carry-forward or TOC fill them later); consecutive headings form one section whose parent is the last of
+them. Before: all text elements between two visual elements were joined, split by character window and the
+LAST heading of the group was stamped on every part (median 22% of chunks in 46 local outputs had a heading
+line embedded after line 1; IRJET 12 of 30 chunks had the wrong parent). Consumers whose input changes:
+`_assign_headings`, the F1 band check, `_merge_mid_sentence_chunks`, ingest `resolve_search_priority`,
+`rag/advanced_pipeline.py` breadcrumb-depth boost. Chunk boundaries and ids change for essentially every
+document. Tests: `tests/test_uir_chunker_heading_sections.py` (127, seeded properties).
+Measured on the fixed UIR of the live run: 0 headings inside body chunks (base 9), 100% parent-heading
+coverage (hard gate 0.80). A replay on reconstructed streams shows 1-2.7 point coverage dips on typical
+documents because front matter before the first heading is now honestly null; the criterion is decided on
+real UIR, and no clause lets a result below the gate be "explained".
+
+### Reference entries (`f62ac26`, `_split_at_sentence_boundaries(entry_labels=True)`)
+Inside a references-class section (heading References/Bibliography/..., or >= 3 bracketed labels in the
+text) the splitter prefers a boundary immediately before an entry label `[n]`, including labels that follow
+a sentence end inline in one element. Elsewhere the splitter is unchanged (a numbered manual list and
+"Reference [10] presented ..." are never treated as entries). Before: the last ". " before the budget was
+the one in "vol. 4, no. 8", so entries were cut mid-citation. Known blind spot: author-year bibliographies
+without bracket labels fall back to the old rule. Tests: `tests/test_uir_chunker_reference_entries.py` (7).
+
+### Neighbour snippets (`9002578`, `batch_processor._refresh_stale_next_snippets`, `_patch_export_file`)
+`next_text_snippet` is recomputed on the FINAL chunk list with the look-ahead rule (successor `content[:300]`).
+Before: the look-ahead ran before the filter chain, so every chunk removed later (icon drop, pHash duplicate,
+mismatch skip) left its predecessor quoting text that was not its neighbour (6 orphans on the real output).
+`prev_text_snippet` is untouched. Tests: `tests/test_export_snippet_refresh.py` (9).
+
+### Provenance stamps (`507038e`, `provenance.py`, `batch_processor` header, `mmrag_v3/processor.py::_stamp_routing`)
+`pipeline_version` is the engine version (it carried the schema version 2.7.0); `config_hash` is a sha256
+of the canonical JSON of the output-affecting options and refuses credential- or endpoint-like names
+(`compute_config_hash`); the header gains `extraction_vlm_model`, `extraction_vlm_served_pages` and
+`extraction_demoted_pages` (a page demoted to Docling by an expired key or an exhausted rate limit left the
+header saying hybrid / degraded 0 / fallback null). The two non-batch header writers stamp `pipeline_version`
+and a sha256 `source_file_hash`. `qa_conversion_audit.py` compares `pipeline_version` to the engine version
+through a constant separate from the schema check. No schema bump (header values and optional fields).
+The staleness rule stays route-based; `config_hash` only makes staleness recordable. Tests:
+`tests/test_provenance_stamps.py` (18, including a full `process_pdf` run with a synthetic PDF).
+
+### Oversize split metadata (`aedf2eb`)
+Parts produced by the oversize breaker and the smart split keep the parent's breadcrumb and hierarchy level;
+the `[Oversize Split n/m]` / `[Split i/n]` breadcrumb markers and the level bump are gone (ids keep the `_oN`
+suffix). Before: the marker entered `breadcrumb_path`, which feeds `to_embedding_text` and the depth boost.
+Tests: `tests/test_oversize_split_metadata.py` (3).
+
+### Docling bbox origin (`7180aee`, `mmrag_v3/engines/docling_fast.py::_normalize_bbox`)
+BOTTOMLEFT-origin boxes are converted with docling_core `to_top_left_origin(page_height=...)`. Before: the
+IRJET p2 header logo came out at y 907-949 instead of 55-91 (mirrored). Every `docling_fast` bbox changes,
+so every offline smoke lane changes crops. Tests: `tests/test_docling_bbox_origin.py` (5).
+
+### validate_qdrant exit code (`501ce82`) and ingest embedding text (`11e9cf7`)
+`scripts/validate_qdrant.py` returns 1 when any collection validation crashed (it printed the error and
+returned 0). `scripts/ingest_to_qdrant.py::image_embedding_text` embeds the full `content` of an IMAGE chunk
+when the 400-character `visual_description` mirror is its truncated prefix; the contractual cap is unchanged
+and other consumers of the mirror are untouched. No retrieval-lift claim is made. Tests:
+`tests/test_validate_qdrant_exit.py` (3), `tests/test_ingest_image_embedding_text.py` (5).
+
+### Crop plausibility guard and sidecar (`12ab7de`, `bf74f62`, `asset_materializer._select_crop_clip`)
+B1 replaced the VLM box with ANY detected object. New rule for chunks that carry a VLM box. IMAGE: a box that
+holds no graphics keeps the geometric rescue (a hallucinated box over blank space); a box that holds graphics
+(rasters and vector-drawing clusters; page-sized background art excluded) keeps the VLM box unless an
+overlapping raster is at least half of their bounding area. TABLE: with no detected table under the box and
+short-line (not prose) words under it, the VLM box is kept (`find_tables` also fires on charts and header
+rows). Chosen by measurement: 359 of the 673 local crops are replayable (the sliced source PDFs of the rest
+are absent); 27 IMAGE and 9 distinct TABLE crops change, each inspected against the rendered page (IRJET
+Figs 4/5/7 and Table I, AIOS p4/p9/p33 tables, HarryPotter p7 and AIOS p7 fragments recovered); one cloud-frame
+case turns a wrong object into a wrong region; none regressed. A one-sided area floor and page-chrome
+exclusion were measured and rejected. Not fixed by design: on the cloud frame the VLM box for Fig 3 is shifted
+onto prose and the rescue still returns the header logo; that needs a bbox frame correction (owner decision).
+`crop_audit.json` (new, next to the JSONL) records every crop's VLM box and rendered rectangle in PDF points,
+asset pixels and reason; `scripts/qa_crop_fidelity.py` (advisory) flags tiny rescues, prose-dominated and
+full-page crops. Tests: `tests/test_asset_crop_plausibility.py` (12), `tests/test_crop_audit_sidecar.py` (2),
+`tests/test_qa_crop_fidelity.py` (7).
+
+### IMAGE drop ledger (`14d3946`, `validators/image_drop_ledger.py`)
+Every IMAGE chunk the export chain removes is itemized with its reason (full_page_guard, quality_filter,
+no_visual_sentinel, full_page_editorial, blank_asset, tiny_icon, thin_strip, chunk_id_duplicate,
+asset_metadata_mismatch, phash_duplicate, export_error), and the run logs
+`IMAGE in == IMAGE written + itemized drops`; an unwrapped drop site shows as `unaccounted=N`. Warning
+summary only, no header change. Drops made inside a batch before the chunk lists are assembled are outside
+the invariant. Tests: `tests/test_image_drop_ledger.py` (9, bridge test through `process_pdf`).
+
+### Element-level running furniture (`c367b12`, `chunking/furniture.py`)
+`chunk_universal_document(drop_furniture=True, furniture_report=[...])` removes running headers, footers and
+folios before chunking: (1) the engine's own label (`header`, `footer`, `page_number`, `page_header`,
+`page_footer`; a VLM type kept as `original_vlm_type`) on elements of at most 200 characters; (2) repetition:
+a digit-normalized signature (difflib ratio >= 0.9) in the top-4 or bottom-4 TEXT elements of >= 3 distinct
+pages (a RANK window, not an absolute band: VLM frames are compressed). Never removed: heading-labelled
+elements, elements equal to a heading or TOC string (a book's running header is often its chapter title and
+the only source of the section heading), captions and footnotes, code and form elements, tables, and the last
+content of a page. Removed elements are registered with the `QualityFilterTracker` as `NOISE_PATTERN`, so
+QA-CHECK-01 reads the removal as an intentional filter; because the same tokens leave the source side, the
+logged variance for IRJET moved from -23.0% to -27.7% on the live run (a warning; an error only under
+`--strict-qa`), an expected accounting effect of losing equation and figure text upstream, not of the
+furniture. Measured before enabling (40 local outputs, elements reconstructed from chunks): no output gained
+a headless chunk at any rank window; IRJET furniture strings drop from 5-7 chunks each to 0-2; the live run's
+label rule fires on 13 elements and the repetition rule finds the same 13. Known limits: a header fused into
+a body element survives; a batch of fewer than 3 pages cannot use the repetition rule. Tests:
+`tests/test_uir_chunker_furniture.py` (66), `tests/test_furniture_batch_registration.py` (1).
+
+### Instruments added in this cycle (advisory, report-only)
+`validators/structural_outcomes.py` (snippet consistency, heading inside body, furniture lines, reference
+integrity, figure-deficit pages; wired report-only into `scripts/qa_semantic_fidelity.py`, 27 tests);
+`scripts/qa_gold_anchor_smoke.py` with `tests/fixtures/gold_anchor_specs/irjet.json` (anchors derived from the
+source PDF, not from the output: sections, front matter, furniture, references, tables, figure size bands,
+search priority; 19 tests); `MMRAG_DUMP_UIR=<dir>` (a batch's `UniversalDocument` as JSON for deterministic
+chunker A/B; `universal/serialization.py`, 8 tests). A metric that restates its own fix reads zero by
+construction, so each of these is anchored in the source or in the fixed extraction.

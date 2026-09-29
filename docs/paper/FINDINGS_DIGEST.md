@@ -14,6 +14,8 @@ from "perfect PDF conversion" to "the RAG works well", measured the RAG end-to-e
 found the real answer-quality lever is trivial (**feed the LLM top-10 chunks, not top-5**).
 The one open retrieval problem is the ~6% of queries that never retrieve the right document.
 
+> STATUS 2026-09-29: this section dates from 2026-06-15. The branch named is pushed (`origin/feat/omnidocbench-phase0` = `499a5fa`, not merged to `origin/main`); the ~6% problem was resolved 2026-06-16 (commit 3278383). Current state: `docs/PROJECT_STATUS.md`. (plan WP-G3, G0-35, AP-48)
+
 ## SETTLED — load-bearing, do NOT re-litigate
 
 - **Engine = MinerU+Qwen-for-code hybrid.** Phase 4 shadow window: 0/16 QA_FAIL vs the
@@ -33,6 +35,9 @@ The one open retrieval problem is the ~6% of queries that never retrieve the rig
 
 - **OCR / `do_ocr=True`** — was the v2 default for years; its 0.301/0.563 ceiling DROVE the
   V3 pivot. MinerU OCRs scans better (0.221). (`[[project_ocr_already_tried]]`)
+
+  > STATUS 2026-09-29: rationale disputed: the V3 pivot is dated 2026-05-29 (history below), the 0.301/0.563 score was first measured 2026-06-09, 0.221 is a 158-page fixed-set figure (not the full-755 set), and the cited memory note is host-local, not in the repository (plan decision D-15).
+
 - **Filtering empty image chunks** to help retrieval — measured **+0.0pp**. (They're an
   enrichment-quality question, not a retrieval one.)
 - **Sorting reranker output by `rerank_score`** — measured **-10pp** (the score field is
@@ -50,6 +55,9 @@ The one open retrieval problem is the ~6% of queries that never retrieve the rig
 
 - **~6% of queries never retrieve the right document** even at top-100 (embedder /
   query-expansion / HyDE problem). THE NEXT TASK.
+
+  > STATUS 2026-09-29: resolved 2026-06-16, commit 3278383 (HNSW search ef raised to 512; `docs/PLAN_DOC_RECALL_FLOOR_V1.md`). (plan WP-G3, G0-35, AP-48, INV-083)
+
 - **Chaubal-type code residual** (REPL/notebook transcripts + engine token corruption):
   fullwidth scrub shipped; de-LaTeX `\(\equiv\)` + CJK strip DEFERRED (need a trustworthy
   code-fidelity measure first).
@@ -58,6 +66,9 @@ The one open retrieval problem is the ~6% of queries that never retrieve the rig
   re-extraction lane (degraded code -> re-do that page via the Qwen lane), NOT a router tweak;
   not yet built. The doc-level `ProfileClassifier` profile is also dropped at the
   `mmrag_v3.extract(path)` seam, so the engine routes code-vs-table blind.
+
+  > STATUS 2026-09-29: `docs/PROJECT_STATUS.md` (2026-06-18 section) reports 14 code books converted + ingested; the re-extraction lane was built 2026-06-17 as `mmrag_v3.processor._repair_degraded_code` (commit 2ec40f5), which also reverted a profile->VLM seam at `extract()` (it missed the target and re-opened the dense-table regression). (plan WP-G3, AP-48, INV-083, INV-053)
+
 - **No omission-sensitive labelled GT for the internal classes** (German/Dutch/automotive) -
   OmniDocBench is EN-only; the deep, deferred measurement gap.
 

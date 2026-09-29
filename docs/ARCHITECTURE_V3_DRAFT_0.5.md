@@ -12,6 +12,12 @@
 > code does today; this draft is retained for the Phase-A micro-sequence and the
 > original intent.
 
+> STATUS 2026-09-29: paths named in this draft that do not exist in the repository on 2026-09-29:
+> docs/PHASE_A_INTENTIONAL_DELTAS.md, PHASE_A_SCOPE_NEGOTIATION.md, PHASE_A_SIGMA_BASELINE.md, PHASE_A_SKIP_AUDIT.md,
+> PHASE_B_BUILD_TIMES.md, VISUAL_INDEX_PIN.md, CHUNK_ID_REWRITE_MAP_3.1.0.csv / 3.2.0.csv / CUMULATIVE.csv,
+> PLAN_V2.16.md, DIAGNOSTIC_2026-05-25_v2.16_p2_omlx_deficit_root_cause.md (all under docs/), plus
+> tests/test_qdrant_cutover_rollback.py and scripts/retrieval_behavior_regression.py; also absent: docs/USER_ISSUES.md and docs/B8_COLD_CACHE_COST.md. (plan WP-G3, INV-071)
+
 ## Phase A: Non-Negotiable UIR Foundation
 
 **Scope:** Phase A2 is a mandatory, non-deferrable structural dependency. The core `batch_processor.py` and `processor.py` (approx 1,755 LOC) MUST be refactored to natively consume the Universal Intermediate Representation (`UniversalDocument` / UIR). 
@@ -67,6 +73,10 @@
 
 This charter defines the next-generation architecture for the MM-Converter pipeline. It describes the *target state* for v3.0 — the components, their interfaces, the migration path, and the quality gates that govern acceptance. It does **not** replace `docs/ARCHITECTURE.md` (v2.X production architecture, still canonical for current operation) until v3.0 ships.
 
+> STATUS 2026-09-29: SUPERSEDED for current operation by `docs/ARCHITECTURE_V3.1_CHARTER.md`: since V3 Phase A
+> (commit 813b9ba, 2026-05-29) the batch PDF path extracts through mmrag_v3.extract(), and
+> src/mmrag_v2/batch_processor.py has no docling import. (plan WP-G3, AP-25)
+
 **Read-order:**
 1. This document (v3.0 target architecture)
 2. `docs/DECISIONS.md` — all architectural decisions governing v2.X → v3.0 transition
@@ -81,6 +91,9 @@ This charter defines the next-generation architecture for the MM-Converter pipel
 ### 1.1 Achievement Context
 
 The v2.X architecture reached its mathematical ceiling at `v2.16.0`. Key metrics:
+
+> STATUS 2026-09-29: SUPERSEDED on this point by `docs/ARCHITECTURE_V3.1_CHARTER.md` Section 1: "v2.16 was
+> never at a "mathematical limit"; V3 simply has more headroom." (plan WP-G3, AP-25)
 
 | Metric | v2.10 Baseline | v2.16.0 | Ceiling Nature |
 |---|---|---|---|

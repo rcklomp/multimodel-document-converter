@@ -5,6 +5,10 @@
 **Author:** Claude (Opus 4.8), grounded in the repo at commit `b44724b` and this
 cycle's measured telemetry. External citations verified 2026-06-03 (see Section 10).
 
+> STATUS 2026-09-29: last edited at commit `f1190b1` (2026-06-11); not reconciled with the 2026-06-13..18
+> changes (code-repair pass `2ec40f5`, per-page deadline `4bfd7c8`, stall retry `b8160aa`) or with the
+> 2026-09-29 route change (plan decision D-1). (plan WP-G3, AP-20)
+
 **Status legend used throughout:**
 `[SHIPPED]` exists in the code and is test-covered ·
 `[PARTIAL]` exists but incomplete or carries known debt ·
@@ -32,6 +36,10 @@ alone empties dense tables), and the hybrid is the **non-dominated** configurati
 - strictly better on every class Phase 1 flagged (tables, scans/forms, code) and
 worse on none (Phase 4 shadow window, `docs/paper/FINDINGS_LOG.md` 2026-06-11).
 
+> STATUS 2026-09-29: R3 0.44 is MinerU on AIOS (`docs/DECISIONS.md` "R3 Code-Indentation Gate Redesign");
+> on the Phase 1 fixed set MinerU scored R3 0.300 vs hybrid 0.947 (DECISIONS "Phase 1 outcome RATIFIED +
+> baseline-provenance correction"). (plan WP-G3, AP-45)
+
 `DoclingFastEngine` (CPU, OCR-off) is therefore **no longer the live prose engine**.
 It is demoted to (a) tier-2 of the fail-closed extraction ladder (Section 4) and
 (b) the `USE_DOCLING_FAST` rollback hatch. Its caveats (stripped code indentation,
@@ -41,6 +49,12 @@ which is exactly why a re-extraction whose pages laddered to Docling must be
 treated as stale, not equivalent. Pretending V3 "replaced" V2 is the mistake that
 produced the previous drafts; so is pretending the ladder's Docling output is
 primary-quality.
+
+> STATUS 2026-09-29: operationally `MINERU_ENDPOINT` is unset (`scripts/env_cloud_vlm.sh`), so `extract()`
+> runs the legacy `HybridEngine` (Section 3.2: cloud VLM pages, `DoclingFastEngine` for all others); operative
+> but unratified and unmeasured (DECISIONS "Operative extraction route since 2026-09-29"). The charter's
+> "production default" is the code default when `MINERU_ENDPOINT` is set; which route counts as production is
+> owner decision D-1 (pending). (plan WP-G3, AP-03, AP-04, AP-08)
 
 V3's value is real but bounded. In a head-to-head soak (same embedder, reranker,
 GX10 judge, seed 7), V3 beat the v2.16 baseline on every axis:
@@ -109,6 +123,9 @@ and the breaker is one fail-fast rung inside it. See B4 below.)
 | B11 | separator-less / corrupt pipe table (cluster C) | the extractor emits valid grids | repair at the engine-agnostic chunker chokepoint; guarded (escaped-pipe, ragged-bail, title-tolerance, single-dash) so it never ships a gate-passing corrupt grid | `test_table_markdown.py` | `[SHIPPED]` (`b032a29`, `de1af9d`) |
 | B12 | no-VLM image (cluster D) | every image is described inline | retain as a documented ID-only fallback (`vision_status=no_vlm`); describe POST-conversion via `enrich_image_chunks_v29.py`; gate advisory, not failure | `test_qa_image_gate_calibration.py`, `test_tiny_icon_filter.py` | `[SHIPPED]` (`dd4a758`) |
 
+> STATUS 2026-09-29: B5's test cell names no test: commit `b44724b` changed only `scripts/ingest_to_qdrant.py`
+> and no file under `tests/` references it. (plan WP-G3, AP-23)
+
 ### 2.2 Vocabulary migration (Charter §7.1)
 
 `ElementType` is the legacy 3-value extraction vocabulary; `Modality` is the
@@ -145,6 +162,10 @@ exists (fitz-based). `[PROPOSED]` ePub: the UIR contract is format-agnostic, so 
 ePub engine is a defined extension point - but it is NOT built (both V3 engines
 hardcode `fitz.open` / `file_type="pdf"`). Do not represent ePub as shipped.
 
+> STATUS 2026-09-29: there are now five V3 engine classes (`DoclingFastEngine`, `VlmNativeEngine`,
+> `MineruNativeEngine`, and `HybridEngine` / `MineruQwenHybridEngine` in `router.py`); all build PDF-only
+> documents (`file_type="pdf"`). (plan WP-G3, AP-23)
+
 ### 3.2 Cost-Optimized Hybrid Router `[SHIPPED]`
 `HybridEngine._classify_page` (`src/mmrag_v3/engines/router.py`) uses fast PyMuPDF
 pre-flight signals to choose an engine per page:
@@ -174,6 +195,11 @@ element list `{type, bbox[0,1], content, merge_prev}`; the converter projects bb
 to `[0,1000]`, maps MinerU's 13-type vocabulary onto the 3-value `ElementType`
 (code smuggled as TEXT per B3), folds `merge_prev` continuations, and transcodes
 MinerU's HTML tables into Markdown grids (the pipeline R2 contract).
+
+> STATUS 2026-09-29: `MineruNativeEngine` alone is the `USE_MINERU_ENGINE=1` route, not the default (with
+> `MINERU_ENDPOINT` set the default is `MineruQwenHybridEngine`, next paragraph); mlx MinerU serving was
+> deprecated 2026-06-10 for GX10 vLLM (DECISIONS "Phase 0B interim default + MinerU serving home + cap1600
+> render"). (plan WP-G3, AP-21)
 
 **Default route is the MinerU+Qwen-for-code hybrid (`MineruQwenHybridEngine`,
 2026-06-06)**, not pure MinerU: when `MINERU_ENDPOINT` is set, code-dense pages
@@ -307,6 +333,10 @@ silent-ladder regression before a corpus run** (this is how the 2026-06-11 Phase
 re-extraction attempt was correctly halted when the conversion env could not reach
 the inference servers). Closing the presence-not-fidelity gap is Section 4.3.
 
+> STATUS 2026-09-29: the `SMOKE_FULL=1` preflight curls `/models` with no Authorization header
+> (`scripts/smoke_production.sh`, FULL-mode preflight loop); whether it can pass against the keyed cloud
+> endpoint of the operative route is unverified (plan decision D-1).
+
 ### 4.2 Rollback hatch `[SHIPPED]`
 
 The env-var routing in `processor._select_engine` keeps `USE_DOCLING_FAST=1` ALIVE
@@ -331,6 +361,12 @@ The flag and its consumers are Phase 3 work; until then the ladder's presence te
 (4.1) is the only arbiter and the offline OmniDocBench gate (Section 7 /
 `PLAN_OMNIDOCBENCH_EVAL`) is the only true fidelity verdict.
 
+> STATUS 2026-09-29: partly built since 2026-06-17: consumer 1 is `mmrag_v3.processor._repair_degraded_code`
+> (`2ec40f5`; one bounded VLM re-extraction per R3-flagged code page, stamps `extraction_quality_risk_pages` /
+> `extraction_code_repaired_pages`), and `scripts/qa_full_conversion.py` reports `EXTRACTION_DEGRADED_CODE`
+> (FAIL) plus the advisories `EXTRACTION_LADDER_SERVED` / `CONTENT_EMPTY_PAGES_UNVERIFIED`. Risk proxies for
+> tables, reading order and empty regions are not built. (plan WP-G3, AP-22, INV-070)
+
 ### 4.4 Operational guards `[SHIPPED]`
 
 - **Circuit breaker:** `VlmInfraError` (transport timeout / connection refused /
@@ -349,6 +385,10 @@ The flag and its consumers are Phase 3 work; until then the ladder's presence te
   pre-merge for any extraction-path change) and `scripts/qa_full_conversion.py`
   (`QA_PASS`/`QA_WARN`/`QA_FAIL`).
 
+> STATUS 2026-09-29: not listed above but shipped 2026-06-18: a hard per-page wall-clock deadline
+> (`src/mmrag_v3/engines/_deadline.py`, `4bfd7c8`) and a retry of a stalled VLM page on a fresh connection
+> (`VLM_PAGE_STALL_RETRIES`, `b8160aa`). (plan WP-G3, AP-22)
+
 ---
 
 ## 5. Hardware Topology & Throughput Budget
@@ -362,6 +402,11 @@ not compute-bound**.
 | LLM-as-judge / soak scoring | GX10 / GB10 (vLLM, Qwen2.5-14B-FP8) | stable FP8 text inference; bandwidth-starved for VLM but fine for the judge | `[SHIPPED]` |
 | Embedding + rerank | omlx-server (Mac Mini) Qwen3-Embedding-8B + ModernBERT | local, LAN | `[SHIPPED]` |
 | Vector store | Qdrant | dense + sparse collections | `[SHIPPED]` |
+
+> STATUS 2026-09-29: the M5, GX10 and omlx hosts in this table were unreachable on 2026-09-29
+> (`scripts/env_cloud_vlm.sh`; a connection probe that day failed), and the table omits the MinerU2.5 host
+> (GX10 vLLM `:8001`, DECISIONS "Phase 0B interim default + MinerU serving home + cap1600 render") (plan
+> decision D-2). (plan WP-G3, AP-07, INV-070)
 
 **Bandwidth rationale (corrects the "discrete GPU" error):** the GB10 (DGX Spark)
 is a *unified-memory* machine (128GB LPDDR5X, ~273 GB/s), the same architecture
@@ -378,6 +423,11 @@ sub-second on Docling. A ~600-page crucible is therefore a multi-hour run and an
 11,000-page Grand Soak is multi-day. **The Grand Soak has NOT been run; the largest
 validated run to date is a single-document smoke.** Budget VLM page-hours before
 committing.
+
+> STATUS 2026-09-29: larger validated runs exist since: the 16-doc crucible (16/16 QA_PASS, 2026-06-08,
+> Section 3.3) and the Phase 4 shadow window (16 docs, identical 15-page slices, 2026-06-11, DECISIONS
+> "Phase 4 - the MinerU+Qwen hybrid is the production default"). The Grand Soak sentence stands. (plan WP-G3,
+> AP-18)
 
 ---
 
@@ -437,6 +487,10 @@ modality-switched rubric matrix is design intent `[PROPOSED]`.
 | ColPali cost if adopted (6.2) | Med | Gated behind the 6.2 constraints; do not adopt blind. |
 | ElementType migration half-done (2.2) | Low | Smuggle-and-promote is stable interim; complete the one-way migration to remove the seam class. |
 
+> STATUS 2026-09-29: the single-point dependency row fired: the M5, GX10 and omlx hosts were unreachable on
+> 2026-09-29 and a cloud VLM is in use; `docs/DECISIONS.md` records no cost ceiling for it (plan decisions
+> D-1, D-20). (plan WP-G3, AP-07, INV-070)
+
 ---
 
 ## 9. Roadmap & Definition of Done
@@ -461,6 +515,11 @@ default to confirm the pivot holds at corpus scale. Validated so far: 6/6 golden
 built as written. Retained as the design reasoning that justified the pivot
 (A5's per-region precedent IS MinerU's two-stage design). Items below are
 historical, not active work.
+
+> STATUS 2026-09-29: "none of A1-A5 / B1-B3 were built" is not accurate: A1-A4 and B1-B2 shipped 2026-06-03
+> (DECISIONS "V3.1 Blocker remediation (A1-A4, B1-B2) + json_schema default") and are live code
+> (`VlmTruncationError`, `repair_truncated_json`, geometric clip + re-extraction in `asset_materializer.py`);
+> A5 was not built (`docs/PROJECT_STATUS.md` History, 2026-06-03 PM). (plan WP-G3, AP-17)
 
 **Blocker A - VLM emits invalid JSON on dense pages** (truncation + malformation
 -> mass Docling fallback; ~58% of pages on the one magazine reached):

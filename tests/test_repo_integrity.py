@@ -11,6 +11,9 @@ as a pytest assertion is worth more than a written rule, because it runs itself.
 We assert against ``git ls-files`` (the *committed* tree), NOT the working
 filesystem — that distinction is the whole point: a developer's dirty working
 tree hides untracked-file bugs that only surface in a fresh clone.
+Exception (verified 2026-09-29): G5 resolves referenced paths with
+``Path.exists()`` on the working tree and G7 reads the digest from disk, so an
+untracked referent satisfies G5 locally and fails only in a clean clone.
 
 Invariants and the failure each prevents:
 
@@ -26,17 +29,25 @@ Invariants and the failure each prevents:
                              test file exists, is tracked, and is not skipped →
                              a doc can't claim a guard that was deleted/skipped
                              (#4 invalidated-contract, part of #7 hollow-green).
-  G5  no dangling paths    — repo-path references in committed governance docs
-                             point at things that exist on disk → no references
-                             to moved/deleted paths (#6).
+  G5  no dangling paths    -- backticked repo paths (src/, tests/, scripts/,
+                             top-level docs/*.md) in the current-state governance
+                             docs (CANONICAL_GOVERNANCE_DOCS minus the V3.0 draft
+                             and DECISIONS.md) exist in the WORKING tree
+                             (``Path.exists()``, not ``git ls-files``) -> no
+                             references to moved/deleted paths (#6). A line that
+                             carries any forward-ref marker (see Conventions) is
+                             skipped entirely.
   G6  skips are registered — every unconditional ``V3_DEFERRED`` test skip is
                              listed in ``docs/V3_DEFERRED_TESTS.md`` → behavioral
                              coverage can't silently rot off the books (#5 stale
                              status + #7 hollow-green via skipped tests).
   G7  anti-circle structure — `docs/paper/FINDINGS_DIGEST.md` keeps its three
-                             load-bearing sections (SETTLED / DEAD ENDS / OPEN)
-                             and the cross-references that make the doc stop
-                             re-litigation. Prevents the digest being silently
+                             load-bearing sections (line-anchored ``## SETTLED`` /
+                             ``## DEAD ENDS`` / ``## OPEN``) and the substrings
+                             ``FINDINGS_LOG.md``, ``docs/PROJECT_STATUS.md`` and
+                             ``docs/DECISIONS.md``. STRUCTURE ONLY: it cannot detect
+                             a stale or wrong item (item content is
+                             human-maintained). Prevents the digest being silently
                              rewritten into prose that loses its anti-circle
                              function (the "forgetting past mistakes" failure).
 
@@ -45,6 +56,9 @@ Conventions authors must follow to satisfy the guards
 - **Forward references** (a path that doesn't exist yet, e.g. a planned script)
   must be annotated *on the same line* with one of: ``NOT YET BUILT``, ``not yet``,
   ``(planned)``, ``to be built``. G5 then treats it as intentional, not dangling.
+  The match is case-insensitive, also accepts ``planned`` followed by an em-dash
+  (U+2014), and exempts the WHOLE line: no other path on it is checked, and the
+  bare ``not yet`` also matches ordinary prose.
 - **Superseding** a Layer-0 statement: place a literal ``SUPERSEDED <date/why> by``
   marker followed by the winning doc's path in backticks *at the conflicting
   content itself* (not only as a global "X supersedes Y" rule elsewhere). G3

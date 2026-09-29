@@ -9,17 +9,20 @@ authoritative current version (do not duplicate here; goes stale).
   embedder + local ModernBERT reranker, per v2.13.0+). Test-suite
   skip-gates handle the unset case for CI.
 - Synthetic-soak judge + query generation (`scripts/synthetic_soak.py`):
-  the default path is the local GX10 vLLM via `--judge-provider vllm` /
-  `--gen-provider vllm` (model `RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic`
-  at `http://10.0.10.239:8000`, a standing service as of 2026-05-31, no
-  auth on the LAN). `DASHSCOPE_API_KEY` is only needed for the cloud
-  `--judge-provider dashscope` alternative (`qwen-max`). Neither is
+  `--judge-provider` and `--gen-provider` both default to `dashscope`
+  (cloud `qwen-max`, needs `DASHSCOPE_API_KEY`; argparse defaults verified
+  2026-09-29). `vllm` targets the local GX10 vLLM (model
+  `RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic` at `http://10.0.10.239:8000`,
+  a standing service as of 2026-05-31, no auth on the LAN). Neither is
   required for the retrieval path since v2.13.0 (local omlx embedder); the
   retrieval-regression script tolerates the unset case via skip-gates.
+
+> STATUS 2026-09-29: the LAN services named above (omlx `10.0.10.246:8000`, GX10 `10.0.10.239:8000`) did not accept a connection (`curl -m 4 http://<host>/v1/models`: curl exit 7); the operative route is recorded in `docs/DECISIONS.md` "Operative extraction route since 2026-09-29" (plan decision D-1, D-2).
 
 ## Environment
 - Runner: `conda run -n mmrag-v2`
 - Default VLM: `none` (set explicit provider when needed)
+- Verified 2026-09-29 (`src/mmrag_v2/cli.py`): `process` resolves an omitted `--vision-provider` from config, else `none`; `batch` defaults to `ollama`. The flag selects only the per-image description VLM; it does not reach `mmrag_v3.extract()`, whose page VLM and code-repair pass use the `VLM_NATIVE_*` env (see the note under CLAUDE.md "Core Commands").
 
 ## Validation (Required)
 
@@ -37,7 +40,7 @@ For every test command in this file, validation is mandatory:
 
 Representative test set (all present in `data/`):
 - `data/academic_journal/AIOS LLM Agent Operating System.pdf` — digital, high text density
-- `data/digital_literature/HarryPotter_and_the_Sorcerers_Stone.pdf` — born-digital novel; routes to `digital_literature` profile and exercises the post-Docling sanity pass (y-sort, drop-cap heal, label-leak filter, OCR gating). See `docs/archive/PLAN_DOCLING_POSTPROCESSOR.md`.
+- `data/digital_literature/HarryPotter_and_the_Sorcerers_Stone.pdf` — born-digital novel; routes to `digital_literature` profile. It exercises the post-Docling sanity pass (y-sort, drop-cap heal, label-leak filter, OCR gating) only on the legacy v2 lane (`--batch-size 0`, `V2DocumentProcessor`): verified 2026-09-29, `apply_postprocessors` is reached only through `DoclingPdfAdapter.convert` in `src/mmrag_v2/engines/docling_adapter.py`, which the V3 batch path (`src/mmrag_v2/batch_processor.py` delegating to `src/mmrag_v3/`) does not call. The plan that introduced the pass was deleted from the tree in commit 159f14b.
 - `data/technical_manual/Firearms.pdf` — scanned technical manual
 - `data/digital_magazine/PCWorld_July_2025_USA.pdf` — high image density, digital
 
@@ -75,6 +78,7 @@ First generate or preserve these outputs:
 - `output/probe_kimothi_toc_contract_codex_rerun/ingestion.jsonl`
 - `output/probe_hao_toc_contract_codex/ingestion.jsonl`
 - `output/probe_python_cookbook_toc_contract_codex/ingestion.jsonl`
+- `output/probe_ayeva_index_contract_codex/ingestion.jsonl`
 
 Then run:
 ```bash
@@ -82,9 +86,16 @@ RUN_TOC_PAGE_CONTRACT=1 conda run -n mmrag-v2 python -m pytest \
   tests/test_toc_index_page_contract.py -q
 ```
 
-Expected: `4 passed`. If the probe outputs were cleaned from `output/`, the
-test fails with an explicit missing-output assertion. Without
-`RUN_TOC_PAGE_CONTRACT=1`, the same file is skipped by default.
+Expected on legacy-lane probe outputs: 6 passed. Verified 2026-09-29: with
+`RUN_TOC_PAGE_CONTRACT=1`, `pytest --collect-only` collects 6 tests (4 parametrized
+page-window cases, the ayeva page-skip check and the kimothi determinism check), and a
+run without the probe outputs fails all 6 with the explicit missing-output assertion,
+so a passing run is not reproducible from a fresh tree. Without `RUN_TOC_PAGE_CONTRACT=1`, the same file is skipped by default.
+Caveat (verified 2026-09-29): `test_ayeva_dense_index_pages_use_pageskip_only`
+asserts the extraction method `hybrid_chunker_pageskip`, which only the legacy
+`src/mmrag_v2/engines/pdf_extraction.py` produces; the V3 batch path only reads
+that value (`src/mmrag_v2/batch_processor.py`), so probes regenerated on the V3
+path cannot pass that test.
 
 ### Process vs Batch (Parity)
 ```bash

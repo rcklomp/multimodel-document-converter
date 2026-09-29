@@ -187,6 +187,7 @@ Consumers to list in the DECISIONS entry: `_assign_headings`, F1 band check, `_m
 **WP-C2 reference entries** (`uir_chunker.py:1044-1101`). In sections that are references-class (Section 6 WP-0.2 definition), rank split candidates: a newline or blank line before an entry label, then a label that follows a sentence end inline (`(?<=[.]) (?=\[\d+\]\s+[A-Z])`, prototyped: Mandour entry intact, no body-citation cut, full suite 1767/99 green), then the existing rule. Outside references-class sections behavior is unchanged (blast radius = reference lists; WP-M0 records how many sections it touches). Tests: (i) newline-separated entries (15/17 intact today), (ii) INLINE-entries fixture from the fresh baseline shape (red today), (iii) body citation "Reference [10] presented" not cut, (iv) a numbered manual list unaffected. Effort S.
 
 **WP-C3 sentence-end ranking (measure-first).** `_SENTENCE_ENDS` includes `)` `;` `:`; prose is cut after them on every route and `_merge_mid_sentence_chunks` cannot rejoin. Candidate: rank ". " / "! " / "? " above the weaker enders and require a non-lowercase next character after a weaker ender. WP-M0 measures how many chunk boundaries on the 46 outputs would change; the change alters chunk shape for essentially every document, so it lands only with D-8 answered "accept" and only if the firing rate justifies it (otherwise KILL). Effort S.
+**Outcome (2026-09-29): KILLED for this cycle, by measurement.** On the fixed UIR of the live run the final chunker has 1 of 27 same-page boundaries whose next chunk starts in lowercase and 0 weak-ender (`)` `;` `:`) cuts (the 11-20% of WP-M0 was measured on the pre-B1 chunker, where glued headers and merged headings created the cuts). On element streams reconstructed from 40 local outputs the final chunker shows 81 weak-ender cuts in 1515 same-page boundaries (5.3%), concentrated in AIOS (about 9%) and CombatAircraft (about 7%); the reconstruction splits sentences across line-level elements, so it overstates the real rate. The target document does not fire, and a change of chunk shape for essentially every document (D-8) is not justified by a rate that is document-dependent and unmeasured on real element streams. Reopen trigger: a real UIR dump (`MMRAG_DUMP_UIR`) of any document shows >= 5% weak-ender cuts among its same-page boundaries. Test `test_numbered_manual_steps_are_not_treated_as_reference_entries` keeps documenting the unchanged legacy rule.
 
 **WP-A2 stale snippets + drop manifest** (`batch_processor.py`). Recompute `next_text_snippet` with the SAME rule as `_apply_lookahead_buffer` (successor `content[:300]`) on the FINAL chunk list, i.e. AFTER every in-loop drop (pHash duplicate rejection at ~2972-3035 and the asset-metadata-mismatch skip at ~2958-2967 happen inside the write loop; the logo orphans in the cloud run are exactly this): buffer the export list, fix snippets, then write, or hoist those two decisions into a pre-pass (chosen at implementation; the red test covers both). `prev_text_snippet` stays as today (null on V3): no backfill, so ingest contextual text changes only where a snippet was stale. Drop manifest: itemized reason -> count + asset names as a WARNING summary (no header change) covering ALL IMAGE-dropping sites: blank, tiny-icon, thin-strip, pHash reject, no-visual, full-page editorial, asset-less drop, `_apply_full_page_guard` DISCARD, asset-metadata-mismatch skip, chunk_id dedup. Invariant test: IMAGE elements in = IMAGE chunks out + itemized drops.
 Tests: [text, image(sprite), text] and [text, image(logo duplicate of an earlier page), text] -> refresh; every surviving snippet is None or equals its actual successor's prefix; coverage: no non-last chunk lost its snippet (fails today with 6 orphans on the real output). Guard: `orphan_snippet_chunks` + `snippet_coverage_gap`. Effort S-M.
@@ -375,5 +376,65 @@ Four HIGH, eleven MED and seven LOW findings on rev. 2; the targeted changes: th
 | f5d3e8a | WP-0.5 UIR dump | replay-fidelity + bridge test | |
 | a4db9ea, 871975b | WP-B1 heading sections | red-first 4 + 37/40 + 37/40; replay in FINDINGS_LOG | LANDED, NOT ACCEPTED until WP-V1 (Section 6); landed citing D-8 before the owner answered it |
 | f62ac26 | WP-C2 reference entries | red-first 4 defect tests; full suite 1949 | |
-| 9002578 | WP-A2 snippet refresh | 9 tests incl. real-output before/after; full suite 1958 | drop manifest still to do |
-Test baseline progression: 1767 passed / 99 skipped (499a5fa) -> 1958 passed / 99 skipped.
+| 9002578 | WP-A2 snippet refresh | 9 tests incl. real-output before/after; full suite 1958 | drop manifest: see 14d3946 |
+| 5ec5acf | plan rev. 3 after Round 0b | register re-dispositioned | |
+| 9c4ad03 | WP-G2 DECISIONS fact entries (verbatim 2026-06-18 deferral; operative route facts) | integrity guards 7/7 | fact-only, ratifies nothing |
+| 7180aee | WP-F1 Docling bbox origin | 5 tests, BOTTOMLEFT fixture | every docling_fast bbox changes |
+| 501ce82 | WP-F2 validate_qdrant exit code | 3 tests | |
+| 507038e | WP-C4 provenance stamps | 18 tests incl. full `process_pdf` run | staleness rule stays route-based (D-1) |
+| aedf2eb | WP-B3 oversize split metadata | 3 tests | marker entries dropped, `_oN` ids kept |
+| 11e9cf7 | WP-D7 ingest embedding text | 5 tests, refactor-first | no retrieval-lift claim |
+| 12ab7de, bf74f62 | WP-A1 crop guard (IMAGE, then TABLE), `crop_audit.json`, `qa_crop_fidelity.py` | design study on 359 of 673 crops (FINDINGS_LOG 2026-09-29 later); 21 tests | region acceptance NOT claimable on the cloud frame (K1, D-4/D-12) |
+| 14d3946 | WP-A2b IMAGE drop ledger | 9 tests incl. bridge; mutation-checked; live `unaccounted=0` | |
+| c367b12 | WP-B2 element-level furniture pass | replay on 40 outputs; 67 tests; live: label rule fires 13x = repetition rule | QA-CHECK-01 -23.0% -> -27.7% (D-7) |
+| (uncommitted at time of writing, committed with the docs) | Wave 1 documentation (G1, G2, G3) | reviewed by an independent adversarial agent: about 240 claims checked, 16 problems, all corrected | see the Wave 1 commit |
+Test baseline progression: 1767 passed / 99 skipped (499a5fa) -> 2095 passed / 99 skipped (c367b12).
+
+### 14.1 Wave 4 acceptance record (2026-09-29)
+
+- **WP-V1 (live IRJET run, current tree):** valid on every precondition (engine hybrid, degraded 0, fallback null, model
+  `qwen3-vl-flash`, 7/7 served, 0 demoted, key present, `config_hash` set); 42 chunks; strict gate `QA_PASS`; new guard
+  metrics: furniture lines 0, heading-inside-body 0, orphan snippets 0, reference split entries 0, figure-deficit pages 1.
+  QA-CHECK-01 -27.7% (warning; D-7). `[IMAGE-DROPS] in=11 written=9 itemized=2 unaccounted=0`.
+- **Fixed-UIR A/B (chunker-owned targets):** chunker-owned gold anchors failing 12 (base chunker) -> 2 (tip); the 2 are
+  extraction/order-owned (intro emitted before its heading; reference [9] truncated inside one VLM element). HEADING
+  coverage 100% (gate 0.80), 0 headless chunks: the WP-B1 criterion is met on the real UIR and B1 is ACCEPTED.
+- **WP-V4 gold anchors on the live output:** 5 fail (was 23-24): intro-section anchor (order-owned), ref [9] (extraction),
+  Figs 3, 5, 6 (cloud frame). Figs 1, 2, 4, 7, 8, 9, 10a, 10b pass the size band; region correctness on the cloud route is
+  NOT claimable (page-6 crops show partial figures plus body text, one flagged prose-dominated by `qa_crop_fidelity.py`).
+- **WP-V2 owner review set:** `output/wpv1_irjet/human_review_page{2,3,5,6}.png` and `human_review_chunks.md` (gitignored).
+  One bounded review; it shows the frame problem directly.
+- **WP-C3:** KILLED by measurement (Section 6, WP-C3 outcome).
+- **WP-V3 ship gate:** 1 pytest 2095/99/0; 2 firewall (in the suite); 3 `smoke_production.sh` offline SMOKE_PRODUCTION_PASS;
+  4 strict gate QA_PASS and UNIVERSAL_PASS on the live output; 5 AGENT-VAL-01 offline before/after: see 14.2.
+
+### 14.2 Ship gate 5: AGENT-VAL-01 (`smoke_multiprofile.sh`), pinned offline recipe, 2026-09-29
+
+Recipe as in Section 8.2 item 5 (cwd = the main checkout; cloud/VLM variables unset; `USE_DOCLING_FAST=1`; BEFORE via
+`PYTHONPATH` at an extracted `499a5fa` source tree, AFTER = the branch tip `c367b12`; the scripts are the tip's in both
+runs, only the package differs). 11 documents, 10 pages each, batch size 3.
+
+| result | before (`499a5fa`) | after (`c367b12`) |
+|---|--:|--:|
+| rows with GATE_PASS + UNIVERSAL_PASS | 11 of 11 | 11 of 11 |
+| CONVERT_ERROR / MISSING_JSONL rows | 0 | 0 |
+
+The scanned form row passes as the documented form class (micro-non-label and label-orphan checks skipped, AGENTS.md form
+acceptance class); it is content-poor on the offline route before and after (2 IMAGE chunks, 0 text), so it proves "ran clean
+with no schema violation", not extraction fidelity: that limit is the same before and after. No row fails on either side, so
+there is no pre-existing failure to report. Blind-test coverage (AGENT-VAL-01): the technical-manual blind-test document (Greenhouse) is in the matrix and was not used in this cycle's dev loop; AIOS, HarryPotter, CarOK and the scanned form were used in the crop and furniture measurements, so for those categories this run is a regression check, not a blind test, and the plan claims no more.
+
+Guard metrics summed over the 11 documents (before -> after): `heading_inside_body` 28 -> 8, orphan snippet chunks 2 -> 0,
+snippet coverage gaps 58 -> 0, reference split entries 0 -> 0, figure-deficit pages 0 -> 0, `furniture_line_chunks` 12 -> 12
+(CarOK's per-page column-header lines of a spreadsheet, an upper-bound metric, unchanged). No metric worsened for any document.
+HEADING coverage never fell: AIOS, review paper, form, HarryPotter, Python Distilled 100% -> 100%; PCWorld 92% -> 95%;
+Greenhouse 83% -> 90%; ATZ 96% -> 98%; CarOK 0% -> 0% (unchanged).
+
+Explained deltas (Mandate Sec. 3): text chunk counts rise where documents have many short sections (ATZ 25 -> 49, AIOS 38 -> 50,
+PCWorld 25 -> 37, Greenhouse 6 -> 10) because a heading is now a chunk boundary (WP-B1, accepted under D-8). IMAGE counts:
+AIOS 7 -> 10 (the base run dropped 4 icon-class images; the tip drops none as icons and 1 as a pHash duplicate, `in=11
+written=10 unaccounted=0`); PCWorld 19 -> 18 (one image is now a pHash duplicate of another, `in=19 written=18`). Every
+header carries `pipeline_version` 2.16.0 (was 2.7.0).
+Limits of this gate: offline route only (D-1: no quality claim for the cloud route beyond the single live document),
+no OCR/scanned-content evidence, one document per category.
+

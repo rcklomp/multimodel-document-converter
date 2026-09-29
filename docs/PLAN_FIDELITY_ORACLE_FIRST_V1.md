@@ -184,6 +184,11 @@ Findings (measured, first time):
    DESTROYED, not degraded -> this upgrades Phase 5 "kill the silent ladder" from
    hygiene to data-integrity (a laddered code page must hard-fail, not advise).
 
+   > STATUS 2026-09-29: the Phase 0B interim default was retired by the Phase 4 flip (2026-06-11, `docs/DECISIONS.md`
+   > "Phase 4 - the MinerU+Qwen hybrid is the production default"); on the operative 2026-09-29 route (legacy
+   > HybridEngine, MINERU_ENDPOINT unset) docling also serves every page that route does not send to the VLM
+   > (plan decision D-1). (plan WP-G3, AP-53)
+
 Calibration honesty: even after callout normalization, `content_loss` (0.232 on the
 winner) still mixes three things the `--examples` dump confirmed - real line-merge
 corruption, PROSE misclassified into code chunks (run-on paragraphs bucketed as code),
@@ -228,6 +233,10 @@ fixture, full suite green, offline `SMOKE_PRODUCTION_PASS`.
 - **WS2c DROPPED** (not signed off): OCR is not novel - it was the v2 default, its
   0.301/0.563 ceiling drove the V3 pivot, MinerU OCRs scans better (0.221), and WS1
   now DETECTS the laddered-scan-blank gap it targeted. See [[project_ocr_already_tried]].
+
+  > STATUS 2026-09-29: [[project_ocr_already_tried]] is a host-local memory note, not in the repository.
+  > (plan WP-G3, AP-56)
+
 - **WS2d CLOSED as a non-issue** by measurement: prose-into-code is 0.0% (1/2651 real
   code chunks); the earlier flag was an oracle-scan artifact, not a production defect.
 - **WS3 PROVEN** (FINDINGS_LOG 2026-06-14): 12 dense `1andmore_column` pages x 6 render
@@ -309,6 +318,10 @@ it block WS1-WS3.
 - I3: full-book extractions need M5/GX10 -> use the relay prod env
   (`scripts/phase5_relay.py`); if a server is down, Phase 1 is a DRY RUN with no
   verdict authority (PLAN_EXTRACTION_FIDELITY_V1 Section 7.2 health guard applies).
+
+  > STATUS 2026-09-29: the M5 and GX10 servers were unreachable on 2026-09-29 (`scripts/env_cloud_vlm.sh`),
+  > and `scripts/phase5_relay.py` forwards only to those two hosts (plan decision D-2). (plan WP-G3, AP-53)
+
 - I4: line-set membership over-counts trivial lines -> `_MIN_SIG_LEN` filter (>=4
   stripped chars); comparative use is common-mode robust to residual inflation.
 - I5: the FREEZE could be read as "stop all extraction work" -> it is scoped to NEW
@@ -321,6 +334,11 @@ it block WS1-WS3.
 
 - Every failing class has a fidelity oracle with a recorded per-engine baseline
   before any new per-class extraction heuristic ships for it.
+
+  > STATUS 2026-09-29: Section 3' (COMPLETE 2026-06-13/14) shipped WS2a, a fullwidth code-token scrub verified
+  > on Chaubal content, while Section 2 lists Chaubal's class (code, no clean repo) as a Phase 2 hand-label
+  > class without an oracle yet; this line and Section 3' are not reconciled. (plan WP-G3, AP-53)
+
 - The code-fidelity floor is set from repo-diff evidence, replacing the contested
   ast.parse 0.85 proxy.
 - The engine/routing default is named by measured per-class evidence (this unblocks

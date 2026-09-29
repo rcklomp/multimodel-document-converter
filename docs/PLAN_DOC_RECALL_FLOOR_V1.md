@@ -25,6 +25,9 @@ NOT statistically significant through the production pipeline. Read
 Section 1 before proposing any fix - several "obvious" levers are
 already measured and rejected here.
 
+> STATUS 2026-09-29: `project_retrieval_findings` (here) and `feedback_no_gx10_model_swap_reflex` (Lever C)
+> are host-local memory notes, not in the repository. (plan WP-G3, AP-56)
+
 ---
 
 ## 0. The problem (recap)
@@ -77,6 +80,10 @@ hybrid-as-default ~0). **The residual 6% is a genuine
 chunk-representation / embedder-ceiling problem, not a cheap pool-hygiene
 bug.** Do not ship "empty-filter + deep retrieval" as THE fix for the
 floor; it does not clear a significance gate.
+
+> STATUS 2026-09-29: this conclusion is contradicted by the RESOLVED banner at the top: the floor was an
+> HNSW search-parameter bug, fixed by commit 3278383 (`_DEFAULT_HNSW_EF = 512` in
+> `src/mmrag_v2/retrieval/pipeline.py`). (plan WP-G3, AP-54)
 
 ## 2. The two regression cases (must understand before any filter ships)
 
@@ -153,6 +160,9 @@ the marginal levers are measured and do not move the answer bar.
 - `/tmp/measure_depth.py` - production-faithful retrieve+rerank gold-chunk@10
   with McNemar (the harness to clone for Lever A/B measurement).
 - `/tmp/debug_flood.py`, `/tmp/measure_filter.py` - flood diagnosis + raw-dense recovery.
+
+> STATUS 2026-09-29: the /tmp harnesses named in this plan are not in the repository and not present on this
+> host; the resolution evidence is commit 3278383 and the banner above. (plan WP-G3, AP-54)
 
 ## 6. What NOT to do (measured + rejected)
 

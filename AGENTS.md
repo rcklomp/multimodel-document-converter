@@ -47,6 +47,8 @@ Companion docs:
 **B. Respect Modality Boundaries (Source Sanctity)**  
 - OCR handles text; VLMs describe visuals only. Use `VISUAL_ONLY_PROMPT`; forbid VLM text transcription.
 
+> STATUS 2026-09-29: CONTRADICTED BY CODE: the V3 page-extraction prompt (`src/mmrag_v3/engines/vlm_native.py`) makes the VLM the text extractor on routed pages ("content": extracted text, tables as Markdown, chart data transcribed), while `src/mmrag_v2/batch_processor.py` still runs the `validate_vlm_response` "Text transcription detected" check on those descriptions (plan decision D-5).
+
 **C. Identity through Content (DNA over Visuals)**  
 - Classify by text evidence (keywords/regex/semantic markers), not by layout alone.
 
@@ -64,6 +66,8 @@ Companion docs:
 - Tune chunk-size behavior per profile (`technical_manual`, `scanned_degraded`, `scanned`, `digital_magazine`, `digital_literature`, `academic_whitepaper`).
 - Treat chunk size as an empirical quality lever: changes require before/after acceptance metrics, not intuition.
 
+> STATUS 2026-09-29: not implemented on the V3 batch path: `src/mmrag_v2/batch_processor.py` calls `chunk_universal_document` without `max_chars`, so every profile gets `DEFAULT_MAX_CHARS = 1400` (`src/mmrag_v2/chunking/uir_chunker.py`), whose `profile_type` argument is documented as "reserved for future tuning" and otherwise unused (register G0-22, `docs/PLAN_QUALITY_REMEDIATION_V1_REGISTER.md`).
+
 ---
 
 ## 🧬 3. CLASSIFICATION & UIR CONTRACT
@@ -71,6 +75,9 @@ Companion docs:
 - Use the **`ProfileClassifier`** in `orchestration/profile_classifier.py` for all automatic routing. Do not replace it with the V2.4.2 `DocumentClassifier` approach (different architecture, not compatible).
 - `--profile-override` is a debugging and diagnostic tool only. **Never use it in acceptance runs** — correct classification by the ProfileClassifier is the goal, not a workaround for it.
 - Extraction pathway (OCR vs direct) is determined by **structural integrity flags** (`has_flat_text_corruption`, `has_encoding_corruption`) from `DocumentDiagnosticEngine`, not by profile type. See `docs/DECISIONS.md`.
+
+  > STATUS 2026-09-29: CONTRADICTED BY CODE on the V3 batch path: `src/mmrag_v2/batch_processor.py` calls `v3_extract` with the batch path only, the engine is chosen by env in `_select_engine` and per page by `src/mmrag_v3/engines/router.py`; `src/mmrag_v3/` reads no structural flag, and the class name `CorruptionInterceptor` appears only in legacy `pdf_plan.py`; the module functions `patch_corrupted_chunks` and `is_irreparably_corrupt` (`validators/corruption_interceptor.py`) still run in `batch_processor.py` when `has_encoding_corruption` is set (plan decision D-21).
+
 - BBoxes must be normalized to **int [0,1000]** before emission.
 - Shadow assets: promote to `IMAGE` if visual signal exists; otherwise drop before final JSONL.
 - **Multimodal image contract (2026-06-08, `DECISIONS.md`):** this is a multimodal converter; IMAGE chunks are always retained, never silently dropped. Image DESCRIPTION is a POST-conversion step (`scripts/enrich_image_chunks_v29.py`), not conversion-time. With `--vision-provider none` an image ships as a documented ID-only fallback (`vision_status=no_vlm`); the strict gate treats `no_vlm` as a documented advisory (`IMAGE_NO_VLM`), not a failure, but only when a real `asset_ref` exists. Icon/glyph-class regions and empty-content tables are culled behind a page-coverage guard (never orphan a page into MISSING_PAGES).
@@ -119,14 +126,17 @@ which v2.X is currently shipping.
 - **Adapter-invocation guard** (v2.8 Phase 2 — **legacy v2 path; test currently deferred `V3_DEFERRED`**): `tests/test_pdf_conversion_plan.py::test_no_raw_converter_invocation_outside_adapter` blocked any `self._converter.convert(...)` outside the adapter. It is `@pytest.mark.skip`-ped because the V3 `BatchProcessor.process_pdf` path delegates extraction to `mmrag_v3.extract()` and constructs no converter; the V3 Docling boundary is `src/mmrag_v3/engines/docling_fast.py`, firewalled by `tests/test_v3_security.py` (V3 Phase C note below).
 - **Form acceptance class** (v2.8 Phase 5a): scanned forms / invoices route to a `FORM_AUDIT_PASS` lane that skips prose-calibrated `micro_non_label_ratio`. See `docs/QUALITY_GATES.md` "Form / Invoice Acceptance Class". This is a first-class acceptance variant, NOT a waiver per `AGENT-VAL-01`.
 - **V3 Phase C — vision-native extraction** (2026-05-29): Phase C engines live under `src/mmrag_v3/engines/`. **The default route is `MineruQwenHybridEngine` (2026-06-06)** when `MINERU_ENDPOINT` is set: code-dense pages (monospace ratio >= 0.10) route to Qwen VLM, every other page to MinerU2.5; pure MinerU via `USE_MINERU_ENGINE=1`; the legacy `HybridEngine` (Docling+VLM per-page pre-flight: tables/images/`> VLM_DRAWINGS_THRESHOLD` drawings route to VLM, else fast Docling) is the no-`MINERU_ENDPOINT` fallback. Single-page VLM failures fall back to Docling automatically. The VLM is not trusted for coordinate normalization or page-number assignment — the adapter projects bboxes to `[0,1000]` and stamps page numbers from its own index. All requests are capped at `max_completion_tokens=4096`. Default provider is OpenRouter (`qwen/qwen3-vl-8b-instruct`); override via `VLM_NATIVE_ENDPOINT` / `VLM_NATIVE_MODEL` / `VLM_NATIVE_API_KEY`. Engine-file imports are firewalled by `tests/test_v3_security.py` (vision/glue files banned from docling + v2 legacy; the docling-boundary file `docling_fast.py` may import docling but not v2 legacy). See `docs/DECISIONS.md` — "v3.0 Phase C — Vision-Native Extraction".
+  > STATUS 2026-09-29: CONTRADICTED BY CODE: the provider default is `max_completion_tokens=8192` with a truncation escalation cap of 16384 (`src/mmrag_v3/engines/vlm_provider.py`, `TRUNCATION_ESCALATION_CAP`). (plan decision D-21)
+
+> STATUS 2026-09-29: the default route above does not run: `MINERU_ENDPOINT` is unset (`scripts/env_cloud_vlm.sh`), so the legacy `HybridEngine` with a cloud VLM is what runs, operative but unratified (facts: `docs/DECISIONS.md` "Operative extraction route since 2026-09-29") (plan decision D-1).
 
 **QA policy:** All profiles use the standard 10% token variance tolerance. See `docs/QUALITY_GATES.md`.
 
 ### Open items + next-cycle plan
 
-Per-cycle priority TODOs live in `docs/PROJECT_STATUS.md` under
-"Other Carry-Forwards" and in the latest `docs/PLAN_V2.*` plan doc's
-disposition sections — they shift every cycle and are not stable
+Per-cycle priority TODOs live in `docs/PROJECT_STATUS.md`, in the
+`## OPEN` section of `docs/paper/FINDINGS_DIGEST.md`, and in the active
+`docs/PLAN_*` docs listed in `docs/README.md` — they shift every cycle and are not stable
 contracts. Don't duplicate that state here; it goes stale by next
 cycle-open.
 
@@ -152,8 +162,8 @@ authoritative records are in `docs/DECISIONS.md` and `docs/paper/FINDINGS_LOG.md
 ## 📂 6. DIRECTORY AUTHORITY
 - `src/mmrag_v2/` … core pipeline, validators, profile logic.
 - `src/mmrag_v2/engines/` … format-specific extraction (Docling, etc.).
-- `src/mmrag_v3/` … V3 Phase C vision-native namespace (`engines/vlm_native.py`, `engines/vlm_provider.py`, `engines/docling_fast.py`, `engines/router.py`, `processor.py`). UIR contract types are imported from `mmrag_v2.universal.intermediate`.
-- `v3_execution_root/` (V3 Phase A sandbox) was **removed 2026-05-30** — duplicate `mmrag_v3` namespace, not a production dependency. Durable docs salvaged to `docs/V3_DEFERRED_TESTS.md` + `docs/paper/archive_extracts/`; full backup at `~/mmrag_v3_execution_root_backup_2026-05-30.tar.gz`. (The broken sandbox-importing baseline scripts are tracked for repointing/removal in `docs/PLAN_V3.1_PIPELINE_RECONVERGENCE.md` P1 — that transient work item does not belong in this contract.)
+- `src/mmrag_v3/` … V3 Phase C vision-native namespace (`engines/mineru_native.py`, `engines/vlm_native.py`, `engines/vlm_provider.py`, `engines/docling_fast.py`, `engines/router.py`, `processor.py`). UIR contract types are imported from `mmrag_v2.universal.intermediate`.
+- `v3_execution_root/` (V3 Phase A sandbox) was **removed 2026-05-30** — duplicate `mmrag_v3` namespace, not a production dependency. Durable docs salvaged to `docs/V3_DEFERRED_TESTS.md` + `docs/paper/archive_extracts/`; full backup at `~/mmrag_v3_execution_root_backup_2026-05-30.tar.gz`. (The V3 baseline/soak scripts `scripts/rebaseline_v3.py` and `scripts/v3_batch_ingest.py` no longer import the sandbox: verified 2026-09-29, 0 `v3_execution_root` references; both use `mmrag_v2.chunking.uir_chunker.chunk_universal_document`.)
 - `docs/` … architecture, audits, plans, governance (canonical references). (The SRS is archived — REQ/IRON IDs originate there; see the Numbering Note above.)
 
 **END OF AGENTS.md**
