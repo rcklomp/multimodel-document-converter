@@ -1910,6 +1910,28 @@ class BatchProcessor:
                 local[key] = value
         return local or None
 
+    def _maybe_dump_uir(self, universal_doc, batch_info, chunker_inputs) -> None:
+        """Opt-in dump of the extracted UIR (PLAN_QUALITY_REMEDIATION WP-0.5).
+
+        ``MMRAG_DUMP_UIR=<dir>`` writes one ``<doc_hash>_bNNN.uir.json`` per batch
+        together with the chunker's other inputs (TOC, carry-in heading), so a chunker
+        change can be A/B-tested on the SAME paid, non-deterministic extraction. With the
+        variable unset nothing is written. Never raises: a dump failure must not lose
+        the batch.
+        """
+        import os
+
+        dump_dir = os.environ.get("MMRAG_DUMP_UIR")
+        if not dump_dir:
+            return
+        try:
+            from .universal.serialization import dump_uir
+
+            name = f"{self._doc_hash or 'doc'}_b{batch_info.batch_index:03d}.uir.json"
+            dump_uir(universal_doc, Path(dump_dir) / name, chunker_inputs)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[UIR-DUMP] failed (%s); continuing without a dump", exc)
+
     # Fail-closed ladder tier severity (PLAN_EXTRACTION_FIDELITY_V1 Section 5.4):
     # None (primary served) < docling_fast < pymupdf_terminal. Aggregating the
     # MOST-severe tier across batches answers "did any page need the ladder?".
@@ -1986,6 +2008,18 @@ class BatchProcessor:
         # sees batch-local page numbers; the absolute-page projection happens
         # below). Drives cross-page heading carry-forward + breadcrumb_path.
         local_toc = self._toc_for_batch(batch_info.page_offset)
+        self._maybe_dump_uir(
+            universal_doc,
+            batch_info,
+            {
+                "profile_type": profile_type,
+                "toc_headings": local_toc,
+                "carry_in_heading": self._carry_heading,
+                "carry_in_breadcrumb": self._carry_breadcrumb,
+                "batch_index": batch_info.batch_index,
+                "page_offset": batch_info.page_offset,
+            },
+        )
         uir_chunks = chunk_universal_document(
             universal_doc,
             profile_type=profile_type,
