@@ -3202,17 +3202,7 @@ class BatchProcessor:
         # the first record after export so chunk_count reflects emitted chunks,
         # not pre-dedup candidates.
         try:
-            with open(output_jsonl, "r", encoding="utf-8") as _rf:
-                _lines = _rf.readlines()
-            if _lines:
-                _first = json.loads(_lines[0])
-                if _first.get("object_type") == "ingestion_metadata":
-                    _first["chunk_count"] = written_chunks
-                    _tmp = output_jsonl.with_suffix(output_jsonl.suffix + ".tmp")
-                    with open(_tmp, "w", encoding="utf-8") as _wf:
-                        _wf.write(json.dumps(_first, ensure_ascii=False) + "\n")
-                        _wf.writelines(_lines[1:])
-                    _tmp.replace(output_jsonl)
+            self._patch_export_file(output_jsonl, written_chunks)
         except Exception as e:
             logger.warning(f"[FINALIZE] Failed to reconcile metadata chunk_count: {e}")
 
@@ -7821,6 +7811,87 @@ class BatchProcessor:
         valid_chunks = self._apply_lookahead_buffer(valid_chunks)
 
         return valid_chunks
+
+    @staticmethod
+    def _refresh_stale_next_snippets(rows: List[Dict[str, Any]]) -> int:
+        """Repair ``semantic_context.next_text_snippet`` on the FINAL exported rows.
+
+        PLAN_QUALITY_REMEDIATION WP-A2. ``_apply_lookahead_buffer`` copies the successor's
+        ``content[:300]`` BEFORE the export-chain filters run; every chunk those filters (or the
+        in-loop pHash / asset-mismatch drops) remove leaves its predecessor pointing at text
+        that is not its neighbour any more (IRJET: the description of a dropped figure survived
+        as the next-snippet of the paragraph before it). Only stale or missing snippets are
+        rewritten with the SAME rule as the lookahead (successor ``content[:300]``); a
+        consistent snippet is left byte-identical, ``prev_text_snippet`` is never touched (the
+        V3 path has none, so ingest contextual text changes only where a snippet was wrong), and
+        the last row's snippet is cleared. Rows without a ``semantic_context`` dict are skipped.
+        Comparison ignores whitespace/control characters (export sanitizing strips them after
+        the snippet was cut). Returns the number of rows changed.
+        """
+        import re as _re
+
+        def _skeleton(text: str) -> str:
+            return _re.sub(r"[\s\x00-\x1f]+", "", text or "")[:60]
+
+        changed = 0
+        for i, row in enumerate(rows):
+            sc = row.get("semantic_context")
+            if not isinstance(sc, dict):
+                continue
+            snippet = sc.get("next_text_snippet")
+            successor = rows[i + 1] if i + 1 < len(rows) else None
+            succ_text = (successor.get("content") or "") if successor else ""
+            if snippet:
+                if not succ_text:
+                    sc["next_text_snippet"] = None
+                    changed += 1
+                    continue
+                a, b = _skeleton(snippet), _skeleton(succ_text)
+                n = min(len(a), len(b))
+                if a[:n] != b[:n]:
+                    sc["next_text_snippet"] = succ_text[:300]
+                    changed += 1
+            elif succ_text:
+                sc["next_text_snippet"] = succ_text[:300]
+                changed += 1
+        return changed
+
+    def _patch_export_file(self, output_jsonl: Path, written_chunks: int) -> None:
+        """Post-export reconciliation of the JSONL (header count + stale neighbour snippets).
+
+        IngestionMetadata must be the first record but final image deduplication happens while
+        chunk lines are streamed, so the header ``chunk_count`` is patched afterwards. The same
+        pass repairs stale next-snippets against the final list (WP-A2). Rows whose snippet was
+        already consistent keep their exact original line.
+        """
+        with open(output_jsonl, "r", encoding="utf-8") as _rf:
+            lines = _rf.readlines()
+        if not lines:
+            return
+        first = json.loads(lines[0])
+        if first.get("object_type") != "ingestion_metadata":
+            return
+        first["chunk_count"] = written_chunks
+        body = lines[1:]
+        refreshed = 0
+        try:
+            parsed = [json.loads(ln) if ln.strip() else None for ln in body]
+            live = [(i, r) for i, r in enumerate(parsed) if r is not None]
+            before = [json.dumps(r.get("semantic_context"), sort_keys=True) for _, r in live]
+            self._refresh_stale_next_snippets([r for _, r in live])
+            for (i, r), b in zip(live, before):
+                if json.dumps(r.get("semantic_context"), sort_keys=True) != b:
+                    body[i] = json.dumps(r, ensure_ascii=False) + "\n"
+                    refreshed += 1
+        except Exception as exc:  # noqa: BLE001 - the header patch must never be lost
+            logger.warning("[SNIPPETS] refresh skipped (%s); snippets left as written", exc)
+        if refreshed:
+            logger.info("[SNIPPETS] refreshed %d stale next_text_snippet value(s)", refreshed)
+        tmp = output_jsonl.with_suffix(output_jsonl.suffix + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as wf:
+            wf.write(json.dumps(first, ensure_ascii=False) + "\n")
+            wf.writelines(body)
+        tmp.replace(output_jsonl)
 
     def _apply_lookahead_buffer(
         self,
