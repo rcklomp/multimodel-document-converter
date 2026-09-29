@@ -3335,3 +3335,58 @@ It is an explicit, user-signed acceptance band for a known content class.
 exceptions to measure how NOTICEABLE the realised-quality drop is in practice
 (retrieval correctness + downstream verbatim-reproduction fidelity), to decide
 whether 0.65 is the right floor or whether targeted repair effort is warranted.
+
+
+## VLM improvement work deferred until the first production-level release (2026-06-18, user-directed; recorded verbatim 2026-09-29)
+**Decision (verbatim from `docs/PROJECT_STATUS.md` as of commit `499a5fa`, where the owner-directed text sat
+in the status banner):**
+
+> **DEFERRED to post-first-production-release (user-directed 2026-06-18):** the VLM
+> (mlx_vlm.server / Qwen3-VL-8B on the M5) is the recurring reliability/quality liability -
+> intermittent per-request handler wedge (mitigated by a client hard deadline +
+> retry-on-fresh-connection, `4bfd7c8`/`b8160aa`), non-deterministic double-transcription of
+> page furniture into code chunks (mitigated by `_strip_code_furniture`), and weaker
+> non-Python (C/C++) code fidelity (unaddressed). Tackle the VLM properly (server
+> logging+watchdog / more robust serving path / model+prompt work) as an improvement only
+> once the first production-level release is achieved. Details in the open-issues memory backlog.
+
+**Why it is recorded here:** the status document is being restructured (plan
+`docs/PLAN_QUALITY_REMEDIATION_V1.md`, WP-G3) and an owner directive must survive a restructure as an
+owner-attributed decision, not as a banner line. The pointer "details in the open-issues memory
+backlog" does not resolve inside the repository (that memory is host-local), so nothing else is lost by
+recording the text itself.
+
+**Open point (owner decision D-4, answer-by 2026-10-20):** "the first production-level release" is not
+defined anywhere in the repository (the README calls the project feature-complete at v2.16.0; the
+CHANGELOG stops at v3.0.0-phase-c), and it is unclear whether additive VLM prompt or adapter work
+(equation contract, bbox frame handling) falls under this deferral. Until answered, the deferral stands
+and such work is not executed.
+
+## Operative extraction route since 2026-09-29: legacy HybridEngine + cloud VLM (FACT record; ratification pending)
+**Status: operative but UNRATIFIED and UNMEASURED. This entry records facts only; it ratifies nothing.**
+Ratification, rollback and staleness rules for this route are owner decision D-1 (answer-by 2026-10-20).
+
+**Facts (each re-checkable):**
+- `scripts/env_cloud_vlm.sh` (tracked since `49a6088`) records that the previous local route (LAN
+  embedding/rerank server, LAN page-VLM server, LAN MinerU server) was down on 2026-09-29 and was slow and
+  weaker on extraction (about 33 tok/s, about 249 s per dense page at the 8192-token cap), and re-points
+  the page VLM at a cloud OpenAI-compatible endpoint (Dashscope-intl `qwen3-vl-flash`).
+- With `MINERU_ENDPOINT` unset, `mmrag_v3.processor._select_engine` selects the legacy `HybridEngine`
+  (Docling prose lane + VLM pages), not the documented default `MineruQwenHybridEngine`. Output headers
+  of that route stamp `extraction_engine: "hybrid"`.
+- Consequently the decisions "MinerU+Qwen-for-code hybrid is the default extraction route" and
+  "Phase 4 - the MinerU+Qwen hybrid is the production default" describe a route that could not run on
+  2026-09-29; their rollback target (`USE_DOCLING_FAST=1`) is labelled "not for acceptance" by the env
+  script, and their stale-corpus rule (production provenance = hybrid + GX10 + cap1600) marks every
+  output of the operative route stale by construction.
+- No fidelity baseline (OmniDocBench delta, FULL smoke, crucible) exists for the operative route on the
+  cloud model. The cap1600 render setting and the R3 code prompt were measured on the local Qwen3-VL-8B
+  serving; re-measuring on another model is new evidence, not a re-litigation.
+- Measured on 2026-09-29 (details and data: `docs/paper/FINDINGS_LOG.md`, entry 2026-09-29): on this
+  route the cloud model answers bounding boxes in a 0-1000 grid although the prompt asks for pixels, so
+  every VLM bbox is shrunk by about 0.88 (x) and 0.625 (y); a 7-page paper converted with 34 chunks, a
+  strict gate that reported `QA_PASS` with zero failures and zero warnings, and the structural defects
+  listed in the plan (figure crops of 66x68 and 420x43 px, 6 of 10 figures missing, running headers glued
+  into 12 chunks, wrong parent headings). Most of those defects predate the route and are engine-agnostic.
+- Settled engine choice (FINDINGS_DIGEST: MinerU+Qwen hybrid) is NOT reopened by this entry; the open
+  question is serving availability and measurement of an interim route (plan D-1, D-2).
