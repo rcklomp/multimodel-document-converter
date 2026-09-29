@@ -387,7 +387,7 @@ Four HIGH, eleven MED and seven LOW findings on rev. 2; the targeted changes: th
 | 12ab7de, bf74f62 | WP-A1 crop guard (IMAGE, then TABLE), `crop_audit.json`, `qa_crop_fidelity.py` | design study on 359 of 673 crops (FINDINGS_LOG 2026-09-29 later); 21 tests | region acceptance NOT claimable on the cloud frame (K1, D-4/D-12) |
 | 14d3946 | WP-A2b IMAGE drop ledger | 9 tests incl. bridge; mutation-checked; live `unaccounted=0` | |
 | c367b12 | WP-B2 element-level furniture pass | replay on 40 outputs; 67 tests; live: label rule fires 13x = repetition rule | QA-CHECK-01 -23.0% -> -27.7% (D-7) |
-| (uncommitted at time of writing, committed with the docs) | Wave 1 documentation (G1, G2, G3) | reviewed by an independent adversarial agent: about 240 claims checked, 16 problems, all corrected | see the Wave 1 commit |
+| c38d53c, 2219c0a | Wave 1 documentation (G1, G2, G3), DECISIONS entries, acceptance record, refreshed audit prompt | Wave 1 edits reviewed by an independent adversarial agent (about 240 claims checked, 16 problems, all corrected); clean-worktree suite green | freeze: the branch tip after the commit that records this row; audit `git rev-parse HEAD` of `fix/quality-remediation-v1` |
 Test baseline progression: 1767 passed / 99 skipped (499a5fa) -> 2095 passed / 99 skipped (c367b12).
 
 ### 14.1 Wave 4 acceptance record (2026-09-29)
