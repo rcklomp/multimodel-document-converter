@@ -9,11 +9,16 @@ was inspected against the rendered page (IRJET Figs 4/5/7, HarryPotter p7 and AI
 recovered); the no-overlap rescues that the B1 tests and the Fluent Python sidebar images depend on
 are unchanged.
 
-Contract (IMAGE chunks carrying a VLM box):
+Contract (chunks carrying a VLM box), IMAGE:
   box holds no graphics (whitespace / prose)      -> B1 rescue stands
   box holds graphics, no raster overlaps it       -> keep the VLM box
   box holds graphics, raster is a fragment of it  -> keep the VLM box
   box holds graphics, raster is the dominant one  -> the raster stands
+TABLE (find_tables also fires on charts and on a table's header row: AIOS p4/p9/p33, Fluent p76,
+IRJET p3 in the correct frame all had the real table under the VLM box):
+  a detected table overlaps the box                -> the detected table
+  none overlaps, words under the box are short-line -> keep the VLM box
+  none overlaps, box is prose or blank             -> B1 rescue stands
 """
 
 from __future__ import annotations
@@ -198,21 +203,80 @@ def test_full_bleed_background_art_does_not_count_as_graphics_in_the_box(tmp_pat
     assert h.crop_reason == "geometric_rescue"
 
 
-def test_tables_are_not_touched_by_the_guard(tmp_path):
-    # Guard is IMAGE-only: a TABLE chunk with a find_tables candidate keeps the old behaviour.
+GRID = fitz.Rect(100, 100, 340, 220)
+
+
+def _draw_ruled_grid(page):
+    for r in range(4):
+        for c in range(3):
+            page.draw_rect(
+                fitz.Rect(100 + c * 80, 100 + r * 30, 180 + c * 80, 130 + r * 30),
+                color=(0, 0, 0),
+                width=1,
+            )
+            page.insert_text((108 + c * 80, 120 + r * 30), f"r{r}c{c}", fontsize=10)
+
+
+def _table_case(tmp_path, extra_draw, box):
     def draw(page):
-        for r in range(4):
-            for c in range(3):
-                page.draw_rect(
-                    fitz.Rect(100 + c * 80, 100 + r * 30, 180 + c * 80, 130 + r * 30),
-                    color=(0, 0, 0),
-                    width=1,
-                )
-                page.insert_text((108 + c * 80, 120 + r * 30), f"r{r}c{c}", fontsize=10)
+        _draw_ruled_grid(page)
+        extra_draw(page)
 
     pdf = _pdf(tmp_path, draw)
-    h = _run(tmp_path, pdf, _chunk(fitz.Rect(90, 90, 350, 240), Modality.TABLE))
-    assert h.crop_reason in {"geometric", "no_geometric_object"}
+    doc = fitz.open(str(pdf))
+    from mmrag_v2.universal.asset_materializer import _geometric_candidates
+
+    assert _geometric_candidates(
+        doc[0], Modality.TABLE
+    ), "fixture: find_tables must detect the grid"
+    doc.close()
+    return _run(tmp_path, pdf, _chunk(box, Modality.TABLE))
+
+
+def test_table_box_over_table_like_text_is_kept_when_only_another_object_was_detected(tmp_path):
+    # AIOS p4 / Fluent p76 shape: find_tables fired on a chart or a header strip elsewhere on the
+    # page; the VLM box sits on the real, un-ruled table (short cell lines).
+    box = fitz.Rect(90, 400, 330, 520)
+
+    def extra(page):
+        for i, row in enumerate(
+            ["Module  Call", "Memory  mem_alloc", "Storage  sto_read", "Tool  tool_run"]
+        ):
+            page.insert_text((100, 420 + i * 24), row, fontsize=11)
+
+    h = _table_case(tmp_path, extra, box)
+    assert h.crop_source == "vlm"
+    assert h.crop_reason == "vlm_kept_table_text_in_box"
+    assert _near(h.clip_rect_pt, box)
+
+
+def test_table_box_over_body_prose_keeps_the_b1_rescue(tmp_path):
+    # Cloud-frame shape: the shifted VLM box lands on running prose; the real table is elsewhere.
+    def extra(page):
+        for i in range(8):
+            page.insert_text(
+                (72, 400 + i * 14),
+                "Body prose fills this part of the page with many words on every single line.",
+                fontsize=10,
+            )
+
+    h = _table_case(tmp_path, extra, fitz.Rect(60, 390, 560, 520))
+    assert h.crop_source == "geometric"
+    assert h.crop_reason == "geometric_rescue"
+    assert _near(h.clip_rect_pt, GRID, tol=6)
+
+
+def test_table_box_over_blank_space_keeps_the_b1_rescue(tmp_path):
+    h = _table_case(tmp_path, lambda page: None, fitz.Rect(400, 600, 580, 760))
+    assert h.crop_source == "geometric"
+    assert h.crop_reason == "geometric_rescue"
+
+
+def test_table_box_that_overlaps_a_detected_table_uses_the_detected_table(tmp_path):
+    h = _table_case(tmp_path, lambda page: None, fitz.Rect(90, 90, 350, 240))
+    assert h.crop_source == "geometric"
+    assert h.crop_reason == "geometric"
+    assert _near(h.clip_rect_pt, GRID, tol=6)
 
 
 def test_sidecar_record_is_complete_and_matches_the_asset_on_disk(tmp_path):

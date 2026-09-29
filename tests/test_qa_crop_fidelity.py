@@ -63,7 +63,7 @@ def test_a_crop_over_body_prose_is_flagged(tmp_path):
     assert out["flagged"][0]["prose_fraction"] >= 0.5
 
 
-def test_a_full_page_crop_is_flagged_and_tables_are_ignored():
+def test_a_full_page_crop_is_flagged_and_a_small_table_is_not_a_sprite():
     out = qa.evaluate(
         [rec(clip=None, source="full_page", reason=""), rec(modality="table", clip=(1, 1, 5, 5))],
         None,
@@ -71,10 +71,18 @@ def test_a_full_page_crop_is_flagged_and_tables_are_ignored():
     assert [f["flag"] for f in out["flagged"]] == ["full_page"]
 
 
+def test_a_table_crop_over_body_prose_is_flagged_too(tmp_path):
+    doc = _prose_pdf(tmp_path)
+    out = qa.evaluate(
+        [rec(modality="table", source="vlm", reason="", clip=(60, 90, 500, 500))], doc
+    )
+    assert [f["flag"] for f in out["flagged"]] == ["prose_dominated"]
+
+
 def test_cli_reports_advisory_and_exits_zero(tmp_path, capsys):
     side = tmp_path / "crop_audit.json"
     side.write_text(json.dumps({"crops": [rec()]}), encoding="utf-8")
-    assert qa.main([str(side)]) == 0
+    assert qa.main(["--crop-audit", str(side)]) == 0
     text = capsys.readouterr().out
     assert "CROP_FIDELITY_FLAG tiny_rescue" in text and "CROP_FIDELITY_ADVISORY" in text
 
@@ -82,5 +90,5 @@ def test_cli_reports_advisory_and_exits_zero(tmp_path, capsys):
 def test_cli_reports_clean_when_nothing_is_flagged(tmp_path, capsys):
     side = tmp_path / "crop_audit.json"
     side.write_text(json.dumps({"crops": [rec(clip=(60, 60, 300, 300))]}), encoding="utf-8")
-    assert qa.main([str(side)]) == 0
+    assert qa.main(["--crop-audit", str(side)]) == 0
     assert "CROP_FIDELITY_CLEAN" in capsys.readouterr().out

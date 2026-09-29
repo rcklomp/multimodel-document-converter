@@ -88,6 +88,12 @@ _MIN_GRAPHIC_SIDE_PT = 6.0
 # page then behaves as before: rasters only).
 _MAX_DRAWINGS_FOR_CLUSTERING = 3000
 
+# A TABLE chunk whose VLM box overlaps no detected table keeps the VLM box when the words under it
+# are table-like (short lines), not running prose: PyMuPDF's find_tables also fires on charts and on
+# a table's header row, and on the local corpus the box was the real table in every inspected case.
+_PROSE_LINE_MIN_WORDS = 8
+PROSE_DOMINATED_MIN_SHARE = 0.5
+
 _RectTuple = Tuple[float, float, float, float]
 
 
@@ -364,7 +370,25 @@ def _bounding_area(rects: List["fitz.Rect"]) -> float:
     return float(box.width * box.height)
 
 
+def prose_word_share(page: "fitz.Page", clip: "fitz.Rect") -> Optional[float]:
+    """Share of the text-layer words inside ``clip`` that sit on lines of >= 8 words.
+
+    Body prose is made of long lines; table cells, axis labels and figure annotations are short.
+    ``None`` when the clip holds no text-layer words at all.
+    """
+    words = page.get_text("words", clip=clip)
+    if not words:
+        return None
+    per_line: Dict[Tuple[int, int], int] = {}
+    for w in words:
+        key = (w[5], w[6])
+        per_line[key] = per_line.get(key, 0) + 1
+    prose = sum(n for n in per_line.values() if n >= _PROSE_LINE_MIN_WORDS)
+    return prose / len(words)
+
+
 def _select_crop_clip(
+    page: "fitz.Page",
     modality: Modality,
     candidates: List["fitz.Rect"],
     consumed: set,
@@ -374,8 +398,12 @@ def _select_crop_clip(
     """B1 pick with the WP-A1 plausibility guard. Returns ``(pick, reason)``.
 
     The pre-guard picker replaced the VLM box with ANY detected object, which on IRJET swapped a
-    vector flowchart for a text-strip raster and a vector figure for the page-header logo. The
-    guard applies to IMAGE chunks that carry a VLM box:
+    vector flowchart for a text-strip raster and a vector figure for the page-header logo, and
+    which for tables returned a chart or a header-row strip that find_tables had detected instead
+    of the table under the VLM box. The guard applies to chunks that carry a VLM box.
+    TABLE: when no detected table overlaps the box and the words under the box are table-like
+    (not running prose) the VLM box is kept; over prose or blank space the rescue stands.
+    IMAGE:
       * the box holds no graphics (whitespace or prose): the B1 rescue stands (pinned by the B1
         tests; e.g. a hallucinated box over blank space next to the real picture);
       * the box holds graphics and no raster overlaps it: keep the VLM box (the figure is vector
@@ -385,11 +413,22 @@ def _select_crop_clip(
         raster stands.
     Design and measurements: docs/PLAN_QUALITY_REMEDIATION_V1.md WP-A1 (study of 359 replayable
     local crops; 314 of the 673 could not be replayed because their sliced source PDFs are absent).
+    The TABLE rule changes 9 distinct local crops; 7 were confirmed against the rendered page as the
+    real table replacing a chart or a header strip, 1 (cloud frame) is wrong-object -> wrong-region.
     """
     pick = _pick_geometric_clip(candidates, consumed, vlm_clip)
     if pick is None:
         return None, "no_geometric_object"
-    if modality != Modality.IMAGE or vlm_clip is None:
+    if vlm_clip is None:
+        return pick, "geometric"
+    if modality == Modality.TABLE:
+        if not (pick[1] & vlm_clip).is_empty:
+            return pick, "geometric"
+        share = prose_word_share(page, vlm_clip)
+        if share is not None and share < PROSE_DOMINATED_MIN_SHARE:
+            return None, "vlm_kept_table_text_in_box"
+        return pick, "geometric_rescue"
+    if modality != Modality.IMAGE:
         return pick, "geometric"
     in_box = _graphics_in_clip(graphics, vlm_clip)
     if not in_box:
@@ -502,6 +541,7 @@ def materialize_visual_assets(
             ):
                 graphics_cache[page_index] = _page_graphics(page)
             picked, crop_reason = _select_crop_clip(
+                page,
                 c.modality,
                 geo_cache[cache_key],
                 geo_consumed[cache_key],

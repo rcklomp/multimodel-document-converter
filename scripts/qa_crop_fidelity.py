@@ -8,13 +8,16 @@ PLAN_QUALITY_REMEDIATION_V1 WP-A1: the size of a crop is frame-dependent and a w
 
   tiny_rescue      the B1 geometric pick replaced the VLM box with an object under 3000 pt^2
                    (a logo / icon sprite; IRJET Fig 3 was a 67x68 header logo)
-  prose_dominated  the rendered rectangle is mostly body text (the VLM box landed on prose)
+  prose_dominated  crop_prose_fraction >= 0.5: at least half of the text-layer words inside the
+                   rendered rectangle sit on lines of >= 8 words, i.e. the crop is body prose and
+                   the VLM box landed on the wrong region (images and tables)
   full_page        the crop degraded to a full-page render
 
 Advisory only (exit 0); AGENT-GATE-PROGRESSION: a new gate starts advisory and is promoted only
 after it has run clean on real output. Usage:
 
-  python scripts/qa_crop_fidelity.py output/<run>/crop_audit.json --source-pdf data/<cat>/<file>.pdf
+  python scripts/qa_crop_fidelity.py --crop-audit output/<run>/crop_audit.json \\
+      --source-pdf data/<cat>/<file>.pdf
 """
 
 from __future__ import annotations
@@ -25,27 +28,13 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from mmrag_v2.universal.asset_materializer import PROSE_DOMINATED_MIN_SHARE, prose_word_share
+
 TINY_RESCUE_MAX_PT2 = 3000.0
-PROSE_FRACTION_MAX = 0.5
 
 
 def _area(rect: List[float]) -> float:
     return max(0.0, rect[2] - rect[0]) * max(0.0, rect[3] - rect[1])
-
-
-def prose_fraction(page: Any, clip: List[float]) -> float:
-    """Fraction of ``clip`` covered by the page's text blocks (0..1)."""
-    import fitz
-
-    clip_rect = fitz.Rect(clip)
-    if clip_rect.is_empty:
-        return 0.0
-    covered = 0.0
-    for block in page.get_text("blocks", clip=clip_rect):
-        inter = fitz.Rect(block[:4]) & clip_rect
-        if not inter.is_empty:
-            covered += inter.width * inter.height
-    return min(1.0, covered / (clip_rect.width * clip_rect.height))
 
 
 def evaluate(records: List[Dict[str, Any]], doc: Optional[Any]) -> Dict[str, Any]:
@@ -55,25 +44,29 @@ def evaluate(records: List[Dict[str, Any]], doc: Optional[Any]) -> Dict[str, Any
     for rec in records:
         counts[rec["crop_source"]] = counts.get(rec["crop_source"], 0) + 1
         reasons[rec.get("crop_reason", "")] = reasons.get(rec.get("crop_reason", ""), 0) + 1
-        if rec["modality"] != "image":
-            continue
         clip = rec.get("clip_rect_pt")
         if clip is None:
             flagged.append({**rec, "flag": "full_page"})
             continue
-        if rec.get("crop_reason") == "geometric_rescue" and _area(clip) < TINY_RESCUE_MAX_PT2:
+        if (
+            rec["modality"] == "image"
+            and rec.get("crop_reason") == "geometric_rescue"
+            and _area(clip) < TINY_RESCUE_MAX_PT2
+        ):
             flagged.append({**rec, "flag": "tiny_rescue"})
             continue
         if doc is not None and 0 < rec["page"] <= doc.page_count:
-            frac = prose_fraction(doc[rec["page"] - 1], clip)
-            if frac >= PROSE_FRACTION_MAX:
+            import fitz
+
+            frac = prose_word_share(doc[rec["page"] - 1], fitz.Rect(clip))
+            if frac is not None and frac >= PROSE_DOMINATED_MIN_SHARE:
                 flagged.append({**rec, "flag": "prose_dominated", "prose_fraction": round(frac, 2)})
     return {"total": len(records), "sources": counts, "reasons": reasons, "flagged": flagged}
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("crop_audit", type=Path)
+    ap.add_argument("--crop-audit", type=Path, required=True)
     ap.add_argument("--source-pdf", type=Path, default=None)
     args = ap.parse_args(argv)
 
