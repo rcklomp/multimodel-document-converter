@@ -105,9 +105,11 @@ vector/composite figures, two-column layout and equation-heavy pages on the lega
 ## 4. The two load-bearing artifacts
 
 - **Disposition register** (`docs/PLAN_QUALITY_REMEDIATION_V1_REGISTER.md`, generated): one row per id with a disposition from the closed vocabulary.
-  Completeness check (run at any time; the audit registers are in `output/audit_2026-09-29/`, gitignored):
-  `python3 output/audit_2026-09-29/gen_register.py` regenerates the file and exits non-zero if the id set differs from the four source registers
-  or any id lacks exactly one disposition. The register file itself is committed and resolvable in a clean clone.
+  Two checks. (1) Integrity in a clean clone: `python3 scripts/check_plan_register.py` (committed; exits non-zero on a duplicate id, a disposition outside the
+  closed vocabulary, a DECIDE/BLOCKED row without owner and answer-by date, a decision or work-package reference that is absent from this plan, or a wrong counts
+  line). (2) Completeness against the sources: the generator (`gen_register.py`) parsed the four audit registers (local, gitignored evidence in
+  `output/audit_2026-09-29/`), aborted on any unmapped or duplicate id and on a wrong per-source count (83 INV, 43 G0, 41 DC, 56 AP), and its output was
+  committed; regenerate only from those local files.
 - **Source-anchored acceptance harness** (WP-0.2, WP-0.3): the instrument that lets a "fixed" claim be falsified.
 
 ## 5. Baseline (captured 2026-09-29 before any change)
@@ -289,6 +291,7 @@ CLOSE reasons in the register are self-contained (KILL/SETTLED/DEAD-END/MOOT wit
 | D-23 | Settled Precedents index and digest content (DC-17, DC-37, G0-34, G0-36, AP-47, AP-50): define AGENT-PRECEDENT-01 in AGENTS.md; re-scope the lines that say only `DoclingPdfAdapter` may build Docling | edit with owner sign-off | dated markers; AGENTS.md untouched |
 | D-24 | Plan/phase closure records and target constraints (AP-14, AP-26, AP-35, AP-39; INV-036) | record closure text | untouched |
 | D-25 | Repair-lane budget (INV-081): the recorded 25%/page rule belongs to PLAN_F1 Phase 2 (commit 46284af says Phase 2 execution remains unauthorized); does it govern `_repair_degraded_code`, per document or per batch (extract() runs per 10-page batch), rounding (ceil is the only choice that keeps `test_v3_code_repair.py` green; floor breaks two pins), page order, and the consequence that more code books ship unrepaired and fail R3 | owner call | not executed |
+| D-26 | (unused id: folded into the adjudication and completion rules below) | - | - |
 | D-27 | Main-line integration and CI (INV-003: HEAD is 98 commits ahead of origin/main; Gitea CI has never run V3 code), stale git artifacts (a 2026-05-31 stash, Cline checkpoint refs) | owner call | do nothing |
 | D-28 | Non-PDF inputs still run only on the legacy V2 lane (INV-051): retire or port | owner call | untouched |
 | D-29 | Measurement gaps worth funding (INV-056/057/058/059) | owner call | CLOSE as roadmap, recorded |
