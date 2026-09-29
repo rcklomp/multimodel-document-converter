@@ -198,20 +198,14 @@ def test_property_a_heading_never_follows_body_text_inside_a_chunk(seed):
 @pytest.mark.parametrize("seed", SEEDS)
 def test_property_b_parent_is_the_nearest_preceding_heading_or_none(seed):
     elems, kinds = _gen(seed)
-    order = {e.content: i for i, e in enumerate(elems)}
     for c in text_chunks(doc_of(elems), max_chars=600):
-        first_idx = (
-            min(order[k] for k in order if k in c.content)
-            if any(k in c.content for k in order)
-            else None
-        )
-        # index of the first ELEMENT whose text appears in the chunk (headings are unique strings;
-        # body elements start with a unique "S<i>." token)
+        # index of the first ELEMENT whose text appears in the chunk (headings are unique
+        # strings; a body element starts with a unique "S<i>." token)
         idxs = [
             i
             for i, e in enumerate(elems)
             if (e.content in c.content)
-            or (e.content.split(" ")[0] in c.content and kinds[i] == "B")
+            or (kinds[i] == "B" and e.content.split(" ")[0] in c.content)
         ]
         if not idxs:
             continue
