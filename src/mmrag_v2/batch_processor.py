@@ -100,6 +100,7 @@ from .validators.token_validator import (
     create_token_validator,
     TokenValidationResult,
 )
+from .validators.image_drop_ledger import ImageDropLedger
 from .validators.quality_filter_tracker import (
     QualityFilterTracker,
     FilterCategory,
@@ -2208,6 +2209,7 @@ class BatchProcessor:
         # many pages it served / demoted (a demoted page is otherwise invisible).
         self._extraction_routing = {"vlm_model": None, "vlm_served": None, "demoted": None}
         self._crop_audit_records = []
+        self._image_drops = ImageDropLedger()
 
         # Workstream B: legacy callers still get the cheap pre-pass here.
         # Canonical CLI paths pass a PdfConversionPlan with this decision already made.
@@ -2524,11 +2526,16 @@ class BatchProcessor:
         # 5. QA-CHECK-01: Token balance validation (with filtering awareness)
         # ====================================================================
 
+        # WP-A2b: from here on every IMAGE chunk the chain removes is itemized.
+        self._image_drop_ledger().begin(all_chunks)
+
         # Step 1: REQ-COORD-02 - Propagate page dimensions to ALL chunks
         all_chunks = self._propagate_page_dimensions(all_chunks)
 
         # Step 2: IRON-07 - Apply Full-Page Guard to filter/modify full-page assets
-        all_chunks = self._apply_full_page_guard(all_chunks)
+        all_chunks = self._track_image_drops(
+            "full_page_guard", all_chunks, self._apply_full_page_guard(all_chunks)
+        )
 
         # Step 3: QA-CHECK-01 - Validate token limits per chunk
         all_chunks, token_flagged_count = self._validate_token_limit_per_chunk(all_chunks)
@@ -2547,7 +2554,9 @@ class BatchProcessor:
         # ====================================================================
 
         # Apply quality filters (this fills the QualityFilterTracker)
-        filtered_chunks = self._apply_quality_filters(all_chunks)
+        filtered_chunks = self._track_image_drops(
+            "quality_filter", all_chunks, self._apply_quality_filters(all_chunks)
+        )
         # Keep a stable baseline count for recovery bookkeeping (avoid in-place mutations)
         filtered_baseline_count = len(filtered_chunks)
         filtered_count = len(all_chunks) - filtered_baseline_count
@@ -2711,7 +2720,9 @@ class BatchProcessor:
             all_chunks = self._sanitize_technical_manual_final(all_chunks)
         all_chunks = self._apply_oversize_breaker(all_chunks, max_chars=1500)
         all_chunks = self._normalize_chunk_text(all_chunks)  # PUA + whitespace normalization
-        all_chunks = self._filter_no_visual_images(all_chunks)
+        all_chunks = self._track_image_drops(
+            "no_visual_sentinel", all_chunks, self._filter_no_visual_images(all_chunks)
+        )
         all_chunks = self._filter_repetition_garbage(all_chunks)
         all_chunks = self._apply_table_recovery_highlander_dedup(all_chunks)
         # Drop recovery text chunks that duplicate the primary VLM extraction on
@@ -2810,6 +2821,7 @@ class BatchProcessor:
         # Write aggregated output to master JSONL with deduplication
         output_jsonl = self.output_dir / "ingestion.jsonl"
         written_chunks = 0
+        written_images = 0
         duplicate_count = 0
         export_error_count = 0
 
@@ -2839,6 +2851,7 @@ class BatchProcessor:
                 if c.modality == Modality.TEXT and c.metadata and c.metadata.page_number
             }
             _pre_filter = len(export_chunks)
+            _pre_export_chunks = export_chunks
             export_chunks = [
                 c for c in export_chunks
                 if not (
@@ -2849,6 +2862,7 @@ class BatchProcessor:
                     and c.metadata.page_number in pages_with_text
                 )
             ]
+            self._track_image_drops("full_page_editorial", _pre_export_chunks, export_chunks)
             _editorial_filtered = _pre_filter - len(export_chunks)
             if _editorial_filtered:
                 logger.info(
@@ -2856,16 +2870,22 @@ class BatchProcessor:
                 )
 
             # Drop/promote blank image/table assets.
-            export_chunks = self._filter_blank_assets(export_chunks)
+            export_chunks = self._track_image_drops(
+                "blank_asset", export_chunks, self._filter_blank_assets(export_chunks)
+            )
 
             # Drop icon/glyph-class image regions (sub-content tiny rasters that
             # only add retrieval noise + IMAGE_NO_VLM/ASSET_TINY advisories).
-            export_chunks = self._filter_tiny_icon_images(export_chunks)
+            export_chunks = self._track_image_drops(
+                "tiny_icon", export_chunks, self._filter_tiny_icon_images(export_chunks)
+            )
 
             # Drop thin-strip image regions (table-row fragments mis-emitted as
             # IMAGE; the table content is already a TABLE chunk). WS2b: clears the
             # strict IMAGE gate's thin_strips hard-FAIL, page-coverage guarded.
-            export_chunks = self._filter_thin_strip_images(export_chunks)
+            export_chunks = self._track_image_drops(
+                "thin_strip", export_chunks, self._filter_thin_strip_images(export_chunks)
+            )
 
             # Re-apply oversize breaker: TABLE→TEXT promotion may create
             # text chunks exceeding the 1500-char gate.
@@ -2930,7 +2950,9 @@ class BatchProcessor:
                     f"[FINALIZE] chunk_id dedup: dropped {_dropped} byte-equal "
                     f"duplicate chunks (v2.9 Phase 1 follow-up)"
                 )
-            export_chunks = _deduped
+            export_chunks = self._track_image_drops(
+                "chunk_id_duplicate", export_chunks, _deduped
+            )
 
             # ============================================================
             # PLAN_V2.10 Phase 3 — `B4B_FULL_DOC_PICTURE_DEDUP`
@@ -3056,6 +3078,7 @@ class BatchProcessor:
                                 logger.error(error_msg)
                                 export_error_count += 1
                                 errors.append(error_msg)
+                                self._image_drop_ledger().record("asset_metadata_mismatch", chunk)
                                 continue
 
                     # ============================================================
@@ -3124,6 +3147,9 @@ class BatchProcessor:
                                                     logger.info(f"Deleted duplicate asset: {asset_file}")
                                                 except Exception as del_e:
                                                     logger.warning(f"Failed to delete duplicate: {del_e}")
+                                                self._image_drop_ledger().record(
+                                                    "phash_duplicate", chunk
+                                                )
                                                 continue  # Skip writing this chunk
                                         else:
                                             # Log successful registration; record
@@ -3205,6 +3231,8 @@ class BatchProcessor:
                     json_line = json.dumps(chunk_dict, ensure_ascii=False)
                     write_buffer.append(json_line)
                     written_chunks += 1
+                    if chunk.modality == Modality.IMAGE:
+                        written_images += 1
 
                     if len(write_buffer) >= DEFAULT_EXPORT_WRITE_BATCH_SIZE:
                         f.write("\n".join(write_buffer) + "\n")
@@ -3221,6 +3249,7 @@ class BatchProcessor:
                         f"Traceback:\n{traceback.format_exc()}"
                     )
                     errors.append(f"Finalize chunk {idx} failed: {e}")
+                    self._image_drop_ledger().record("export_error", chunk)
                     continue
 
             if write_buffer:
@@ -3265,6 +3294,8 @@ class BatchProcessor:
             logger.warning(f"[FINALIZE] Failed to reconcile metadata chunk_count: {e}")
 
         self._write_crop_audit_sidecar(output_jsonl.parent)
+        for line in self._image_drop_ledger().summary_lines(written_images):
+            logger.warning(line)
 
         # Clean up orphan assets: files saved to disk during extraction but
         # not referenced in the final JSONL (e.g., Docling images skipped in
@@ -7918,6 +7949,16 @@ class BatchProcessor:
                 sc["next_text_snippet"] = succ_text[:300]
                 changed += 1
         return changed
+
+    def _image_drop_ledger(self) -> ImageDropLedger:
+        ledger = getattr(self, "_image_drops", None)
+        if ledger is None:
+            ledger = self._image_drops = ImageDropLedger()
+        return ledger
+
+    def _track_image_drops(self, reason: str, before: List[Any], after: List[Any]) -> List[Any]:
+        """WP-A2b: itemize the IMAGE chunks a filter stage removed; returns ``after`` unchanged."""
+        return self._image_drop_ledger().track(reason, before, after)
 
     def _write_crop_audit_sidecar(self, output_dir: Path) -> None:
         """Write ``crop_audit.json`` next to the JSONL: one record per rendered IMAGE/TABLE crop.
