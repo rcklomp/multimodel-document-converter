@@ -407,6 +407,12 @@ Test baseline progression: 1767 passed / 99 skipped (499a5fa) -> 2095 passed / 9
 - **WP-C3:** KILLED by measurement (Section 6, WP-C3 outcome).
 - **WP-V3 ship gate:** 1 pytest 2095/99/0; 2 firewall (in the suite); 3 `smoke_production.sh` offline SMOKE_PRODUCTION_PASS;
   4 strict gate QA_PASS and UNIVERSAL_PASS on the live output; 5 AGENT-VAL-01 offline before/after: see 14.2.
+  Clean worktree of the documentation commit `c38d53c`: pytest 2086 passed / 108 skipped / 0 failed (the 9 extra skips against
+  the main checkout are the conditional skips of tests that read gitignored local outputs: `skipif` on a missing output, not
+  registered deferrals), integrity guards G1-G7 and `check_plan_register.py` green. 6: no existing test was modified or
+  removed (the only changed existing test file is `tests/test_repo_integrity.py`, docstring only); Workstream B negative
+  tests and the seeded-fault tests are unchanged and green. 7: the OmniDocBench advisory criterion was NOT run (stated
+  waiver, Section 8.2 item 7). 8: the evidence is committed (fixtures, hashes, FINDINGS_LOG, this log).
 
 ### 14.2 Ship gate 5: AGENT-VAL-01 (`smoke_multiprofile.sh`), pinned offline recipe, 2026-09-29
 
