@@ -83,6 +83,7 @@ from .universal.intermediate import (
     LocatorType as UIRLocatorType,
     UIRChunk,
 )
+from .version import __engine_version__ as ENGINE_VERSION
 from .version import __schema_version__ as SCHEMA_VERSION
 from .state.context_state import ContextStateV2, create_context_state, is_valid_heading
 from .state.magazine_section_detector import (
@@ -4353,9 +4354,11 @@ class V2DocumentProcessor:
         # Compute doc_id from file MD5 (12-char hex) for metadata record.
         _fp = Path(file_path)
         _hasher = hashlib.md5()
+        _sha = hashlib.sha256()
         with open(_fp, "rb") as _fh:
             for _blk in iter(lambda: _fh.read(8192), b""):
                 _hasher.update(_blk)
+                _sha.update(_blk)
         _doc_id = _hasher.hexdigest()[:12]
 
         chunk_count = 0
@@ -4366,6 +4369,8 @@ class V2DocumentProcessor:
                 doc_id=_doc_id,
                 source_file=_fp.name,
                 ingestion_timestamp=datetime.now(timezone.utc).isoformat(),
+                pipeline_version=ENGINE_VERSION,
+                source_file_hash=_sha.hexdigest(),
             )
             f.write(json.dumps(_meta_rec.model_dump(mode="json"), ensure_ascii=False) + "\n")
 
@@ -4429,9 +4434,11 @@ class V2DocumentProcessor:
         # Compute doc_id from file MD5 (12-char hex) for metadata record.
         _fp = Path(file_path)
         _hasher = hashlib.md5()
+        _sha = hashlib.sha256()
         with open(_fp, "rb") as _fh:
             for _blk in iter(lambda: _fh.read(8192), b""):
                 _hasher.update(_blk)
+                _sha.update(_blk)
         _doc_id = _hasher.hexdigest()[:12]
 
         # Write document-level metadata record as the FIRST line (atomic write).
@@ -4440,6 +4447,8 @@ class V2DocumentProcessor:
             doc_id=_doc_id,
             source_file=_fp.name,
             ingestion_timestamp=datetime.now(timezone.utc).isoformat(),
+            pipeline_version=ENGINE_VERSION,
+            source_file_hash=_sha.hexdigest(),
         )
         with open(final_output_path, "a", encoding="utf-8") as _mf:
             _mf.write(json.dumps(_meta_rec.model_dump(mode="json"), ensure_ascii=False) + "\n")

@@ -169,6 +169,7 @@ def build_row(
             "route": header.get("extraction_engine"),
             "schema_version": header.get("schema_version"),
             "engine_version": header.get("pipeline_version"),
+            "config_hash": header.get("config_hash"),
             "extracted_at": header.get("ingestion_timestamp"),
         }
     outcome = _outcome(points_dense, header)

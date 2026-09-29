@@ -68,6 +68,7 @@ from .schema.ingestion_schema import (
     create_table_chunk,
     create_text_chunk,
 )
+from .version import __engine_version__ as ENGINE_VERSION
 from .version import __schema_version__ as SCHEMA_VERSION
 
 # V2.4.0: Shadow extraction is a CORE REQUIREMENT (REQ-MM-05/06/07, IRON-07)
@@ -1962,6 +1963,47 @@ class BatchProcessor:
         acc["quality_risk"] += int(extra.get("extraction_quality_risk_pages") or 0)
         acc["code_repaired"] += int(extra.get("extraction_code_repaired_pages") or 0)
 
+    def _accumulate_routing_provenance(self, universal_doc) -> None:
+        """Aggregate the per-batch VLM routing stamps (WP-C4) into doc-level totals.
+
+        ``None`` means "no batch reported routing" (a single-lane engine): the header fields then
+        stay null instead of claiming zero.
+        """
+        extra = getattr(getattr(universal_doc, "metadata", None), "extra", None) or {}
+        acc = self._extraction_routing
+        model = extra.get("extraction_vlm_model")
+        if model and not acc["vlm_model"]:
+            acc["vlm_model"] = str(model)
+        for src, dst in (("extraction_vlm_served_pages", "vlm_served"), ("extraction_demoted_pages", "demoted")):
+            value = extra.get(src)
+            if value is not None:
+                acc[dst] = int(acc[dst] or 0) + int(value)
+
+    def _config_hash(self, profile_type: Optional[str]) -> str:
+        """Hash of the options that change THIS run's output (never keys or endpoints)."""
+        from .chunking.uir_chunker import DEFAULT_MAX_CHARS
+        from .provenance import compute_config_hash
+
+        try:
+            from mmrag_v3.engines.vlm_native import _render_max_px
+
+            render_cap = _render_max_px()
+        except Exception:  # noqa: BLE001 - provenance must never break export
+            render_cap = None
+        return compute_config_hash(
+            {
+                "engine_version": ENGINE_VERSION,
+                "schema_version": SCHEMA_VERSION,
+                "profile_type": profile_type,
+                "extraction_route": self._extraction_provenance.get("engine"),
+                "vlm_model": self._extraction_routing.get("vlm_model"),
+                "render_cap_px": render_cap,
+                "batch_size": self.batch_size,
+                "chunk_max_chars": DEFAULT_MAX_CHARS,
+                "drop_running_furniture": bool(getattr(self, "_drop_running_furniture", True)),
+            }
+        )
+
     def _process_single_batch(
         self,
         batch_info: BatchInfo,
@@ -2001,6 +2043,7 @@ class BatchProcessor:
 
         universal_doc = v3_extract(str(batch_info.batch_path))
         self._accumulate_extraction_provenance(universal_doc)
+        self._accumulate_routing_provenance(universal_doc)
 
         # PLAN_V3.1 P2: thread the PyMuPDF TOC (extracted document-wide in
         # process_pdf, keyed by ABSOLUTE page) into the UIR-native chunker as
@@ -2154,6 +2197,10 @@ class BatchProcessor:
             "quality_risk": 0,
             "code_repaired": 0,
         }
+        # PLAN_QUALITY_REMEDIATION WP-C4: routing provenance kept OUT of the accumulator
+        # dict above (two tests pin that dict whole): the VLM that served the run and how
+        # many pages it served / demoted (a demoted page is otherwise invisible).
+        self._extraction_routing = {"vlm_model": None, "vlm_served": None, "demoted": None}
 
         # Workstream B: legacy callers still get the cheap pre-pass here.
         # Canonical CLI paths pass a PdfConversionPlan with this decision already made.
@@ -2954,8 +3001,9 @@ class BatchProcessor:
                 has_encoding_corruption=self.has_encoding_corruption,
                 chunk_count=len(export_chunks),
                 ingestion_timestamp=datetime.now(timezone.utc).isoformat(),
-                pipeline_version=SCHEMA_VERSION,
+                pipeline_version=ENGINE_VERSION,
                 source_file_hash=_src_hash,
+                config_hash=self._config_hash(intel.get("profile_type")),
                 # PLAN_EXTRACTION_FIDELITY_V1 Section 5.4: doc-level extraction
                 # provenance aggregated across batches (advisory observability).
                 extraction_engine=self._extraction_provenance.get("engine"),
@@ -2964,6 +3012,9 @@ class BatchProcessor:
                 extraction_recovered_pages=self._extraction_provenance.get("recovered"),
                 extraction_quality_risk_pages=self._extraction_provenance.get("quality_risk"),
                 extraction_code_repaired_pages=self._extraction_provenance.get("code_repaired"),
+                extraction_vlm_model=self._extraction_routing.get("vlm_model"),
+                extraction_vlm_served_pages=self._extraction_routing.get("vlm_served"),
+                extraction_demoted_pages=self._extraction_routing.get("demoted"),
             )
             f.write(json.dumps(meta_record.model_dump(mode="json"), ensure_ascii=False) + "\n")
 

@@ -29,9 +29,11 @@ from typing import List, Optional, Tuple
 # Current pipeline version for provenance comparison
 try:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+    from mmrag_v2.version import __engine_version__ as CURRENT_ENGINE_VERSION
     from mmrag_v2.version import __schema_version__ as CURRENT_VERSION
 except ImportError:
     CURRENT_VERSION = "unknown"
+    CURRENT_ENGINE_VERSION = "unknown"
 
 # Shared R3 code-indentation metric (single source of truth; see
 # docs/PLAN_R3_CODE_GATE_REDESIGN.md). The script's own directory is on
@@ -336,8 +338,10 @@ def audit(jsonl_path: Path) -> AuditResult:
                 r.schema_version = obj.get("schema_version", "")
                 r.total_pages = int(obj.get("total_pages") or 0)
                 pv = obj.get("pipeline_version", "")
-                if pv and pv != CURRENT_VERSION:
-                    r.add_issue("PROVENANCE", f"pipeline_version={pv} != current {CURRENT_VERSION}")
+                # pipeline_version is the ENGINE version; schema_version is the chunk-SHAPE
+                # version. They are different numbers on purpose (WP-C4): compare each to its own.
+                if pv and pv != CURRENT_ENGINE_VERSION:
+                    r.add_issue("PROVENANCE", f"pipeline_version={pv} != current {CURRENT_ENGINE_VERSION}")
                 sv = obj.get("schema_version", "")
                 if sv and sv != CURRENT_VERSION:
                     r.add_issue("PROVENANCE", f"schema_version={sv} != current {CURRENT_VERSION}")

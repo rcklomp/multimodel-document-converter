@@ -1049,6 +1049,13 @@ class IngestionMetadata(BaseModel):
     # bounded VLM re-extraction. ADVISORY observability; absent (None) on legacy.
     extraction_quality_risk_pages: Optional[int] = None  # R3-flagged degraded-code pages
     extraction_code_repaired_pages: Optional[int] = None  # of those, VLM-repaired
+    # PLAN_QUALITY_REMEDIATION WP-C4: which VLM served the run and how many pages it really
+    # served. A page a VLM engine demoted to Docling (non-retryable 401/402/403, exhausted 429)
+    # leaves engine="hybrid", degraded=0, fallback=None, so without these an expired key yields
+    # a "valid" run served by the Docling lane. ADVISORY observability; absent on legacy outputs.
+    extraction_vlm_model: Optional[str] = None
+    extraction_vlm_served_pages: Optional[int] = None
+    extraction_demoted_pages: Optional[int] = None
 
 
 # ============================================================================

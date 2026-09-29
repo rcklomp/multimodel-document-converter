@@ -166,6 +166,33 @@ def _stamp(doc: UniversalDocument, *, engine: str, fallback=None,
     return doc
 
 
+def _stamp_routing(doc: UniversalDocument, engine: object) -> None:
+    """Record which pages a VLM really served and which it demoted (PLAN_QUALITY_REMEDIATION WP-C4).
+
+    Both hybrid engines log per-page routing on ``last_routing_decisions`` as
+    ``(page, choice, reason)``: a page whose VLM call failed semantically is demoted and its
+    choice ends in ``_fallback``. That log was read by nothing, so an expired key (401/403) or an
+    exhausted rate limit silently served every page from the Docling/MinerU lane while the header
+    still said hybrid / degraded=0 / fallback=None. Engines without the log (single-lane engines)
+    stamp nothing. The model id is read from the engine's provider config when it exists.
+    """
+    decisions = getattr(engine, "last_routing_decisions", None)
+    if not isinstance(decisions, list) or not decisions:
+        return
+    extra = doc.metadata.extra
+    extra["extraction_vlm_served_pages"] = sum(
+        1 for d in decisions if d[1] in ("vlm", "qwen_code", "qwen_code_block")
+    )
+    extra["extraction_demoted_pages"] = sum(1 for d in decisions if str(d[1]).endswith("_fallback"))
+    try:
+        provider = getattr(getattr(engine, "vlm_engine", None), "_provider", None)
+        model = getattr(getattr(provider, "config", None), "model", None)
+        if model:
+            extra["extraction_vlm_model"] = str(model)
+    except Exception:  # noqa: BLE001 - provenance must never break extraction
+        pass
+
+
 # --- Terminal tier: PyMuPDF native text -------------------------------------
 # The last rung of the ladder. No model, no network, no GPU server — it reads the
 # PDF's own text layer. The ONLY way it fails is an unreadable file, which is a
@@ -297,6 +324,7 @@ def _extract_fail_closed(file_path: Union[str, "os.PathLike[str]"]) -> Universal
     # 1) Whole-engine failure (server 500s, JSON mismatch, model load fail).
     try:
         doc = engine.extract(path)
+        _stamp_routing(doc, engine)
     except Exception as exc:  # noqa: BLE001 — fail-closed on ANY engine failure
         if engine_name == _FALLBACK_ENGINE_NAME:
             raise  # nothing more reliable to fall back to

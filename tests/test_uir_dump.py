@@ -204,6 +204,7 @@ def test_call_site_bridge_passes_toc_and_carry_into_the_dump(tmp_path, monkeypat
     bp._intelligence_metadata = {}
     bp._toc_headings = {5: ["Document", "Ch"], "__heading_map__": {}}
     bp._accumulate_extraction_provenance = lambda d: None
+    bp._accumulate_routing_provenance = lambda d: None
     bp._render_visual_assets = lambda *a, **k: None
     bp._next_chunk_position = lambda: 0
     monkeypatch.setattr(v3p, "extract", lambda path: _doc())
