@@ -1872,13 +1872,19 @@ class BatchProcessor:
         # rebuild them heading-less (observed on Kimothi: a MuPDF PNG encode
         # crash discarded 151 extracted elements). Fail open - keep the text.
         try:
-            materialize_visual_assets(
+            report = materialize_visual_assets(
                 uir_chunks,
                 batch_path,
                 self.assets_dir,
                 doc_hash=self._doc_hash or "doc",
                 page_offset=page_offset,
             )
+            # WP-A1: keep every crop's provenance for the crop_audit.json sidecar (the report
+            # used to be discarded here, so a wrong-object crop left no trace).
+            records = getattr(self, "_crop_audit_records", None)
+            if records is None:
+                records = self._crop_audit_records = []
+            records.extend(crop.to_record() for crop in report.crops)
         except Exception as exc:
             logger.warning(
                 "[V3-ASSET] visual asset rendering failed for %s; continuing "
@@ -2201,6 +2207,7 @@ class BatchProcessor:
         # dict above (two tests pin that dict whole): the VLM that served the run and how
         # many pages it served / demoted (a demoted page is otherwise invisible).
         self._extraction_routing = {"vlm_model": None, "vlm_served": None, "demoted": None}
+        self._crop_audit_records = []
 
         # Workstream B: legacy callers still get the cheap pre-pass here.
         # Canonical CLI paths pass a PdfConversionPlan with this decision already made.
@@ -3256,6 +3263,8 @@ class BatchProcessor:
             self._patch_export_file(output_jsonl, written_chunks)
         except Exception as e:
             logger.warning(f"[FINALIZE] Failed to reconcile metadata chunk_count: {e}")
+
+        self._write_crop_audit_sidecar(output_jsonl.parent)
 
         # Clean up orphan assets: files saved to disk during extraction but
         # not referenced in the final JSONL (e.g., Docling images skipped in
@@ -7909,6 +7918,23 @@ class BatchProcessor:
                 sc["next_text_snippet"] = succ_text[:300]
                 changed += 1
         return changed
+
+    def _write_crop_audit_sidecar(self, output_dir: Path) -> None:
+        """Write ``crop_audit.json`` next to the JSONL: one record per rendered IMAGE/TABLE crop.
+
+        Fail-open (a sidecar failure never affects the conversion). Absent when no crop was
+        rendered, so a text-only document leaves no file.
+        """
+        records = getattr(self, "_crop_audit_records", None)
+        if not records:
+            return
+        try:
+            (Path(output_dir) / "crop_audit.json").write_text(
+                json.dumps({"crops": records}, ensure_ascii=False, indent=1) + "\n",
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            logger.warning(f"[FINALIZE] Failed to write crop_audit.json: {exc}")
 
     def _patch_export_file(self, output_jsonl: Path, written_chunks: int) -> None:
         """Post-export reconciliation of the JSONL (header count + stale neighbour snippets).
