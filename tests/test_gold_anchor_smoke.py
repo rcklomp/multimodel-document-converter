@@ -163,3 +163,68 @@ def test_pre_fix_outputs_fail_many_anchors_proving_discrimination(name):
     assert len(fails) >= 8, fails
     assert any(a.startswith("furniture:") for a in fails)
     assert any(a.startswith("reference:") for a in fails)
+
+
+# ------------------------------------------------------------------ figure and priority anchors (Round 0b N-1, N-13)
+FIG_SPEC = {
+    "crop_zoom": 2.0,
+    "figure_area_band": [0.5, 2.0],
+    "figure_anchors": [
+        {"id": "big", "page": 5, "gold_rect_pt": [300, 100, 560, 560]},
+        {"id": "small", "page": 5, "gold_rect_pt": [40, 600, 250, 700]},
+    ],
+    "priority_anchors": [{"id": "abs", "phrase": "the abstract text", "must_not_priority": "low"}],
+}
+
+
+def IMG(cid, w, h, page=5):
+    return {
+        "chunk_id": cid,
+        "modality": "image",
+        "content": "d",
+        "asset_ref": {"width_px": w, "height_px": h},
+        "metadata": {"page_number": page, "hierarchy": {"parent_heading": None}},
+    }
+
+
+def fig_verdicts(rows):
+    return {aid: (v, d) for aid, v, d in _load().evaluate(rows, FIG_SPEC)}
+
+
+def test_full_size_crops_pass_the_figure_anchors():
+    v = fig_verdicts([IMG("a", 520, 920), IMG("b", 420, 200)])
+    assert v["figure:big"][0] == "PASS" and v["figure:small"][0] == "PASS"
+
+
+def test_a_fragment_crop_fails_even_though_an_image_chunk_exists():
+    # the IRJET shapes: a 420x43 text strip and a 66x68 logo where whole figures should be
+    v = fig_verdicts([IMG("strip", 420, 43), IMG("logo", 66, 68)])
+    assert v["figure:big"][0] == "FAIL" and "fragment" in v["figure:big"][1]
+    assert v["figure:small"][0] == "FAIL"
+
+
+def test_a_dropped_figure_fails_and_is_not_rescued_by_a_manifest():
+    v = fig_verdicts([IMG("a", 520, 920)])
+    assert v["figure:big"][0] == "PASS"
+    assert v["figure:small"][0] == "FAIL" and "dropped or never emitted" in v["figure:small"][1]
+
+
+def test_one_image_chunk_cannot_satisfy_two_figures():
+    v = fig_verdicts([IMG("only", 520, 920)])
+    assert [
+        k for k, (verdict, _) in v.items() if k.startswith("figure:") and verdict == "PASS"
+    ] == ["figure:big"]
+
+
+def test_image_on_another_page_does_not_count():
+    v = fig_verdicts([IMG("elsewhere", 520, 920, page=4)])
+    assert v["figure:big"][0] == "FAIL"
+
+
+def test_priority_anchor_fails_when_the_chunk_is_demoted_to_low():
+    low = T("x", "the abstract text goes here")
+    low["metadata"]["search_priority"] = "low"
+    ok = T("y", "the abstract text goes here")
+    ok["metadata"]["search_priority"] = "high"
+    assert fig_verdicts([low])["priority:abs"][0] == "FAIL"
+    assert fig_verdicts([ok])["priority:abs"][0] == "PASS"

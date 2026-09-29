@@ -1598,3 +1598,65 @@ metrics incl. the available text/reading ED - read the metric_result.json direct
 (`text_block.page.Edit_dist.ALL` + per-layout `layout: 1andmore_column`) when the
 table key is absent. (3) same `$HOME` env-path mismatch as the smoke script - the
 omnidocbench scorer python is `/Users/Shared/...`, not `$HOME/...`; monkeypatch `ODB_PY`.
+
+
+## 2026-09-29 - IRJET-class quality audit: the gates were blind, the defects predate the cloud switch, and the instruments now exist  `[Results][Method][Lessons]`
+
+Trigger: an external verdict on one cloud-route conversion (Dashscope-intl `qwen3-vl-flash`,
+`MINERU_ENDPOINT` unset so the legacy HybridEngine ran) of `IRJET_Modeling_of_Solar_PV_system_under.pdf`.
+Plan and register: `docs/PLAN_QUALITY_REMEDIATION_V1.md` and `..._REGISTER.md`. This entry holds the data
+behind Wave 0 (instruments) and the first Wave 2 fixes; owner decisions are pending (plan Section 9).
+
+**1. The strict gate cannot see any of it.** `qa_full_conversion.py --source-pdf` on the defective output:
+`QA_PASS failures=0 warnings=0`, `furniture_chunk_ratio=0.0000` while 11 of 30 TEXT chunks contain running
+header/footer lines (the F1 filter is chunk-level, capped at 70 characters; the header chunk is 151). The
+mandatory `smoke_production.sh` "academic" lane IS this document.
+
+**2. The defects predate the cloud switch.** June runs (`vlmtest_IRJET`, `enrichtest_IRJET`,
+`icontest_IRJET_academic`, MinerU-era boxes in the correct frame) show the same 67x68 asset, 7 header-contaminated
+chunks and 12 low-priority chunks; a fresh run on the current tree (`irjet_baseline_499a5fa`) shows the same asset
+sizes and missing figures (log: "Dropped 7 icon-class image chunk(s)"). The 45 upstream commits changed none of it.
+
+**3. Regression-guard metrics over 46 local outputs (WP-0.2, `validators/structural_outcomes.py`).**
+
+| metric | median | p75 | p90 | max | outputs at 0 |
+|---|--:|--:|--:|--:|--:|
+| TEXT chunks with a heading line embedded after line 1 | 22.4% | 31.0% | 39.6% | 100% | 6/46 |
+| TEXT chunks containing a line repeating on >= 3 pages (upper bound) | 28.2% | 36.6% | 40.2% | 48.3% | 9/46 |
+| chunks with a stale next_text_snippet | 0.0% | 4.1% | 8.3% | 25.0% | 25/46 |
+| outputs with reference-class rows / order breaks / split entries | 15 / 5 / 8 of 46 | | | | |
+| outputs with a figure-caption deficit page | 14 of 46 | | | | |
+
+The snippet coverage gap reads 71-99% on outputs that predate the snippet feature (`snippets_present == 0`):
+interpret it only on fresh outputs. No threshold is set yet; thresholds follow Wave 2 (AGENT-GATE-PROGRESSION).
+
+**4. Source-anchored acceptance (WP-0.3, `scripts/qa_gold_anchor_smoke.py`) baseline before any fix.**
+`cloud_probe_irjet`: 12 anchors FAIL, 2 N/A; `irjet_baseline_499a5fa`: 11 FAIL, 1 N/A; June MinerU run: 12 FAIL, 0 N/A.
+Failing classes on all three: the source's running header/footer strings present in 6-7 chunks (5 of 5 furniture
+anchors), 2-3 of 3 reference entries split or cut mid-token (Tsai, Miyatake, Mandour), section anchors under the
+wrong parent (page-4 PSO paragraphs under "B. PSO applied to MPPT"; the conclusion under "REFERENCES" on the fresh
+run), and the abstract under "1. INTRODUCTION". N/A = the engine did not label that heading (never counted as a pass).
+
+**5. Firing rates before building (WP-M0).** Weak sentence-end cuts (a chunk ending in `)` `;` `:` continued in
+lowercase): 78 of 1,123 same-page text boundaries (6.9%) in 22 of 42 outputs (IRJET 11-20%, AIOS 10-17%). VLM-typed
+header/footer chunks: 9 chunks in 5 of 42 outputs; MinerU-era outputs carry no `source_label`, so the engine-label
+route of the furniture pass cannot be replayed offline (repetition can).
+
+**6. Bbox frame probe (WP-0.4; 6 paid page calls, production prompt and call path).** `qwen3-vl-flash` answers bboxes
+in a 0-1000 grid although the prompt asks for pixels. Raw-max / native-text-max: IRJET p2 x 0.866 y 0.617, p3 0.838
+0.615, p7 0.874 0.613 (grid expectation 0.883 / 0.625 for a 1132x1600 render; pixel answers would read 1.0);
+Schwungradspeicher p2 0.892 0.627 and p4 0.887 0.624 (expected 0.893 / 0.625); its p3 is inconclusive on y (raw boxes
+include figure regions with no text block, x 0.879). The page-7 inconsistency of the user's run did not reproduce.
+
+**7. WP-B1 replay (heading sections) on reconstructed element streams, 33 outputs.** HEADING coverage falls by
+1-2.7 points on typical documents (IRJET 100% -> 93%) because front matter before the first heading is now honestly
+null instead of carrying the NEXT section's heading. A 2-page slice of a 35-page paper (front matter 22% of its
+TEXT chunks) drops from 100% to 78%. The replay cannot emulate title-labelled elements, so it is a lower bound;
+the criterion is measured on the real fixed UIR in WP-V1, and no clause allows a sub-0.80 result to be "explained".
+
+Lessons: (1) a green strict gate proves the structural proxies only; the repo's own AGENT-INTEGRITY-01 named this and the
+F1 filter still shipped a predicate fitted to magazine folios. (2) A metric that restates its own fix is zero by
+construction: acceptance must be anchored in the source. (3) The first draft of the figure acceptance
+(`crop_prose_fraction`) scores a header-logo crop and a text-strip crop as success because neither contains prose; a
+check must be tried against the actual defect before it is trusted. (4) `git log HEAD..origin/<branch>` first: the
+working tree was 45 commits stale and a third lineage (`github/laptop-travel`) existed that no document mentioned.

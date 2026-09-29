@@ -17,6 +17,12 @@ Anchor kinds (see tests/fixtures/gold_anchor_specs/irjet.json):
   furniture_absent     source running header/footer strings: no TEXT chunk may contain them.
   reference_anchors    ALL tokens of one source reference entry must be found inside ONE chunk.
   table_anchors        a TABLE chunk with the expected tokens and at least N data rows.
+  figure_anchors       every source figure (page + gold region in PDF points, from the PDF's own
+                       geometry) needs a RETAINED IMAGE chunk on that page whose asset pixel area is
+                       within the band (default 0.5x-2.0x) of the gold region at the crop zoom,
+                       matched one-to-one; a dropped figure or a fragment crop (a logo, one text
+                       strip) fails. Frame-independent: it reads only the asset dimensions.
+  priority_anchors     a phrase whose chunk must not be demoted to search_priority "low".
 
 Exit code 0 only when nothing failed and enough section anchors were evaluable.
 Read-only over the JSONL; no network, no PDF access.
@@ -58,6 +64,67 @@ def _table_rows(content: str) -> int:
         if s.startswith("|") and not re.fullmatch(r"\|[\s:\-|]+\|?", s):
             n += 1
     return n
+
+
+def _figure_results(rows: List[Row], spec: Dict[str, Any]) -> List[Tuple[str, str, str]]:
+    """One-to-one match of source figures to retained IMAGE chunks by asset-area ratio."""
+    import math
+
+    zoom = float(spec.get("crop_zoom", 2.0))
+    lo, hi = spec.get("figure_area_band", [0.5, 2.0])
+    by_page: Dict[int, List[Row]] = {}
+    for r in rows:
+        if r.get("modality") == "image":
+            pg = (r.get("metadata") or {}).get("page_number")
+            by_page.setdefault(pg, []).append(r)
+    out: List[Tuple[str, str, str]] = []
+    figs_by_page: Dict[int, List[Dict[str, Any]]] = {}
+    for f in spec.get("figure_anchors", []):
+        figs_by_page.setdefault(f["page"], []).append(f)
+    for page, figs in figs_by_page.items():
+        pool = list(by_page.get(page, []))
+        # largest gold regions first so a big figure cannot be starved by a small one
+        for f in sorted(
+            figs,
+            key=lambda f: -(
+                (f["gold_rect_pt"][2] - f["gold_rect_pt"][0])
+                * (f["gold_rect_pt"][3] - f["gold_rect_pt"][1])
+            ),
+        ):
+            aid = "figure:" + f["id"]
+            x0, y0, x1, y1 = f["gold_rect_pt"]
+            gold_px = zoom * zoom * (x1 - x0) * (y1 - y0)
+            best, best_ratio = None, None
+            for c in pool:
+                ar = c.get("asset_ref") or {}
+                area = (ar.get("width_px") or 0) * (ar.get("height_px") or 0)
+                if area <= 0:
+                    continue
+                ratio = area / gold_px
+                if best is None or abs(math.log(ratio)) < abs(math.log(best_ratio)):
+                    best, best_ratio = c, ratio
+            if best is None:
+                out.append(
+                    (
+                        aid,
+                        "FAIL",
+                        f"no retained IMAGE chunk left on page {page} (figure dropped or never emitted)",
+                    )
+                )
+            elif lo <= best_ratio <= hi:
+                pool.remove(best)
+                out.append(
+                    (aid, "PASS", f"{best.get('chunk_id')} asset/gold area ratio {best_ratio:.2f}")
+                )
+            else:
+                out.append(
+                    (
+                        aid,
+                        "FAIL",
+                        f"closest retained crop {best.get('chunk_id')} has asset/gold area ratio {best_ratio:.2f} (band {lo}-{hi}): a fragment or a wrong object",
+                    )
+                )
+    return out
 
 
 def evaluate(rows: List[Row], spec: Dict[str, Any]) -> List[Tuple[str, str, str]]:
@@ -146,6 +213,26 @@ def evaluate(rows: List[Row], spec: Dict[str, Any]) -> List[Tuple[str, str, str]
                     f"tokens not found intact in any chunk (missing or cut mid-token): {missing}",
                 )
             )
+
+    for a in spec.get("priority_anchors", []):
+        aid = "priority:" + a["id"]
+        hits = [t for t in texts if re.search(a["phrase"], _norm(t.get("content")), re.I)]
+        if not hits:
+            out.append((aid, "FAIL", "anchor text is absent from every TEXT chunk (content lost)"))
+            continue
+        bad = [
+            h.get("chunk_id")
+            for h in hits
+            if ((h.get("metadata") or {}).get("search_priority") or "")
+            == a.get("must_not_priority", "low")
+        ]
+        out.append(
+            (aid, "FAIL", f"{len(bad)} chunk(s) demoted to {a.get('must_not_priority', 'low')}")
+            if bad
+            else (aid, "PASS", f"{len(hits)} chunk(s)")
+        )
+
+    out.extend(_figure_results(rows, spec))
 
     for a in spec.get("table_anchors", []):
         aid = "table:" + a["id"]

@@ -27,8 +27,11 @@ DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 def main() -> int:
     plan = PLAN.read_text(encoding="utf-8")
-    decisions = set(re.findall(r"^\| (D-\d+) \|", plan, flags=re.M))
-    wp_ids = set(re.findall(r"\bWP-[A-Za-z0-9.]+", plan))
+    # A decision counts only when its row states a decision (not an "(unused id ...)" placeholder);
+    # a work package counts only when the plan DEFINES it as a bold heading, not when it is merely
+    # mentioned (a row pointing at a removed package would otherwise pass).
+    decisions = set(re.findall(r"^\| (D-\d+) \| (?!\(unused)", plan, flags=re.M))
+    wp_ids = set(re.findall(r"\*\*(WP-[A-Za-z0-9.]+)", plan))
     problems: list[str] = []
     seen: dict[str, int] = {}
     counts: dict[str, int] = {}
