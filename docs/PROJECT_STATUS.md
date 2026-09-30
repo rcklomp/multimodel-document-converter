@@ -1,8 +1,419 @@
 # Project Status
 
-Last updated: 2026-06-08 (full-crucible Grand Soak: 5 gate fails / 4 clusters fixed + corpus-validated 16/16 clean QA_PASS; multimodal no-VLM image policy + local enrichment lane; code-review hardening)
+Last updated: 2026-09-29. Branch `fix/quality-remediation-v1` (local, no upstream, not pushed), based on
+`499a5fa` (= `origin/feat/omnidocbench-phase0`; not merged to `origin/main`).
 
-## Current state (2026-06-08) - full 16-doc crucible CLEAN; clusters A/C/B/D fixed; multimodal image policy shipped
+> STATUS 2026-09-29: no document names the canonical development line. `github/laptop-travel`
+> (45 commits, tip 2026-08-04) diverged from this line at `58b856c` (2026-05-31) (plan decision D-3).
+
+## Current state (2026-09-29)
+
+- **Active work:** `docs/PLAN_QUALITY_REMEDIATION_V1.md` (status: RATIFICATION PENDING, rev. 3) with its
+  register `docs/PLAN_QUALITY_REMEDIATION_V1_REGISTER.md`; its owner decisions (Section 9) have the
+  answer-by date 2026-10-20. Executed on this branch (Section 14): the instruments, WP-F1, F2, C4, B3, D7, B1, C2,
+  A2, A2b, A1 (IMAGE and TABLE) and B2; WP-C3 was killed by measurement. Acceptance record (Sections 14.1, 14.2): on the
+  fixed extraction of one live cloud run the chunker-owned source anchors failing went 12 -> 2, the source-anchored smoke
+  24 -> 5 failures, the strict gate `QA_PASS`, `smoke_production.sh` offline `SMOKE_PRODUCTION_PASS`, and the offline
+  `smoke_multiprofile.sh` matrix 11/11 `GATE_PASS` + `UNIVERSAL_PASS` before and after. Not fixed and waiting on owner
+  decisions: the cloud model's bbox frame (figures 3, 5, 6 and the region of page-6 crops of the reference document are
+  still wrong; D-4, D-12), reading order (D-10), equations (D-9), QA-CHECK-01 tolerance (D-7, now -27.7% on the live run),
+  route ratification (D-1).
+- **Operative extraction route:** legacy `HybridEngine` + a cloud VLM (`scripts/env_cloud_vlm.sh`
+  leaves `MINERU_ENDPOINT` unset); operative but unratified and unmeasured. Facts: `docs/DECISIONS.md`
+  entry "Operative extraction route since 2026-09-29: legacy HybridEngine + cloud VLM (FACT record;
+  ratification pending)" (plan decision D-1). With `MINERU_ENDPOINT` set, the code default is still
+  `MineruQwenHybridEngine` (`_select_engine` in `src/mmrag_v3/processor.py`).
+- **Owner directive of 2026-06-18 (VLM work):** recorded verbatim in `docs/DECISIONS.md` entry
+  "VLM improvement work deferred until the first production-level release" (its scope: plan decision D-4).
+- **Versions:** engine 2.16.0, schema 2.7.0 (`src/mmrag_v2/version.py`).
+- **Tests:** `pytest tests/ -q` = 2095 passed / 99 skipped / 0 failed at `c367b12` (2026-09-29; 1767 passed /
+  99 skipped at `499a5fa`, measured in a clean worktree, `docs/PLAN_QUALITY_REMEDIATION_V1.md` Section 2).
+- **Lint:** `ruff check src tests` = 410 errors; `black --check src tests` = 174 files would be
+  reformatted at `c367b12` (408 / 174 at `499a5fa`; the two extra ruff findings are E402 on imports added
+  next to the 14 existing E402 imports of `src/mmrag_v2/batch_processor.py`).
+- **Hosts:** the LAN inference servers were unreachable on 2026-09-29 (next section).
+- The most recent dated status before this one is 2026-06-18 (first section under "History").
+
+## Active model / endpoint state
+
+> STATUS 2026-09-29: as of 2026-09-29 the M5, GX10 and omlx servers listed here were unavailable (connection
+> attempts to the M5, GX10 and omlx hosts failed); see `docs/DECISIONS.md` entry "Operative
+> extraction route since 2026-09-29". (plan WP-G3, AP-06)
+
+- **VLM extraction:** code default is OpenRouter `qwen/qwen3-vl-8b-instruct`; this
+  cycle ran the local **M5** (`macbook-pro-m5.lan:8000`, mlx
+  `Qwen3-VL-8B-Instruct-8bit`) for bandwidth (charter §5). Override via
+  `VLM_NATIVE_ENDPOINT` / `VLM_NATIVE_MODEL` / `VLM_NATIVE_API_KEY`.
+- **Judge / soak scoring:** GX10 (GB10) `RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic`
+  at `http://10.0.10.239:8000`.
+- **Embedder + reranker:** omlx-server `http://10.0.10.246:8000`
+  (`Qwen3-Embedding-8B-mxfp8` 4096-dim + `gte-reranker-modernbert-base-mlx`).
+- **Vector store:** Qdrant.
+
+## Retrieval stack
+
+dense (omlx Qwen3-Embedding-8B) + sparse (BM25) -> RRF fusion -> ModernBERT
+rerank -> top-5. A ColPali visual late-interaction reranker is **PROPOSED, not
+built** (charter §6.2): adopt only if the text stack is measured insufficient on
+visual-dense queries.
+
+> STATUS 2026-09-29: the omlx embedder/reranker host named above was unreachable on 2026-09-29
+> (same probe); embedding continuity is plan decision D-14. (plan WP-G3, AP-06)
+
+## Engine override env vars
+
+| Env var | Effect |
+|---|---|
+| (none) | `MineruQwenHybridEngine` when `MINERU_ENDPOINT` set (Qwen for code-dense pages, MinerU elsewhere); else legacy `HybridEngine` |
+| `USE_MINERU_QWEN_HYBRID=1` | force the MinerU+Qwen-for-code hybrid |
+| `USE_MINERU_ENGINE=1` | all pages through `MineruNativeEngine` (pure MinerU escape hatch) |
+| `USE_VLM_ENGINE=1` | all pages through `VlmNativeEngine` |
+| `USE_HYBRID_ENGINE=1` | force the legacy cost-optimizer `HybridEngine` |
+| `USE_DOCLING_FAST=1` | all pages through `DoclingFastEngine` (offline, deterministic) |
+| `VLM_DRAWINGS_THRESHOLD=N` | router treats `> N` drawings as visual (default 10) |
+| `MINERU_ENDPOINT` / `MINERU_MODEL` / `MINERU_API_KEY` | MinerU server base URL / served model id (default `MinerU2.5-2509-1.2B`) / optional key |
+| `VLM_NATIVE_ENDPOINT` / `VLM_NATIVE_MODEL` / `VLM_NATIVE_API_KEY` | page-VLM endpoint / model / key (code default OpenRouter `qwen/qwen3-vl-8b-instruct`); also used by the code-repair pass |
+| `VLM_NATIVE_TIMEOUT` / `VLM_NATIVE_MAX_TOKENS` | per-call read timeout in seconds (default 600) / output token budget |
+| `VLM_NATIVE_REPETITION_PENALTY` / `VLM_NATIVE_RESPONSE_FORMAT` / `VLM_NATIVE_STRUCTURED_OUTPUT` | sampling and JSON-mode overrides (`src/mmrag_v3/engines/vlm_provider.py`) |
+| `VLM_PAGE_STALL_RETRIES` | retries of a stalled VLM page on a fresh connection (default 2) |
+| `VLM_PAGE_DEADLINE_SECONDS` / `MINERU_PAGE_DEADLINE_SECONDS` / `EXTRACT_PAGE_DEADLINE_BUFFER` | per-page wall-clock deadline override / seconds added to the request timeout (default 120) (`src/mmrag_v3/engines/_deadline.py`) |
+| `VLM_MONO_RATIO_THRESHOLD=R` | router monospace code threshold (default 0.10) |
+| `VLM_RENDER_MAX_PX=N` | longest-side VLM render cap in px (default 1600; 0 disables) |
+| `MMRAG_DUMP_UIR=<dir>` | write each batch's `UniversalDocument` as JSON (plan WP-0.5) |
+| `MMRAG_<ROLE>_BASE_URL` / `_MODEL` / `_API_KEY` | endpoint registry `src/mmrag_v2/endpoints.py` (roles chat, embed, rerank, vlm, mineru); read by retrieval and eval code, not by `src/mmrag_v3` |
+
+## Must-respect constraints
+
+- Python 3.10 only; batch size <= 10 pages; `docling` exact-pin 2.86.0.
+- BBoxes: integer `[0,1000]` (`COORD_SCALE`).
+- No filename- or document-specific rules; profile overrides are debug-only.
+- Acceptance requires `GATE_PASS` + `UNIVERSAL_PASS` across the smoke matrix, and
+  `SMOKE_PRODUCTION_PASS` for any V3 extraction-path change.
+- Default-route dependency: the hybrid default needs BOTH servers (GX10 MinerU +
+  M5 Qwen) for FULL-QUALITY code-bearing docs. A Qwen transport outage trips the
+  circuit breaker (no cross-engine MinerU fallback for that code page) and the
+  `extract()` fail-closed ladder then serves the page from tier-2 Docling /
+  tier-3 PyMuPDF, PROVENANCE-STAMPED `extraction_degraded_pages > 0` - the doc is
+  NOT halted, but its laddered code pages are Docling-quality (stripped indentation)
+  and STALE by the Phase 4 re-extraction policy. The mandatory pre-batch smoke
+  asserts `degraded == 0` precisely to catch this silent-ladder case before a
+  corpus run (charter §4.1). Use `USE_MINERU_ENGINE=1` for MinerU-only
+  availability, or `USE_DOCLING_FAST=1` for the offline rollback. See `DECISIONS.md`
+  "MinerU+Qwen-for-code hybrid is the default extraction route" -> Operational
+  envelope, and "Phase 4 - the MinerU+Qwen hybrid is the production default".
+
+## Test command
+
+```
+pytest tests/ -q            # 2026-09-29, fix/quality-remediation-v1 at c367b12:
+                            #  2095 passed / 99 skipped / 0 failed (1767 / 99 at 499a5fa).
+                            #  78 skips are the three V3_DEFERRED modules (docs/V3_DEFERRED_TESTS.md).
+bash scripts/smoke_production.sh   # -> SMOKE_PRODUCTION_PASS (offline)
+```
+
+## History (dated status sections)
+
+Moved here unchanged on 2026-09-29 (plan WP-G3), newest date first, same-date sections in their
+original order. Changed: the headings ("Current state" / "Prior state" dropped, date first), the
+2026-06-18 banner prefix and owner note (pointer below), and dated `STATUS 2026-09-29` markers. Each
+section describes its own date; its "current", "next" and "open" statements are not current. The
+current state is the section at the top of this file.
+
+### 2026-06-18 - code-book coverage expanded; full-corpus retrieval validated
+
+Branch `feat/omnidocbench-phase0`, pushed. Code-book coverage
+expanded (14 code books converted + ingested; production dense ~37k / sparse ~26k pts),
+plus extraction-reliability hardening and a code-fidelity audit (see the deferred note).
+
+**Full-corpus retrieval validated (2026-06-18) - DoD met.** gold-chunk@10 over the
+production hybrid path (omlx dense + bm25 sparse + RRF + ModernBERT rerank): prior 29 docs
+441/514 = 85.8% (a ~1.9pp dilution from corpus growth 29->43, not a defect); 14 new books
+59/70 = 84.3%. Code/distinctive books are strong (Fluent/C++/PyDistilled/Chaubal/Hao/
+ArcGIS/PyCookbook/Devlin/Zephyr/Adedeji all 4-5/5). An initial prose tail (Raieli 1/5,
+Bourne 2/5, Jungjun 3/5) was traced to EVAL ARTIFACT, not retrieval: my sampler picked
+front-matter (title/cover pages) and the LLM generated keyword-bag queries. A clean re-run
+(natural questions, mid-document chunks) put the same three at 8/8, 6/8, 6/8 = 83% @10,
+in line with the corpus. Retrieval meets the requirement corpus-wide. Validation tooling:
+`scripts/_gold_recall_eval.py`, `_newbook_gold_eval.py`, `_clean_prose_eval.py`. Forward
+guard shipped for VLM code-loops: within-page dedup now covers CODE chunks (`64e3c88`); a
+sweep of the existing corpus found 0 degenerate code dupes (data already clean).
+
+> The owner-directed deferral note that stood here (user-directed 2026-06-18) is recorded verbatim in `docs/DECISIONS.md` entry "VLM improvement work deferred until the first production-level release" (moved 2026-09-29, plan WP-G3).
+
+Earlier (2026-06-15) two things closed: the residual-burndown plan, and a measured
+RAG/retrieval investigation that reframed where the real bottleneck is.
+
+### 2026-06-15 - residual burndown DONE; RAG measured; the lever is "feed top-10", not conversion
+
+**Residual burndown (`PLAN_FIDELITY_ORACLE_FIRST_V1` Section 3') COMPLETE.** WS1a
+content-emptiness advisory (`e653fac`), WS1b extraction-ladder verdict signal -
+laddered code hard-FAILs (`8e954c1`), WS2a fullwidth code token-corruption scrub
+(`ef5a377`), WS2b Adedeji thin-strip cull (`254ec07`); WS2c OCR-on-fallback DROPPED
+(already tried, drove the V3 pivot); WS2d prose-into-code CLOSED as a non-issue
+(measured 0.0%); WS3 render tail PROVEN (cap1600 best on the dense academic class,
+`85dfc9b`). All with frozen fixtures, suite green, offline `SMOKE_PRODUCTION_PASS`.
+
+**The reframe + RAG measurement (the bigger finding).** The "done" bar is "the RAG
+works well" - a RETRIEVAL bar, not a transcription bar. Measured end-to-end on 514
+code-inclusive queries over the 29 ingested docs (`output/v3_soak_code/`, fully local
+oMLX + Qdrant; gen+judge on GX10 14B):
+- **Conversion is NOT the bottleneck** (the data said so twice). Doc-level retrieval is
+  strong (R@5-doc 91.6%); the soft spot is chunk-level precision.
+- **The answer-quality lever is FEED THE LLM TOP-10 CHUNKS, not top-5**: +4.9pp answer
+  correctness (56.8 -> 61.7), German-safe, one-line gen-config change.
+- **Three "clever" levers were ruled out by measurement before shipping:** empty image
+  chunks (+0pp), rerank-score-sort (-10pp), and hybrid/BM25 (no gain over plain top-10,
+  and a German regression). The BM25-index persistence fix (`e3467bc`) was still a real
+  bug fix - hybrid was silently broken - but it is not needed for the answer win.
+- **The one remaining retrieval item:** ~6% of queries never retrieve the right document
+  even at top-100 (an embedder / query-expansion problem). This is the next task.
+
+> STATUS 2026-09-29: resolved 2026-06-16 by commit `3278383` (HNSW search ef raised to 512); see
+> `docs/PLAN_DOC_RECALL_FLOOR_V1.md`. (plan WP-G3, AP-10)
+
+**Housekeeping (2026-06-15):** repo sanitation pass - archived done plans + dead
+old-phase scripts to `.archive/`; reconciled stale docs; the findings log is being
+condensed for faster session onboarding. Tests untouched (all 146 sound).
+
+See `[[project_retrieval_findings]]` / `[[project_oracle_first_pivot]]` (memory) for detail.
+
+> STATUS 2026-09-29: both `[[...]]` notes are host-local memory files, not in the repository.
+> (plan WP-G3, AP-56)
+
+### 2026-06-13 - WP-A P2 re-attempt: chunker contiguity is the WRONG LEVER; residual re-scoped
+
+The registered "chunker contiguity" item (PLAN_F1 WP-A) is **BUILT, correct, and
+non-regressing, but it is NOT the lever for Chaubal's 0.85** - the prior
+Phase-1-closure diagnosis ("15/26 of Chaubal's residual fails are one code block
+split across interleaved figure/table chunks") is **FALSIFIED**.
+
+> STATUS 2026-09-29: PLAN_F1 (PLAN_F1_DETERMINISTIC_TEXT_LANE_V1.md, cited here and in the 2026-06-12
+> section) was archived by commit `2f6e769` (2026-06-15) and is not readable by agents.
+> (plan WP-G3, INV-085)
+
+- `_coalesce_code_blocks` shipped in `uir_chunker._chunk_page` (`c6c1f4c`+`9866832`,
+  12 unit tests): when code Elements on a page form one logical block (prev ends
+  open `:`/`\`/unclosed-bracket/unterminated-docstring, or next starts mid-body)
+  across an interleaved figure/table/prose Element, the code segments merge into
+  one chunk and the non-code is emitted after. Per page only; never bridges a page
+  boundary; integer bbox union; heading-carry + table/form untouched. Full suite
+  **1690 passed / 100 skipped / 0 failed**; WS-B negatives green; offline
+  `SMOKE_PRODUCTION_PASS`.
+- **P2 re-attempt FAIL -> STOP (registered rule).** Re-extract + `f1_oracle`:
+  FluentPython 15pg slice QA_PASS indent 1.00 (no-regression), Jungjun 0.669
+  (coalesced 0x, swing is fresh-VLM-extraction variance not a chunker regression -
+  the prior 0.895 stands on its extraction), **Chaubal 0.828 < 0.85 (coalesced 0x)**.
+  Per the rule: no floor weakening, no book swap; code books EXCLUDED from WP-C
+  ingestion.
+
+  > STATUS 2026-09-29: superseded by the 2026-06-18 section above (14 code books converted +
+  > ingested). (plan WP-G3, AP-10)
+
+- **Why 0x.** The 129 same-page CODE-[noncode]-CODE interleavings in Chaubal are
+  **REPL/notebook transcripts** (Jupyter `[17]:` inputs / `[t17]: tensor(...)`
+  outputs around prose), NOT one contiguous block split by a figure - genuinely
+  separate snippets the continuation predicate correctly declines to merge. The
+  residual is further dominated by **engine token corruption** (`=`->`\(\equiv\)`,
+  CJK garbage, fullwidth punctuation).
+- **RE-SCOPED REGISTER ITEM (was "chunker contiguity"):** Chaubal's P2 0.85 needs
+  a **REPL/notebook-transcript-aware code handler + engine token-corruption repair**
+  (de-LaTeX `\(\equiv\)`, CJK/fullwidth scrub) - a NEW item distinct from chunker
+  segmentation. Keep the contiguity fix (net-positive, fires on the genuine
+  contiguous-split class, 0x here, no regression). Owner/scope TBD.
+
+### 2026-06-12 - PLAN_F1 Phase 1 closed (scoped); chunker fragment-merge registered
+
+PLAN_F1 Phase 1 (deterministic text-layer code lane) is **closed, scoped**:
+- **P1 VALIDATED.** On Jungjun (a born-digital x-indented code book) the lane +
+  signal recalibration + code-content repairs take repair-touched judgeable-Python
+  `ast.parse` from 0.000 to **0.90-0.92** (>= the unchanged 0.85 oracle floor).
+  Devlin reclassified OUT as a flat-source defect (no indentation in the PDF at
+  all - a new P0 population, like Earthship/Adedeji).
+- **P2 BLOCKED-BY-CHUNKER.** Chaubal (P2) tops out at ~0.78: its code is clean and
+  correctly indented, but ~58% of the residual `ast.parse` fails are code blocks
+  the CHUNKER split across an interleaved image/table/prose chunk (15 of 26), which
+  no post-hoc adjacent-code merge can heal without breaking document order. The
+  one-iteration general fragment-merge helped Jungjun (0.90->0.92) but was neutral
+  on Chaubal and was reverted (it is a band-aid; the fix belongs in the chunker).
+- **REGISTERED ITEM (pipeline-wide chunker):** the chunker must not split a single
+  code block across a non-code (figure/table) chunk - keep code-block segments
+  contiguous, or merge code fragments that bracket an interleaved non-code chunk.
+  This is a chunker-segmentation fix, not code-hygiene; it gates re-attempting P2's
+  0.85 and applies corpus-wide. Owner/scope TBD.
+
+  > STATUS 2026-09-29: superseded by the 2026-06-13 section above: the contiguity fix was built as
+  > `_coalesce_code_blocks` (`c6c1f4c`), fired 0x on Chaubal and is listed under DEAD ENDS in
+  > `docs/paper/FINDINGS_DIGEST.md`. (plan WP-G3, AP-15)
+
+- Shipped this phase (committed, not pushed): modality-seam fix (`c95950b`),
+  `text_native_code` signal + recalibration + Mechanism B + the `f1_oracle`
+  (`31a0ee0`/`05ac421`), code-content repairs - smart quotes, open-string wraps,
+  fence-strip, nbsp normalize (`f713954`/`51ccef9`). No gate/fixture weakening;
+  Workstream B negatives green throughout; suite 1678.
+
+  > STATUS 2026-09-29: the commits above are on `origin/feat/omnidocbench-phase0` (verified with
+  > `git merge-base --is-ancestor`). (plan WP-G3, AP-12)
+
+### 2026-06-11 PM - Phase 5: spec reconciled + bounded corpus re-ingested
+
+`PLAN_EXTRACTION_FIDELITY_V1` Phase 5 is DONE. WP-1 rewrote the Layer-0 spec to the
+Phase 4 reality (charter §4 retry-first + fail-closed ladder + rollback hatch; QUALITY_GATES
+advisory fidelity gate; F1-F9 dispositioned - `DECISIONS.md` "Phase 5 - spec rewrite
+closure"). WP-2 re-extracted a 12-doc bounded crucible subset (12/12 `mineru_qwen_hybrid`,
+`degraded=0`, 0/724 laddered) and dense-ingested 3338 points into `mmrag_v3__qwen3_local` on
+the LOCAL Mini Qdrant (`127.0.0.1:6333`, omlx 4096-dim). A per-process conda-env routing
+fault to the M5/GX10 (EHOSTUNREACH - VPN `utun` scoped-route) was bridged with a localhost
+relay (`scripts/phase5_relay.py`); the permanent fix is the VPN split-tunnel. The BM25 sparse
+twin `mmrag_v3__bm25_sparse` (1854 pts, `scripts/phase5_ingest_bm25.py`) is also DONE - RRF
+fuses by chunk_id, validated 20/20. Deferred: full-corpus reconciliation (~32 docs). See
+`HANDOVER_PHASE5_REEXTRACT_REPORT.md`.
+
+### 2026-06-11 PM - Phase 4 complete: the hybrid is the formal production default
+
+`PLAN_EXTRACTION_FIDELITY_V1` Phase 4 is DONE (controls + evidence + records; no
+engine code changed - the default route already selected `MineruQwenHybridEngine`
+when `MINERU_ENDPOINT` is set). Evidence + records: DECISIONS.md "Phase 4 - the
+MinerU+Qwen hybrid is the production default", FINDINGS_LOG 2026-06-11 (Phase 4),
+gitignored `HANDOVER_PHASE4_REPORT.md`.
+
+- **Shadow window (WP-A): the flip is JUSTIFIED.** 16-doc crucible, identical
+  15-page slices per doc, both arms via the shipping CLI (`--vision-provider none`).
+  arm A = interim default (`USE_DOCLING_FAST=1`), arm B = the hybrid config. arm B
+  regresses NO doc and is strictly better on 5: QA_WARN+QA_FAIL rate arm A 25%
+  (4/16 QA_FAIL) vs **arm B 0%**. The 4 arm-A failures are real docling content
+  losses (CarOK spreadsheet HEADING 0/37 table-flatten; Firearms + DigitaleFotografie
+  HEADING 0/0, zero text on image/scan pages with `do_ocr=False`; HarryPotter dropped
+  page 12). arm B: 0 ladder-served pages, 0 leak; known class gaps (tables/scans/code)
+  all favour B.
+- **Formalized config:** route `mineru_qwen_hybrid` = GX10 MinerU `:8001`
+  (`MinerU2.5-2509-1.2B`) + M5 Qwen `:8000` (`Qwen3-VL-8B-Instruct-8bit`, code lane)
+  + cap1600 render, default precedence (no force flag). Runtime prerequisite
+  installed: the `[mineru]` extra `mineru-vl-utils` (was missing in the Mini env;
+  its absence silently ladders every non-code page to docling).
+- **Rollback (WP-B, pre-named):** revert to `USE_DOCLING_FAST=1` if, over any 10
+  consecutive production docs, QA_WARN+QA_FAIL > 20pp (arm-B baseline 0%) OR
+  ladder-served > 2% of pages (baseline 0%). The env-var routing stays alive through
+  Phase 5 (pinned by `test_docling_fast_overrides_mineru_default`).
+- **Re-extraction policy (WP-B, written; execution USER-SCHEDULED):** stale = any
+  prior JSONL whose provenance is not (hybrid + GX10 + cap1600); re-extract via
+  `scripts/rebaseline_v3.py`; Qdrant re-ingestion is user-scheduled (production
+  collections on the M1 docker, not this box). Nothing re-extracted/ingested tonight.
+- **Interim default retired** from "production default" to tier-2 of the fail-closed
+  ladder; the option-2 scanned/image-only exclusion DIES with the flip (hybrid OCRs
+  scans on the primary path). The laddered-scan-still-blank residual stays the Phase 3
+  OCR-on-fallback candidate.
+- **Validation (WP-C):** 7 routing tests pass (default + rollback paths);
+  `SMOKE_FULL=1` with the exact flipped env -> `SMOKE_PRODUCTION_PASS`. Two-axis
+  advisory baseline: hybrid Phase 1 fidelity text-ED 0.2212 / TEDS 0.7933.
+- **Phase 5 (Layer-0 spec rewrite) NOT done** - charter/mandate/QUALITY_GATES edits
+  are Phase 5. Phase 3 scope (quality-risk arbitration, specialist re-extraction,
+  content-empty health guard, OCR-on-fallback net) untouched.
+
+### 2026-06-11 - Phase 1 complete: hybrid validated, Phase 2 settled by evidence, Phase 4 greenlit
+
+The Phase 1 two-corpus bake-off ran verdict-ELIGIBLE (158-page OmniDocBench fixed
+set + 6-doc internal corpus, 4 registered candidates, paired bootstrap stats per
+the pre-registered Section 7.2 rule) and was RATIFIED by the user 2026-06-11. See
+DECISIONS.md "Phase 1 outcome RATIFIED" + FINDINGS_LOG 2026-06-11:
+- **Pipeline-vs-hybrid: INCONCLUSIVE by construction** (identical on a code-free
+  benchmark; +0.0001). The default does not move on it.
+- **Pure VLM-primary REFUTED** (hybrid > Qwen3-VL: text-ED +0.0346, TEDS +0.1745,
+  CIs exclude 0). **Pure pipeline-primary REFUTED for code** (R3 0.300 vs 0.947).
+- **The MinerU+Qwen hybrid is non-dominated on every measured class.** Phase 2 is
+  settled by the same evidence: ONE specialist lane (Qwen-for-code), already
+  implemented. **Phase 4 (formalize hybrid as production default, with shadow
+  window + rollback + re-extraction policy) is greenlit and is the next milestone.**
+- Baseline-provenance CORRECTION: the 0.301/0.563 full-755 baseline came from the
+  OCR-enabled legacy offline route, NOT `USE_DOCLING_FAST=1` (do_ocr=False, proven
+  content-empty on image-only input). Interim-default disposition RESOLVED
+  (option 2): keep `USE_DOCLING_FAST=1` with a documented scanned/image-only
+  exclusion, time-boxed to the Phase 4 flip; tier-2-net OCR fix registered for
+  Phase 3.
+- R3 reconciliation: the PRODUCTION schema prompt preserves code indentation on
+  Qwen (0.950); the render-sweep's indentation loss was a PROMPT property.
+
+### 2026-06-10 - rev. 4 prerequisites shipped; interim default + serving home + render cap decided
+
+`PLAN_EXTRACTION_FIDELITY_V1` rev. 4 Phases 0A/0B/0.5 are DONE (two unattended
+runs, 2026-06-10; evidence in FINDINGS_LOG + the gitignored
+`HANDOVER_MORNING_REPORT*.md`). Shipped: MinerU retry-before-fallback
+(`6a352da`+`66d2a08`, 22 tests), Section 5.4 provenance consumers wired to the
+JSONL + QA advisory block (`bcfac2b`), seeded-fault blindness report (`d046583`
+- text-ED is BLIND to code-indentation loss; junk-presence gate signals are
+BLIND to all omission faults), Phase 0A n=44 render sweep + 3-way MinerU
+serving probe, and the `VLM_RENDER_MAX_PX` longest-side render cap (default
+1600, env rollback).
+
+**Decisions ratified 2026-06-10 (see DECISIONS.md "Phase 0B interim default +
+MinerU serving home + cap1600 render"):** (1) INTERIM production default = the
+offline floor (`USE_DOCLING_FAST=1`) with an initial production-level
+acceptance definition; (2) MinerU serving home = GX10 vLLM
+(`http://10.0.10.239:8001`, served id `MinerU2.5-2509-1.2B`) - mlx MinerU
+serving deprecated (deterministic `broadcast_shapes` on magazine/form pages,
+concurrency collapse); (3) cap1600 INTERIM render for the VLM lane (dpi200 was
+measured fidelity-HARMFUL: repetition loops on dense pages, text-ED 0.411 vs
+0.081). **Phase 0 is effectively complete by substitution** - all bake-off
+candidate engines now have a healthy serving path, so Phase 1 is
+verdict-ELIGIBLE pending its entry gates (Section 7.2 health logging + the
+150-200 page set; the fixed 44-page subset is the down payment).
+
+**Test state:** `pytest tests/` = 1624 passed / 99 skipped / **0 failures**
+(fully green; the long-standing `test_v3_vlm_code_form` contract conflict was
+user-adjudicated to the F4 fenced contract, `4f20801`).
+`SMOKE_PRODUCTION_PASS` (offline) on the branch tip.
+
+### 2026-06-09 - OmniDocBench fidelity benchmark + fail-closed extraction
+
+Branch `feat/omnidocbench-phase0` (NOT pushed). Two workstreams shipped on top of
+the 2026-06-08 crucible baseline:
+
+> STATUS 2026-09-29: pushed since; `origin/feat/omnidocbench-phase0` = `499a5fa`, not merged to
+> `origin/main`. (plan WP-G3, AP-12)
+
+**Fail-closed extraction ladder (`fcd4207`, `e73fbd8`, + working-tree hardening).**
+`mmrag_v3.processor.extract()` no longer depends on a remote GPU server staying
+healthy. It degrades through three tiers, each serving only the pages the tier
+above could not:
+- tier 1 - selected engine (MineruQwenHybridEngine default when `MINERU_ENDPOINT`
+  is set, else legacy HybridEngine; forced via `USE_*` env flags),
+- tier 2 - offline `DoclingFastEngine` (no network),
+- tier 3 - PyMuPDF native-text terminal tier (no model/network).
+
+The served lane + outcome are stamped on `doc.metadata.extra`
+(`extraction_engine` / `extraction_fallback` / `extraction_degraded_pages` /
+`extraction_recovered_pages` / `extraction_fallback_reason`) and logged.
+Guarantee scope (honest): no page that HAS an extractable text layer is zeroed by
+an engine/server/network failure; a cheap text-layer probe means genuinely blank
+pages pay zero fallback cost; the terminal tier never fabricates text. Out of
+scope: a scanned page where OCR also fails. Working-tree hardening (this session)
+broadened degeneracy detection to zero-element pages, backstopped the whole-doc
+failure path with the terminal tier, and added the blank-page cost gate (3 tests).
+
+**OmniDocBench Phase 0+1 (`746ea31`..`e970e54`).** Ground-truth fidelity benchmark
+(adapters + stratified baseline). Full 755-page English baseline: text
+edit-distance 0.301 / TEDS 0.563. Phase 1 extractor bake-off harness shipped but
+**INCONCLUSIVE** - the M5 mlx MinerU2.5 server threw intermittent
+`broadcast_shapes` 500s (serving faults, not a fidelity verdict); paddle/granite
+adapters deferred. See `docs/PLAN_OMNIDOCBENCH_EVAL.md`.
+
+**Test state (honest):** `pytest tests/` = 1616 passed / 99 skipped on the
+committed branch tip, plus **1 KNOWN failure** -
+`tests/test_v3_vlm_code_form.py::test_code_smuggles_as_text_promotes_to_code_modality`.
+Diagnosed (2026-06-10): it is a CONTRACT CONFLICT, not an implementation bug. Its
+`assert ic.content == code` (verbatim, UNFENCED) was superseded by the deliberate
+F4 fencing contract (`eeffcff` "code MUST be fenced"), now pinned by the passing
+`tests/test_code_fencing_f4.py` + the `code_fence_consistency` guard. No
+implementation can satisfy both contracts; which one wins needs USER adjudication
+(proposed requirement change in `HANDOVER_MORNING_REPORT.md`). Left failing per
+the don't-weaken-a-test rule. `ruff` clean; `SMOKE_PRODUCTION_PASS` (offline).
+(RESOLVED 2026-06-10: user adjudicated to the F4 fenced contract, `4f20801` -
+see Current state above.)
+
+> STATUS 2026-09-29: measured 2026-09-29: `ruff check src tests` = 408 errors and
+> `black --check src tests` = 174 files to reformat at `499a5fa` (410 / 174 on this branch at
+> `c367b12`), so "`ruff` clean" above does not hold for `src tests`. (plan WP-G3, INV-009)
+
+### 2026-06-08 - full 16-doc crucible CLEAN; clusters A/C/B/D fixed; multimodal image policy shipped
 
 The full-crucible Grand Soak (16 docs) that closed the MinerU+Qwen cycle surfaced
 5 gate failures in 4 root-cause clusters. All four are fixed, corpus-validated,
@@ -10,6 +421,9 @@ and committed on branch `fix/crucible-clusters-acd-b` (7 commits, NOT yet pushed
 each gated `SMOKE_PRODUCTION_PASS`). Final result: the full 16-doc crucible is
 **16/16 clean QA_PASS** post-enrichment, `leak=0`, 0 hard fallbacks. Each fix was
 a SYSTEMIC bug, not a one-doc patch:
+
+> STATUS 2026-09-29: pushed since; `origin/fix/crucible-clusters-acd-b` is an ancestor of
+> `origin/feat/omnidocbench-phase0`. (plan WP-G3, AP-12)
 
 - **A - asset-render fail-open** (`7b1871b`): a MuPDF PNG crash during cosmetic
   crop materialization discarded the whole batch's extracted text (Kimothi
@@ -54,14 +468,25 @@ chunks/headings, text-as-image survivors, CJK garbage headings, cover garble).
   hard protocol (now in AGENTS.md), crucible-calibrated regression fixtures.
 - `docs/PLAN_OMNIDOCBENCH_EVAL.md` - ground-truth fidelity benchmark (the gate
   plan measures retrieval value on OUR docs; this measures transcription fidelity
-  vs labeled ground truth - 1651 annotated pages, TEDS/edit-distance). Wired as a
-  two-axis acceptance with a Phase-0 fidelity floor.
+  vs labeled ground truth - 1651 annotated pages, TEDS/edit-distance). PROPOSED as
+  a two-axis acceptance; the fidelity axis is ADVISORY (offline selection/regression
+  gate, benchmark-gated per `AGENT-GATE-PROGRESSION`), NOT a wired per-conversion
+  floor (F5). The recorded hybrid regression baseline is the 158-page fixed set
+  text-ED 0.2212 / TEDS 0.7933 (Phase 1); the full-755 0.301/0.563 is a corpus
+  reference, never a subset comparator.
+
+> STATUS 2026-09-29: both plans were executed since: `docs/PLAN_GATE_QUALITY_V1.md` (F1-F4, F6, F7
+> shipped; F5 deferred-and-accepted) and `docs/PLAN_OMNIDOCBENCH_EVAL.md` (Phase 0 and Phase 1
+> done, Phase 1 ratified 2026-06-11). (plan WP-G3, AP-30)
 
 **Harnesses:** `scripts/mineru_crucible_soak.sh` (leak-metric corrected to a
 whitelist) and `scripts/crucible_vlm_pipeline.sh` (soak -> M5 enrichment ->
 revalidate). Deferred review follow-ups #8/#9/#10 tracked in `[[project_open_issues]]`.
 
-## Prior state (2026-06-06) - MinerU+Qwen-for-code hybrid is the default route, corpus-validated
+> STATUS 2026-09-29: `[[project_open_issues]]` is a host-local memory note, not in the repository.
+> (plan WP-G3, AP-56)
+
+### 2026-06-06 - MinerU+Qwen-for-code hybrid is the default route, corpus-validated
 
 The 2026-06-04 VLM-evaluation pivot CONCLUDED: **MinerU2.5 is the chosen
 extractor** and is now integrated into the V3 pipeline as a selectable, and
@@ -127,12 +552,26 @@ fences it, R3) (`PLAN_VLM_EVAL` §16).
   sub-threshold page, which still goes to MinerU-1.2B and can be mangled; the R3
   gate (incl. the single-line-collapse fix) flags it. A per-region code lane for
   the inline case is unbuilt ([[project_open_issues]]).
+
+  > STATUS 2026-09-29: route-scoped: `page_has_code_block` is called only in
+  > `MineruQwenHybridEngine.extract` (`src/mmrag_v3/engines/router.py`); on the operative legacy
+  > `HybridEngine` route (`MINERU_ENDPOINT` unset) it does not run. `[[project_open_issues]]` is a
+  > host-local memory note, not in the repository. (plan WP-G3, AP-04, AP-56)
+
 - The recovery_scan/gap_fill chunks (batch_processor's engine-independent net)
   carry no bbox - pre-existing, out of MinerU scope.
+
+  > STATUS 2026-09-29: half correct: `recovery_scan` chunks carry no bbox (FLOW_OFFSET locator),
+  > but `recovery_gap_fill` chunks carry a normalized bbox (BBOX locator) in
+  > `src/mmrag_v2/batch_processor.py`. (plan WP-G3, INV-042)
+
 - AIOS HEADING 79.7% (just under 0.80) - a genuine borderline coverage signal,
   left as-is (not over-firing; the doc has real headings).
 
-## PIVOT (2026-06-04): evaluate the extraction VLM before more scaffolding
+  > STATUS 2026-09-29: resolved 2026-06-08 by the F6 cross-page dedup (`b9d15aa`): AIOS HEADING
+  > 79.7% -> 100% per `docs/PLAN_GATE_QUALITY_V1.md`. (plan WP-G3, AP-13)
+
+### 2026-06-04 - PIVOT: evaluate the extraction VLM before more scaffolding
 
 Decision: PAUSE main extraction-code work and run a thorough evaluation of
 candidate document-extraction VLMs. Rationale: the §9.2 full crucible showed this
@@ -147,9 +586,7 @@ flagged on 2026-06-04 (render guard, empty-table degrade, table-prompt tuning,
 crop-audit heuristic) are deferred behind the model decision - several are
 model-specific.
 
-
-
-## Current state (2026-06-04) - bounded crucible subset MEETS §9.1 acceptance
+### 2026-06-04 - bounded crucible subset MEETS §9.1 acceptance
 
 The bounded crucible subset - one doc per class that failed the 2026-06-02 soak
 (CombatAircraft dense-magazine interior, CarOK spreadsheet/tables, Form_0013
@@ -177,7 +614,7 @@ repetition pathology surfaced only by running the hardest pages (charter §2.3):
 Earlier in the cycle: the `VLM_NATIVE_TIMEOUT` 180->600s fix and the
 json_schema-off self-hosted default (see the 2026-06-03 entry below).
 
-## §9.2 full crucible (2026-06-04) - this cycle's fixes HELD; a new layer surfaced
+### 2026-06-04 - §9.2 full crucible: this cycle's fixes HELD; a new layer surfaced
 
 Ran a 16-doc crucible across all 8 categories (big docs sliced to ~25 interior
 pages, small full; 285 pages, 224 VLM-routed; 3.9h on M5, resilient breaker).
@@ -210,9 +647,7 @@ crucible. The Grand Soak (all 43 docs / 12,215 pages) remains multi-day and
 un-run. Live artifacts: output/crucible_full_run/ + output/crucible_full_src/
 (gitignored).
 
-## Prior state (2026-06-03 PM - blocker remediation shipped)
-
-## Current state (2026-06-03 PM) - Charter §9.1 remediation SHIPPED
+### 2026-06-03 PM - Charter §9.1 remediation SHIPPED
 
 The two Grand-Soak blockers (Charter §8/§9.1) are remediated on branch
 `v3.1-extraction-hardening` (pushed to origin), seven atomic commits, each gated
@@ -255,14 +690,14 @@ ruff/black on changed files, and `scripts/smoke_production.sh`
   subset (`batch_size=1` for dense docs, structured output off) to confirm the
   acceptance criteria at corpus scale before any Grand Soak.
 
-## Prior state (2026-06-03 AM)
+### 2026-06-03 AM
 
 Layer-1 current-state doc. For the as-built architecture + roadmap read
 `docs/ARCHITECTURE_V3.1_CHARTER.md`; for decision history `docs/DECISIONS.md`;
 for the engineering log `docs/paper/FINDINGS_LOG.md`. The only definition of done
 lives in `docs/V3_EXECUTION_MANDATE.md`.
 
-## Current state (2026-06-03)
+### 2026-06-03
 
 - **V3.1 extraction hardening is COMMITTED** on branch `v3.1-extraction-hardening`
   (pushed to origin). Commits, in order: `c6c2105` (schema-compliant VLM
@@ -294,7 +729,7 @@ lives in `docs/V3_EXECUTION_MANDATE.md`.
   `finish_reason=length`, consider guided JSON decoding or per-region
   extraction); (2) bbox fidelity to cut the 40-50% crop drift. See charter §8.
 
-## What shipped this cycle (V3.1 extraction hardening)
+### What shipped this cycle (V3.1 extraction hardening)
 
 The previous crucible soak produced 0/18 valid baselines - a `from_uir` schema
 breach, not the M5 outage it was first blamed on. The fixes (all boundary
@@ -319,7 +754,7 @@ contracts now fail open; see charter §2.1):
    monospace-char-ratio signal (>= 0.10) so code-as-text pages route to the VLM
    instead of being stripped by Docling.
 
-## V3 foundation (complete)
+### V3 foundation (complete)
 
 - **Phase A native-UIR refactor COMPLETE** (`813b9ba`): `batch_processor.py` is
   engine-agnostic on input and emission boundaries (extraction via
@@ -334,58 +769,6 @@ contracts now fail open; see charter §2.1):
   `_merge_mid_sentence_chunks`), P4 (geometric boundary-repair bridge deprecated
   for VLM-native), P5 (`smoke_production.sh` anti-rot gate) shipped. Detail in
   `docs/DECISIONS.md` and `docs/paper/FINDINGS_LOG.md`.
-
-## Active model / endpoint state
-
-- **VLM extraction:** code default is OpenRouter `qwen/qwen3-vl-8b-instruct`; this
-  cycle ran the local **M5** (`macbook-pro-m5.lan:8000`, mlx
-  `Qwen3-VL-8B-Instruct-8bit`) for bandwidth (charter §5). Override via
-  `VLM_NATIVE_ENDPOINT` / `VLM_NATIVE_MODEL` / `VLM_NATIVE_API_KEY`.
-- **Judge / soak scoring:** GX10 (GB10) `RedHatAI/Qwen2.5-14B-Instruct-FP8-dynamic`
-  at `http://10.0.10.239:8000`.
-- **Embedder + reranker:** omlx-server `http://10.0.10.246:8000`
-  (`Qwen3-Embedding-8B-mxfp8` 4096-dim + `gte-reranker-modernbert-base-mlx`).
-- **Vector store:** Qdrant.
-
-## Retrieval stack
-
-dense (omlx Qwen3-Embedding-8B) + sparse (BM25) -> RRF fusion -> ModernBERT
-rerank -> top-5. A ColPali visual late-interaction reranker is **PROPOSED, not
-built** (charter §6.2): adopt only if the text stack is measured insufficient on
-visual-dense queries.
-
-## Engine override env vars
-
-| Env var | Effect |
-|---|---|
-| (none) | `MineruQwenHybridEngine` when `MINERU_ENDPOINT` set (Qwen for code-dense pages, MinerU elsewhere); else legacy `HybridEngine` |
-| `USE_MINERU_QWEN_HYBRID=1` | force the MinerU+Qwen-for-code hybrid |
-| `USE_MINERU_ENGINE=1` | all pages through `MineruNativeEngine` (pure MinerU escape hatch) |
-| `USE_VLM_ENGINE=1` | all pages through `VlmNativeEngine` |
-| `USE_HYBRID_ENGINE=1` | force the legacy cost-optimizer `HybridEngine` |
-| `USE_DOCLING_FAST=1` | all pages through `DoclingFastEngine` (offline, deterministic) |
-| `VLM_DRAWINGS_THRESHOLD=N` | router treats `> N` drawings as visual (default 10) |
-
-## Must-respect constraints
-
-- Python 3.10 only; batch size <= 10 pages; `docling` exact-pin 2.86.0.
-- BBoxes: integer `[0,1000]` (`COORD_SCALE`).
-- No filename- or document-specific rules; profile overrides are debug-only.
-- Acceptance requires `GATE_PASS` + `UNIVERSAL_PASS` across the smoke matrix, and
-  `SMOKE_PRODUCTION_PASS` for any V3 extraction-path change.
-- Default-route dependency: the hybrid default needs BOTH servers (GX10 MinerU +
-  M5 Qwen) for any code-bearing doc; a Qwen transport outage trips the circuit
-  breaker and HALTS the doc (correctness over availability, no MinerU fallback).
-  Use `USE_MINERU_ENGINE=1` for MinerU-only availability. See `DECISIONS.md`
-  "MinerU+Qwen-for-code hybrid is the default extraction route" -> Operational
-  envelope.
-
-## Test command
-
-```
-pytest tests/ -q            # 1355 passed / 99 skipped / 0 failed
-bash scripts/smoke_production.sh   # -> SMOKE_PRODUCTION_PASS (offline)
-```
 
 ## Archived history
 

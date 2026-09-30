@@ -11,6 +11,9 @@ as a pytest assertion is worth more than a written rule, because it runs itself.
 We assert against ``git ls-files`` (the *committed* tree), NOT the working
 filesystem — that distinction is the whole point: a developer's dirty working
 tree hides untracked-file bugs that only surface in a fresh clone.
+Exception (verified 2026-09-29): G5 resolves referenced paths with
+``Path.exists()`` on the working tree and G7 reads the digest from disk, so an
+untracked referent satisfies G5 locally and fails only in a clean clone.
 
 Invariants and the failure each prevents:
 
@@ -26,19 +29,36 @@ Invariants and the failure each prevents:
                              test file exists, is tracked, and is not skipped →
                              a doc can't claim a guard that was deleted/skipped
                              (#4 invalidated-contract, part of #7 hollow-green).
-  G5  no dangling paths    — repo-path references in committed governance docs
-                             point at things that exist on disk → no references
-                             to moved/deleted paths (#6).
+  G5  no dangling paths    -- backticked repo paths (src/, tests/, scripts/,
+                             top-level docs/*.md) in the current-state governance
+                             docs (CANONICAL_GOVERNANCE_DOCS minus the V3.0 draft
+                             and DECISIONS.md) exist in the WORKING tree
+                             (``Path.exists()``, not ``git ls-files``) -> no
+                             references to moved/deleted paths (#6). A line that
+                             carries any forward-ref marker (see Conventions) is
+                             skipped entirely.
   G6  skips are registered — every unconditional ``V3_DEFERRED`` test skip is
                              listed in ``docs/V3_DEFERRED_TESTS.md`` → behavioral
                              coverage can't silently rot off the books (#5 stale
                              status + #7 hollow-green via skipped tests).
+  G7  anti-circle structure — `docs/paper/FINDINGS_DIGEST.md` keeps its three
+                             load-bearing sections (line-anchored ``## SETTLED`` /
+                             ``## DEAD ENDS`` / ``## OPEN``) and the substrings
+                             ``FINDINGS_LOG.md``, ``docs/PROJECT_STATUS.md`` and
+                             ``docs/DECISIONS.md``. STRUCTURE ONLY: it cannot detect
+                             a stale or wrong item (item content is
+                             human-maintained). Prevents the digest being silently
+                             rewritten into prose that loses its anti-circle
+                             function (the "forgetting past mistakes" failure).
 
 Conventions authors must follow to satisfy the guards
 ------------------------------------------------------
 - **Forward references** (a path that doesn't exist yet, e.g. a planned script)
   must be annotated *on the same line* with one of: ``NOT YET BUILT``, ``not yet``,
   ``(planned)``, ``to be built``. G5 then treats it as intentional, not dangling.
+  The match is case-insensitive, also accepts ``planned`` followed by an em-dash
+  (U+2014), and exempts the WHOLE line: no other path on it is checked, and the
+  bare ``not yet`` also matches ordinary prose.
 - **Superseding** a Layer-0 statement: place a literal ``SUPERSEDED <date/why> by``
   marker followed by the winning doc's path in backticks *at the conflicting
   content itself* (not only as a global "X supersedes Y" rule elsewhere). G3
@@ -78,6 +98,14 @@ SRC = REPO_ROOT / "src"
 
 # Canonical Read-First docs (CLAUDE.md §"Read First") + the agent contracts.
 # These ARE the governance surface; a fresh clone with these missing is ungoverned.
+#
+# `docs/paper/FINDINGS_DIGEST.md` is included since 2026-06-18 (AGENT-PRECEDENT-01):
+# it is the cold-start "SETTLED / DEAD ENDS / OPEN" index that prevents agents
+# from re-litigating settled decisions and re-proposing measured-and-rejected
+# approaches. It is NOT a Layer-0 contract that wins conflicts (the MANDATE
+# remains the conflict-resolution authority); it is the required-present
+# anti-circle onboarding doc. G5 path-resolves it like the other current-state
+# docs (it carries no forward references).
 CANONICAL_GOVERNANCE_DOCS = (
     "CLAUDE.md",
     "AGENTS.md",
@@ -88,6 +116,7 @@ CANONICAL_GOVERNANCE_DOCS = (
     "docs/QUALITY_GATES.md",
     "docs/TESTING.md",
     "docs/V3_DEFERRED_TESTS.md",
+    "docs/paper/FINDINGS_DIGEST.md",
 )
 
 
@@ -416,4 +445,64 @@ def test_g6_v3_deferred_skips_are_registered() -> None:
         "Unconditionally-skipped V3_DEFERRED tests are missing from "
         "docs/V3_DEFERRED_TESTS.md — add a line per test so the deferred "
         "coverage stays auditable:\n  - " + "\n  - ".join(unregistered)
+    )
+
+
+# ── G7: anti-circle structure of FINDINGS_DIGEST is intact ───────────────────
+
+
+# The three load-bearing section headers that make the digest stop re-litigation.
+# Each must be present as a real header. A future "condensing edit" that folds
+# them into prose would silently neuter the anti-circle function — this guard
+# makes that edit fail loudly instead.
+_G7_REQUIRED_DIGEST_HEADERS = (
+    "## SETTLED",      # load-bearing, do NOT re-litigate
+    "## DEAD ENDS",    # measured and rejected, do NOT re-propose
+    "## OPEN",         # the actual remaining work
+)
+# Cross-references that keep the digest honest: the digest is an index, not a
+# second source of truth, so it must point back at the canonical log + status.
+_G7_REQUIRED_DIGEST_REFS = (
+    "FINDINGS_LOG.md",        # the detailed archive behind the digest
+    "docs/PROJECT_STATUS.md",  # current task state
+    "docs/DECISIONS.md",       # locked decisions
+)
+
+
+def test_g7_findings_digest_anti_circle_structure_intact() -> None:
+    """`docs/paper/FINDINGS_DIGEST.md` keeps the structure that stops re-litigation.
+
+    Prevents the "agent forgets past mistakes" failure (2026-06-18): the digest
+    is the cold-start doc an agent is told to read first, and its anti-circle
+    function lives in its three explicit sections (SETTLED / DEAD ENDS / OPEN).
+    If those headers disappear — e.g. a "condensing edit" rewrites the file into
+    narrative prose — the doc stops preventing circles while still being cited
+    as if it did. This guard makes that drift fail loudly instead of silently.
+    It is deliberately structural (headers + the back-references that keep the
+    digest an *index*, not a second source of truth); the *content* of each
+    settled/dead-end item is human-maintained per AGENT-PRECEDENT-01.
+    """
+    digest = REPO_ROOT / "docs" / "paper" / "FINDINGS_DIGEST.md"
+    if not digest.is_file():
+        pytest.skip("FINDINGS_DIGEST.md not present (G2 covers its tracking)")
+    lines = digest.read_text(encoding="utf-8").splitlines()
+    # A section header is a real line starting with `## SETTLED` / `## DEAD ENDS` /
+    # `## OPEN`. A bare substring check would be defeated by the same tokens appearing
+    # as inline backtick references elsewhere in the doc (e.g. the maintenance footer
+    # names them as `## SETTLED`), so we anchor at line start. This is the F13 lesson:
+    # the guard must demonstrably fail on drift, not just pass on presence.
+    missing_headers = [
+        h for h in _G7_REQUIRED_DIGEST_HEADERS
+        if not any(line.startswith(h) for line in lines)
+    ]
+    text = "\n".join(lines)
+    missing_refs = [r for r in _G7_REQUIRED_DIGEST_REFS if r not in text]
+    violations = [f"missing load-bearing section header {h!r}" for h in missing_headers]
+    violations += [f"missing required cross-reference {r!r}" for r in missing_refs]
+    assert not violations, (
+        "docs/paper/FINDINGS_DIGEST.md lost the structure that makes it the "
+        "anti-circle onboarding doc (AGENT-PRECEDENT-01). Restore the three "
+        "sections (SETTLED / DEAD ENDS / OPEN) and the back-references to "
+        "FINDINGS_LOG.md / PROJECT_STATUS.md / DECISIONS.md:\n  - "
+        + "\n  - ".join(violations)
     )

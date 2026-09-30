@@ -138,7 +138,11 @@ def embed_text_dashscope(text: str, model: str, api_key: str,
 
 # ── omlx local embedding (v2.13 Phase 1) ───────────────────────────────────
 
-_OMLX_DEFAULT_URL = "http://10.0.10.246:8000/v1/embeddings"
+# Resolved from the central endpoint registry (mmrag_v2.endpoints),
+# env-overridable; default is the Mini-hosted oMLX embeddings server.
+from mmrag_v2.endpoints import endpoint as _endpoint  # noqa: E402
+
+_OMLX_DEFAULT_URL = _endpoint("embed").embeddings_url
 
 
 def embed_text_omlx(text: str, model: str, api_key: str,
@@ -388,6 +392,25 @@ def resolve_search_priority(
     return priority
 
 
+def image_embedding_text(chunk: dict, metadata: dict, content: str) -> str:
+    """Text embedded for an IMAGE chunk (PLAN_QUALITY_REMEDIATION WP-D7).
+
+    ``metadata.visual_description`` is a mirror capped at 400 characters ("..." marks the cut,
+    ``_fit_visual_description``); the full description stays authoritative in ``content``. Embedding
+    the mirror threw away the tail of every long description (IRJET flowchart: 702 characters embedded
+    as a 400-character prefix ending "Recalculate o..."), contrary to the schema docstring's claim that
+    the truncation "loses nothing retrievable". When the mirror is such a cut of ``content`` embed
+    ``content``; every other case keeps the previous order (mirror, then content).
+    """
+    mirror = metadata.get("visual_description") or chunk.get("visual_description", "") or ""
+    full = content or ""
+    if mirror.endswith("..."):
+        stem = mirror[:-3].rstrip()
+        if stem and full.startswith(stem) and len(full) > len(stem):
+            return full
+    return mirror or full
+
+
 def build_qdrant_payload(
     chunk: dict,
     *,
@@ -578,9 +601,7 @@ def main():
                 # dashscope embeds the VLM description text only.
                 asset_ref = chunk.get("asset_ref", {})
                 asset_path = assets_dir / Path(asset_ref.get("file_path", "")).name if asset_ref else None
-                description = (metadata.get("visual_description")
-                             or chunk.get("visual_description", "")
-                             or content)
+                description = image_embedding_text(chunk, metadata, content)
                 vector = _embed_image(asset_path, description)
             else:
                 # Text and table chunks: use contextualized text for embedding.

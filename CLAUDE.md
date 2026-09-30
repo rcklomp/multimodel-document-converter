@@ -2,11 +2,11 @@
 
 This file provides guidance to Claude Code when working with this repository.
 
-## Read First (live working set — top-level `docs/` only)
+## Read First (live working set: top-level `docs/`, the repo-root contracts, `docs/paper/FINDINGS_DIGEST.md` and `tests/test_repo_integrity.py`)
 
 1. `docs/PROJECT_STATUS.md` — current task state.
 2. `AGENTS.md` — agent-protocol contract.
-3. `docs/ARCHITECTURE_V3_DRAFT_0.5.md` — **V3.0 target architecture (canonical)**.
+3. `docs/ARCHITECTURE_V3_DRAFT_0.5.md` — **V3.0 target architecture (canonical *aspirational target*, NOT a description of what ships; the as-built reality is the V3.1 charter at 3a — read the charter for current behavior)** (F9).
 3a. `docs/ARCHITECTURE_V3.1_CHARTER.md` — **V3.1 as-built + roadmap** (current reality, status-tagged SHIPPED/PARTIAL/PROPOSED; read alongside the 0.5 target).
 4. `docs/README.md` — docs index + three-layer model overview.
 5. `docs/V3_EXECUTION_MANDATE.md` — conflict-resolution authority for V3 work (governance set is the Layer-0 list in `docs/README.md`; the mandate wins where it conflicts).
@@ -14,7 +14,9 @@ This file provides guidance to Claude Code when working with this repository.
 7. `docs/TESTING.md` — test conventions.
 8. `docs/QUALITY_GATES.md` — gate definitions.
 9. `docs/ARCHITECTURE.md` — v2.X pipeline architecture (production baseline being evolved).
-10. **Committed-Truth convention** — repo-integrity guards in `tests/test_repo_integrity.py` (its docstring documents G1–G6 + author conventions); the contract is AGENTS.md `AGENT-INTEGRITY-01` (assert outcomes, not proxies).
+10. **Committed-Truth convention** — repo-integrity guards in `tests/test_repo_integrity.py` (its docstring documents G1–G7 + author conventions); the contract is AGENTS.md `AGENT-INTEGRITY-01` (assert outcomes, not proxies).
+11. `docs/paper/FINDINGS_DIGEST.md` — **anti-circle cold-start index** (`## SETTLED` / `## DEAD ENDS` / `## OPEN`). Read it before proposing any fix, component, or plan (per `AGENT-PRECEDENT-01`); its structure is G7-enforced so a "condensing edit" cannot silently neuter it.
+12. `docs/DECISIONS.md` opens with a **"Settled Precedents"** index pointing at the load-bearing anti-circle entries — the map into the long append-only log.
 
 All v2.14–v2.16 history, telemetry, calibration reports, and legacy
 quality snapshots are quarantined in `docs/.archive/` and blocked by
@@ -25,13 +27,53 @@ Use the three-layer docs model:
 - Layer 1 current state: PROJECT_STATUS.md, ARCHITECTURE_V3_DRAFT_0.5.md.
 - Layer 2 execution: active plan docs; legacy v2.X history quarantined in `docs/.archive/`.
 
+## Reliability Protocol (operating rule — applies every session, before anything else)
+
+I (Claude) can produce confident, fluent output that is wrong, and my confidence is NOT
+correlated with whether I'm right. These rules exist so errors get **caught or labeled**
+instead of shipped silently with false confidence. They are **self-applied** — the user is
+NOT the verifier; that defeats the point of the tool. (Origin: 2026-06-16/17 session where I
+blamed fonts/source for a fixable extraction failure, reinvented the existing `ProfileClassifier`,
+and asserted "the log always started at 2026-05-29" from a single git commit — all confidently
+wrong. See memory `feedback_reliability_failure_mode`.)
+
+> STATUS 2026-09-29: `feedback_reliability_failure_mode` does not resolve: no tracked file matches it and this host's auto-memory directory has no such entry; the "memory" that rule 3 below says to grep is likewise host-local and absent from a clean clone (register G0-43).
+
+1. **Receipts, or it's a guess.** State a factual claim only with the check that backs it (a
+   command, `file:line`, test output). If I can't attach evidence, label it explicitly as an
+   *unverified guess* — never present a guess in the voice of a fact.
+2. **Test before concluding.** Any "X is the cause / it's done / it's safe / it CAN'T be done /
+   the source is bad" triggers verification FIRST. Test, don't bet — the default, not something
+   the user must invoke. Falsify a "can't be done" by trying the obvious fix before asserting it.
+3. **Check what exists before building or blaming.** Before reinventing a component or blaming an
+   input, grep the codebase + CLAUDE.md + memory for the existing answer (the `ProfileClassifier`
+   and the R3 router diagnosis were already written). A proxy (font, directory name, filename)
+   used to decide something is a RED FLAG that I've lost the real signal — stop and find it.
+   This is the named contract `AGENT-PRECEDENT-01` in `AGENTS.md`: before proposing a substantive
+   fix/build/plan, read `docs/paper/FINDINGS_DIGEST.md` (`## SETTLED` / `## DEAD ENDS`) and cite
+   the prior `DECISIONS.md` heading / `FINDINGS_LOG` date / `file:line` that established the
+   current state, OR state explicitly that this is new ground. Re-proposing a measured-and-rejected
+   dead-end without new evidence (a different corpus / model / a measured reversal) is a defect.
+
+   > STATUS 2026-09-29: `AGENTS.md` does not define `AGENT-PRECEDENT-01`: its numbered invariants end at item 12 (AGENT-GATE-PROGRESSION) and the id appears there only as a usage in Sec. 5 (plan decision D-23).
+
+4. **Independent adversarial check for high-stakes work.** For a significant conclusion or
+   non-trivial change, dispatch a separate subagent whose only job is to try to BREAK the claim
+   before presenting it. AI checks AI; the user does not.
+5. **Mechanical ground truth wins.** git, tests, gates, running code override my narrative. When
+   they contradict my belief, I am wrong.
+
+Honest limit: this does not guarantee zero errors. It makes errors surface (caught by the check,
+or labeled uncertain) instead of shipping with confidence. The verification burden is on me + the
+mechanical checks, never on the user.
+
 ## Engineering Principles
 
 - **Think before coding.** State assumptions explicitly. If multiple interpretations exist, present them — don't pick silently. If something is unclear, stop and ask.
 - **Simplicity first.** Minimum code that solves the problem. No speculative features, abstractions for single-use code, or error handling for impossible scenarios. If 200 lines could be 50, rewrite it.
 - **Surgical changes.** Touch only what you must. Don't "improve" adjacent code, comments, or formatting. Match existing style. Remove only imports/variables/functions that YOUR changes made unused. Every changed line should trace directly to the request.
-- **Libraries first, custom code last.** Before writing filters, heuristics, or workarounds, check whether the library (Docling, ebooklib, etc.) already has a configuration option that solves the problem. The v2.4 script is a valid reference for what Docling can do natively.
-- **Keep configurations in sync.** *Legacy v2 Docling path:* shared `PdfConversionPlan` + `DoclingPdfAdapter` is the single source of Docling option/converter construction (`src/mmrag_v2/engines/pdf_plan.py`, `engines/docling_adapter.py`). Its static guard tests (`tests/test_pdf_conversion_plan.py`) are currently **deferred** (`@pytest.mark.skip`, `V3_DEFERRED`; see `docs/PROJECT_STATUS.md`) because the V3 path no longer constructs Docling there. *V3 path (current default for `BatchProcessor.process_pdf`):* `batch_processor.py` is engine-agnostic and constructs **no** Docling — extraction is delegated to `mmrag_v3.extract()`, where Docling is confined to `src/mmrag_v3/engines/docling_fast.py` (the sole V3 Docling boundary, AST-guarded by `tests/test_v3_security.py`). Do not add Docling construction to `batch_processor.py`.
+- **Libraries first, custom code last.** Before writing filters, heuristics, or workarounds, check whether the library (Docling, ebooklib, etc.) already has a configuration option that solves the problem. The v2.4 script is a valid reference for what Docling can do natively (verified 2026-09-29: no tracked file name outside `docs/.archive/` contains v2.4 / v2_4 except the requirements extract `docs/paper/archive_extracts/SRS_Multimodal_Ingestion_V2.4.md`, a requirements document, not a script).
+- **Keep configurations in sync.** *Legacy v2 Docling path:* shared `PdfConversionPlan` + `DoclingPdfAdapter` is the single source of Docling option/converter construction (`src/mmrag_v2/engines/pdf_plan.py`, `engines/docling_adapter.py`). Its static guard tests (`tests/test_pdf_conversion_plan.py`, `tests/test_docling_postprocess_ocr_gating.py`, `tests/test_docling_postprocess_profile_integration.py`) are currently **deferred** (module-level `pytestmark = ...skip(...)`, `V3_DEFERRED`), registered in `docs/V3_DEFERRED_TESTS.md` with the disposition DELETE-by-decision on legacy-lane retirement; their skip reason still cites the retired LLM-sanitization premise. The lane itself still ships for non-PDF input and `--batch-size 0`, so `pdf_plan.py` / `docling_adapter.py` edits currently run with those tests skipped. *V3 path (current default for `BatchProcessor.process_pdf`):* `batch_processor.py` is engine-agnostic and constructs **no** Docling — extraction is delegated to `mmrag_v3.extract()`, where Docling is confined to `src/mmrag_v3/engines/docling_fast.py` (the sole V3 Docling boundary, AST-guarded by `tests/test_v3_security.py`). Do not add Docling construction to `batch_processor.py`.
 - **Verify before converting.** Run the test suite and a single-document smoke test before starting batch conversions. Confirm schema version, chunk counts, and gate results on a real output before burning VLM credits.
 - **Goal-driven execution.** Transform tasks into verifiable goals with success criteria. For multi-step tasks, state a brief plan with verification checks at each step.
 
@@ -44,8 +86,8 @@ Use the three-layer docs model:
 - If Docling only supports document-level code enrichment, enable it only after the code-evidence pass. If region-level remote inference exists, send only `CodeItem`/code-candidate crops.
 - Keep fallback regex/Tesseract repairs clearly marked and do not let them mask whether Docling-native/remote enrichment worked.
 - Workstream B negative tests are contracts: incidental shell commands, sparse fenced snippets, non-code magazines, and encoding corruption alone must not trigger CodeFormulaV2. Do not loosen these assertions or rewrite fixtures to match a broad heuristic. If one fails, fix the heuristic or stop.
-- v2.7 §5 (shared PDF extraction plan + adapter refactor) and `docs/archive/PLAN_DOCLING_POSTPROCESSOR.md` (post-Docling sanity pass — y-sort, drop-cap heal, label-leak filter, OCR gating; new `digital_literature` profile) are both **shipped** as of 2026-05-03. If a new design plan is needed for next-phase work, draft it as `docs/PLAN_V2.8_*.md` rather than adding parallel sections to either existing plan.
-- Canonical flow — *legacy v2 path:* diagnostics/config -> `PdfConversionPlan` -> Docling adapter -> `UniversalDocument` -> `ElementProcessor` -> chunks. *V3 path (current default for `BatchProcessor.process_pdf`):* `mmrag_v3.extract()` (HybridEngine) -> `UniversalDocument` -> `chunk_universal_document()` -> `IngestionChunk.from_uir()`. Do not expand direct Docling-item-to-chunk mapping in either path.
+- v2.7 §5 (shared PDF extraction plan + adapter refactor) and the PLAN_DOCLING_POSTPROCESSOR plan (deleted from the tree in commit 159f14b; git history only) (post-Docling sanity pass — y-sort, drop-cap heal, label-leak filter, OCR gating; new `digital_literature` profile) are both **shipped** as of 2026-05-03. If a new design plan is needed for next-phase work, draft it as `docs/PLAN_V2.8_*.md` rather than adding parallel sections to either existing plan.
+- Canonical flow — *legacy v2 path:* diagnostics/config -> `PdfConversionPlan` -> Docling adapter -> `UniversalDocument` -> `ElementProcessor` -> chunks. *V3 path (current default for `BatchProcessor.process_pdf`):* `mmrag_v3.extract()` (engine chosen by `_select_engine`, then `_repair_degraded_code`) -> `UniversalDocument` -> `chunk_universal_document()` -> `IngestionChunk.from_uir()`. Do not expand direct Docling-item-to-chunk mapping in either path.
 
 ## Test Contract Integrity
 
@@ -57,7 +99,7 @@ Use the three-layer docs model:
 ## Project Invariants
 - Python is locked to 3.10 (`pyproject.toml`: `>=3.10,<3.11`).
 - Runtime target is Apple Silicon; prefer Torch MPS when available.
-- `docling` is exact-pinned to `2.86.0` (upgraded from 2.66.0 — enables picture/code enrichment features used by current plans).
+- `docling` is exact-pinned to `2.86.0` (upgraded from 2.66.0 — enables picture/code enrichment features used by current plans; verified 2026-09-29: only the legacy v2 lane sets them (`src/mmrag_v2/engines/pdf_plan.py` decides, `src/mmrag_v2/engines/docling_adapter.py` applies), while the V3 Docling boundary `src/mmrag_v3/engines/docling_fast.py` turns picture classification off and sets no code enrichment).
 - Keep PDF batch size at `<=10` pages.
 - Use the `ProfileClassifier` in `orchestration/profile_classifier.py` for automatic routing; do not replace it with the V2.4.2 `DocumentClassifier` approach. Profile overrides (`--profile-override`) are for debugging only, never for production acceptance runs.
 - Spatial metadata `bbox` must be emitted as integer `[0,1000]` coordinates.
@@ -71,6 +113,7 @@ conda env create -f environment.yml
 conda activate mmrag-v2
 pip install -e .
 pip install -e ".[dev]"
+pip install -e ".[mineru]"   # REQUIRED on production conversion hosts: without mineru-vl-utils, non-code pages silently ladder
 ```
 
 ## Core Commands
@@ -82,6 +125,7 @@ mmrag-v2 process data/<category>/<file>.pdf --batch-size 10 --output-dir output/
 mmrag-v2 process data/<category>/<file>.pdf --profile-override <profile> --output-dir output/<run_name>
 mmrag-v2 batch data/<category> --pattern "*.pdf" --output-dir output/<run_name> --vision-provider none
 ```
+Note (verified 2026-09-29): `--vision-provider` selects only the per-image description VLM of the batch writer; it is not passed to `mmrag_v3.extract()` (`src/mmrag_v2/batch_processor.py` calls `v3_extract(str(batch_info.batch_path))`). On the V3 path `HybridEngine` still sends table/image/drawing/code pages to the `VLM_NATIVE_*` endpoint (default OpenRouter), and `extract()` then runs `_repair_degraded_code`, which re-extracts R3-flagged code pages through that VLM. `--vision-provider none` alone is therefore not a no-VLM run.
 
 ## Tests and Lint
 ```bash
@@ -118,9 +162,11 @@ python scripts/qa_full_conversion.py output/<run_name>/ingestion.jsonl \
 # Lighter universal invariant check (no blank-page awareness — advisory only):
 python scripts/qa_universal_invariants.py output/<run_name>/ingestion.jsonl
 ```
-Look for explicit `GATE_PASS` / `GATE_FAIL` and `UNIVERSAL_PASS` / `UNIVERSAL_FAIL` in output, and `QA_PASS` / `QA_WARN` / `QA_FAIL` from `qa_full_conversion.py`. The strict-gate command is `qa_full_conversion.py --source-pdf` (per Phase 4 Step 1, 2026-05-09); the no-flag form reports phantom MISSING_PAGES failures on docs with blank-source pages.
+Look for explicit `GATE_PASS` / `GATE_FAIL` and `UNIVERSAL_PASS` / `UNIVERSAL_FAIL` in output, and `QA_PASS` / `QA_PASS_WITH_ADVISORIES` / `QA_WARN` / `QA_FAIL` from `qa_full_conversion.py`. The strict-gate command is `qa_full_conversion.py --source-pdf` (per Phase 4 Step 1, 2026-05-09); the no-flag form reports phantom MISSING_PAGES failures on docs with blank-source pages.
 
 `scripts/smoke_production.sh` (PLAN_V3.1 Phase 5) is the mandatory pre-merge gate for any change touching the V3 extraction path; it must print `SMOKE_PRODUCTION_PASS` (exit 0) in offline mode before merge. It runs one doc per routing lane through the shipping CLI and asserts batch integrity, IMAGE/TABLE asset_ref + on-disk asset (QA-CHECK-05), V3-path routing (`extraction_method=uir_native_chunker` offline), and `QA_PASS`/`QA_PASS_WITH_ADVISORIES`.
+
+> STATUS 2026-09-29: "offline" is not VLM-free: `_repair_degraded_code` runs on every route except `vlm_native` and calls the VLM for R3-flagged pages when one is reachable (`docs/DECISIONS.md`, fact record of shipped behaviors; plan decision D-21).
 
 ## Runtime Architecture
 - CLI entry: `src/mmrag_v2/cli.py` (`process`, `batch`, `version`, `check`).
@@ -136,4 +182,6 @@ Look for explicit `GATE_PASS` / `GATE_FAIL` and `UNIVERSAL_PASS` / `UNIVERSAL_FA
 - QA-CHECK-01 token balance logic: `src/mmrag_v2/validators/token_validator.py`.
 - Filtering analytics: `src/mmrag_v2/validators/quality_filter_tracker.py`.
 - UIR abstractions live under `src/mmrag_v2/universal/` and engines under `src/mmrag_v2/engines/`.
-- **V3 Phase C — vision-native extraction (2026-05-29):** new namespace at `src/mmrag_v3/`. Entry `src/mmrag_v3/processor.py`. **Default route (2026-06-06): `MineruQwenHybridEngine`** when `MINERU_ENDPOINT` is set — code-dense pages (monospace ratio >= 0.10) → Qwen VLM, every other page → MinerU2.5 (neither engine alone passes a code-heavy doc: MinerU mangles dense code to R3 0.44, Qwen empties dense tables to 50%; the hybrid gets both, AIOS `QA_PASS` — see `docs/DECISIONS.md` "MinerU+Qwen-for-code hybrid"). Pure MinerU via `USE_MINERU_ENGINE=1`; the legacy `HybridEngine` (Docling+VLM) is the no-`MINERU_ENDPOINT` fallback. Engines: `engines/vlm_native.py`, `engines/vlm_provider.py`, `engines/docling_fast.py` (sole `docling` import boundary in V3), `engines/router.py`. AST firewall at `tests/test_v3_security.py` (13 tests). Default VLM provider is OpenRouter `qwen/qwen3-vl-8b-instruct`; override via `VLM_NATIVE_ENDPOINT` / `VLM_NATIVE_MODEL` / `VLM_NATIVE_API_KEY`. Engine route forced via `USE_VLM_ENGINE=1` or `USE_DOCLING_FAST=1`. Rebaseline utility at `scripts/rebaseline_v3.py`. The V3 Phase A sandbox (`v3_execution_root/`) was **removed 2026-05-30** — it was a duplicate `mmrag_v3` namespace and NOT a production dependency (`src/mmrag_v3/processor.py` never imported it). Durable artifacts were salvaged: `docs/V3_DEFERRED_TESTS.md` (active contract), `docs/paper/archive_extracts/v3_mandate/` + `…/sanitization_prompts/` (reference). Full backup tarball: `~/mmrag_v3_execution_root_backup_2026-05-30.tar.gz`. NOTE: the V3 baseline/soak scripts (`scripts/v3_batch_ingest.py`, `rebaseline_v3.py`) imported the sandbox chunker and need repointing to `src/mmrag_v2/chunking/uir_chunker.py` before they run again. See `docs/DECISIONS.md` "v3.0 Phase C — Vision-Native Extraction" and `docs/PROJECT_STATUS.md` "Phase C" section.
+- **V3 Phase C — vision-native extraction (2026-05-29):** new namespace at `src/mmrag_v3/`. Entry `src/mmrag_v3/processor.py`. **Default route (2026-06-06): `MineruQwenHybridEngine`** when `MINERU_ENDPOINT` is set — code-dense pages (monospace ratio >= 0.10) → Qwen VLM, every other page → MinerU2.5 (neither engine alone passes a code-heavy doc: MinerU mangles dense code to R3 0.44, Qwen empties dense tables to 50%; the hybrid gets both, AIOS `QA_PASS` — see `docs/DECISIONS.md` "MinerU+Qwen-for-code hybrid"). Pure MinerU via `USE_MINERU_ENGINE=1`; the legacy `HybridEngine` (Docling+VLM) is the no-`MINERU_ENDPOINT` fallback. Engines: `engines/mineru_native.py`, `engines/vlm_native.py`, `engines/vlm_provider.py`, `engines/docling_fast.py` (sole `docling` import boundary in V3), `engines/router.py` (`HybridEngine`, `MineruQwenHybridEngine`). AST firewall at `tests/test_v3_security.py` (15 tests collected 2026-09-29; it scans `src/mmrag_v3/engines/` `vlm_native.py`, `vlm_provider.py`, `router.py`, `mineru_native.py` and the boundary file `docling_fast.py`). Default VLM provider is OpenRouter `qwen/qwen3-vl-8b-instruct`; override via `VLM_NATIVE_ENDPOINT` / `VLM_NATIVE_MODEL` / `VLM_NATIVE_API_KEY`. Engine route forced via env, first match wins in `_select_engine` (`src/mmrag_v3/processor.py`): `USE_MINERU_ENGINE=1`, `USE_VLM_ENGINE=1`, `USE_DOCLING_FAST=1`, `USE_HYBRID_ENGINE=1`, `USE_MINERU_QWEN_HYBRID=1`; with none set, `MineruQwenHybridEngine` if `MINERU_ENDPOINT` is set, else `HybridEngine`. Rebaseline utility at `scripts/rebaseline_v3.py`. The V3 Phase A sandbox (`v3_execution_root/`) was **removed 2026-05-30** — it was a duplicate `mmrag_v3` namespace and NOT a production dependency (`src/mmrag_v3/processor.py` never imported it). Durable artifacts were salvaged: `docs/V3_DEFERRED_TESTS.md` (active contract), `docs/paper/archive_extracts/v3_mandate/` + `…/sanitization_prompts/` (reference). Full backup tarball: `~/mmrag_v3_execution_root_backup_2026-05-30.tar.gz`. NOTE (updated 2026-06-12): the V3 baseline/soak scripts (`scripts/v3_batch_ingest.py`, `rebaseline_v3.py`) no longer import the removed sandbox - both run the shipping path via `src/mmrag_v2/chunking/uir_chunker.py` (verified in the consolidation pass, WP-4). See `docs/DECISIONS.md` "v3.0 Phase C — Vision-Native Extraction" and `docs/PROJECT_STATUS.md` (it has no "Phase C" heading; verified 2026-09-29).
+
+> STATUS 2026-09-29: the default route above does not run: the LAN MinerU and VLM servers did not answer, and `scripts/env_cloud_vlm.sh` leaves `MINERU_ENDPOINT` unset, so `_select_engine` returns the legacy `HybridEngine` with a cloud `VLM_NATIVE_*` model, a route that is operative but unratified (facts: `docs/DECISIONS.md` "Operative extraction route since 2026-09-29") (plan decision D-1).

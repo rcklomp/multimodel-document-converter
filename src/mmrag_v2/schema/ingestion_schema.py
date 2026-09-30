@@ -1034,6 +1034,29 @@ class IngestionMetadata(BaseModel):
     source_file_hash: Optional[str] = None  # SHA-256
     config_hash: Optional[str] = None  # SHA-256 of relevant pipeline options
 
+    # Extraction provenance (PLAN_EXTRACTION_FIDELITY_V1 Section 5.4) — the served
+    # engine + fail-closed ladder outcome, aggregated across batches. ADVISORY:
+    # they let a green gate report what fraction of its pages the primary engine
+    # actually served vs. the ladder. Absent (None) on legacy outputs.
+    extraction_engine: Optional[str] = None
+    # Most-severe ladder tier engaged anywhere in the doc (docling_fast <
+    # pymupdf_terminal); None when the primary engine served every page.
+    extraction_fallback: Optional[str] = None
+    extraction_degraded_pages: Optional[int] = None  # pages the primary left degraded
+    extraction_recovered_pages: Optional[int] = None  # degraded pages the ladder recovered
+    # PLAN_EXTRACTION_FIDELITY_V1 §5.4 consumer 1: pages the R3 detector flagged as
+    # degraded code (present-but-flattened) and how many were repaired by the
+    # bounded VLM re-extraction. ADVISORY observability; absent (None) on legacy.
+    extraction_quality_risk_pages: Optional[int] = None  # R3-flagged degraded-code pages
+    extraction_code_repaired_pages: Optional[int] = None  # of those, VLM-repaired
+    # PLAN_QUALITY_REMEDIATION WP-C4: which VLM served the run and how many pages it really
+    # served. A page a VLM engine demoted to Docling (non-retryable 401/402/403, exhausted 429)
+    # leaves engine="hybrid", degraded=0, fallback=None, so without these an expired key yields
+    # a "valid" run served by the Docling lane. ADVISORY observability; absent on legacy outputs.
+    extraction_vlm_model: Optional[str] = None
+    extraction_vlm_served_pages: Optional[int] = None
+    extraction_demoted_pages: Optional[int] = None
+
 
 # ============================================================================
 # HELPER FUNCTIONS

@@ -66,7 +66,20 @@ set -uo pipefail
 # --- Resolve repo + interpreters ------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ENV_PYTHON="${ENV_PYTHON:-$HOME/miniforge3/envs/mmrag-v2/bin/python}"
+# ENV_PYTHON resolution chain (C3): explicit env var wins; else the Shared-seat
+# interpreter; else the per-user one; else fail fast naming the var.
+if [ -n "${ENV_PYTHON:-}" ]; then
+  : # explicit override wins (validated for executability below)
+elif [ -x "/Users/Shared/miniforge3/envs/mmrag-v2/bin/python" ]; then
+  ENV_PYTHON="/Users/Shared/miniforge3/envs/mmrag-v2/bin/python"
+elif [ -x "$HOME/miniforge3/envs/mmrag-v2/bin/python" ]; then
+  ENV_PYTHON="$HOME/miniforge3/envs/mmrag-v2/bin/python"
+else
+  echo "FATAL: could not resolve a python interpreter. Set ENV_PYTHON to the" >&2
+  echo "       mmrag-v2 env python, e.g." >&2
+  echo "       ENV_PYTHON=/Users/Shared/miniforge3/envs/mmrag-v2/bin/python" >&2
+  exit 2
+fi
 MMRAG_CLI="$(dirname "$ENV_PYTHON")/mmrag-v2"
 
 # The editable install resolves mmrag_v2/mmrag_v3 to the MAIN checkout; when
@@ -178,6 +191,19 @@ if [ "$FULL" -eq 1 ]; then
     log "SMOKE_PRODUCTION_FAIL"
     exit 1
   fi
+  # MinerU env preflight (C2): when the hybrid route can reach MinerU, the
+  # mineru-vl-utils package MUST import or non-code pages silently ladder.
+  if [ -n "${MINERU_ENDPOINT:-}" ]; then
+    if "$ENV_PYTHON" -c "import mineru_vl_utils" >/dev/null 2>&1; then
+      log "  mineru_vl_utils import OK (MINERU_ENDPOINT set)."
+    else
+      log "FULL-MODE PRECONDITION FAIL: MINERU_ENDPOINT is set but"
+      log "  'import mineru_vl_utils' failed in $ENV_PYTHON. Install the extra:"
+      log "  python -m pip install -e '.[mineru]'  (the silent-ladder prerequisite)."
+      log "SMOKE_PRODUCTION_FAIL"
+      exit 2
+    fi
+  fi
 fi
 
 # --- Per-lane runner -------------------------------------------------------
@@ -263,14 +289,17 @@ fails = []
 notes = []
 
 chunks = []
+meta = {}
 with jsonl.open("r", encoding="utf-8") as fh:
     for line in fh:
         line = line.strip()
         if not line:
             continue
         obj = json.loads(line)
-        # Skip the manifest/metadata line (no "modality").
+        # Skip the manifest/metadata line (no "modality") but keep it for the
+        # extraction-provenance NOTE below (PLAN_EXTRACTION_FIDELITY_V1 5.4).
         if obj.get("object_type") == "ingestion_metadata":
+            meta = obj
             continue
         if "modality" not in obj:
             continue
@@ -284,6 +313,17 @@ n_img = mods.get("image", 0)
 n_tbl = mods.get("table", 0)
 n_txt = mods.get("text", 0)
 notes.append(f"chunks={n} (txt={n_txt} img={n_img} tbl={n_tbl})")
+
+# Extraction provenance aggregates (advisory observability, Section 5.4 fleet
+# consumer): which engine served and whether the fail-closed ladder engaged.
+_eng = meta.get("extraction_engine")
+if _eng:
+    _fb = meta.get("extraction_fallback")
+    _deg = meta.get("extraction_degraded_pages") or 0
+    _rec = meta.get("extraction_recovered_pages") or 0
+    notes.append(
+        f"extract={_eng} fallback={_fb or 'none'} degraded={_deg} recovered={_rec}"
+    )
 
 # (a) BATCH INTEGRITY -----------------------------------------------------
 require_chunks = (expect == "require_chunks") or full

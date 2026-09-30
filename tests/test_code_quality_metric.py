@@ -262,8 +262,38 @@ def test_verdict_warn_below_density_floor():
 
 
 def test_verdict_hardfail_above_density_floor():
-    # AIOS-class: 9 judgeable, 5 broken, 163 chunks -> density 0.055 -> fail.
+    # AIOS-class: 9 judgeable, 5 broken, 163 chunks -> density 0.055, fidelity 0.44
+    # (below the 0.65 accept floor) -> fail.
     r = cq.CodeQuality(n_judgeable=9, n_judgeable_fail=5, total_chunks=163)
     assert r.judgeable_density >= cq.DEFAULT_HARDFAIL_DENSITY
-    assert r.indentation_fidelity < cq.DEFAULT_INDENT_FIDELITY_FLOOR
+    assert r.indentation_fidelity < cq.DEFAULT_ACCEPT_FIDELITY_FLOOR
     assert cq.gate_verdict(r) == "fail"
+
+
+# --- Accept-with-remark band (user-signed 2026-06-17) ----------------------
+
+
+def test_verdict_accept_with_remark_band_is_warn_not_fail():
+    # Devlin-class: 42 judgeable, 13 broken -> fidelity 0.69, density 0.08 (>= 0.04).
+    # Pre-policy this hard-failed; the accept band [0.65, 0.90) now WARNs (accepted
+    # with a remark), even though density is above the hard-fail floor.
+    r = cq.CodeQuality(n_judgeable=42, n_judgeable_fail=13, total_chunks=520)
+    assert cq.DEFAULT_ACCEPT_FIDELITY_FLOOR <= r.indentation_fidelity < cq.DEFAULT_INDENT_FIDELITY_FLOOR
+    assert r.judgeable_density >= cq.DEFAULT_HARDFAIL_DENSITY  # would be 'fail' pre-policy
+    assert cq.gate_verdict(r) == "warn"
+
+
+def test_verdict_below_accept_floor_still_hardfails():
+    # Just below 0.65 with non-incidental density: still a hard fail (the accept
+    # band does not rescue genuinely broken code).
+    r = cq.CodeQuality(n_judgeable=10, n_judgeable_fail=4, total_chunks=100)  # fidelity 0.60
+    assert r.indentation_fidelity < cq.DEFAULT_ACCEPT_FIDELITY_FLOOR
+    assert r.judgeable_density >= cq.DEFAULT_HARDFAIL_DENSITY
+    assert cq.gate_verdict(r) == "fail"
+
+
+def test_verdict_at_accept_floor_is_warn():
+    # Exactly at the accept floor (0.65) is accepted with remark.
+    r = cq.CodeQuality(n_judgeable=20, n_judgeable_fail=7, total_chunks=100)  # 0.65
+    assert r.indentation_fidelity == cq.DEFAULT_ACCEPT_FIDELITY_FLOOR
+    assert cq.gate_verdict(r) == "warn"

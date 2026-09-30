@@ -29,9 +29,11 @@ from typing import List, Optional, Tuple
 # Current pipeline version for provenance comparison
 try:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+    from mmrag_v2.version import __engine_version__ as CURRENT_ENGINE_VERSION
     from mmrag_v2.version import __schema_version__ as CURRENT_VERSION
 except ImportError:
     CURRENT_VERSION = "unknown"
+    CURRENT_ENGINE_VERSION = "unknown"
 
 # Shared R3 code-indentation metric (single source of truth; see
 # docs/PLAN_R3_CODE_GATE_REDESIGN.md). The script's own directory is on
@@ -336,8 +338,10 @@ def audit(jsonl_path: Path) -> AuditResult:
                 r.schema_version = obj.get("schema_version", "")
                 r.total_pages = int(obj.get("total_pages") or 0)
                 pv = obj.get("pipeline_version", "")
-                if pv and pv != CURRENT_VERSION:
-                    r.add_issue("PROVENANCE", f"pipeline_version={pv} != current {CURRENT_VERSION}")
+                # pipeline_version is the ENGINE version; schema_version is the chunk-SHAPE
+                # version. They are different numbers on purpose (WP-C4): compare each to its own.
+                if pv and pv != CURRENT_ENGINE_VERSION:
+                    r.add_issue("PROVENANCE", f"pipeline_version={pv} != current {CURRENT_ENGINE_VERSION}")
                 sv = obj.get("schema_version", "")
                 if sv and sv != CURRENT_VERSION:
                     r.add_issue("PROVENANCE", f"schema_version={sv} != current {CURRENT_VERSION}")
@@ -844,10 +848,21 @@ def print_report(r: AuditResult, path: Path) -> bool:
         for cid in cq.degraded_ids[:5]:
             r.add_issue("CODE", f"degraded code indentation: {cid}")
     elif indent_verdict == "warn":
-        code_warnings.append(
-            f"indent_fidelity={cq.indentation_fidelity:.2f} (<{indent_floor:.2f}; "
-            f"density {cq.judgeable_density:.3f} below hard-fail floor)"
-        )
+        accept_floor = code_quality_mod.DEFAULT_ACCEPT_FIDELITY_FLOOR
+        if cq.indentation_fidelity >= accept_floor:
+            # Accept-with-remark band (DECISIONS.md "R3 Accept-With-Remark Band",
+            # 2026-06-17): code-bearing doc accepted despite sub-0.90 fidelity; the
+            # realised-quality drop is tracked for targeted follow-up.
+            code_warnings.append(
+                f"indent_fidelity={cq.indentation_fidelity:.2f} ACCEPT-WITH-REMARK "
+                f"(R3 in [{accept_floor:.2f},{indent_floor:.2f}); code-quality drop "
+                f"tracked for targeted follow-up)"
+            )
+        else:
+            code_warnings.append(
+                f"indent_fidelity={cq.indentation_fidelity:.2f} (<{accept_floor:.2f}; "
+                f"density {cq.judgeable_density:.3f} below hard-fail floor)"
+            )
         for cid in cq.degraded_ids[:5]:
             r.add_issue("CODE", f"degraded code indentation (advisory): {cid}")
 

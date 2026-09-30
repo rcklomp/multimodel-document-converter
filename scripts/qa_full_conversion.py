@@ -31,7 +31,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_DIR = REPO_ROOT / "scripts"
 
@@ -95,6 +94,15 @@ _ALLOWED_ADVISORY_WARN_CODES = frozenset(
         # every missing chapter is an edge-only low-content structural
         # spine item. Internal/content-bearing missing chapters are FAIL.
         "MISSING_CHAPTERS",
+        # WS1b (PLAN_FIDELITY_ORACLE_FIRST_V1 Section 3'): ladder-served pages.
+        # Conditional: advisory ONLY when the served fraction is within the 2%
+        # Phase-4 bound. Above the bound it is a real WARN; a code-bearing doc
+        # that laddered any page is EXTRACTION_DEGRADED_CODE (FAIL), never here.
+        "EXTRACTION_LADDER_SERVED",
+        # WS1a: content-emptiness visibility on no-source-pdf runs. Always advisory
+        # (blank-vs-lost is unverifiable without the source); nudges toward the hard
+        # MISSING_PAGES verdict. Never a basis to FAIL.
+        "CONTENT_EMPTY_PAGES_UNVERIFIED",
     }
 )
 
@@ -312,8 +320,7 @@ def _is_low_value_epub_structural_chapter(chapter: EpubChapterInfo) -> bool:
     if chapter.text_len == 0:
         return True
     if chapter.text_len <= 1200 and (
-        _EPUB_STRUCTURAL_NAME_RE.search(name)
-        or _EPUB_STRUCTURAL_TEXT_RE.search(sample)
+        _EPUB_STRUCTURAL_NAME_RE.search(name) or _EPUB_STRUCTURAL_TEXT_RE.search(sample)
     ):
         return True
     return False
@@ -338,18 +345,11 @@ def _missing_epub_chapters_are_advisory(
         return False
     first_covered = min(covered)
     last_covered = max(covered)
-    edge_missing = {
-        idx
-        for idx in all_indices
-        if idx < first_covered or idx > last_covered
-    }
+    edge_missing = {idx for idx in all_indices if idx < first_covered or idx > last_covered}
     if missing_set != edge_missing:
         return False
     by_index = {chapter.index: chapter for chapter in chapters}
-    return all(
-        _is_low_value_epub_structural_chapter(by_index[idx])
-        for idx in missing
-    )
+    return all(_is_low_value_epub_structural_chapter(by_index[idx]) for idx in missing)
 
 
 def _epub_chapter_coverage_issues(
@@ -385,15 +385,9 @@ def _epub_chapter_coverage_issues(
         page = _chunk_page(c)
         if page:
             chapters_with_chunks.add(page // 1000)
-    missing = [
-        ch for ch in range(1, chapter_count + 1) if ch not in chapters_with_chunks
-    ]
+    missing = [ch for ch in range(1, chapter_count + 1) if ch not in chapters_with_chunks]
     if missing:
-        severity = (
-            "WARN"
-            if _missing_epub_chapters_are_advisory(missing, chapters)
-            else "FAIL"
-        )
+        severity = "WARN" if _missing_epub_chapters_are_advisory(missing, chapters) else "FAIL"
         preview = ", ".join(str(c) for c in missing[:20])
         suffix = "" if len(missing) <= 20 else f" ... (+{len(missing) - 20})"
         missing_names = ", ".join(
@@ -588,7 +582,9 @@ def _read_blank_pages_in_source(path: Path) -> set[int]:
             # "Blank" = no extractable text AND no images AND no
             # meaningful drawing blocks. A single empty block is
             # typical PyMuPDF output for blank pages.
-            non_trivial_blocks = [b for b in blocks if isinstance(b, tuple) and len(b) >= 5 and (b[4] or "").strip()]
+            non_trivial_blocks = [
+                b for b in blocks if isinstance(b, tuple) and len(b) >= 5 and (b[4] or "").strip()
+            ]
             if not text and not images and not non_trivial_blocks:
                 blank.add(idx + 1)
                 continue
@@ -600,10 +596,11 @@ def _read_blank_pages_in_source(path: Path) -> set[int]:
                 continue
             # Even with non-trivial blocks, accept if the only block
             # text is the boilerplate.
-            if non_trivial_blocks and all(
-                _is_intentionally_blank_text(b[4] or "")
-                for b in non_trivial_blocks
-            ) and _is_intentionally_blank_text(text):
+            if (
+                non_trivial_blocks
+                and all(_is_intentionally_blank_text(b[4] or "") for b in non_trivial_blocks)
+                and _is_intentionally_blank_text(text)
+            ):
                 blank.add(idx + 1)
                 continue
             # Phase B4.a: render-based near-blank check. The page
@@ -660,9 +657,7 @@ def _page_coverage_issues(
             total_pages = None
 
     if not total_pages:
-        issues.append(
-            Issue("WARN", "PAGE_COUNT_UNKNOWN", "Could not determine source page count.")
-        )
+        issues.append(Issue("WARN", "PAGE_COUNT_UNKNOWN", "Could not determine source page count."))
         return issues
 
     pages_with_chunks = {p for p in (_chunk_page(c) for c in chunks) if p}
@@ -691,8 +686,7 @@ def _page_coverage_issues(
         severity = "WARN" if allow_missing_pages else "FAIL"
         preview = ", ".join(str(p) for p in missing_with_content[:20])
         suffix = (
-            "" if len(missing_with_content) <= 20
-            else f" ... (+{len(missing_with_content) - 20})"
+            "" if len(missing_with_content) <= 20 else f" ... (+{len(missing_with_content) - 20})"
         )
         issues.append(
             Issue(
@@ -735,9 +729,7 @@ def _duplicate_text_issues(
             if len(example_bits) < 5:
                 _, chunk_id = examples[text]
                 sample = text[:90]
-                example_bits.append(
-                    f"p{page} {count}x first={chunk_id} sample={sample!r}"
-                )
+                example_bits.append(f"p{page} {count}x first={chunk_id} sample={sample!r}")
 
     if duplicate_excess:
         issues.append(
@@ -770,9 +762,7 @@ def _page_outlier_issues(chunks: list[dict[str, Any]]) -> list[Issue]:
     chunk_values = list(page_chunk_counts.values())
     chunk_median = statistics.median(chunk_values)
     chunk_limit = max(30, int(chunk_median * 8))
-    chunk_outliers = [
-        (p, c) for p, c in page_chunk_counts.items() if c > chunk_limit
-    ]
+    chunk_outliers = [(p, c) for p, c in page_chunk_counts.items() if c > chunk_limit]
     if chunk_outliers:
         top = sorted(chunk_outliers, key=lambda item: item[1], reverse=True)[:8]
         issues.append(
@@ -788,9 +778,7 @@ def _page_outlier_issues(chunks: list[dict[str, Any]]) -> list[Issue]:
     if text_values:
         text_median = statistics.median(text_values)
         text_limit = max(50000, int(text_median * 12))
-        text_outliers = [
-            (p, c) for p, c in page_text_chars.items() if c > text_limit
-        ]
+        text_outliers = [(p, c) for p, c in page_text_chars.items() if c > text_limit]
         if text_outliers:
             top = sorted(text_outliers, key=lambda item: item[1], reverse=True)[:8]
             issues.append(
@@ -865,9 +853,7 @@ def _image_issues(
     for chunk in images:
         meta = chunk.get("metadata") or {}
         content = chunk.get("content") or ""
-        visual_description = (
-            meta.get("visual_description") or chunk.get("visual_description") or ""
-        )
+        visual_description = meta.get("visual_description") or chunk.get("visual_description") or ""
         vision_status = meta.get("vision_status") or chunk.get("vision_status")
         # Documented no-VLM state: the converter ran with --vision-provider none,
         # so the image is retained as an ID-only fallback (asset filename) with no
@@ -897,9 +883,7 @@ def _image_issues(
             hard_fallback += 1
         if vision_status == "pending":
             pending += 1
-        if _is_blankish_visual_description(
-            visual_description, chunk=chunk, output_dir=output_dir
-        ):
+        if _is_blankish_visual_description(visual_description, chunk=chunk, output_dir=output_dir):
             missing_visual += 1
             if len(examples) < 5:
                 examples.append(
@@ -994,8 +978,7 @@ def _asset_issues(jsonl_path: Path, chunks: list[dict[str, Any]]) -> list[Issue]
             Issue(
                 "FAIL",
                 "ASSET_MISSING",
-                f"{len(missing)} asset reference(s) missing. "
-                + "; ".join(missing[:5]),
+                f"{len(missing)} asset reference(s) missing. " + "; ".join(missing[:5]),
             )
         )
     if tiny:
@@ -1003,8 +986,7 @@ def _asset_issues(jsonl_path: Path, chunks: list[dict[str, Any]]) -> list[Issue]
             Issue(
                 "WARN",
                 "ASSET_TINY",
-                f"{len(tiny)} asset file(s) are under 1000 bytes. "
-                + "; ".join(tiny[:5]),
+                f"{len(tiny)} asset file(s) are under 1000 bytes. " + "; ".join(tiny[:5]),
             )
         )
     return issues
@@ -1036,6 +1018,155 @@ def _table_issues(chunks: list[dict[str, Any]]) -> list[Issue]:
             )
         )
     return issues
+
+
+def _print_extraction_provenance(metadata: dict[str, Any]) -> None:
+    """ADVISORY: surface the served engine + fail-closed ladder outcome.
+
+    PLAN_EXTRACTION_FIDELITY_V1 Section 5.4 consumer 2, advisory phase per
+    AGENT-GATE-PROGRESSION: a green gate must report what fraction of its pages
+    the primary engine actually served versus the ladder (tier-2 docling /
+    tier-3 PyMuPDF terminal). Pure observability - it reads the doc-level
+    ``extraction_*`` stamps on the IngestionMetadata header and NEVER changes
+    the QA verdict (no new failure condition tonight). A flagged/ladder-served
+    ratio bound that emits QA_WARN is Phase 3 work, gated on calibration.
+    """
+    print("Extraction Provenance (advisory)")
+    print("--------------------------------")
+    engine = metadata.get("extraction_engine")
+    if engine is None:
+        print(
+            "No extraction_* provenance stamps on this output "
+            "(legacy / pre-Section-5.4 conversion)."
+        )
+        print()
+        return
+    total = metadata.get("total_pages")
+    degraded = int(metadata.get("extraction_degraded_pages") or 0)
+    recovered = int(metadata.get("extraction_recovered_pages") or 0)
+    fallback = metadata.get("extraction_fallback")
+
+    def _frac(n: int) -> str:
+        if isinstance(total, int) and total > 0:
+            return f"{n}/{total} ({100.0 * n / total:.1f}%)"
+        return f"{n}"
+
+    quality_risk = int(metadata.get("extraction_quality_risk_pages") or 0)
+    code_repaired = int(metadata.get("extraction_code_repaired_pages") or 0)
+
+    print(f"engine: {engine}")
+    print(f"ladder fallback: {fallback or 'none (primary engine served every page)'}")
+    print(f"ladder-served pages (primary could not serve): {_frac(degraded)}")
+    print(f"ladder-recovered pages: {_frac(recovered)}")
+    # §5.4 consumer 1 outcome: R3-flagged degraded-code pages and how many the
+    # bounded VLM re-extraction repaired. A flagged page that was NOT repaired ships
+    # with degraded code (visible here; the offline R3 gate is the hard authority).
+    print(f"code-degraded pages flagged (R3): {_frac(quality_risk)}")
+    print(f"  of those, VLM-repaired: {code_repaired}/{quality_risk}"
+          if quality_risk else "  of those, VLM-repaired: 0/0")
+    print()
+
+
+# Phase-4 rollback bound (charter 4.2): ladder-served > 2% of pages is a real
+# signal; at/below it a small transient ladder is a documented advisory.
+_LADDER_SERVED_ADVISORY_BOUND = 0.02
+
+# WS1a: fraction of pages that produced NO chunk above which a no-source-pdf run
+# surfaces a content-emptiness advisory (a few blank dividers are normal).
+_CONTENT_EMPTY_ADVISORY_BOUND = 0.15
+
+
+def _content_emptiness_issues(
+    metadata: dict[str, Any],
+    chunks: list[dict[str, Any]],
+    source_pdf_provided: bool,
+) -> list[Issue]:
+    """WS1a (PLAN_FIDELITY_ORACLE_FIRST_V1 Section 3'): content-emptiness visibility.
+
+    Page coverage (`_page_coverage_issues`) only runs WITH --source-pdf (blank-page
+    aware -> hard MISSING_PAGES). Without it, silent content-emptiness - an engine
+    that posts 0 ladder failures yet emits empty pages (the documented docling-on-
+    image-only case, FINDINGS_LOG 2026-06-11 "presence-not-content") - is invisible.
+    This adds an ADVISORY-only nudge for the no-source case: orphan pages (pages that
+    produced no chunk of ANY modality, so image/table pages are NOT counted) above a
+    bound. It CANNOT distinguish a blank source page from a lost one, so it never
+    FAILs - it points the operator at the hard verdict. Silent emptiness stops being
+    silent. With --source-pdf, MISSING_PAGES is the authority and this is inert.
+    """
+    if source_pdf_provided:
+        return []
+    if metadata.get("extraction_engine") is None:
+        return []  # legacy output: no provenance to reason about
+    total = metadata.get("total_pages")
+    if not isinstance(total, int) or total <= 0:
+        return []
+    pages_present = {p for c in chunks if (p := _chunk_page(c)) is not None}
+    empty = total - len(pages_present)
+    if empty <= 0:
+        return []
+    frac = empty / total
+    if frac <= _CONTENT_EMPTY_ADVISORY_BOUND:
+        return []
+    return [
+        Issue(
+            "WARN",
+            "CONTENT_EMPTY_PAGES_UNVERIFIED",
+            f"{empty}/{total} ({100.0 * frac:.1f}%) page(s) produced no chunk; "
+            "no --source-pdf so blank-vs-lost is unverified. Re-run with --source-pdf "
+            "for a hard MISSING_PAGES verdict.",
+        )
+    ]
+
+
+def _extraction_ladder_issues(
+    metadata: dict[str, Any],
+    chunks: list[dict[str, Any]],
+) -> list[Issue]:
+    """WS1b (PLAN_FIDELITY_ORACLE_FIRST_V1 Section 3'): promote the
+    extraction-ladder stamps from display-only into a VERDICT signal.
+
+    The fail-closed ladder is a safety net, not a free pass. A page the primary
+    engine could not serve was recovered by tier-2 docling / tier-3 PyMuPDF, both
+    VACUOUS on code (measured: docling verbatim 0.015 on a code-dense slice). So:
+      * a code-bearing doc with ANY laddered page -> FAIL (laddered code is data
+        loss; the doc is stale and must be re-extracted, never a silent QA_PASS);
+      * a non-code doc -> ladder-served fraction ABOVE the Phase-4 bound is a real
+        WARN; at/below the bound it is a documented advisory.
+    Legacy outputs (no stamps) and healthy runs (degraded == 0) raise nothing,
+    so the offline smoke (asserts degraded == 0) and healthy hybrid runs are
+    unaffected.
+    """
+    engine = metadata.get("extraction_engine")
+    if engine is None:
+        return []  # legacy / pre-Section-5.4 output: no stamps to judge
+    degraded = int(metadata.get("extraction_degraded_pages") or 0)
+    if degraded <= 0:
+        return []
+    total = metadata.get("total_pages")
+    frac = (degraded / total) if isinstance(total, int) and total > 0 else None
+    frac_txt = f"{degraded}/{total} ({100.0 * frac:.1f}%)" if frac is not None else f"{degraded}"
+    fallback = metadata.get("extraction_fallback")
+    if any(c.get("modality") == "code" for c in chunks):
+        return [
+            Issue(
+                "FAIL",
+                "EXTRACTION_DEGRADED_CODE",
+                f"code-bearing doc laddered {frac_txt} page(s) to the fail-closed "
+                f"tier (engine={engine}, fallback={fallback}); tier-2 docling / "
+                "tier-3 PyMuPDF are vacuous on code, so laddered code pages are data "
+                "loss. Re-extract on the primary engine before ingest.",
+            )
+        ]
+    within = frac is not None and frac <= _LADDER_SERVED_ADVISORY_BOUND
+    suffix = "within the 2% Phase-4 bound (advisory)" if within else "exceeds the 2% Phase-4 bound"
+    return [
+        Issue(
+            "WARN",
+            "EXTRACTION_LADDER_SERVED",
+            f"ladder-served {frac_txt} page(s) (engine={engine}, fallback={fallback}); "
+            f"{suffix}.",
+        )
+    ]
 
 
 def _print_script_results(results: list[ScriptResult]) -> None:
@@ -1074,6 +1205,9 @@ def _warn_is_documented_advisory(
         return False
     if issue.code == "MISSING_CHAPTERS":
         return "edge low-content structural spine item" in issue.message
+    if issue.code == "EXTRACTION_LADDER_SERVED":
+        # Advisory only when the served fraction is within the Phase-4 bound.
+        return "within the 2% Phase-4 bound" in issue.message
     if issue.code != "VISION_HARD_FALLBACK_RATE":
         return True
 
@@ -1185,9 +1319,7 @@ def main() -> int:
         # v2.10 Phase 7: EPUB sources use synthetic per-chapter page
         # numbers; the PDF page-coverage check does not apply. Validate
         # chapter coverage instead via ebooklib spine enumeration.
-        issues.extend(
-            _epub_chapter_coverage_issues(source, chunks, args.allow_missing_pages)
-        )
+        issues.extend(_epub_chapter_coverage_issues(source, chunks, args.allow_missing_pages))
     else:
         issues.extend(
             _page_coverage_issues(
@@ -1210,6 +1342,8 @@ def main() -> int:
     )
     issues.extend(_asset_issues(jsonl_path, chunks))
     issues.extend(_table_issues(chunks))
+    issues.extend(_extraction_ladder_issues(metadata, chunks))
+    issues.extend(_content_emptiness_issues(metadata, chunks, bool(args.source_pdf)))
 
     fail_count = sum(1 for issue in issues if issue.severity == "FAIL")
     warn_issues = [issue for issue in issues if issue.severity == "WARN"]
@@ -1219,9 +1353,7 @@ def main() -> int:
     # gate emits QA_PASS_WITH_ADVISORIES rather than QA_WARN per the
     # `docs/QUALITY_GATES.md` "Advisory Warning Classes" allowance.
     disallowed_warn_count = sum(
-        1
-        for issue in warn_issues
-        if not _warn_is_documented_advisory(issue, chunks)
+        1 for issue in warn_issues if not _warn_is_documented_advisory(issue, chunks)
     )
     advisory_warn_count = warn_count - disallowed_warn_count
     if fail_count:
@@ -1253,6 +1385,7 @@ def main() -> int:
         f"table={sum(1 for c in chunks if c.get('modality') == 'table')}"
     )
     print()
+    _print_extraction_provenance(metadata)
     _print_script_results(script_results)
     _print_issues("Additional Deterministic Checks", issues)
     print()

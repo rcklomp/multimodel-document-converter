@@ -19,6 +19,7 @@ Design:
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import logging
 import re
@@ -40,6 +41,7 @@ from ..universal.intermediate import (
     UniversalPage,
 )
 from ..universal.table_markdown import ensure_table_separator
+from .furniture import FurnitureDrop, find_running_furniture
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +140,8 @@ def chunk_universal_document(
     toc_headings: Optional[Dict[Any, Any]] = None,
     carry_in_heading: Optional[str] = None,
     carry_in_breadcrumb: Optional[List[str]] = None,
+    drop_furniture: bool = True,
+    furniture_report: Optional[List[FurnitureDrop]] = None,
 ) -> List[UIRChunk]:
     """Chunk a UniversalDocument into UIRChunks — pure UIR-native.
 
@@ -166,6 +170,11 @@ def chunk_universal_document(
             Seeds carry-forward so a chapter heading propagates across batch
             boundaries. ``None`` for the first batch.
         carry_in_breadcrumb: Breadcrumb paired with ``carry_in_heading``.
+        drop_furniture: Remove running headers/footers/folios at ELEMENT level before
+            chunking (PLAN_QUALITY_REMEDIATION_V1 WP-B2; engine labels first, then rank-based
+            repetition; headings and heading strings are never removed).
+        furniture_report: Optional out-parameter; the removed elements are appended so the
+            caller can account for them (QA-CHECK-01). The input document is never mutated.
 
     Returns:
         List of UIRChunk objects ready for ingestion.
@@ -173,12 +182,29 @@ def chunk_universal_document(
     chunks: List[UIRChunk] = []
     reading_order: int = 0
 
+    pages = universal_doc.pages
+    if drop_furniture:
+        furniture = find_running_furniture(pages, toc_headings=toc_headings)
+        if furniture:
+            doomed = {(d.page, d.position) for d in furniture}
+            pages = [
+                dataclasses.replace(
+                    pg,
+                    elements=[
+                        e for i, e in enumerate(pg.elements) if (pg.page_number, i) not in doomed
+                    ],
+                )
+                for pg in pages
+            ]
+            if furniture_report is not None:
+                furniture_report.extend(furniture)
+
     doc_title: Optional[str] = None
     meta = getattr(universal_doc, "metadata", None)
     if meta is not None:
         doc_title = getattr(meta, "title", None)
 
-    for page in universal_doc.pages:
+    for page in pages:
         page_chunks = _chunk_page(
             page,
             doc_id=universal_doc.doc_id,
@@ -357,6 +383,203 @@ def _assign_headings(
 
 
 # ---------------------------------------------------------------------------
+# Code-block contiguity (PLAN_F1 WP-A — chunker-level)
+# ---------------------------------------------------------------------------
+#
+# The chunker emits one chunk per code Element in document order. When the
+# extractor splits a single logical code block into several code Elements with
+# a figure/table/prose Element interleaved between them, the fragments each
+# fail ``ast.parse`` (the F1 oracle's dominant residual: 15/26 Chaubal fails
+# were a code block split across an interleaved non-code chunk). This pre-pass
+# coalesces code Elements that form ONE logical block into a single Element and
+# defers any interleaved non-code Element to AFTER the block. It runs per page
+# only; it never bridges a page boundary, never reorders two code blocks, and
+# never merges code that does not continue (an open structure / suite header in
+# the running segment, or a mid-body continuation in the next). AGENT-SPATIAL-20
+# and bbox [0,1000] are untouched (bbox is the integer union of the merged
+# segments); heading carry (B1) and table/form handling are unchanged.
+
+
+def _is_code_element(element: Element) -> bool:
+    """True if the Element is a promoted CODE element (VLM smuggle / MinerU)."""
+    return (element.metadata or {}).get("promoted_modality") == "code"
+
+
+def _strip_code_fence(content: str) -> str:
+    """Remove a single surrounding Markdown ``` fence (idempotent, lang-tolerant).
+
+    Segments arriving from the MinerU lane are individually fenced; joining them
+    verbatim would interleave fence markers mid-block. Strip the outer fence so
+    the merged body is re-fenced exactly once by ``_code_element_to_uirchunk``.
+    """
+    if not content:
+        return content
+    lines = content.strip("\n").split("\n")
+    if lines and lines[0].lstrip().startswith("```"):
+        lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        return "\n".join(lines)
+    return content
+
+
+def _has_unclosed_brackets(text: str) -> bool:
+    """Heuristic: more opening than closing brackets (naive, string-agnostic)."""
+    opens = text.count("(") + text.count("[") + text.count("{")
+    closes = text.count(")") + text.count("]") + text.count("}")
+    return opens > closes
+
+
+def _has_unterminated_triple_quote(text: str) -> bool:
+    """Heuristic: an odd count of triple-quote markers (mid-docstring split)."""
+    return (text.count('"""') % 2 == 1) or (text.count("'''") % 2 == 1)
+
+
+_MIDBODY_LEADS: Tuple[str, ...] = (
+    ")",
+    "]",
+    "}",
+    "else",
+    "elif",
+    "except",
+    "finally",
+    "case",
+    ".",
+)
+
+
+def _code_block_continues(prev_content: str, next_content: str) -> bool:
+    """True if ``next`` code segment continues ``prev``'s logical block.
+
+    Continuation signals (any one suffices), mirroring the oracle's residual
+    failure classes: ``prev`` ends OPEN (suite header ``:``, explicit ``\\``
+    continuation, unclosed brackets, or an unterminated docstring), OR ``next``
+    starts MID-BODY (leading indentation, or a continuation token such as a
+    closing bracket / ``else``/``elif``/``except``/``finally``). Two complete,
+    standalone code blocks (``prev`` closed AND ``next`` starting at column 0
+    with a fresh statement) are NOT merged.
+    """
+    prev = _strip_code_fence(prev_content or "")
+    nxt = _strip_code_fence(next_content or "")
+    prev_nonblank = [ln for ln in prev.splitlines() if ln.strip()]
+    nxt_lines = nxt.splitlines()
+    nxt_first = next((ln for ln in nxt_lines if ln.strip()), "")
+    if not prev_nonblank or not nxt_first:
+        return False
+
+    last = prev_nonblank[-1].rstrip()
+    prev_open = (
+        last.endswith(":")
+        or last.endswith("\\")
+        or _has_unclosed_brackets(prev)
+        or _has_unterminated_triple_quote(prev)
+    )
+
+    next_midbody = nxt_first.startswith((" ", "\t")) or nxt_first.lstrip().startswith(
+        _MIDBODY_LEADS
+    )
+    return prev_open or next_midbody
+
+
+def _merge_code_elements(segments: List[Element]) -> Element:
+    """Merge code Elements forming one logical block into a single Element.
+
+    Content is de-fenced per segment and joined with newlines (re-fenced once at
+    chunk emission). BBox is the integer union of the segments' bboxes (None if
+    none carry a bbox). Metadata keeps ``promoted_modality='code'`` and the first
+    segment's ``original_vlm_type``; the lowest ``element_index`` is preserved so
+    document order is unchanged.
+    """
+    bodies = [_strip_code_fence(s.content or "") for s in segments]
+    merged_content = "\n".join(b for b in bodies if b.strip())
+
+    left = top = 1_000
+    right = bottom = 0
+    have = False
+    for s in segments:
+        if s.bbox:
+            left = min(left, s.bbox.x_min)
+            top = min(top, s.bbox.y_min)
+            right = max(right, s.bbox.x_max)
+            bottom = max(bottom, s.bbox.y_max)
+            have = True
+    merged_bbox: Optional[BoundingBox] = None
+    if have and right > left and bottom > top:
+        merged_bbox = BoundingBox(x_min=left, y_min=top, x_max=right, y_max=bottom)
+
+    first = segments[0]
+    metadata = dict(first.metadata or {})
+    metadata["promoted_modality"] = "code"
+    metadata["code_block_coalesced"] = len(segments)
+    return Element(
+        type=first.type,
+        content=merged_content,
+        bbox=merged_bbox,
+        confidence=min(s.confidence for s in segments),
+        extraction_method=first.extraction_method,
+        element_index=min(s.element_index for s in segments),
+        source_label=first.source_label,
+        metadata=metadata,
+    )
+
+
+def _coalesce_code_blocks(elements: List[Element]) -> List[Element]:
+    """Coalesce split code blocks on one page (see module-section header).
+
+    Walks the page's Element list; when a code Element begins a logical block
+    that continues across interleaved non-code Elements, the code segments are
+    merged into one Element and the interleaved non-code Elements are re-emitted
+    immediately AFTER the merged block (their relative order preserved). Code
+    that does not continue is left untouched (one chunk per Element, as before).
+    """
+    result: List[Element] = []
+    i = 0
+    n = len(elements)
+    while i < n:
+        el = elements[i]
+        if not _is_code_element(el):
+            result.append(el)
+            i += 1
+            continue
+
+        code_segs: List[Element] = [el]
+        deferred: List[Element] = []
+        j = i + 1
+        while j < n:
+            nxt = elements[j]
+            if _is_code_element(nxt):
+                if _code_block_continues(code_segs[-1].content or "", nxt.content or ""):
+                    code_segs.append(nxt)
+                    j += 1
+                    continue
+                break
+            # Non-code run: bridge only if a following code Element continues
+            # the block; otherwise stop and leave it in place.
+            k = j
+            interleaved: List[Element] = []
+            while k < n and not _is_code_element(elements[k]):
+                interleaved.append(elements[k])
+                k += 1
+            if k < n and _code_block_continues(
+                code_segs[-1].content or "", elements[k].content or ""
+            ):
+                deferred.extend(interleaved)
+                code_segs.append(elements[k])
+                j = k + 1
+                continue
+            break
+
+        if len(code_segs) == 1:
+            result.append(code_segs[0])
+        else:
+            result.append(_merge_code_elements(code_segs))
+        result.extend(deferred)
+        i = j
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Per-page chunking
 # ---------------------------------------------------------------------------
 
@@ -443,7 +666,12 @@ def _chunk_page(
 
         text_buffer.clear()
 
-    for element in page.elements:
+    # PLAN_F1 WP-A: coalesce a logical code block split across an interleaved
+    # figure/table/prose Element into one code chunk (interleaved non-code
+    # re-emitted after the block). No-op on pages with <2 code Elements.
+    page_elements = _coalesce_code_blocks(page.elements)
+
+    for element in page_elements:
         # Charter §7.1: ElementType is the 3-value legacy vocabulary. The VLM
         # adapter smuggles 'code'/'form' through as ElementType.TEXT and tags
         # the original signal here; promote it to Modality.CODE/FORM at this
@@ -525,15 +753,18 @@ def _dedupe_within_page_text(chunks: List[UIRChunk]) -> List[UIRChunk]:
         text dupe is a hard fail - no length floor;
       * qa_full_conversion: whitespace-normalized dupes >= 120 chars.
     Dedup at the union: drop on an exact ``content.strip()`` match (any length)
-    OR a whitespace-normalized match >= ``_DEDUP_MIN_CHARS``. TEXT only;
-    IMAGE/TABLE/CODE/FORM, empty text, and cross-page repeats (headers/footers)
-    are untouched; order preserved.
+    OR a whitespace-normalized match >= ``_DEDUP_MIN_CHARS``. TEXT and CODE (the VLM
+    loops on dense CODE pages too - Fluent Python p214 emitted the same
+    ``def best_promo`` block 90x, surviving because dedup was TEXT-only); IMAGE/TABLE/
+    FORM, empty content, and cross-page repeats (headers/footers) are untouched. A
+    code book never legitimately repeats a 120+ char block within ONE page, so this
+    cannot drop real content; order preserved.
     """
     seen_exact: Dict[int, Set[str]] = {}
     seen_norm: Dict[int, Set[str]] = {}
     out: List[UIRChunk] = []
     for c in chunks:
-        if c.modality is not Modality.TEXT:
+        if c.modality not in (Modality.TEXT, Modality.CODE):
             out.append(c)
             continue
         stripped = (c.content or "").strip()
@@ -630,6 +861,72 @@ def _table_element_to_uirchunk(
     )
 
 
+# Page furniture the VLM intermittently transcribes INTO a code element (it also
+# emits it as its own heading/caption element, so removing it here is LOSSLESS):
+# running headers ("[50] Chapter 3 Building ..."), publisher listing captions
+# ("Listing 3.2 ...", "Figure/Table N.N ..."), and bare page-number lines at the
+# block edges or adjacent to such furniture. Proven 2026-06-18 (Hao p71: the header
+# appeared both as a heading chunk AND inlined in the code chunk). Engine-agnostic.
+_FURNITURE_LINE_RE = re.compile(
+    r"^(?:\d{1,4}\s+)?(?:chapter|part|section|appendix|unit|module)\s+\d+\b"
+    r"|^(?:listing|figure|table|example)\s+\d+(?:\.\d+)?\b",
+    re.IGNORECASE,
+)
+_BARE_PAGENO_RE = re.compile(r"^\d{1,4}$")
+# A line carrying any of these is real code and is NEVER stripped, even if it also
+# matches a furniture pattern (defensive: a string/comment mentioning "Chapter").
+_CODE_SIGNAL_RE = re.compile(
+    r"[=(){}\[\];]|->|=>|::|\bself\.|\.\w+\(|#include|std::|"
+    r"^\s*(?:def|class|import|from|return|if|elif|else|for|while|with|try|except|"
+    r"finally|raise|yield|assert|print|lambda|async|await|int|void|char|struct|"
+    r"public|private|func|var|const|let)\b"
+)
+
+
+def _strip_code_furniture(content: str) -> str:
+    """Drop page-furniture lines (running headers, captions, edge page numbers) that
+    the extractor inlined into a code element. Lines with any code signal are kept
+    verbatim; indentation of real code is untouched. Lossless (furniture is captured
+    separately as its own element). Iterates to a fixpoint: removing a header can
+    expose a new edge page-number, so one pass is not idempotent."""
+    prev = None
+    cur = content
+    for _ in range(5):  # converges in <=2 passes in practice; bounded for safety
+        prev = cur
+        cur = _strip_code_furniture_once(prev)
+        if cur == prev:
+            break
+    return cur
+
+
+def _strip_code_furniture_once(content: str) -> str:
+    lines = content.split("\n")
+    is_furn = []
+    for ln in lines:
+        s = ln.strip()
+        if not s:
+            is_furn.append(False)
+            continue
+        if _CODE_SIGNAL_RE.search(s):
+            is_furn.append(False)
+            continue
+        is_furn.append(bool(_FURNITURE_LINE_RE.match(s)))
+    # Bare page-number lines are furniture only at a block edge or next to a header.
+    nonempty_idx = [i for i, ln in enumerate(lines) if ln.strip()]
+    edge = {nonempty_idx[0], nonempty_idx[-1]} if nonempty_idx else set()
+    for i, ln in enumerate(lines):
+        s = ln.strip()
+        if not s or is_furn[i] or not _BARE_PAGENO_RE.match(s):
+            continue
+        if _CODE_SIGNAL_RE.search(s):
+            continue
+        adj_furn = (i - 1 >= 0 and is_furn[i - 1]) or (i + 1 < len(lines) and is_furn[i + 1])
+        if i in edge or adj_furn:
+            is_furn[i] = True
+    cleaned = [ln for i, ln in enumerate(lines) if not is_furn[i]]
+    return "\n".join(cleaned)
+
+
 def _fence_code(content: str) -> str:
     """Wrap code in a Markdown fence (idempotent), engine-agnostically (F4).
 
@@ -663,7 +960,7 @@ def _code_element_to_uirchunk(
     pw, ph = _page_dims_px(page)
     return UIRChunk(
         modality=Modality.CODE,
-        content=_fence_code(element.content or ""),
+        content=_fence_code(_strip_code_furniture(element.content or "")),
         locator=Locator(
             type=LocatorType.BBOX,
             bbox=bbox,
@@ -713,33 +1010,56 @@ def _form_element_to_uirchunk(
 # ---------------------------------------------------------------------------
 
 
-def _partition_text_elements(
+def _is_heading_element(e: Element) -> bool:
+    """True for a non-empty element the engine labelled as a heading."""
+    label = (e.source_label or "").lower().replace("-", "_").replace(" ", "_")
+    return label in _HEADING_LABELS and bool(e.content.strip())
+
+
+def _split_into_heading_sections(
     elements: List[Element],
-    page_number: int,
+) -> List[Tuple[Optional[str], List[Element]]]:
+    """Split a text buffer into heading-led sections (PLAN_QUALITY_REMEDIATION WP-B1).
+
+    A heading element opens a new section. Consecutive headings with no body between
+    them join ONE section (a title split over two elements stays together and no
+    heading-only micro chunk appears); the section's heading is the LAST heading of
+    that run, the more specific one. Elements before the first heading form a leading
+    section whose heading is ``None``: carry-forward / TOC fill it later
+    (``_assign_headings``) or it stays honestly null. The section heading is a
+    property of the section, never of the whole buffer.
+    """
+    sections: List[Tuple[Optional[str], List[Element]]] = []
+    current: List[Element] = []
+    heading: Optional[str] = None
+    has_body = False
+    for e in elements:
+        if _is_heading_element(e):
+            if current and has_body:
+                sections.append((heading, current))
+                current, has_body = [], False
+            current.append(e)
+            heading = e.content.strip()
+        else:
+            current.append(e)
+            has_body = True
+    if current:
+        sections.append((heading, current))
+    return sections
+
+
+def _partition_group(
+    elements: List[Element],
+    parent_heading: Optional[str],
     page_w: float,
     page_h: float,
     max_chars: int,
     min_chars: int,
 ) -> List[Tuple[str, str, List[int], Optional[str], Dict[str, Any]]]:
-    """Partition consecutive TEXT elements into chunk-sized groups.
-
-    Returns list of (content, label, bbox, parent_heading, metadata) tuples.
-    Each tuple represents one candidate chunk.
-    """
-    if not elements:
-        return []
-
+    """Chunk-size partition of ONE section (label, provenance, text, bbox, size split)."""
     # Determine the dominant label for this group
     labels = [e.source_label for e in elements if e.source_label]
     dominant_label = _most_common(labels) if labels else "text"
-
-    # Find the most-recent heading element before this text group
-    # (heading is typically a separate element with section_header label)
-    parent_heading: Optional[str] = None
-    for e in elements:
-        if e.source_label.lower().replace("-", "_").replace(" ", "_") in _HEADING_LABELS:
-            if e.content.strip():
-                parent_heading = e.content.strip()
 
     # Aggregate any original_vlm_type provenance markers carried by the
     # constituent elements (a degraded-unknown VLM type smuggled in as TEXT).
@@ -757,11 +1077,40 @@ def _partition_text_elements(
         return [(full_text, dominant_label, current_bbox, parent_heading, group_metadata)]
 
     # Split at sentence boundaries
-    parts = _split_at_sentence_boundaries(full_text, max_chars, min_chars)
+    parts = _split_at_sentence_boundaries(
+        full_text,
+        max_chars,
+        min_chars,
+        entry_labels=_is_reference_section(parent_heading, full_text),
+    )
     result: List[Tuple[str, str, List[int], Optional[str], Dict[str, Any]]] = []
     for part in parts:
         result.append((part, dominant_label, current_bbox, parent_heading, group_metadata))
 
+    return result
+
+
+def _partition_text_elements(
+    elements: List[Element],
+    page_number: int,
+    page_w: float,
+    page_h: float,
+    max_chars: int,
+    min_chars: int,
+) -> List[Tuple[str, str, List[int], Optional[str], Dict[str, Any]]]:
+    """Partition consecutive TEXT elements into chunk-sized groups.
+
+    Returns list of (content, label, bbox, parent_heading, metadata) tuples.
+    Each tuple represents one candidate chunk. Headings are chunk boundaries
+    (WP-B1): the buffer is first split into heading-led sections, each section is
+    then size-partitioned on its own, and every part inherits ITS section's heading
+    and bounding box (never the last heading / union of the whole buffer).
+    """
+    if not elements:
+        return []
+    result: List[Tuple[str, str, List[int], Optional[str], Dict[str, Any]]] = []
+    for heading, group in _split_into_heading_sections(elements):
+        result.extend(_partition_group(group, heading, page_w, page_h, max_chars, min_chars))
     return result
 
 
@@ -770,15 +1119,42 @@ def _partition_text_elements(
 # ---------------------------------------------------------------------------
 
 
+# Reference-list entry labels (PLAN_QUALITY_REMEDIATION WP-C2). A bracketed label counts at a
+# line start OR inline right after a sentence end (a list emitted as ONE element has no newline
+# before "[11]"); "(n)" / "n." labels count only at a line start. All need a capital after them,
+# so a body citation such as "Reference [10] presented ..." is never an entry.
+_ENTRY_LABEL_RE = re.compile(
+    r"(?:(?<=\n)|(?<=[.] ))\[\d+\]\s+(?=[A-Z])"
+    r"|(?<=\n)(?:\(\d+\)|\d+\.)\s+(?=[A-Z])"
+)
+_BRACKET_LABEL_RE = re.compile(r"\[\d+\]\s+[A-Z]")
+_REFERENCE_HEADING_RE = re.compile(
+    r"^\W*(?:\d+\.?\s*)?(?:references|bibliography|literature cited|works cited|"
+    r"literaturverzeichnis|referenties|literatuur)\b",
+    re.I,
+)
+
+
+def _is_reference_section(parent_heading: Optional[str], text: str) -> bool:
+    """True for a bibliography: a References-class heading or >= 3 bracketed entry labels."""
+    if parent_heading and _REFERENCE_HEADING_RE.match(parent_heading):
+        return True
+    return len(_BRACKET_LABEL_RE.findall(text)) >= 3
+
+
 def _split_at_sentence_boundaries(
     text: str,
     max_chars: int,
     min_chars: int,
+    entry_labels: bool = False,
 ) -> List[str]:
     """Split text at sentence boundaries, respecting the char budget.
 
     Prefers splitting at `. `, `! `, `? `; falls back to newline splits
-    when no sentence boundary is found within the budget.
+    when no sentence boundary is found within the budget. With ``entry_labels``
+    (a references-class section) a boundary immediately BEFORE the last entry
+    label inside the window wins over any sentence end, so a citation is never
+    cut mid-record ("vol. 4, no." | "8, August 2013").
     """
     if len(text) <= max_chars:
         return [text]
@@ -796,7 +1172,15 @@ def _split_at_sentence_boundaries(
         search_end = cursor + max_chars
         best_split = -1
 
+        if entry_labels:
+            # Rank 1 (WP-C2): the last entry label starting inside the window.
+            for m in _ENTRY_LABEL_RE.finditer(text, search_start, search_end):
+                if m.start() > cursor:
+                    best_split = m.start()
+
         for i in range(search_end - 1, search_start - 1, -1):
+            if best_split >= 0:
+                break
             if i >= len(text):
                 continue
             ch = text[i]

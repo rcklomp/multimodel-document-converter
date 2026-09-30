@@ -186,6 +186,9 @@ re-measured on M5.
 - [ ] Operator serves the shortlist.
 - [ ] Run A/B, score, decide.
 
+> STATUS 2026-09-29: this checklist was not updated after the evaluation ran: Section 10 records the
+> result (2026-06-05, MinerU2.5 selected). (plan WP-G3, AP-37)
+
 ## 10. RESULT (2026-06-05): MinerU2.5 wins; topology stays Config C
 
 Empirical A/B on the 15-page golden set (M5 + GX10), deterministic scorecard:
@@ -234,6 +237,10 @@ re-quant/re-calibration. The judge->Mac-Mini swap is dominated (judge+embedder
 collide during soaks + re-cal cost). **Config F** (parallel extraction on M5+GX10,
 judge time-shared on GX10 across phases) remains an OPTIONAL throughput upgrade for
 the full corpus/Grand Soak; not needed for correctness.
+
+> STATUS 2026-09-29: superseded 2026-06-10: MinerU serving home = GX10 vLLM, mlx MinerU serving deprecated
+> (`docs/DECISIONS.md` "Phase 0B interim default + MinerU serving home + cap1600 render"). The M5, GX10 and
+> omlx hosts were unreachable on 2026-09-29 (plan decision D-2). (plan WP-G3, AP-37)
 
 ## 12. Config F measurement (2026-06-05): GX10 vLLM throughput vs M5
 
@@ -400,6 +407,10 @@ Three distinct findings:
    route) shipped 2026-06-06 as the default `MineruQwenHybridEngine` (DECISIONS.md
    "MinerU+Qwen-for-code hybrid is the default extraction route").
 
+   > STATUS 2026-09-29: PLAN_R3_CODE_GATE_REDESIGN.md is no longer in docs/: commit 2f6e769 (2026-06-15)
+   > archived it (not readable by agents); its decision record is the DECISIONS entry named above.
+   > (plan WP-G3, AP-40, INV-085)
+
 3. **MinerU model-quality residual (not converter-fixable):** some AIOS pseudocode
    has recognition errors - `self.` read as `self(`, `self/response`, a typo
    `createed_time`, and one `class Scheduler` block flattened to a single line.
@@ -411,6 +422,9 @@ Also re-confirmed: the AIOS HEADING gate WARN/FAIL at 110/138 = 79.7% (just unde
 0.80) - a genuine borderline coverage signal on an academic paper with reference/
 caption chunks lacking headings; not the tabular_document class (it has real
 headings). Left as-is (a real signal, not over-firing).
+
+> STATUS 2026-09-29: resolved 2026-06-08 by the F6 cross-page dedup (`b9d15aa`): AIOS HEADING 79.7% -> 100%
+> per `docs/PLAN_GATE_QUALITY_V1.md`. (plan WP-G3, AP-13)
 
 **Net:** the MinerU default is validated across golden 6/6 + soak 7/7 + scanned;
 AIOS is the one hard doc that surfaces a real model-quality limit (#3) and a

@@ -68,6 +68,7 @@ from .schema.ingestion_schema import (
     create_table_chunk,
     create_text_chunk,
 )
+from .version import __engine_version__ as ENGINE_VERSION
 from .version import __schema_version__ as SCHEMA_VERSION
 
 # V2.4.0: Shadow extraction is a CORE REQUIREMENT (REQ-MM-05/06/07, IRON-07)
@@ -99,6 +100,7 @@ from .validators.token_validator import (
     create_token_validator,
     TokenValidationResult,
 )
+from .validators.image_drop_ledger import ImageDropLedger
 from .validators.quality_filter_tracker import (
     QualityFilterTracker,
     FilterCategory,
@@ -138,6 +140,304 @@ _CODE_EVIDENCE_KEYWORDS: tuple = (
 _CODE_FENCE_THRESHOLD: int = 5
 # Minimum weighted code-line ratio in the page sample.
 _CODE_RATIO_THRESHOLD: float = 0.10
+
+# --- PLAN_F1 4.1: text_native_code page signal -----------------------------
+# Font-INDEPENDENT born-digital code-page signal. RECALIBRATED after the WP-4
+# spike (PLAN_F1 1.1 / report): the original keyword-START-fraction + leading-
+# whitespace-depth channels were calibrated on SYNTHETIC fixtures and fired on 0
+# of 39 real Jungjun code pages and ~0 Chaubal code pages, because (a) real PDFs
+# encode indentation as x-position or non-breaking spaces that ``get_text`` does
+# NOT surface as regular leading whitespace, and (b) the def/class/import-only
+# keyword set misses body-heavy code (loops, calls, assignments). The robust
+# discriminator is the CODE-LINE RATIO: the fraction of non-blank lines that look
+# like code statements (keyword headers, assignments, or call expressions). This
+# fires on real code pages (Chaubal/Jungjun ~0.5-0.8) and stays ~0 on the frozen
+# Workstream B negatives (prose, magazines, incidental shell, poetry, nested
+# lists), which carry indentation but not code syntax. Fenced code still qualifies
+# via the existing threshold. A real text layer (>= _TEXT_NATIVE_MIN_CHARS) is a
+# precondition: the signal gates the Mechanism-B text-layer patch, meaningless on
+# raster pages. The over-trigger contract is the Workstream B negative set.
+_TEXT_NATIVE_MIN_CHARS: int = 100
+_TEXT_NATIVE_CODE_RATIO_MIN: float = 0.40
+
+_TN_KEYWORDS: tuple = (
+    "def ", "class ", "import ", "from ", "return", "yield", "for ", "while ",
+    "if ", "elif ", "else", "try", "except", "finally", "with ", "async ",
+    "await ", "raise ", "print(", "assert ", "lambda ", "@",
+)
+_TN_ASSIGN = re.compile(r"[^=!<>]=[^=]")       # a plain/augmented assignment, not ==/!=/<=/>=
+_TN_CALL = re.compile(r"[A-Za-z_]\w*\(")        # function/method call
+
+
+def _tn_is_code_line(stripped: str) -> bool:
+    """True if a stripped line looks like a code statement (not prose/list/kv)."""
+    if any(stripped.startswith(k) for k in _TN_KEYWORDS):
+        return True
+    if _TN_ASSIGN.search(stripped):
+        return True
+    if _TN_CALL.search(stripped):
+        return True
+    if stripped.endswith(":") and "(" in stripped:  # suite header
+        return True
+    return False
+
+
+# --- PLAN_F1 Phase 1 residual-defect fixes (user J1, 2026-06-12) -----------
+# Three real extraction defects surfaced by the Jungjun oracle (all ORTHOGONAL to
+# indentation): (b) smart quotes used as code delimiters, (c) single/double/f-strings
+# hard-wrapped across printed-source lines (illegal in Python -> parse fail), and
+# (a) code blocks cut mid-docstring across a chunk boundary. Fixes are conservative
+# and apply to CODE chunks only.
+_SMART_QUOTES = {
+    "“": '"', "”": '"', "″": '"',   # " " ”  -> "
+    "‘": "'", "’": "'", "′": "'",   # ' ' ′  -> '
+}
+_SMART_QUOTE_TABLE = str.maketrans(_SMART_QUOTES)
+
+
+def _normalize_code_quotes(text: str) -> str:
+    """(b/K2) Replace typographic/smart quotes with ASCII quotes AND non-breaking
+    spaces (U+00A0) with regular spaces (code chunks only). nbsp is how some PDFs
+    encode leading indentation; normalizing it to spaces both fixes the literal
+    "invalid non-printable U+00A0" parse error and preserves the indent depth."""
+    return (text or "").translate(_SMART_QUOTE_TABLE).replace(" ", " ")
+
+
+# WS2a (PLAN_FIDELITY_ORACLE_FIRST_V1 Section 3'): fullwidth ASCII-variant
+# punctuation/digits (Unicode "Halfwidth and Fullwidth Forms", offset 0xFEE0) that
+# a VLM emits in place of their ASCII code counterparts - the `[:，2]` fullwidth-comma
+# class of Chaubal engine token corruption. Each has an UNAMBIGUOUS 1:1 ASCII
+# equivalent, so this is a correct-by-construction scrub, not a guess. Restricted to
+# punctuation + digits; fullwidth LETTERS are excluded (they can be legitimate string
+# content, where a guess WOULD be wrong). The ambiguous Chaubal corruptions
+# (de-LaTeX `\(\equiv\)` -> `=` vs `==`; CJK-garbage stripping) are DEFERRED - they
+# need a trustworthy code-fidelity measure this project does not yet have.
+_FULLWIDTH_CODE_TABLE = {
+    cp: cp - 0xFEE0
+    for cp in (
+        list(range(0xFF01, 0xFF10))  # !"#$%&'()*+,-./
+        + list(range(0xFF10, 0xFF1A))  # 0-9
+        + list(range(0xFF1A, 0xFF21))  # :;<=>?@
+        + list(range(0xFF3B, 0xFF41))  # [\]^_`
+        + list(range(0xFF5B, 0xFF5F))  # {|}~
+    )
+}
+
+
+def _normalize_code_fullwidth(text: str) -> str:
+    """(WS2a) Map fullwidth ASCII-variant punctuation/digits back to ASCII in code
+    chunks. Unambiguous 1:1 (the fullwidth block is NFKC-equivalent to ASCII);
+    fullwidth letters are intentionally NOT touched. Idempotent / no-op on clean
+    code."""
+    return (text or "").translate(_FULLWIDTH_CODE_TABLE)
+
+
+def _strip_code_fences(text: str) -> str:
+    """(K1) Drop markdown code-fence lines (``` / ~~~, optionally language-tagged)
+    that the VLM emits around code blocks. A fence line is pure syntax noise in a
+    code chunk and is line 1's `invalid syntax` parse failure on Chaubal."""
+    return "\n".join(
+        ln for ln in (text or "").split("\n")
+        if not ln.strip().startswith(("```", "~~~"))
+    )
+
+
+def _scan_code_line(line: str, triple: "Optional[str]") -> "Tuple[Optional[str], bool]":
+    """Scan one line starting inside triple-string ``triple`` (or None).
+
+    Returns ``(end_triple, nontriple_string_open)``: the triple-delimiter still
+    open at line end (carried to the next line - legal multiline docstring), and
+    whether a SINGLE/DOUBLE/f-string was left open at line end (an illegal
+    hard-wrap that must be rejoined). ``#`` comments outside strings end scanning.
+    """
+    i, n = 0, len(line)
+    s = triple  # active string delimiter (triple, or single/double, or None)
+    while i < n:
+        if s in ('"""', "'''"):
+            if line[i:i + 3] == s:
+                s = None
+                i += 3
+                continue
+            i += 1
+            continue
+        if s in ("'", '"'):
+            if line[i] == "\\":
+                i += 2
+                continue
+            if line[i] == s:
+                s = None
+                i += 1
+                continue
+            i += 1
+            continue
+        # not in a string
+        c = line[i]
+        if c == "#":
+            break
+        if line[i:i + 3] in ('"""', "'''"):
+            s = line[i:i + 3]
+            i += 3
+            continue
+        if c in ("'", '"'):
+            s = c
+            i += 1
+            continue
+        i += 1
+    if s in ('"""', "'''"):
+        return s, False           # still inside a (legal) triple-quoted block
+    if s in ("'", '"'):
+        return None, True         # non-triple string left open -> wrapped line
+    return None, False
+
+
+def _rejoin_wrapped_code_lines(text: str) -> str:
+    """(c) Conservatively rejoin lines where a NON-triple string is left open.
+
+    A bare ``"abc`` / ``'abc`` at a line end is always a Python syntax error - it
+    is a printed-source hard-wrap. Join it with following line(s) (word-wrap
+    convention: single space) until the string closes. Triple-quoted docstrings
+    that legally span lines are NOT touched. Open brackets alone are legal
+    multiline and are left as-is (conservative: only rejoin what breaks parse).
+    """
+    raw = (text or "").split("\n")
+    out: "List[str]" = []
+    triple: "Optional[str]" = None
+    i = 0
+    while i < len(raw):
+        line = raw[i]
+        while True:
+            end_triple, nontriple_open = _scan_code_line(line, triple)
+            if nontriple_open and i + 1 < len(raw):
+                line = line + " " + raw[i + 1].lstrip()
+                i += 1
+                continue
+            break
+        triple = end_triple
+        out.append(line)
+        i += 1
+    return "\n".join(out)
+
+
+def _code_bracket_depth(line: str) -> int:
+    """Net unclosed ([{ depth at end of a line, ignoring strings and # comments."""
+    d = 0
+    s = None
+    i = 0
+    n = len(line)
+    while i < n:
+        if s:
+            if s in ("'", '"') and line[i] == "\\":
+                i += 2
+                continue
+            if s in ('"""', "'''") and line[i:i + 3] == s:
+                s = None
+                i += 3
+                continue
+            if s in ("'", '"') and line[i] == s:
+                s = None
+            i += 1
+            continue
+        c = line[i]
+        if c == "#":
+            break
+        if line[i:i + 3] in ('"""', "'''"):
+            s = line[i:i + 3]
+            i += 3
+            continue
+        if c in ("'", '"'):
+            s = c
+        elif c in "([{":
+            d += 1
+        elif c in ")]}":
+            d = max(0, d - 1)
+        i += 1
+    return d
+
+
+def _rejoin_open_brackets(text: str) -> str:
+    """Collapse open-bracket line continuations (no separator: code wraps split
+    mid-token, e.g. ``request.tool`` + ``s``). REPAIR-ONLY use: collapsing legal
+    multi-line calls is non-conservative, so only apply when the chunk does not
+    already parse and keep the result only if it then parses (see _repair_code_content).
+    """
+    raw = text.split("\n")
+    out: "List[str]" = []
+    i = 0
+    while i < len(raw):
+        line = raw[i]
+        while _code_bracket_depth(line) > 0 and i + 1 < len(raw):
+            line = line + raw[i + 1].lstrip()
+            i += 1
+        out.append(line)
+        i += 1
+    return "\n".join(out)
+
+
+def _repair_code_content(text: str) -> str:
+    """PLAN_F1 J1 (b)+(c): normalize smart quotes, rejoin open-string hard-wraps,
+    and (only if still unparseable) rejoin open-bracket wraps - keeping the bracket
+    rejoin solely when it makes the chunk parse, so a parseable chunk is never
+    degraded. No-op on already-clean code (idempotent)."""
+    cleaned = _strip_code_fences(_normalize_code_fullwidth(_normalize_code_quotes(text or "")))
+    fixed = _rejoin_wrapped_code_lines(cleaned)
+    try:
+        import ast as _ast
+        _ast.parse(fixed)
+        return fixed
+    except (SyntaxError, ValueError):
+        pass
+    candidate = _rejoin_open_brackets(fixed)
+    try:
+        import ast as _ast
+        _ast.parse(candidate)
+        return candidate
+    except (SyntaxError, ValueError):
+        return fixed
+
+
+def _leaves_docstring_open(text: str) -> bool:
+    """True if ``text`` ends inside an unterminated triple-quoted string (a code
+    block cut mid-docstring across a chunk boundary - PLAN_F1 J1 (a))."""
+    triple = None
+    for line in (text or "").split("\n"):
+        triple, _ = _scan_code_line(line, triple)
+    return triple in ('"""', "'''")
+
+
+def _score_text_native_code(page_text: str) -> "Tuple[bool, dict]":
+    """Decide whether a page is born-digital code from its text-layer text alone.
+
+    Returns ``(is_text_native_code, channels)``. Font-independent by construction
+    (P1 is font-blind) and indentation-encoding-independent (uses code SYNTAX, not
+    leading whitespace, which ``get_text`` strips for x-positioned indentation).
+    """
+    text = (page_text or "").replace("\xa0", " ")  # normalize nbsp -> space
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    n = len(lines)
+    channels = {
+        "chars": len(text.strip()),
+        "lines": n,
+        "code_ratio": 0.0,
+        "kw_starts": 0,
+        "fence": 0,
+        "depths": 0,
+    }
+    if n == 0 or channels["chars"] < _TEXT_NATIVE_MIN_CHARS:
+        return False, channels
+
+    code_lines = sum(1 for ln in lines if _tn_is_code_line(ln.strip()))
+    fence = sum(1 for ln in lines if ln.lstrip().startswith(("```", "~~~")))
+    kw = sum(1 for ln in lines if any(ln.lstrip().startswith(k) for k in _CODE_EVIDENCE_KEYWORDS))
+    depths = len({len(ln) - len(ln.lstrip(" \t")) for ln in lines if len(ln) - len(ln.lstrip(" \t")) > 0})
+
+    channels["code_ratio"] = round(code_lines / n, 3)
+    channels["kw_starts"] = kw
+    channels["fence"] = fence
+    channels["depths"] = depths
+
+    dense_code = channels["code_ratio"] >= _TEXT_NATIVE_CODE_RATIO_MIN
+    fenced_code = fence >= _CODE_FENCE_THRESHOLD
+    return bool(dense_code or fenced_code), channels
 
 
 def _select_code_evidence_sample_indices(total_pages: int) -> "List[int]":
@@ -1102,6 +1402,83 @@ class BatchProcessor:
             )
         return surviving
 
+    def _filter_thin_strip_images(
+        self, chunks: List[IngestionChunk]
+    ) -> List[IngestionChunk]:
+        """Drop thin-strip IMAGE chunks (table-row fragments mis-emitted as images).
+
+        WS2b (PLAN_FIDELITY_ORACLE_FIRST_V1 Section 3'): MinerU/hybrid sometimes
+        emits a table-header or table-row band (e.g. 720x28, aspect 26) as an IMAGE
+        region. The table CONTENT is already captured as a TABLE chunk, so the strip
+        is a redundant crop that only fails the strict IMAGE gate
+        (`qa_conversion_audit.py` flags rendered ``aspect > 25`` as ``thin_strips``,
+        a hard FAIL - the Adedeji deterministic failure). This is the fix half of
+        fix-and-guard: it culls EXACTLY what the gate flags (rendered aspect > 25),
+        behind a page-coverage guard so a strip that is the only content on its page
+        is never orphaned into MISSING_PAGES. The bbox is not used (a hallucinated
+        VLM bbox is unreliable); the rendered asset is the only trustworthy size.
+        """
+        if not getattr(self, "_drop_thin_strip_images", True):
+            return chunks
+        from PIL import Image
+
+        STRIP_ASPECT = 25  # matches qa_conversion_audit.py thin_strip predicate
+
+        def _page(c: IngestionChunk) -> Optional[int]:
+            return c.metadata.page_number if c.metadata else None
+
+        strip_ids: set[int] = set()
+        info: Dict[int, Tuple[str, int, int, Path]] = {}
+        for c in chunks:
+            if c.modality != Modality.IMAGE:
+                continue
+            asset_ref = getattr(c, "asset_ref", None)
+            asset_path = getattr(asset_ref, "file_path", None) if asset_ref else None
+            if not asset_path:
+                continue
+            full = self.output_dir / asset_path
+            if not full.exists():
+                continue
+            try:
+                with Image.open(full) as im:
+                    w, h = im.size
+            except Exception:
+                continue
+            if max(w, h) / max(min(w, h), 1) > STRIP_ASPECT:
+                strip_ids.add(id(c))
+                info[id(c)] = (asset_path, w, h, full)
+
+        if not strip_ids:
+            return chunks
+
+        # Page-coverage guard: keep a strip that is the only content on its page.
+        pages_with_other = {
+            _page(c) for c in chunks if id(c) not in strip_ids and _page(c) is not None
+        }
+
+        surviving: List[IngestionChunk] = []
+        dropped = 0
+        for c in chunks:
+            if id(c) in strip_ids and _page(c) in pages_with_other:
+                asset_path, w, h, full = info[id(c)]
+                dropped += 1
+                logger.info(
+                    f"[THIN-STRIP] Dropping thin-strip image {asset_path} "
+                    f"({w}x{h}px, aspect={max(w, h) / max(min(w, h), 1):.0f})"
+                )
+                try:
+                    full.unlink()
+                except Exception:
+                    pass
+                continue
+            surviving.append(c)
+        if dropped:
+            logger.info(
+                f"[FINALIZE] Dropped {dropped} thin-strip image chunk(s) "
+                "(table-row fragments)"
+            )
+        return surviving
+
     def _promote_or_drop_empty_tables(
         self, chunks: List[IngestionChunk]
     ) -> List[IngestionChunk]:
@@ -1496,13 +1873,19 @@ class BatchProcessor:
         # rebuild them heading-less (observed on Kimothi: a MuPDF PNG encode
         # crash discarded 151 extracted elements). Fail open - keep the text.
         try:
-            materialize_visual_assets(
+            report = materialize_visual_assets(
                 uir_chunks,
                 batch_path,
                 self.assets_dir,
                 doc_hash=self._doc_hash or "doc",
                 page_offset=page_offset,
             )
+            # WP-A1: keep every crop's provenance for the crop_audit.json sidecar (the report
+            # used to be discarded here, so a wrong-object crop left no trace).
+            records = getattr(self, "_crop_audit_records", None)
+            if records is None:
+                records = self._crop_audit_records = []
+            records.extend(crop.to_record() for crop in report.crops)
         except Exception as exc:
             logger.warning(
                 "[V3-ASSET] visual asset rendering failed for %s; continuing "
@@ -1534,6 +1917,99 @@ class BatchProcessor:
                 # "__heading_map__" (title -> breadcrumb) is page-independent.
                 local[key] = value
         return local or None
+
+    def _maybe_dump_uir(self, universal_doc, batch_info, chunker_inputs) -> None:
+        """Opt-in dump of the extracted UIR (PLAN_QUALITY_REMEDIATION WP-0.5).
+
+        ``MMRAG_DUMP_UIR=<dir>`` writes one ``<doc_hash>_bNNN.uir.json`` per batch
+        together with the chunker's other inputs (TOC, carry-in heading), so a chunker
+        change can be A/B-tested on the SAME paid, non-deterministic extraction. With the
+        variable unset nothing is written. Never raises: a dump failure must not lose
+        the batch.
+        """
+        import os
+
+        dump_dir = os.environ.get("MMRAG_DUMP_UIR")
+        if not dump_dir:
+            return
+        try:
+            from .universal.serialization import dump_uir
+
+            name = f"{self._doc_hash or 'doc'}_b{batch_info.batch_index:03d}.uir.json"
+            dump_uir(universal_doc, Path(dump_dir) / name, chunker_inputs)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[UIR-DUMP] failed (%s); continuing without a dump", exc)
+
+    # Fail-closed ladder tier severity (PLAN_EXTRACTION_FIDELITY_V1 Section 5.4):
+    # None (primary served) < docling_fast < pymupdf_terminal. Aggregating the
+    # MOST-severe tier across batches answers "did any page need the ladder?".
+    _FALLBACK_SEVERITY = {None: 0, "docling_fast": 1, "pymupdf_terminal": 2}
+
+    def _accumulate_extraction_provenance(self, universal_doc) -> None:
+        """Fold one batch's extraction provenance into the doc-level summary.
+
+        Reads the ``extraction_*`` stamps that ``mmrag_v3.extract`` records on
+        ``universal_doc.metadata.extra`` (served engine, fail-closed fallback
+        tier, degraded/recovered page counts) and aggregates them across the
+        document's batches: the first engine seen, the most-severe ladder tier
+        engaged anywhere, and summed degraded/recovered page counts. ADVISORY
+        observability for the Section 5.4 consumers; never gates anything.
+        """
+        extra = getattr(getattr(universal_doc, "metadata", None), "extra", None) or {}
+        acc = self._extraction_provenance
+        engine = extra.get("extraction_engine")
+        if engine and acc["engine"] is None:
+            acc["engine"] = engine
+        fallback = extra.get("extraction_fallback")
+        sev = self._FALLBACK_SEVERITY.get(fallback, 1 if fallback else 0)
+        cur_sev = self._FALLBACK_SEVERITY.get(acc["fallback"], 1 if acc["fallback"] else 0)
+        if sev > cur_sev:
+            acc["fallback"] = fallback
+        acc["degraded"] += int(extra.get("extraction_degraded_pages") or 0)
+        acc["recovered"] += int(extra.get("extraction_recovered_pages") or 0)
+        acc["quality_risk"] += int(extra.get("extraction_quality_risk_pages") or 0)
+        acc["code_repaired"] += int(extra.get("extraction_code_repaired_pages") or 0)
+
+    def _accumulate_routing_provenance(self, universal_doc) -> None:
+        """Aggregate the per-batch VLM routing stamps (WP-C4) into doc-level totals.
+
+        ``None`` means "no batch reported routing" (a single-lane engine): the header fields then
+        stay null instead of claiming zero.
+        """
+        extra = getattr(getattr(universal_doc, "metadata", None), "extra", None) or {}
+        acc = self._extraction_routing
+        model = extra.get("extraction_vlm_model")
+        if model and not acc["vlm_model"]:
+            acc["vlm_model"] = str(model)
+        for src, dst in (("extraction_vlm_served_pages", "vlm_served"), ("extraction_demoted_pages", "demoted")):
+            value = extra.get(src)
+            if value is not None:
+                acc[dst] = int(acc[dst] or 0) + int(value)
+
+    def _config_hash(self, profile_type: Optional[str]) -> str:
+        """Hash of the options that change THIS run's output (never keys or endpoints)."""
+        from .chunking.uir_chunker import DEFAULT_MAX_CHARS
+        from .provenance import compute_config_hash
+
+        try:
+            from mmrag_v3.engines.vlm_native import _render_max_px
+
+            render_cap = _render_max_px()
+        except Exception:  # noqa: BLE001 - provenance must never break export
+            render_cap = None
+        return compute_config_hash(
+            {
+                "engine_version": ENGINE_VERSION,
+                "schema_version": SCHEMA_VERSION,
+                "profile_type": profile_type,
+                "extraction_route": self._extraction_provenance.get("engine"),
+                "vlm_model": self._extraction_routing.get("vlm_model"),
+                "render_cap_px": render_cap,
+                "batch_size": self.batch_size,
+                "chunk_max_chars": DEFAULT_MAX_CHARS,
+                "drop_running_furniture": bool(getattr(self, "_drop_running_furniture", True)),
+            }
+        )
 
     def _process_single_batch(
         self,
@@ -1573,6 +2049,8 @@ class BatchProcessor:
         profile_type = self._intelligence_metadata.get("profile_type") or None
 
         universal_doc = v3_extract(str(batch_info.batch_path))
+        self._accumulate_extraction_provenance(universal_doc)
+        self._accumulate_routing_provenance(universal_doc)
 
         # PLAN_V3.1 P2: thread the PyMuPDF TOC (extracted document-wide in
         # process_pdf, keyed by ABSOLUTE page) into the UIR-native chunker as
@@ -1580,10 +2058,25 @@ class BatchProcessor:
         # sees batch-local page numbers; the absolute-page projection happens
         # below). Drives cross-page heading carry-forward + breadcrumb_path.
         local_toc = self._toc_for_batch(batch_info.page_offset)
+        self._maybe_dump_uir(
+            universal_doc,
+            batch_info,
+            {
+                "profile_type": profile_type,
+                "toc_headings": local_toc,
+                "carry_in_heading": self._carry_heading,
+                "carry_in_breadcrumb": self._carry_breadcrumb,
+                "batch_index": batch_info.batch_index,
+                "page_offset": batch_info.page_offset,
+            },
+        )
+        furniture_report: List[Any] = []
         uir_chunks = chunk_universal_document(
             universal_doc,
             profile_type=profile_type,
             toc_headings=local_toc,
+            drop_furniture=getattr(self, "_drop_running_furniture", True),
+            furniture_report=furniture_report,
             # Cluster B (2026-06-07): heading assignment runs per batch, so seed
             # it with the last active heading from the previous batch. Without
             # this, a batch whose chapter title appears only as a glued running
@@ -1593,6 +2086,8 @@ class BatchProcessor:
             carry_in_heading=self._carry_heading,
             carry_in_breadcrumb=self._carry_breadcrumb,
         )
+        self._register_furniture_drops(furniture_report, batch_info.page_offset)
+
         # Capture carry-out: the last text chunk that received a heading becomes
         # the seed for the next batch.
         for _uir in reversed(uir_chunks):
@@ -1700,6 +2195,26 @@ class BatchProcessor:
         # heading never bleeds into the next document in a batch CLI run.
         self._carry_heading = None
         self._carry_breadcrumb = None
+
+        # PLAN_EXTRACTION_FIDELITY_V1 Section 5.4: aggregate the per-batch
+        # extraction provenance (served engine + fail-closed ladder outcome,
+        # stamped on each UniversalDocument by mmrag_v3.extract) into a
+        # doc-level summary written onto the IngestionMetadata header. ADVISORY
+        # observability only; never affects gate semantics.
+        self._extraction_provenance = {
+            "engine": None,
+            "fallback": None,
+            "degraded": 0,
+            "recovered": 0,
+            "quality_risk": 0,
+            "code_repaired": 0,
+        }
+        # PLAN_QUALITY_REMEDIATION WP-C4: routing provenance kept OUT of the accumulator
+        # dict above (two tests pin that dict whole): the VLM that served the run and how
+        # many pages it served / demoted (a demoted page is otherwise invisible).
+        self._extraction_routing = {"vlm_model": None, "vlm_served": None, "demoted": None}
+        self._crop_audit_records = []
+        self._image_drops = ImageDropLedger()
 
         # Workstream B: legacy callers still get the cheap pre-pass here.
         # Canonical CLI paths pass a PdfConversionPlan with this decision already made.
@@ -2016,11 +2531,16 @@ class BatchProcessor:
         # 5. QA-CHECK-01: Token balance validation (with filtering awareness)
         # ====================================================================
 
+        # WP-A2b: from here on every IMAGE chunk the chain removes is itemized.
+        self._image_drop_ledger().begin(all_chunks)
+
         # Step 1: REQ-COORD-02 - Propagate page dimensions to ALL chunks
         all_chunks = self._propagate_page_dimensions(all_chunks)
 
         # Step 2: IRON-07 - Apply Full-Page Guard to filter/modify full-page assets
-        all_chunks = self._apply_full_page_guard(all_chunks)
+        all_chunks = self._track_image_drops(
+            "full_page_guard", all_chunks, self._apply_full_page_guard(all_chunks)
+        )
 
         # Step 3: QA-CHECK-01 - Validate token limits per chunk
         all_chunks, token_flagged_count = self._validate_token_limit_per_chunk(all_chunks)
@@ -2039,7 +2559,9 @@ class BatchProcessor:
         # ====================================================================
 
         # Apply quality filters (this fills the QualityFilterTracker)
-        filtered_chunks = self._apply_quality_filters(all_chunks)
+        filtered_chunks = self._track_image_drops(
+            "quality_filter", all_chunks, self._apply_quality_filters(all_chunks)
+        )
         # Keep a stable baseline count for recovery bookkeeping (avoid in-place mutations)
         filtered_baseline_count = len(filtered_chunks)
         filtered_count = len(all_chunks) - filtered_baseline_count
@@ -2203,7 +2725,9 @@ class BatchProcessor:
             all_chunks = self._sanitize_technical_manual_final(all_chunks)
         all_chunks = self._apply_oversize_breaker(all_chunks, max_chars=1500)
         all_chunks = self._normalize_chunk_text(all_chunks)  # PUA + whitespace normalization
-        all_chunks = self._filter_no_visual_images(all_chunks)
+        all_chunks = self._track_image_drops(
+            "no_visual_sentinel", all_chunks, self._filter_no_visual_images(all_chunks)
+        )
         all_chunks = self._filter_repetition_garbage(all_chunks)
         all_chunks = self._apply_table_recovery_highlander_dedup(all_chunks)
         # Drop recovery text chunks that duplicate the primary VLM extraction on
@@ -2302,6 +2826,7 @@ class BatchProcessor:
         # Write aggregated output to master JSONL with deduplication
         output_jsonl = self.output_dir / "ingestion.jsonl"
         written_chunks = 0
+        written_images = 0
         duplicate_count = 0
         export_error_count = 0
 
@@ -2331,6 +2856,7 @@ class BatchProcessor:
                 if c.modality == Modality.TEXT and c.metadata and c.metadata.page_number
             }
             _pre_filter = len(export_chunks)
+            _pre_export_chunks = export_chunks
             export_chunks = [
                 c for c in export_chunks
                 if not (
@@ -2341,6 +2867,7 @@ class BatchProcessor:
                     and c.metadata.page_number in pages_with_text
                 )
             ]
+            self._track_image_drops("full_page_editorial", _pre_export_chunks, export_chunks)
             _editorial_filtered = _pre_filter - len(export_chunks)
             if _editorial_filtered:
                 logger.info(
@@ -2348,11 +2875,22 @@ class BatchProcessor:
                 )
 
             # Drop/promote blank image/table assets.
-            export_chunks = self._filter_blank_assets(export_chunks)
+            export_chunks = self._track_image_drops(
+                "blank_asset", export_chunks, self._filter_blank_assets(export_chunks)
+            )
 
             # Drop icon/glyph-class image regions (sub-content tiny rasters that
             # only add retrieval noise + IMAGE_NO_VLM/ASSET_TINY advisories).
-            export_chunks = self._filter_tiny_icon_images(export_chunks)
+            export_chunks = self._track_image_drops(
+                "tiny_icon", export_chunks, self._filter_tiny_icon_images(export_chunks)
+            )
+
+            # Drop thin-strip image regions (table-row fragments mis-emitted as
+            # IMAGE; the table content is already a TABLE chunk). WS2b: clears the
+            # strict IMAGE gate's thin_strips hard-FAIL, page-coverage guarded.
+            export_chunks = self._track_image_drops(
+                "thin_strip", export_chunks, self._filter_thin_strip_images(export_chunks)
+            )
 
             # Re-apply oversize breaker: TABLE→TEXT promotion may create
             # text chunks exceeding the 1500-char gate.
@@ -2417,7 +2955,9 @@ class BatchProcessor:
                     f"[FINALIZE] chunk_id dedup: dropped {_dropped} byte-equal "
                     f"duplicate chunks (v2.9 Phase 1 follow-up)"
                 )
-            export_chunks = _deduped
+            export_chunks = self._track_image_drops(
+                "chunk_id_duplicate", export_chunks, _deduped
+            )
 
             # ============================================================
             # PLAN_V2.10 Phase 3 — `B4B_FULL_DOC_PICTURE_DEDUP`
@@ -2495,8 +3035,20 @@ class BatchProcessor:
                 has_encoding_corruption=self.has_encoding_corruption,
                 chunk_count=len(export_chunks),
                 ingestion_timestamp=datetime.now(timezone.utc).isoformat(),
-                pipeline_version=SCHEMA_VERSION,
+                pipeline_version=ENGINE_VERSION,
                 source_file_hash=_src_hash,
+                config_hash=self._config_hash(intel.get("profile_type")),
+                # PLAN_EXTRACTION_FIDELITY_V1 Section 5.4: doc-level extraction
+                # provenance aggregated across batches (advisory observability).
+                extraction_engine=self._extraction_provenance.get("engine"),
+                extraction_fallback=self._extraction_provenance.get("fallback"),
+                extraction_degraded_pages=self._extraction_provenance.get("degraded"),
+                extraction_recovered_pages=self._extraction_provenance.get("recovered"),
+                extraction_quality_risk_pages=self._extraction_provenance.get("quality_risk"),
+                extraction_code_repaired_pages=self._extraction_provenance.get("code_repaired"),
+                extraction_vlm_model=self._extraction_routing.get("vlm_model"),
+                extraction_vlm_served_pages=self._extraction_routing.get("vlm_served"),
+                extraction_demoted_pages=self._extraction_routing.get("demoted"),
             )
             f.write(json.dumps(meta_record.model_dump(mode="json"), ensure_ascii=False) + "\n")
 
@@ -2531,6 +3083,7 @@ class BatchProcessor:
                                 logger.error(error_msg)
                                 export_error_count += 1
                                 errors.append(error_msg)
+                                self._image_drop_ledger().record("asset_metadata_mismatch", chunk)
                                 continue
 
                     # ============================================================
@@ -2599,6 +3152,9 @@ class BatchProcessor:
                                                     logger.info(f"Deleted duplicate asset: {asset_file}")
                                                 except Exception as del_e:
                                                     logger.warning(f"Failed to delete duplicate: {del_e}")
+                                                self._image_drop_ledger().record(
+                                                    "phash_duplicate", chunk
+                                                )
                                                 continue  # Skip writing this chunk
                                         else:
                                             # Log successful registration; record
@@ -2680,6 +3236,8 @@ class BatchProcessor:
                     json_line = json.dumps(chunk_dict, ensure_ascii=False)
                     write_buffer.append(json_line)
                     written_chunks += 1
+                    if chunk.modality == Modality.IMAGE:
+                        written_images += 1
 
                     if len(write_buffer) >= DEFAULT_EXPORT_WRITE_BATCH_SIZE:
                         f.write("\n".join(write_buffer) + "\n")
@@ -2696,6 +3254,7 @@ class BatchProcessor:
                         f"Traceback:\n{traceback.format_exc()}"
                     )
                     errors.append(f"Finalize chunk {idx} failed: {e}")
+                    self._image_drop_ledger().record("export_error", chunk)
                     continue
 
             if write_buffer:
@@ -2735,19 +3294,13 @@ class BatchProcessor:
         # the first record after export so chunk_count reflects emitted chunks,
         # not pre-dedup candidates.
         try:
-            with open(output_jsonl, "r", encoding="utf-8") as _rf:
-                _lines = _rf.readlines()
-            if _lines:
-                _first = json.loads(_lines[0])
-                if _first.get("object_type") == "ingestion_metadata":
-                    _first["chunk_count"] = written_chunks
-                    _tmp = output_jsonl.with_suffix(output_jsonl.suffix + ".tmp")
-                    with open(_tmp, "w", encoding="utf-8") as _wf:
-                        _wf.write(json.dumps(_first, ensure_ascii=False) + "\n")
-                        _wf.writelines(_lines[1:])
-                    _tmp.replace(output_jsonl)
+            self._patch_export_file(output_jsonl, written_chunks)
         except Exception as e:
             logger.warning(f"[FINALIZE] Failed to reconcile metadata chunk_count: {e}")
+
+        self._write_crop_audit_sidecar(output_jsonl.parent)
+        for line in self._image_drop_ledger().summary_lines(written_images):
+            logger.warning(line)
 
         # Clean up orphan assets: files saved to disk during extraction but
         # not referenced in the final JSONL (e.g., Docling images skipped in
@@ -5687,13 +6240,62 @@ class BatchProcessor:
         recovered = 0
         fence_recovered = 0
         if self._current_pdf_path and self._current_pdf_path.exists():
+            # PLAN_F1 WP-2 (Mechanism B): on a born-digital text_native_code page
+            # the PDF text layer is the AUTHORITATIVE source for code indentation,
+            # so EVERY code chunk on such a page is re-served from the text-layer
+            # clip — both lanes, not only flat chunks. Precompute the page signal
+            # once (single PDF open) over the pages that actually carry code chunks.
+            code_pages = {
+                ch.metadata.page_number
+                for ch in chunks
+                if (
+                    ch.modality in (Modality.TEXT, Modality.CODE)
+                    and is_code_chunk(ch)
+                    and ch.metadata
+                    and ch.metadata.page_number
+                )
+            }
+            text_native_pages: dict = {}
+            if code_pages:
+                try:
+                    import fitz as _fitz
+
+                    _doc = _fitz.open(str(self._current_pdf_path))
+                    for _pno in code_pages:
+                        if 1 <= _pno <= len(_doc):
+                            _native, _ = _score_text_native_code(_doc[_pno - 1].get_text())
+                            text_native_pages[_pno] = _native
+                    _doc.close()
+                except Exception as _e:
+                    logger.debug(f"[CODE-INDENT] text_native_code precompute failed: {_e}")
+
             for ch in chunks:
-                if ch.modality != Modality.TEXT or not is_code_chunk(ch):
+                # Admit promoted Modality.CODE chunks, not only code smuggled as
+                # TEXT. V3 promotes code to Modality.CODE, which the old TEXT-only
+                # gate skipped, leaving this recovery dead on the entire promoted
+                # population (PLAN_F1 Phase 0(b) modality seam).
+                if ch.modality not in (Modality.TEXT, Modality.CODE) or not is_code_chunk(ch):
                     continue
                 try:
+                    page_num = ch.metadata.page_number if ch.metadata else None
+                    is_text_native = bool(text_native_pages.get(page_num, False))
+
                     fidelity = getattr(ch.metadata, "indentation_fidelity", None)
-                    if fidelity is not None and fidelity > 0:
-                        continue  # Already has indentation
+                    if fidelity is None:
+                        # The hygiene loop above stamps indentation_fidelity only
+                        # on TEXT chunks; derive the same flat/indented signal for
+                        # CODE chunks so already-indented code is not re-extracted.
+                        _code_lines = [ln for ln in (ch.content or "").splitlines() if ln.strip()]
+                        _has_indent = any(ln.startswith(("    ", "\t")) for ln in _code_lines)
+                        _has_repl = any(ln.lstrip().startswith(">>> ") for ln in _code_lines)
+                        fidelity = 1.0 if (_has_indent or _has_repl) else 0.0
+                    # WP-2 rule (documented, supersedes the c95950b skip on
+                    # text-native pages): the text layer wins on a text_native_code
+                    # page, so re-serve even already-indented chunks (the engine's
+                    # indentation may be a lossy raster round-trip). OFF text-native
+                    # pages, retain c95950b: only attempt flat chunks.
+                    if not is_text_native and fidelity is not None and fidelity > 0:
+                        continue  # Already has indentation; not a text-native page
 
                     # Strategy 1: PyMuPDF recovery for pure code chunks
                     if self._recover_code_indentation_from_pdf(ch):
@@ -5706,12 +6308,65 @@ class BatchProcessor:
                 except Exception as e:
                     logger.debug(f"[CODE-INDENT] Recovery failed for {ch.chunk_id}: {e}")
 
-        if reclassified or reflowed or recovered or fence_recovered:
+        # PLAN_F1 J1 (b)+(c): repair the residual non-indentation defects in code
+        # chunks - smart quotes, hard-wrapped open strings, and (repair-only) open
+        # brackets. Idempotent / no-op on already-clean code.
+        repaired_code = 0
+        for ch in chunks:
+            if ch.modality in (Modality.TEXT, Modality.CODE) and is_code_chunk(ch):
+                new_content = _repair_code_content(ch.content or "")
+                if new_content != ch.content:
+                    ch.content = new_content
+                    repaired_code += 1
+                    try:
+                        ch.metadata.code_repair_applied = True
+                    except Exception:
+                        pass
+
+        # PLAN_F1 J1 (a): heal code blocks cut mid-docstring across a chunk
+        # boundary - merge a code chunk that ends inside an unterminated
+        # triple-quoted string into the next adjacent (same/next page) code chunk.
+        merged_docstrings = 0
+        if any(_leaves_docstring_open(c.content or "") for c in chunks
+               if c.modality in (Modality.TEXT, Modality.CODE) and is_code_chunk(c)):
+            healed: List[IngestionChunk] = []
+            i = 0
+            while i < len(chunks):
+                ch = chunks[i]
+                if (
+                    ch.modality in (Modality.TEXT, Modality.CODE)
+                    and is_code_chunk(ch)
+                    and _leaves_docstring_open(ch.content or "")
+                    and i + 1 < len(chunks)
+                ):
+                    nxt = chunks[i + 1]
+                    cur_pg = ch.metadata.page_number if ch.metadata else None
+                    nxt_pg = nxt.metadata.page_number if nxt.metadata else None
+                    adjacent = (
+                        cur_pg is not None and nxt_pg is not None and 0 <= (nxt_pg - cur_pg) <= 1
+                    )
+                    if (
+                        nxt.modality in (Modality.TEXT, Modality.CODE)
+                        and is_code_chunk(nxt)
+                        and adjacent
+                    ):
+                        ch.content = (ch.content or "") + "\n" + _repair_code_content(nxt.content or "")
+                        merged_docstrings += 1
+                        i += 2  # absorbed nxt
+                        healed.append(ch)
+                        continue
+                healed.append(ch)
+                i += 1
+            chunks = healed
+
+        if reclassified or reflowed or recovered or fence_recovered or repaired_code or merged_docstrings:
             logger.info(
                 f"[CODE-HYGIENE] Reclassified {reclassified} chunks as code, "
                 f"reflowed {reflowed} flat code, "
                 f"recovered indentation for {recovered} chunks (PyMuPDF), "
-                f"{fence_recovered} chunks (fence reflow)"
+                f"{fence_recovered} chunks (fence reflow), "
+                f"repaired {repaired_code} code chunks (quotes/wraps), "
+                f"merged {merged_docstrings} split-docstring code chunks"
             )
 
         return chunks
@@ -5771,7 +6426,10 @@ class BatchProcessor:
                     x_start = spans[0]["bbox"][0]
                     text = "".join(s.get("text", "") for s in spans)
                     if text.strip():
-                        raw_lines.append((y_center, x_start, text.rstrip()))
+                        # Strip leading whitespace too (PLAN_F1 WP-2 double-indent
+                        # guard): x_start already encodes the indent, so leading
+                        # space glyphs in the span text would be added TWICE.
+                        raw_lines.append((y_center, x_start, text.strip()))
 
             if len(raw_lines) < 2:
                 return False
@@ -6856,11 +7514,14 @@ class BatchProcessor:
                         if ch.metadata.hierarchy
                         else []
                     )
-                    _new_breadcrumb = _orig_breadcrumb + [
-                        f"[Oversize Split {idx+1}/{len(parts)}]"
-                    ]
+                    # The parts of one chunk keep the PARENT's breadcrumb and level: a positional
+                    # "[Oversize Split n/m]" leaf (and the level bump that kept level == depth) put a
+                    # synthetic node into breadcrumb_path, which is embedded into the vectors
+                    # (to_embedding_text / ingest prefix). Adjacency is carried by the "_o<n>" chunk_id
+                    # suffix (retrieval-side), which is unchanged. PLAN_QUALITY_REMEDIATION WP-B3.
+                    _new_breadcrumb = list(_orig_breadcrumb)
                     _new_level = (
-                        (ch.metadata.hierarchy.level or 2) + 1
+                        (ch.metadata.hierarchy.level or 2)
                         if ch.metadata and ch.metadata.hierarchy
                         else 3
                     )
@@ -7249,6 +7910,140 @@ class BatchProcessor:
         valid_chunks = self._apply_lookahead_buffer(valid_chunks)
 
         return valid_chunks
+
+    @staticmethod
+    def _refresh_stale_next_snippets(rows: List[Dict[str, Any]]) -> int:
+        """Repair ``semantic_context.next_text_snippet`` on the FINAL exported rows.
+
+        PLAN_QUALITY_REMEDIATION WP-A2. ``_apply_lookahead_buffer`` copies the successor's
+        ``content[:300]`` BEFORE the export-chain filters run; every chunk those filters (or the
+        in-loop pHash / asset-mismatch drops) remove leaves its predecessor pointing at text
+        that is not its neighbour any more (IRJET: the description of a dropped figure survived
+        as the next-snippet of the paragraph before it). Only stale or missing snippets are
+        rewritten with the SAME rule as the lookahead (successor ``content[:300]``); a
+        consistent snippet is left byte-identical, ``prev_text_snippet`` is never touched (the
+        V3 path has none, so ingest contextual text changes only where a snippet was wrong), and
+        the last row's snippet is cleared. Rows without a ``semantic_context`` dict are skipped.
+        Comparison ignores whitespace/control characters (export sanitizing strips them after
+        the snippet was cut). Returns the number of rows changed.
+        """
+        import re as _re
+
+        def _skeleton(text: str) -> str:
+            return _re.sub(r"[\s\x00-\x1f]+", "", text or "")[:60]
+
+        changed = 0
+        for i, row in enumerate(rows):
+            sc = row.get("semantic_context")
+            if not isinstance(sc, dict):
+                continue
+            snippet = sc.get("next_text_snippet")
+            successor = rows[i + 1] if i + 1 < len(rows) else None
+            succ_text = (successor.get("content") or "") if successor else ""
+            if snippet:
+                if not succ_text:
+                    sc["next_text_snippet"] = None
+                    changed += 1
+                    continue
+                a, b = _skeleton(snippet), _skeleton(succ_text)
+                n = min(len(a), len(b))
+                if a[:n] != b[:n]:
+                    sc["next_text_snippet"] = succ_text[:300]
+                    changed += 1
+            elif succ_text:
+                sc["next_text_snippet"] = succ_text[:300]
+                changed += 1
+        return changed
+
+    def _register_furniture_drops(self, drops: List[Any], page_offset: int) -> None:
+        """WP-B2: account for element-level furniture removal (QA-CHECK-01) and log it.
+
+        The removed text is registered with the quality-filter tracker as NOISE_PATTERN so the
+        token-balance check reads it as an intentional filter, not as lost content.
+        """
+        if not drops:
+            return
+        tracker = getattr(self, "_quality_filter_tracker", None)
+        if tracker is not None:
+            for d in drops:
+                tracker.track_filtered_content(
+                    d.text,
+                    d.page + page_offset,
+                    FilterCategory.NOISE_PATTERN,
+                    chunk_id=f"furniture_p{d.page + page_offset}_e{d.element_index}",
+                )
+        by_rule: Dict[str, int] = {}
+        for d in drops:
+            by_rule[d.rule] = by_rule.get(d.rule, 0) + 1
+        signatures = sorted({d.signature[:50] for d in drops})[:4]
+        logger.info(
+            f"[FURNITURE] Removed {len(drops)} running header/footer element(s) before "
+            f"chunking ({by_rule}); e.g. {signatures}"
+        )
+
+    def _image_drop_ledger(self) -> ImageDropLedger:
+        ledger = getattr(self, "_image_drops", None)
+        if ledger is None:
+            ledger = self._image_drops = ImageDropLedger()
+        return ledger
+
+    def _track_image_drops(self, reason: str, before: List[Any], after: List[Any]) -> List[Any]:
+        """WP-A2b: itemize the IMAGE chunks a filter stage removed; returns ``after`` unchanged."""
+        return self._image_drop_ledger().track(reason, before, after)
+
+    def _write_crop_audit_sidecar(self, output_dir: Path) -> None:
+        """Write ``crop_audit.json`` next to the JSONL: one record per rendered IMAGE/TABLE crop.
+
+        Fail-open (a sidecar failure never affects the conversion). Absent when no crop was
+        rendered, so a text-only document leaves no file.
+        """
+        records = getattr(self, "_crop_audit_records", None)
+        if not records:
+            return
+        try:
+            (Path(output_dir) / "crop_audit.json").write_text(
+                json.dumps({"crops": records}, ensure_ascii=False, indent=1) + "\n",
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            logger.warning(f"[FINALIZE] Failed to write crop_audit.json: {exc}")
+
+    def _patch_export_file(self, output_jsonl: Path, written_chunks: int) -> None:
+        """Post-export reconciliation of the JSONL (header count + stale neighbour snippets).
+
+        IngestionMetadata must be the first record but final image deduplication happens while
+        chunk lines are streamed, so the header ``chunk_count`` is patched afterwards. The same
+        pass repairs stale next-snippets against the final list (WP-A2). Rows whose snippet was
+        already consistent keep their exact original line.
+        """
+        with open(output_jsonl, "r", encoding="utf-8") as _rf:
+            lines = _rf.readlines()
+        if not lines:
+            return
+        first = json.loads(lines[0])
+        if first.get("object_type") != "ingestion_metadata":
+            return
+        first["chunk_count"] = written_chunks
+        body = lines[1:]
+        refreshed = 0
+        try:
+            parsed = [json.loads(ln) if ln.strip() else None for ln in body]
+            live = [(i, r) for i, r in enumerate(parsed) if r is not None]
+            before = [json.dumps(r.get("semantic_context"), sort_keys=True) for _, r in live]
+            self._refresh_stale_next_snippets([r for _, r in live])
+            for (i, r), b in zip(live, before):
+                if json.dumps(r.get("semantic_context"), sort_keys=True) != b:
+                    body[i] = json.dumps(r, ensure_ascii=False) + "\n"
+                    refreshed += 1
+        except Exception as exc:  # noqa: BLE001 - the header patch must never be lost
+            logger.warning("[SNIPPETS] refresh skipped (%s); snippets left as written", exc)
+        if refreshed:
+            logger.info("[SNIPPETS] refreshed %d stale next_text_snippet value(s)", refreshed)
+        tmp = output_jsonl.with_suffix(output_jsonl.suffix + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as wf:
+            wf.write(json.dumps(first, ensure_ascii=False) + "\n")
+            wf.writelines(body)
+        tmp.replace(output_jsonl)
 
     def _apply_lookahead_buffer(
         self,
@@ -9405,8 +10200,9 @@ class BatchProcessor:
                     if chunk.metadata.hierarchy
                     else []
                 )
+                # Same rule as the oversize breaker (WP-B3): parts keep the parent's level.
                 _new_level = (
-                    (chunk.metadata.hierarchy.level or 2) + 1
+                    (chunk.metadata.hierarchy.level or 2)
                     if chunk.metadata.hierarchy
                     else 3
                 )
@@ -9456,9 +10252,7 @@ class BatchProcessor:
                         if chunk.semantic_context
                         else None
                     ),
-                    breadcrumb_path=(
-                        _orig_breadcrumb + [f"[Split {idx+1}/{len(sub_chunks)}]"]
-                    ),
+                    breadcrumb_path=list(_orig_breadcrumb),
                     **{k: v for k, v in self._intelligence_metadata.items() if v is not None},
                 )
                 new_chunk.metadata.content_classification = getattr(

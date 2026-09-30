@@ -54,6 +54,11 @@ WITH the guarded code when the legacy lane is cut** (its own future phase, P6);
 NOT adopted (the lane is on a retirement path) and NOT deleted yet (the code
 still ships for non-PDF + `--batch-size 0`). Trigger: legacy-lane retirement.
 
+> STATUS 2026-09-29: the skip reason string in all three modules still reads "re-enable when
+> LLM-sanitization layer subsumes them", the premise retired in the History correction above; the
+> disposition registered here is DELETE-by-decision on legacy-lane retirement. Skipped tests: 78
+> (62 + 10 + 6). (plan WP-G3, INV-075)
+
 - `tests/test_docling_postprocess_ocr_gating.py` - post-Docling OCR
   heading-override + bitmap-threshold gating on the adapter.
 - `tests/test_docling_postprocess_profile_integration.py` - post-Docling

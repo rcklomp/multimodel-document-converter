@@ -23,6 +23,10 @@ has two divergent realities:
   now RETIRED (the sandbox was deleted 2026-05-30) and BROKEN (both
   v3_batch_ingest.py and rebaseline_v3.py crash on import).
 
+  > STATUS 2026-09-29: no longer true: neither script references v3_execution_root and both import
+  > cleanly on 2026-09-29; the repoint to the shipping path was recorded 2026-06-12 (commit 021d24f).
+  > (plan WP-G3, AP-36)
+
 - Reality B - the SHIPPING path (production CLI). mmrag-v2 process ->
   BatchProcessor.process_pdf -> mmrag_v3.extract (HybridEngine) ->
   chunk_universal_document (uir_chunker) -> IngestionChunk.from_uir. This path
@@ -49,6 +53,9 @@ Consequences of the A/B split:
    RUNS GREEN and is the G6 enforcer that keeps the deferred set registered. The
    gate that regressed is HEADING coverage; the deferred contracts are the
    safety net to restore.
+
+   > STATUS 2026-09-29: 3 unconditionally-skipped V3_DEFERRED modules remain (78 tests,
+   > `docs/V3_DEFERRED_TESTS.md`). (plan WP-G3, AP-36)
 
 Root cause in one sentence: V3 was declared done on the strength of a sandbox
 path while the shipping path was left partially wired, its gates deferred, and
@@ -181,6 +188,11 @@ green, do not skip it.
     `docs/DECISIONS.md` "Legacy V2DocumentProcessor / Docling lane — retirement
     PLANNED". NOT adopted (lane is on a retirement path), NOT deleted yet (code
     still ships for non-PDF + `--batch-size 0`).
+
+  > STATUS 2026-09-29: the first two dispositions above were overtaken: both files were
+  > DELETED-by-decision on 2026-06-01 (P4; `docs/V3_DEFERRED_TESTS.md`) and are absent from tests/.
+  > (plan WP-G3, AP-36)
+
 - NEW (R10) - add the missing unit test for the V3 chunker ENTRY:
   `chunk_universal_document` has NO direct unit test today; it is only exercised
   end-to-end by test_v3_integration, which is how a broken edit (a kwarg the
@@ -211,6 +223,10 @@ green, do not skip it.
     * Update test_carry_forward_distance_is_unbounded_until_overridden to assert
       the cap (the test already instructs this; rename + assert cap, do NOT
       delete - AGENT-TEST-01). Add a DECISIONS.md entry (stricter contract).
+
+      > STATUS 2026-09-29: no test named test_carry_forward_distance_is_unbounded_until_overridden
+      > exists in tests/ (grep: 0 hits). (plan WP-G3, AP-36)
+
   Sequencing: implement in the same change that drops --no-contextual (R4), so
   the cap and its only consumer land together and are soak-validated in P4.
 - Resolve R6: ADOPT (un-skip the test) or REMOVE the two still-executing

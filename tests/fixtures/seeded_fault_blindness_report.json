@@ -1,0 +1,104 @@
+{
+  "faults": [
+    {
+      "fault": "strip_code_indentation",
+      "text_edit_distance": {
+        "delta": 0.0,
+        "verdict": "BLIND"
+      },
+      "table_teds": {
+        "teds": null,
+        "delta": null,
+        "verdict": "N/A"
+      },
+      "gate_quality_signals": {
+        "original": {
+          "running_furniture": 0,
+          "cross_page_dupes": 0,
+          "insane_headings": 0
+        },
+        "mutated": {
+          "running_furniture": 0,
+          "cross_page_dupes": 0,
+          "insane_headings": 0
+        },
+        "verdict": "BLIND"
+      }
+    },
+    {
+      "fault": "drop_small_label",
+      "text_edit_distance": {
+        "delta": 0.068182,
+        "verdict": "MOVED"
+      },
+      "table_teds": {
+        "teds": null,
+        "delta": null,
+        "verdict": "N/A"
+      },
+      "gate_quality_signals": {
+        "original": {
+          "running_furniture": 0,
+          "cross_page_dupes": 0,
+          "insane_headings": 0
+        },
+        "mutated": {
+          "running_furniture": 0,
+          "cross_page_dupes": 0,
+          "insane_headings": 0
+        },
+        "verdict": "BLIND"
+      }
+    },
+    {
+      "fault": "flatten_table_to_prose",
+      "text_edit_distance": {
+        "delta": 0.769841,
+        "verdict": "MOVED"
+      },
+      "table_teds": {
+        "teds": 0.0,
+        "delta": 1.0,
+        "verdict": "MOVED"
+      },
+      "gate_quality_signals": {
+        "original": {
+          "running_furniture": 0,
+          "cross_page_dupes": 0,
+          "insane_headings": 0
+        },
+        "mutated": {
+          "running_furniture": 0,
+          "cross_page_dupes": 0,
+          "insane_headings": 0
+        },
+        "verdict": "BLIND"
+      }
+    },
+    {
+      "fault": "reorder_two_columns",
+      "text_edit_distance": {
+        "delta": 0.190476,
+        "verdict": "MOVED"
+      },
+      "table_teds": {
+        "teds": 0.52381,
+        "delta": 0.47619,
+        "verdict": "MOVED"
+      },
+      "gate_quality_signals": {
+        "original": {
+          "running_furniture": 0,
+          "cross_page_dupes": 0,
+          "insane_headings": 0
+        },
+        "mutated": {
+          "running_furniture": 0,
+          "cross_page_dupes": 0,
+          "insane_headings": 0
+        },
+        "verdict": "BLIND"
+      }
+    }
+  ]
+}

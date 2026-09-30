@@ -1,0 +1,274 @@
+{
+  "doc": "IRJET_Modeling_of_Solar_PV_system_under.pdf",
+  "derivation": "Anchors are read from the SOURCE PDF (text layer + rendered pages), never from a conversion run. Section membership follows the source layout: page 3 column 0 holds the tail of section 2 (Fig. 4 paragraph) before the III heading; page 4 column 0 is section A; the B heading sits at the end of page 4 column 1. Figure regions are the PDF's own raster/drawing geometry above each caption, checked on a rendered contact sheet.",
+  "min_evaluable_section_anchors": 6,
+  "sections": {
+    "intro": "^\\s*1\\.\\s*INTRODUCTION",
+    "model": "^\\s*2\\.\\s*SOLAR PV ARRAY MODELING",
+    "method": "^\\s*III\\.\\s*PROPOSED MPPT METHOD",
+    "pso": "^\\s*A\\.\\s*Particle Swarm Optimization",
+    "mppt": "^\\s*B\\.\\s*PSO applied to MPPT",
+    "sim": "^\\s*IV\\.\\s*SIMULATION",
+    "results": "^\\s*V\\.\\s*RESULTS AND DISCUSSION",
+    "conclusion": "^\\s*VI\\.\\s*CONCLUSION",
+    "references": "^\\s*REFERENCES"
+  },
+  "section_anchors": [
+    {
+      "id": "intro_partial_shading",
+      "phrase": "output P-V characteristic of the array exhibits local multiple peaks",
+      "section": "intro"
+    },
+    {
+      "id": "model_equivalent_circuit",
+      "phrase": "equivalent circuit of a solar cell contains a current source",
+      "section": "model"
+    },
+    {
+      "id": "model_math_modeling",
+      "phrase": "Mathematical modeling for PV module is done by using",
+      "section": "model"
+    },
+    {
+      "id": "model_fig4_paragraph",
+      "phrase": "Fig\\. 4 shows simulation of 2\\S1 PV array consists of four groups",
+      "section": "model"
+    },
+    {
+      "id": "method_track_mpp",
+      "phrase": "To track the maximum power from the output P-V",
+      "section": "method"
+    },
+    {
+      "id": "pso_kennedy",
+      "phrase": "PSO was originally developed by James Kennedy",
+      "section": "pso"
+    },
+    {
+      "id": "pso_loop",
+      "phrase": "After that a loop starts to find the optimal solution",
+      "section": "pso"
+    },
+    {
+      "id": "pso_particles_fly",
+      "phrase": "All particles fly through a multidimensional search space",
+      "section": "pso"
+    },
+    {
+      "id": "mppt_constrained",
+      "phrase": "is constrained to",
+      "section": "mppt"
+    },
+    {
+      "id": "sim_matlab",
+      "phrase": "Modeling and simulation of the system has been done in MATLAB",
+      "section": "sim"
+    },
+    {
+      "id": "sim_pwm",
+      "phrase": "high frequency signal of 20\\s?kHz",
+      "section": "sim"
+    },
+    {
+      "id": "conclusion_scheme",
+      "phrase": "Developed scheme provides an efficient and accurate way",
+      "section": "conclusion"
+    }
+  ],
+  "front_matter_anchors": [
+    {
+      "id": "abstract_not_intro",
+      "phrase": "presents the effects of changing environmental conditions",
+      "must_not_parent": "^\\s*1\\.\\s*INTRODUCTION"
+    }
+  ],
+  "furniture_absent": [
+    "International Research Journal of Engineering and Technology",
+    "Impact Factor value",
+    "ISO 9001:2008 Certified Journal",
+    "e-ISSN",
+    "p-ISSN"
+  ],
+  "reference_anchors": [
+    {
+      "id": "ref1_tsai",
+      "all_of": [
+        "Tsai",
+        "World Congress on Engineering and Computer Science",
+        "2008"
+      ]
+    },
+    {
+      "id": "ref9_miyatake",
+      "all_of": [
+        "Miyatake",
+        "Veerachary",
+        "Aerospace and Electronic Systems",
+        "vol\\.\\s*47"
+      ]
+    },
+    {
+      "id": "ref11_mandour",
+      "all_of": [
+        "Mandour",
+        "Elamvazuthi",
+        "vol\\.\\s*4,\\s*no\\.\\s*8",
+        "2013"
+      ]
+    }
+  ],
+  "table_anchors": [
+    {
+      "id": "table1_module",
+      "all_of": [
+        "37\\.08",
+        "16\\.56",
+        "2\\.25"
+      ],
+      "min_rows": 8
+    },
+    {
+      "id": "table2_pso",
+      "all_of": [
+        "No\\. of particles",
+        "0\\.15",
+        "1\\.6"
+      ],
+      "min_rows": 10
+    }
+  ],
+  "crop_zoom": 2.0,
+  "figure_area_band": [
+    0.5,
+    2.0
+  ],
+  "figure_anchors": [
+    {
+      "id": "fig1",
+      "page": 2,
+      "gold_rect_pt": [
+        66,
+        607,
+        258,
+        719
+      ]
+    },
+    {
+      "id": "fig2",
+      "page": 2,
+      "gold_rect_pt": [
+        328,
+        158,
+        546,
+        282
+      ]
+    },
+    {
+      "id": "fig3",
+      "page": 3,
+      "gold_rect_pt": [
+        47,
+        380,
+        278,
+        488
+      ]
+    },
+    {
+      "id": "fig5",
+      "page": 3,
+      "gold_rect_pt": [
+        324,
+        100,
+        553,
+        262
+      ]
+    },
+    {
+      "id": "fig6",
+      "page": 3,
+      "gold_rect_pt": [
+        324,
+        295,
+        553,
+        462
+      ]
+    },
+    {
+      "id": "fig4",
+      "page": 4,
+      "gold_rect_pt": [
+        90,
+        124,
+        556,
+        405
+      ]
+    },
+    {
+      "id": "fig7",
+      "page": 5,
+      "gold_rect_pt": [
+        306,
+        115,
+        566,
+        561
+      ]
+    },
+    {
+      "id": "fig8",
+      "page": 6,
+      "gold_rect_pt": [
+        34,
+        178,
+        297,
+        379
+      ]
+    },
+    {
+      "id": "fig9",
+      "page": 6,
+      "gold_rect_pt": [
+        48,
+        550,
+        282,
+        725
+      ]
+    },
+    {
+      "id": "fig10a",
+      "page": 6,
+      "gold_rect_pt": [
+        325,
+        224,
+        560,
+        415
+      ]
+    },
+    {
+      "id": "fig10b",
+      "page": 6,
+      "gold_rect_pt": [
+        325,
+        484,
+        559,
+        666
+      ]
+    }
+  ],
+  "priority_anchors": [
+    {
+      "id": "abstract",
+      "phrase": "presents the effects of changing environmental conditions",
+      "must_not_priority": "low"
+    },
+    {
+      "id": "pso_formulation",
+      "phrase": "a solution vector of module voltages",
+      "must_not_priority": "low"
+    },
+    {
+      "id": "conclusion",
+      "phrase": "Developed scheme provides an efficient and accurate way",
+      "must_not_priority": "low"
+    }
+  ]
+}

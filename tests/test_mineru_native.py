@@ -23,7 +23,14 @@ import typing
 import fitz
 import pytest
 
-from mmrag_v2.universal.intermediate import ElementType, UniversalDocument
+from mmrag_v2.universal.intermediate import (
+    DocumentMetadata,
+    Element,
+    ElementType,
+    PageClassification,
+    UniversalDocument,
+    UniversalPage,
+)
 from mmrag_v3.engines.mineru_native import (
     MineruConfigError,
     MineruNativeEngine,
@@ -533,9 +540,18 @@ def test_mineru_route_takes_precedence_and_calls_engine(monkeypatch):
     class _SpyEngine:
         def extract(self, file_path):
             seen["file_path"] = file_path
-            return "SENTINEL_UIR"
+            page = UniversalPage(
+                page_number=1,
+                elements=[Element(type=ElementType.TEXT, content="body", bbox=None, confidence=1.0)],
+                classification=PageClassification.DIGITAL,
+                dimensions=(1000, 1000),
+            )
+            return UniversalDocument(
+                doc_id="d", source_file="d.pdf", file_type="pdf",
+                pages=[page], metadata=DocumentMetadata(), total_pages=1,
+            )
 
-    def _no(*_a, **_k):  # other engines must NOT be constructed
+    def _no(*_a, **_k):  # other engines must NOT be constructed (incl. docling fallback)
         raise AssertionError("non-MinerU engine constructed despite USE_MINERU_ENGINE=1")
 
     monkeypatch.setattr(processor, "MineruNativeEngine", lambda: _SpyEngine())
@@ -544,7 +560,10 @@ def test_mineru_route_takes_precedence_and_calls_engine(monkeypatch):
     monkeypatch.setattr(processor, "HybridEngine", _no)
 
     result = processor.extract("/some/doc.pdf")
-    assert result == "SENTINEL_UIR"
+    # MinerU route won, engine was called with the path, and a healthy doc means
+    # the docling fallback (patched to _no) was never constructed.
+    assert result.metadata.extra["extraction_engine"] == "mineru"
+    assert result.metadata.extra["extraction_fallback"] is None
     assert seen["file_path"] == "/some/doc.pdf"
 
 
@@ -552,18 +571,29 @@ def _route_spies(monkeypatch):
     """Patch all four engines to identifying sentinels; return the processor."""
     from mmrag_v3 import processor
 
-    def _spy(name):
+    def _engine():
+        # All routes return an identical minimal NON-degenerate doc; the selected
+        # lane is read off the provenance stamp (extract() stamps the canonical
+        # engine name from _select_engine). Fail-closed post-processing is a no-op
+        # on a healthy doc, so this isolates routing precedence.
         class _E:
             def extract(self, _fp):
-                return name
+                page = UniversalPage(
+                    page_number=1,
+                    elements=[Element(type=ElementType.TEXT, content="body", bbox=None, confidence=1.0)],
+                    classification=PageClassification.DIGITAL,
+                    dimensions=(1000, 1000),
+                )
+                return UniversalDocument(
+                    doc_id="d", source_file="d.pdf", file_type="pdf",
+                    pages=[page], metadata=DocumentMetadata(), total_pages=1,
+                )
 
-        return lambda: _E()
+        return _E()
 
-    monkeypatch.setattr(processor, "MineruNativeEngine", _spy("mineru"))
-    monkeypatch.setattr(processor, "VlmNativeEngine", _spy("vlm"))
-    monkeypatch.setattr(processor, "DoclingFastEngine", _spy("docling"))
-    monkeypatch.setattr(processor, "HybridEngine", _spy("hybrid"))
-    monkeypatch.setattr(processor, "MineruQwenHybridEngine", _spy("mineru_qwen_hybrid"))
+    for _cls in ("MineruNativeEngine", "VlmNativeEngine", "DoclingFastEngine",
+                 "HybridEngine", "MineruQwenHybridEngine"):
+        monkeypatch.setattr(processor, _cls, _engine)
     for var in (
         "USE_MINERU_ENGINE",
         "USE_VLM_ENGINE",
@@ -582,7 +612,7 @@ def test_default_route_is_mineru_qwen_hybrid_when_endpoint_configured(monkeypatc
     # identical to the prior pure-MinerU default.
     proc = _route_spies(monkeypatch)
     monkeypatch.setenv("MINERU_ENDPOINT", "http://10.0.10.239:8001")
-    assert proc.extract("/d.pdf") == "mineru_qwen_hybrid"
+    assert proc.extract("/d.pdf").metadata.extra["extraction_engine"] == "mineru_qwen_hybrid"
 
 
 def test_pure_mineru_is_opt_in_via_flag(monkeypatch):
@@ -590,26 +620,26 @@ def test_pure_mineru_is_opt_in_via_flag(monkeypatch):
     proc = _route_spies(monkeypatch)
     monkeypatch.setenv("MINERU_ENDPOINT", "http://10.0.10.239:8001")
     monkeypatch.setenv("USE_MINERU_ENGINE", "1")
-    assert proc.extract("/d.pdf") == "mineru"
+    assert proc.extract("/d.pdf").metadata.extra["extraction_engine"] == "mineru"
 
 
 def test_explicit_mineru_qwen_hybrid_flag(monkeypatch):
     proc = _route_spies(monkeypatch)
     monkeypatch.setenv("USE_MINERU_QWEN_HYBRID", "1")
-    assert proc.extract("/d.pdf") == "mineru_qwen_hybrid"
+    assert proc.extract("/d.pdf").metadata.extra["extraction_engine"] == "mineru_qwen_hybrid"
 
 
 def test_default_route_falls_back_to_hybrid_without_endpoint(monkeypatch):
     proc = _route_spies(monkeypatch)
     monkeypatch.delenv("MINERU_ENDPOINT", raising=False)
-    assert proc.extract("/d.pdf") == "hybrid"
+    assert proc.extract("/d.pdf").metadata.extra["extraction_engine"] == "hybrid"
 
 
 def test_use_hybrid_engine_overrides_mineru_default(monkeypatch):
     proc = _route_spies(monkeypatch)
     monkeypatch.setenv("MINERU_ENDPOINT", "http://10.0.10.239:8001")  # would default to mineru
     monkeypatch.setenv("USE_HYBRID_ENGINE", "1")  # explicit legacy override
-    assert proc.extract("/d.pdf") == "hybrid"
+    assert proc.extract("/d.pdf").metadata.extra["extraction_engine"] == "hybrid"
 
 
 def test_docling_fast_overrides_mineru_default(monkeypatch):
@@ -618,4 +648,4 @@ def test_docling_fast_overrides_mineru_default(monkeypatch):
     proc = _route_spies(monkeypatch)
     monkeypatch.setenv("MINERU_ENDPOINT", "http://10.0.10.239:8001")
     monkeypatch.setenv("USE_DOCLING_FAST", "1")
-    assert proc.extract("/d.pdf") == "docling"
+    assert proc.extract("/d.pdf").metadata.extra["extraction_engine"] == "docling_fast"

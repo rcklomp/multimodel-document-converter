@@ -1,5 +1,9 @@
 # MM-RAG V3 — Findings Log (paper source material)
 
+> 👉 **New here? Read `FINDINGS_DIGEST.md` first** - a one-page to-the-point history
+> (where we are, what's settled, what's been tried-and-failed, what's open). This full
+> log is the detailed append-only archive behind that digest.
+
 **Purpose.** Append-only, dated capture of paper-grade material: motivation,
 method, **verbatim measured data**, conclusions, and **rejected approaches with
 reasoning**. This is the raw material for an eventual systems paper / background
@@ -964,6 +968,387 @@ Pre-existing file-wide black/ruff drift in `batch_processor.py` left untouched
 
 ---
 
+## 2026-06-09 — OmniDocBench fidelity baseline: first labeled ground-truth numbers (Phase 0)  `[Results][Method]`
+
+First-ever measurement of our pipeline against EXTERNAL labeled ground truth
+(OmniDocBench, opendatalab, Apache-2.0). Every prior quality signal scored the
+converter against itself or a human read; this is third-party transcription
+fidelity. Stratified English subset, current `main` (pipeline 2.7.0), offline.
+
+**Setup.** 128 English pages (~18 per `data_source`, capped; note + research_report
+n=1). Each OmniDocBench page ships as an IMAGE → wrapped lossless to a 1-page PDF
+(`img2pdf`) → run through the shipping CLI `mmrag-v2 process --batch-size 10
+--vision-provider none` → `ingestion.jsonl` rendered to one Markdown page →
+scored by OmniDocBench `quick_match`, no-CDM config. Adapter:
+`scripts/omnidocbench_adapter.py`; config `configs/omnidocbench_end2end.yaml`.
+128/128 ran, 0 failures; 5 pages rendered empty (offline scanned lane extracted
+nothing). Scorer: 128 pages scored, 34 tables (TEDS), 0 errors, 0 timeouts.
+
+**Text Edit_dist (lower=better) | Reading-order Edit_dist | Table TEDS (higher=better)**
+
+| data_source | text ED | reading ED | table TEDS |
+|---|--:|--:|--:|
+| **ALL (128)** | **0.2511** | **0.2491** | **0.6691** (struct 0.7494) |
+| PPT2PDF | 0.0184 | 0.0926 | 0.6167 |
+| magazine | 0.1599 | 0.1152 | 0.9908 |
+| colorful_textbook | 0.2544 | 0.2101 | 0.6913 |
+| academic_literature | 0.2481 | 0.2526 | 0.7197 |
+| book | 0.2727 | 0.3020 | 1.0000 |
+| newspaper | 0.3701 | 0.2149 | 0.7182 |
+| exam_paper | 0.4393 | 0.5126 | 0.3441 |
+| research_report (n=1) | — | 1.0000 | 0.9806 |
+
+Best lane: PPT (near-perfect text 0.018) and magazine (text 0.160, table TEDS
+0.99). Worst lane: exam_paper (text 0.439, reading 0.513, table TEDS 0.344 —
+dense multi-column exam layouts) and newspaper (text 0.370). research_report is a
+single page (reading 1.0 = total order mismatch on that one page; not
+generalizable).
+
+**FULL 755-page English baseline (authoritative; the 128 above was the preview).**
+All 755 English pages, 243 tables scored, 0 errors, 0 timeouts, 0 match fallbacks.
+26 pages rendered empty (offline scanned lane extracted nothing). Headline: text
+Edit_dist **0.3009**, reading-order **0.3183**, table TEDS **0.5632** (struct 0.6137).
+
+| data_source | text ED | reading ED | table TEDS |
+|---|--:|--:|--:|
+| **ALL (755)** | **0.3009** | **0.3183** | **0.5632** (struct 0.6137) |
+| PPT2PDF | 0.1198 | 0.1470 | 0.7881 |
+| colorful_textbook | 0.2124 | 0.1811 | 0.7829 |
+| exam_paper | 0.2819 | 0.3626 | 0.7897 |
+| book | 0.3049 | 0.3349 | 0.7709 |
+| magazine | 0.3053 | 0.2820 | 0.7800 |
+| academic_literature | 0.3768 | 0.3950 | 0.6859 |
+| newspaper | 0.4586 | 0.4305 | 0.4250 |
+
+At full scale the easy/hard ordering holds (PPT best, newspaper worst) but the
+small-sample noise washes out: table TEDS is a tight 0.77–0.79 band across PPT/
+textbook/exam/book/magazine and only newspaper (0.425, dense multi-column furniture)
+and academic (0.686, complex multi-table pages) sit below. The stratified exam_paper
+TEDS 0.34 was a 6-page-sample artifact — at 82 pages it is 0.79. This full table is
+the **fidelity floor** the gate-quality F1–F7 re-run (Phase 2) must not regress.
+
+**Caveat labels (bake into any citation of these numbers; per PLAN 12.3):**
+1. **Synthetic image-PDF → scanned lane.** Inputs are flat page images with no
+   text layer, so the classifier routes ALL of them to `scanned`/`scanned_degraded`
+   (`is_scan=True`, `extraction_method=uir_native_chunker`, offline Docling-fast).
+   This is SCANNED-lane fidelity, NOT native-PDF quality.
+2. **F1 ↔ abandon directional, not exact (sanity-passed).** All 28 stratified
+   pages with GT `abandon` blocks have EMPTY abandon text — OmniDocBench `abandon`
+   is a text-less spatial region carrying no scored content. Our F1 furniture
+   filter drops *repeating* headers/footers (GT `header`/`footer`/`page_number`,
+   all scored as text), not `abandon`; and F1 needs ≥3-page repetition so it is
+   structurally inert on these 1-page docs. The two operate on different things;
+   no scored text is at stake. Disagreement is directional, not an extraction error.
+3. **no-CDM config: formulas unscored by CDM** (excluded, not penalized). The
+   notex config still scores `equation_isolated` by Edit_dist if present; CDM
+   render-fidelity deferred (no TeX stack).
+4. **English subset = `language` attribute (authoritative), NOT `_eng_` filename.**
+   The filename heuristic tags only 5 of 755 English pages (cross-tab disagreement
+   750); we select on `page_info.page_attribute.language == english`.
+5. **VLM descriptions omitted.** Image regions render as nothing (GT `figure`
+   blocks carry 0 scored text; the scorer strips markdown image syntax; emitting
+   our long visual_descriptions would inflate edit distance). This is a TEXT/TABLE
+   fidelity baseline, not multimodal value-add.
+
+**Adapter render decisions, resolved against the scorer source (not assumption):**
+heading markers are normalized away (`clean_string` → alphanumerics) so headings
+render as plain text; the scorer strips ```` ```markdown/html/latex ```` fences;
+reading order is reconstructed from JSONL line order (no `reading_order` schema
+field) and verified to match GT `order` on the smoke page.
+
+**Next (Phase 1/2):** extractor bake-off (MinerU vs PaddleOCR-VL vs granite-docling
+vs Qwen3-VL on OmniDocBench) and re-run after the gate-quality F1–F7 fixes to prove
+fidelity does not regress vs this floor.
+
+---
+
+## 2026-06-09 — Phase 1 extractor bake-off: INCONCLUSIVE, blocked by M5 serving  `[Results][Lessons]`
+
+Bake-off of five engine routes through our pipeline on a common 44-page English
+subset (6/source), scored on OmniDocBench. Harness `scripts/omnidocbench_bakeoff.py`.
+**The headline question — confirm/revisit MinerU2.5+Qwen on labeled GT — could NOT
+be answered: three of five engines were invalidated by serving/integration faults,
+not fidelity.** Recording the raw table with explicit validity flags so it is never
+mistaken for a model verdict.
+
+| engine | text ED | reading ED | table TEDS | TEDS struct | VALID? |
+|---|--:|--:|--:|--:|---|
+| docling_fast | 0.2770 | 0.3071 | 0.4410 | 0.5676 | YES (offline baseline) |
+| qwen3vl | 0.4936 | 0.4507 | 0.2052 | 0.3392 | YES |
+| mineru | 0.7854 | 0.7607 | 0.2538 | 0.3096 | NO — see below |
+| hybrid | 0.7435 | 0.7493 | 0.2790 | 0.3527 | NO (uses MinerU) |
+| paddleocr | 1.0000 | 1.0000 | 0.0000 | 0.0000 | NO — see below |
+| granite | — | — | — | — | NO (server can't load) |
+
+**Why three engines are invalid (diagnosed directly, not assumed):**
+- **mineru / hybrid — M5 mlx MinerU2.5 serving throws intermittent 500s.** 20/44
+  pages produced ZERO chunks. CORRECTION (first probe was misread): an earlier note
+  here said the "content-step returns empty." That was a `getattr(e, "text")` bug in
+  the probe — `Element` stores text in `.content`, so EVERY page read as empty.
+  Reading `.content`: MinerU's content step WORKS (a page I had called empty has
+  1706 chars, "Top10 Best Seller Books..."). The real fault is INTERMITTENT
+  `Generation failed: [broadcast_shapes] Shapes (6,14,108,64) and (1,1,38,64)
+  cannot be broadcast` 500s from MinerU's two-step `batch_predict` (it sends several
+  different-sized block crops in one batch; the mlx server cannot broadcast them).
+  The SAME page returned 1706 chars on one call and 500'd on the next — non-
+  deterministic, batch-shape dependent. When the 500 fires on a single-page doc, the
+  whole extract raises and the doc → 0 chunks. Infrastructure, not MinerU2.5 fidelity
+  (passed 6/6 golden 2026-06-05). **Likely client-side mitigation: force batch
+  size 1 in mineru_vl_utils so block crops are never batched together. Until then,
+  the fail-closed fallback (below) recovers these pages offline. Re-run the bake-off
+  after either fix before drawing a MinerU conclusion.**
+- **paddleocr — engine-contract mismatch.** `VlmNativeEngine` requires a STRICT-JSON
+  response (`json.loads(raw)`); PaddleOCR-VL returns plain Markdown (confirmed by a
+  raw chat probe), so every page raises `unrepairable VLM JSON` → 0 chunks. PaddleOCR
+  needs a dedicated Markdown-parsing adapter; it cannot ride the Qwen-shaped VLM
+  engine. Deferred.
+- **granite — server load failure.** M5 mlx returns HTTP 500 "Unrecognized image
+  processor"; also emits DocTags not Markdown. Deferred.
+
+**The one valid comparison (docling_fast vs qwen3vl, scanned-lane images):** verbatim
+OCR (docling) tracks GT transcription markedly better than the VLM on these scanned
+page-images — text ED 0.277 vs 0.494, reading 0.307 vs 0.451, TEDS 0.441 vs 0.205.
+Directional reading: Qwen3-VL paraphrases/restructures and emits many extra image/
+form chunks, which inflates edit distance against verbatim GT, and it left 4/44 pages
+empty. This is NARROW — it measures TRANSCRIPTION FIDELITY on synthetic scanned
+images, the opposite end from the crucible's RETRIEVAL-VALUE finding on native PDFs
+that picked MinerU+Qwen. The two are not in conflict; they measure different axes on
+different inputs. **Lesson: a fair extractor bake-off needs every engine actually
+serving correctly first — verify each endpoint END-TO-END through the pipeline (not
+just a raw /v1 probe) before trusting the score. A raw chat probe said all three of
+mineru/paddle/granite "worked"; the pipeline integration is where two of them broke.**
+
+Bake-off artifacts: `~/omnidocbench-eval/bakeoff/<engine>/{preds,score}`. Harness +
+this finding committed; the MinerU re-run is parked on the M5 serving fix.
+
+---
+
+## 2026-06-09 — Fail-closed extraction: reliability stops depending on the GPU server  `[Architecture][Lessons]`
+
+The repeated "disappointing AGAIN" failures share ONE root cause that the bake-off
+made undeniable: `mmrag_v3.extract()` trusted a remote multi-model GPU server and
+had NO safety net. When the M5 MinerU server threw an intermittent `broadcast_shapes`
+500, `batch_processor` wrote an empty document — `failed=0`, zero chunks, no error.
+Silent data loss wired to the most fragile component. The fix is architectural, not
+another model swap.
+
+**Change (`src/mmrag_v3/processor.py`):** extraction is now FAIL-CLOSED through a
+THREE-TIER ladder, each tier serving only the pages the tier above could not:
+`tier 1` selected engine (best quality) -> `tier 2` offline `DoclingFastEngine` (no
+network; may itself fail) -> `tier 3` PyMuPDF native text layer (no model, no network
+— the only thing that defeats it is an unreadable file, a true input error raised
+loudly). A page is recovered per-page (not whole-doc swap) when the engine raises or
+returns a page with no content and no visual element (covers both the empty-TEXT and
+the dropped-zero-element shapes). A cheap fitz text-layer probe gates recovery so a
+genuinely blank divider page pays nothing, and the probe is crash-proof (a corrupt
+page's `get_text` is treated as recoverable, never propagated). A docling figure-only
+result never buries a recoverable text layer — such a page falls through to tier 3. The served lane + outcome are
+stamped on `doc.metadata.extra` (`extraction_engine`/`extraction_fallback`/
+`extraction_degraded_pages`/`extraction_recovered_pages`) and logged at WARNING.
+Healthy extractions pay nothing. **Guarantee: no page that HAS extractable text is
+ever zeroed by an engine/server/network failure.** A genuinely text-less page
+(scan/blank) stays empty — we do NOT fabricate. Honest limit: "never fail" is not
+achievable (corrupt input, dead hardware, a true scan when OCR also fails); the
+guarantee is content-PRESERVATION, not content-from-nothing. Terminal verified on a
+real native PDF (21,934 chars across 6/6 pages). 9 tests (`tests/test_v3_fail_closed.py`,
+incl. 3 terminal); routing tests assert the provenance stamp; full suite 1571 passed /
+0 regressions; ruff clean; SMOKE_PRODUCTION_PASS.
+
+**Design stance:** the benchmark is now the decision oracle. The offline floor is
+MEASURED (full-755: text ED 0.301 / TEDS 0.563), so any "smart" lane must beat it by a
+margin worth its failure surface or it gets cut (benchmark-gated prune — start with the
+paddle/granite stretch engines and the monospace-routing hybrid). Smart-when-healthy,
+reliable-always.
+
+> **CORRECTION (2026-06-11):** "the offline floor is MEASURED" conflated two configs.
+> The 0.301/0.563 baseline was produced by the OCR-enabled legacy offline default
+> route (shipping CLI with no `USE_*` flag, Docling with default OCR — only 26/755
+> pages empty), NOT by `USE_DOCLING_FAST=1` (`DoclingFastEngine`, `do_ocr=False`).
+> Phase 1 (2026-06-11 entry) proved the no-OCR engine is content-empty on ALL 151
+> scored pages of the image-only corpus. The fail-closed ladder's tier-2 net and the
+> Phase 0B interim default therefore have NO measured OmniDocBench fidelity and are
+> blank on scanned/image-only input. Same-day Phase 1 also showed the hybrid OCRs
+> scans cleanly — the durable fixes are Phase 4 (hybrid default) + a Phase 3
+> candidate (OCR on fallback-only recovery runs).
+
+**Lesson:** when a pipeline keeps "disappointing," check whether reliability is wired to
+its most fragile component with no fallback. The fix is a safety net + provenance, not
+chasing the fragile component to perfection. Also: a `getattr(e, "text")` typo (the field
+is `.content`) sent me down a wrong "empty content-step" diagnosis for an hour — verify
+the attribute exists before building a theory on its value.
+
+---
+
+## 2026-06-10 — Phase 0A render sweep + seeded-fault instrument validation  `[Results][Method][Lessons]`
+
+Two prerequisite measurements for PLAN_EXTRACTION_FIDELITY_V1, run overnight on the M5
+`Qwen3-VL-8B-Instruct-8bit`. Both are FAILURE-MODE EXPOSURE on small fixed sets, not
+benchmarks.
+
+**Phase 0A — what render resolution actually costs (the M5-load question).** 9-page
+fixed set (5 internal + 4 OmniDocBench), four render settings, client-side metrics:
+
+| setting | px (longest) | TTFT s | vision tok | payload KB | pages/hr |
+|---------|-------------|--------|-----------|-----------|----------|
+| dpi200 (prod default) | up to 4873 | 28.3 | 9220 | 1499 | 173 |
+| dpi150 | up to 3655 | 15.2 | 6022 | 1770 | 244 |
+| cap1600 | 1600 | 2.1 | 1867 | 550 | 274 |
+| cap1400 | 1400 | 1.6 | 1464 | 434 | 415 |
+
+ROBUST result: the production default renders every page at up to ~4873px on the
+longest side (~9220 vision tokens/page); a longest-side CAP at 1400px cuts vision
+tokens 6.3x, TTFT ~18x, and lifts throughput 2.4x. Most extreme single case — a
+large-format form page: **162s / 16320 tokens at dpi200 vs 4.0s / 1420 tokens at
+cap1400 (~40x)**. Strongly supports the plan hypothesis that render resolution, not
+architecture, may dominate the VLM cost. A longest-side CAP beats a uniform DPI cut on
+cost (cap1400 ships fewer tokens than dpi150 at a smaller payload).
+
+NEGATIVE result (honest): the COMPUTED OmniDocBench text-ED fidelity column is NOISE at
+n=4 — non-monotonic and partly implausible (cap1400 scored text-ED 0.007, "better" than
+dpi200's 0.196; reading-ED improved monotonically as resolution dropped). That is
+`quick_match` block-alignment variance on a 4-page subset dominated by one math-heavy
+page (formulas excluded) and one large form; TEDS likewise swung 0.019->0.432->0.179
+(~1 real table in the set). So the I6 risk (a resolution cut silently lowering fidelity)
+is STILL OPEN. The harness now works end-to-end (render->transcribe->score->delta); it
+needs a larger, balanced subset for a fidelity verdict. Saved per-(page,setting)
+artifacts for the internal-corpus artifact review.
+
+SATURATION: the mlx-vlm server does not serve concurrent requests gracefully — a k=2
+concurrent probe both TIMED OUT while a single sequential call to the same page
+returned. mlx-vlm is single-request-oriented; throughput gains need a batching backend
+(vLLM), not client concurrency.
+
+**Section 7.3 — both selection instruments are BLIND to the failure class we fear.**
+Seeded four content-omission faults, ran each through the instruments that exist:
+
+| fault | OmniDocBench text-ED | table-TEDS | gate junk-presence signals |
+|---|---|---|---|
+| strip code indentation | BLIND (Δ=0.0) | N/A | BLIND |
+| drop small label | MOVED (Δ=0.068) | N/A | BLIND |
+| flatten table to prose | MOVED (Δ=0.770) | MOVED (1.0->0.0) | BLIND |
+| reorder two columns | MOVED (Δ=0.190) | MOVED (1.0->0.52) | BLIND |
+
+The OmniDocBench TEXT metric strips ALL whitespace (`clean_string`) and is BLIND to
+code-indentation loss — the metric that would judge a code-fidelity regression cannot
+see one (a pipeline that strips indentation and a VLM that preserves it score
+IDENTICALLY). The PLAN_GATE_QUALITY_V1 junk-presence signals are BLIND to ALL four
+omission faults by construction. Phase 1/2 verdicts on content-omission classes are
+therefore QUALITATIVE (fixed-page artifact diff), not measured — and must be recorded
+as such. Code fidelity must be judged by the R3 indentation gate, never text-ED.
+
+**Lesson:** measure the instrument before you trust its verdict. The text metric that
+anchors the whole bake-off is blind to the exact regression (indentation) the project
+most fears; n=4 fidelity scoring produces confidently-wrong numbers. Cost is the solid
+Phase 0A deliverable; fidelity needs scale before it can decide anything.
+
+---
+
+## 2026-06-10 — Render-cap fidelity at n=44 inverts I6; 3-way MinerU serving probe  `[Results][Method][Lessons]`
+
+The n=4 fidelity column from the morning was noise (non-monotonic, cap1400 implausibly
+"best"). Re-run on a BALANCED 44-page OmniDocBench EN subset (9 data_source classes, 15
+tables / 5 scanned / 2 forms / 0 equation-hard; the n=4 was math/table-skewed), it
+resolved into a coherent result that INVERTS the I6 risk: a longest-side render cap is
+not merely fidelity-safe, in aggregate it is fidelity-POSITIVE *and* 4.5–8x cheaper.
+Mechanism (corroborated by the internal artifacts): the production dpi200 render
+over-sizes pages — one page hit **19192 px** longest side, ~12163 vision tokens — and
+the VLM falls into repetition loops; the cap simply doesn't give it the room to loop.
+
+**Phase 0A DoD table (n=44, M5 Qwen3-VL-8B-8bit; text/read ED lower=better, TEDS higher).**
+
+| setting | max px | mean s | vision tok | pages/hr (3600/mean) | text-ED | dED | read-ED | TEDS |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| dpi200 (prod) | 19192 | 86.1 | 12163 | 42 | 0.411 | 0.000 | 0.468 | 0.166 |
+| dpi150 | 14394 | 68.0 | 7759 | 53 | 0.340 | -0.071 | 0.384 | 0.281 |
+| cap1600 | 1600 | 17.5 | 1894 | 206 | 0.081 | **-0.330** | 0.178 | 0.523 |
+| cap1400 | 1400 | 15.3 | 1474 | 235 | 0.089 | **-0.322** | 0.179 | 0.439 |
+
+Worst-K (category-level; the scorer exposes category not per-sample ED): the cap rescues
+the classes dpi200 degenerates on (exam_paper 0.999→0.005, double_column 0.669→0.028,
+scanned 0.654→0.074) but CATASTROPHICALLY breaks one dense academic `1andmore_column`
+page (0.004→0.95, n=1). So **I6 is RETIRED in aggregate, CONFIRMED for one page class** —
+the worst-K convention earned its keep by surfacing the regression the mean hid. cap1600
+is the fidelity sweet spot, cap1400 the throughput sweet spot; dpi150 stays inconclusive
+(non-monotonic per class). Code-indentation is stripped at EVERY setting (a model
+property, render-independent) — and the labelled "code page" p60 turned out BLANK; the
+real code page is p65. Production render setting NOT changed (user decision; needs the
+150-200 page set to size the academic-multicolumn tail).
+
+**3-way MinerU serving probe (same 5-page set via the shipping engine + WP2 retry).**
+
+| box (chip) | k1 mean/max | pages/hr k1 | best-k pages/hr | k1 ok | 500s | retries rec. | sanity |
+|---|---|--:|--:|--:|--:|--:|---|
+| GX10 vLLM (GB10) | 8.6/13.1 s | 419 | **1180 (k4)** | 5/5 | 0 | 0 | all 5, in-family el counts |
+| M5 mlx (M5 Max) | 12.3/26.0 s | 293 | **0 (k2 collapse)** | 3/5 | 5 | 7 | magazine+form FAIL (500) |
+| Mini mlx (M4 Pro) | 24.4/51.1 s | 147 | 72 (k2) | 3/5 | 3/4 | 8 | magazine+form FAIL (500) |
+
+GX10 vLLM is the only box that serves all five page classes, the only one that batches
+(1180 vs 0–293 pages/hr under concurrency), and the only one with zero 500s. Both mlx
+boxes are sequential-only and fail the two highest-element-count pages (magazine el=18,
+form el=39) on a `broadcast_shapes` 500 that PERSISTS through all 3 WP2 retries (the
+retry recovers *transient* 500s — M5 7, Mini 8 — but cannot fix a deterministic per-page
+serving fault). Where all boxes complete, element counts are identical (in-family). No
+repetition observed on GX10 despite its missing anti-repetition logits processor (5-page
+sample, so the risk stayed theoretical). This is the concrete "invest in moving MinerU to
+GX10 vLLM" data point for memo B — verdict still deferred to Phase 1 serving-health gating.
+
+**Lesson:** the dominant VLM-extraction cost AND a dominant VLM-fidelity failure are the
+SAME variable — render resolution — pulling in the same direction: oversized renders cost
+more *and* destabilize the model. Throughput is a memory-bandwidth problem; fidelity on
+dense pages is a token-budget problem; a longest-side cap addresses both. But the mean
+lies on a mixed corpus — only the worst-K split exposed that the cap that fixes 8 classes
+breaks the 9th. Measure the spread, not just the aggregate, before flipping a default.
+
+---
+
+## 2026-06-10 — Three decisions ratified; serving topology settled; a prompt caveat on the indentation finding  `[Results][Architecture][Lessons]`
+
+The interactive session between the two unattended runs: stood up the comparison
+endpoints, ratified the decisions the evidence supported, and shipped the render cap.
+
+**Serving standup data (morning, pre-probe):**
+- Mac Mini identified: **M4 Pro, 64 GB, macOS 15.7.3, 10.0.10.246** — it IS the
+  omlx embedder box (oMLX.app on :8000). MinerU eval server stood up at :8010 in an
+  isolated uv env pinned to M5 parity (python 3.12, mlx-vlm 0.5.0, mlx 0.31.2).
+- GX10 already had `gx10-vllm-mineru` on :8001 (up 3+ days, gpu-mem-util 0.15,
+  served id `MinerU2.5-2509-1.2B`, NO anti-repetition logits processor).
+- M5 serving stack identified: `python -m mlx_vlm.server` (conda env `vlm-server`).
+- One-page smoke, same page, real `two_step_extract`: **GX10 2.2 s vs Mini 4.8 s**,
+  byte-identical layout (6 blocks, 70 chars) — client integration clean on both.
+
+**Decisions ratified (user, on the two overnight evidence runs; DECISIONS.md
+"Phase 0B interim default + MinerU serving home + cap1600 render"):**
+1. INTERIM production default = offline floor (`USE_DOCLING_FAST=1`), with the
+   first written production-level acceptance definition (>=200 pages/hr;
+   ladder-served QA_WARN >10%/doc; Section 5.4 aggregates as observability floor).
+2. MinerU serving home = GX10 vLLM :8001; mlx MinerU serving deprecated (the
+   `broadcast_shapes` fault is DETERMINISTIC on element-heavy pages and reproduces
+   on both mlx boxes — it is the stack, not the M5). Mini :8010 stopped same day.
+3. cap1600 INTERIM render, shipped as `VLM_RENDER_MAX_PX=1600` at the single
+   render chokepoint (`bd09e6d`; env rollback; 7 tests). Also closes the
+   unbounded-render defect (19192 px pages observed).
+Also: the WP6 contract conflict user-adjudicated to the F4 fenced contract
+(`4f20801`) — suite FULLY GREEN for the first time (1624/0).
+
+**Caveat discovered on the indentation finding (matters for Phase 1):** the render
+sweep's "VLM strips ALL leading indentation at every setting" was measured under the
+harness's one-line `VERBATIM_PROMPT` ("preserve ... code indentation exactly" — plain
+markdown transcription), NOT the production UIR schema prompt (JSON output, mandatory
+fences, rule-6 spacing contract). The model ignored an explicit indentation
+instruction in transcription mode — suggestive of a model property — but the
+production path previously PASSED the R3 gate on AIOS code. The two facts are not yet
+reconciled; Phase 1 measures code classes with the R3 gate on the production path.
+
+**Lesson:** the serving comparison was settled by topology, not benchmarks — the
+1.2B many-small-crops workload dodges both GB10 weaknesses (memory: trivial at 2.4 GB;
+single-stream decode: short outputs) and lands on its strength (batched prefill).
+The boxes settle into roles by architecture: GX10 = batch-shaped work (MinerU crops +
+judge), M5 Max = single-stream-heavy big VLM (bandwidth), Mini = always-on embedder.
+And: a "model property" claim is only as strong as the prompt it was measured under —
+record the prompt with the finding.
+
+---
+
 ## Backfill backlog (remaining threads — to expand when drafting)
 
 *Covered above as of 2026-05-30:* V1→V2 lineage · V2 metrics trajectory · V2
@@ -981,3 +1366,374 @@ committed `V3_OVERNIGHT_REPORT.md`). Still to do:
   / 18.4 s/page, fidelity OK. Remaining: large-magazine thrash test + oMLX A-B.
 - **(legacy backlog note)** Judge calibration — GX10 Qwen2.5-14B-FP8: format TRUSTWORTHY,
   rel/faith RESTRICTED; treat as directional. Source: memory `feedback_v2_14_gx10_14b_fp8_swap`.
+
+---
+
+## 2026-06-11 - Phase 1 two-corpus extractor bake-off: INCONCLUSIVE, both pure extremes refuted  `[Results][Method][Decision]`
+
+The Phase 1 decision run (PLAN_EXTRACTION_FIDELITY_V1 Section 7.2 / PLAN_OMNIDOCBENCH
+13.4), unattended overnight. Fixed set: 158 stratified English OmniDocBench pages
+(n>=22 per main data_source class, 12 1andmore_column, 29 tables) + a 6-doc internal
+native-PDF corpus. Four registered candidates; PaddleOCR-VL EXCLUDED (strict-JSON
+engine mismatch, not a forfeit). Per-sample scoring surfaced from the OmniDocBench
+scorer; paired per-page bootstrap 95% CI (10k resamples, seed 20260610). Full report:
+`HANDOVER_PHASE1_REPORT.md`.
+
+**VERDICT: INCONCLUSIVE** on the pre-registered comparison (pipeline-primary candidate
+vs the VLM hybrid); the default does NOT move (Phase 0B interim offline-floor default
+stays; the MinerU+Qwen hybrid stays the validated candidate). Reason: on OmniDocBench
+the only viable pipeline candidate (MinerU) is statistically identical to the incumbent
+hybrid (paired text-ED delta +0.0001, inside the +/-0.02 margin) because the hybrid IS
+MinerU on a near-code-free benchmark. What the two corpora establish positively, both
+with margin: pure-VLM-primary REFUTED (pipeline beats Qwen3-VL) and pure-pipeline-primary
+REFUTED for code (MinerU mangles indentation). The non-dominated architecture is the
+complementary one the candidate thesis describes - a MinerU-dominant default WITH a VLM
+code-specialist lane - i.e. the EXISTING hybrid.
+
+**OmniDocBench fidelity (158 pages; text/reading ED lower=better, TEDS higher):**
+
+| engine | text ED | reading ED | TEDS | note |
+|---|--:|--:|--:|---|
+| docling_fast | 1.000 | 1.000 | 0.000 | DRY - content-empty (do_ocr=False on image-only PDFs) |
+| mineru | 0.221 | 0.226 | 0.798 | GX10 vLLM |
+| qwen3vl | 0.256 | 0.238 | 0.421 | M5 mlx, cap1600 |
+| hybrid | 0.221 | 0.227 | 0.793 | == mineru here |
+
+Paired (n_text=151, n_teds=29): mineru vs hybrid text +0.0001 CI[+0.0000,+0.0002]
+(equivalent); hybrid vs qwen3vl text +0.0346 CI[+0.0036,+0.0663], TEDS +0.1745
+CI[+0.0283,+0.3102] (pipeline beats VLM, margin met); qwen3vl regresses worst on
+newspaper/three_column/1andmore_column (VLM multi-column reading-order failure).
+Engine health: all four 0% ladder/degraded, but docling content-empty 151/151 ->
+its OmniDocBench comparisons are DRY (the ladder-health guard does not see
+content-emptiness; flagged as a guard blind-spot).
+
+**Internal native-PDF corpus (6 docs x 4 engines, all fb=None, 0 ladder):**
+
+| class | docling_fast | mineru | qwen3vl | hybrid |
+|---|---|---|---|---|
+| CarOK dense table | 0 table (flattened, part-nrs lost) | 12 table | 12 table | 12 table |
+| scanned form 0013 | 0 text (no OCR) | text+table (OCR) | text+table | text+table |
+| code R3 indentation | vacuous (0 code chunks) | **0.300 FAIL** | **0.950** | **0.947** |
+
+R3 reconciliation: the PRODUCTION schema prompt preserves Qwen code indentation
+(0.950), unlike the render-sweep transcription prompt (which stripped it) - so
+indentation loss was a PROMPT property, not an unavoidable model property; the
+hybrid's Qwen-for-code lane is validated (0.947 vs pure MinerU 0.300). Junk-presence
+signals clean across all engines (no added junk); the real differentiators are
+OMISSION (counts) and CODE (R3), the classes those signals are blind to (judged
+qualitatively per Section 7.3).
+
+**Per-class winners (Phase 2 evidence, no action):** prose MinerU==hybrid>Qwen;
+tables MinerU/hybrid>>Qwen and >>docling; scans MinerU/hybrid>>docling;
+code-indentation Qwen/hybrid>>MinerU>>docling; multi-column MinerU/hybrid>Qwen. The
+hybrid loses no class outright.
+
+**Lesson:** a bake-off on a corpus that lacks the deciding content class cannot
+decide it. OmniDocBench (English, ~no dense code) makes pure MinerU and the
+MinerU+Qwen hybrid indistinguishable - the ONLY page class that separates them
+(code-indentation) lives exclusively in the internal corpus, where the R3 gate (not
+text-ED, which is whitespace-blind) shows MinerU failing and the VLM rescuing it.
+The two-corpus design is what turned a benchmark tie into a real architectural
+finding. Also: presence-not-content - an engine can post 0% ladder failures and
+still emit empty pages (docling on image-only PDFs); a fidelity health guard must
+check content, not just that a chunk was produced.
+
+## 2026-06-11 - Phase 4 shadow window: the hybrid flip is JUSTIFIED, interim default fails 4/16  `[Results][Decision][Lessons]`
+
+Phase 4 (formalize the MinerU+Qwen hybrid as the production default) ran a shadow
+window: the 16-doc crucible through BOTH production configs on IDENTICAL 15-page
+slices per doc, via the shipping CLI (`--vision-provider none`). arm A = the interim
+default (`USE_DOCLING_FAST=1`, offline floor); arm B = the hybrid (GX10 MinerU `:8001`
++ M5 Qwen `:8000` code lane + cap1600). Harness: `scripts/phase4_shadow_window.py`.
+
+Shadow table (verdict | engine | degraded | leak | text/img/tbl chunks | wall_s):
+
+| doc | A verdict | A chunks (t/i/tb) | A wall | B verdict | B chunks (t/i/tb) | B deg | B wall |
+|---|---|---|--:|---|---|--:|--:|
+| CombatAircraft | PASS_ADV | 34/36/0 | 43s | PASS_ADV | 48/33/0 | 0 | 236s |
+| PCWorld | PASS_ADV | 36/21/0 | 12s | PASS_ADV | 36/16/0 | 0 | 90s |
+| AIOS_academic | PASS_ADV | 54/7/0 | 12s | PASS_ADV | 57/5/5 | 0 | 126s |
+| FluentPython | PASS_ADV | 29/7/0 | 10s | PASS_ADV | 36/6/0 (64 tot) | 0 | 453s |
+| Grundlagen | PASS_ADV | 31/11/0 | 12s | PASS_ADV | 34/8/0 | 0 | 129s |
+| Form_0013 | PASS_ADV | 0/2/0 | 5s | **PASS** | 2/0/2 | 0 | 9s |
+| Form_betwisting | PASS_ADV | 3/3/0 | 5s | PASS_ADV | 3/1/0 | 0 | 13s |
+| CarOK_spreadsheet | **QA_FAIL** | 37/4/0 | 20s | **PASS** | 37/0/12 | 0 | 230s |
+| Firearms | **QA_FAIL** | 0/29/0 | 11s | PASS_ADV | 42/30/0 | 0 | 84s |
+| DigitaleFotografie | **QA_FAIL** | 0/13/0 | 35s | PASS_ADV | 27/20/0 | 0 | 133s |
+| HarryPotter | **QA_FAIL** | 14/4/0 | 9s | PASS_ADV | 18/6/0 | 0 | 53s |
+| Kimothi_RAG | PASS_ADV | 21/4/0 | 11s | PASS_ADV | 22/2/0 | 0 | 72s |
+| ATZ_Elektronik | PASS_ADV | 24/14/0 | 7s | PASS_ADV | 27/14/0 | 0 | 77s |
+| IRJET_academic | PASS_ADV | 32/6/0 | 8s | PASS_ADV | 29/5/2 | 0 | 77s |
+| Hybrid_EV | PASS_ADV | 76/13/0 | 17s | PASS_ADV | 84/14/5 | 0 | 188s |
+| Bevestigingsmiddelen | PASS | 4/0/0 | 5s | PASS | 5/0/1 | 0 | 61s |
+
+Aggregates: arm A QA_WARN+QA_FAIL = 4/16 = 25.0%; **arm B = 0/16 = 0.0%**. Both
+arms 0% ladder-served, 0 leak. Total wall A 222s, B 2030s (~9x; offline docling).
+
+Readings:
+- arm B regresses NO doc's verdict and is strictly better on 5 (4 FAIL->PASS/PASS_ADV
+  + Form_0013 PASS_ADV->PASS). The flip is JUSTIFIED by the pre-stated WP-A criteria
+  (arm B no worse on verdicts + ladder rates; the known class gaps favour B).
+- The 4 arm-A QA_FAILs are real content losses, all the documented docling weakness:
+  HEADING-coverage collapse from no-OCR (`do_ocr=False` -> 0 text on image/scan-heavy
+  Firearms + DigitaleFotografie), spreadsheet table-flatten (CarOK 0 tables, HEADING
+  0/37), and a dropped page (HarryPotter missing page 12). arm B fixes all four:
+  OCRs the scans (Firearms 0->42 text, Form_0013 0->2 text + 2 table), recovers
+  tables (CarOK 0->12, AIOS +5, Hybrid_EV +5, IRJET +2), keeps the page.
+- arm B's only advisories are `IMAGE_NO_VLM` (no VLM in the shadow run, by design)
+  + the semantic-fidelity advisory; neither blocks PASS_ADV.
+
+Lessons / dead-ends:
+- **A missing client library silently degrades the whole flip.** First shadow run
+  laddered EVERY non-code page on arm B to docling: the `[mineru]` extra
+  `mineru-vl-utils` was absent in the Mini env, so the MinerU lane raised
+  `ModuleNotFoundError` and the fail-closed ladder caught it. The smoke that
+  "passed" earlier only routed code-dense pages (which go to Qwen, not MinerU) so it
+  never exercised the broken lane. Lesson: smoke a NON-code page when validating the
+  MinerU half; and the absence shows as `degraded=N` in provenance, not as an error
+  verdict - watch the ladder stamp, not just the QA verdict.
+- **Throughput tail = the all-code doc on the M5 sequential mlx lane** (FluentPython
+  452s/15pg ~= 120 pages/hr, under the Phase 0B 200 pages/hr floor). Real production
+  code docs are mixed (most pages go to batched GX10 MinerU); flagged for the
+  production-week throughput calibration, not a flip-blocker.
+- The smoke script's `ENV_PYTHON` default (`$HOME/miniforge3/...`) does not match this
+  box's env (`/Users/Shared/miniforge3/...`); pass `ENV_PYTHON` explicitly.
+
+---
+
+## 2026-06-11 - R3 code-router gap: 3 distinct causes; the lever is the post-extraction quality flag, NOT the router  `[Method][Architecture][Lessons]`
+
+(Folded in 2026-06-17 from the standalone `docs/FINDINGS_R3_ROUTER_DIAGNOSIS.md`, now removed.)
+
+Triggered by the Phase 5 full-corpus run: code-heavy books fail the R3 code-indentation
+gate (`QA_FAIL`, "degraded code indentation") on cleanly-extracted (`degraded=0`) output.
+The obvious read - "the 0.10 monospace router threshold is wrong, lower it" - is WRONG. The
+router is sound; the failure decomposes into three distinct causes, only one an unaddressed gap.
+(Offline analysis: PyMuPDF page signals + the in-tree router functions; no inference server.)
+
+**Production routing (MineruQwenHybridEngine, router.py:383+).** Per page: `mono_ratio >= 0.10`
+-> Qwen (code); ELIF `page_has_code_block` AND NOT `page_has_table` -> Qwen (diluted code block);
+ELSE -> MinerU. Two font-based code signals, the second table-guarded (Qwen empties dense tables).
+
+**The three causes (measured):**
+
+| doc | pages | code pages | residual code->MinerU | reason |
+|---|--:|--:|--:|---|
+| FluentPython | 766 | 450 | 11 (1.4%) | font-blind text |
+| PythonDistilled | 1411 | 341 | 2 (0.1%) | font-blind text |
+| HarryPotter (prose) | 327 | 0 | 0 | (no over-trigger) |
+| **C++ Manual (R3-FAIL)** | 148 | **0 by text** | **148 (100%)** | **image-only scan** |
+
+1. **Dilution - ALREADY FIXED.** Monospace code block whose page-average ratio is pulled <0.10
+   by surrounding prose. `page_has_code_block` (>=4 contiguous lines each >=0.6 mono) recovers
+   these (FluentPython: 456 pages caught), table-guarded. Was the first thing to "fix" - already there.
+2. **Font-blind text code - TINY residual.** Code in a font not in `MONO_FONT_TOKENS` -> both font
+   signals read 0. Measured 11 FluentPython + 2 PythonDistilled pages (~1% of code pages). A
+   font-independent content detector (indentation + code punctuation + keywords) catches them at
+   0% prose false-positive (HarryPotter 0, Grundlagen 0). Small, optional.
+3. **Image-only scanned code - THE REAL GAP.** The C++ manual is 100% image-only (0 text chars/page,
+   full-page image). NO text layer -> every font-based signal is blind by construction -> all pages
+   to MinerU -> MinerU's 1.2B OCR mangles indentation (R3 0.44). A threshold tweak can't touch this -
+   there are no glyphs to weigh.
+
+**The fix (the lever):** post-extraction quality-flag re-extraction, NOT a better pre-flight router.
+The R3 metric ALREADY detects degraded code after extraction (it is what fails these docs). Wire that
+flag to a bounded re-extraction of the flagged page(s) through the Qwen code lane, accept the better of
+the two. No new routing signal, no per-page image classifier - reuses the existing R3 detector as
+trigger + existing Qwen lane as specialist. Fixes both the image-only scan (cause 3) and the font-blind
+residual (cause 2) for free (both surface as the same post-extraction R3 signal). This is
+`PLAN_EXTRACTION_FIDELITY_V1` Section 5.4 / charter 4.3 "action-on-flag specialist re-extraction" made
+concrete. (NOTE 2026-06-17: this is the same lever re-derived from scratch during the code-book trial -
+see the reliability lesson; reading THIS would have grounded it immediately, though today's framing goes
+one level deeper: the doc-level ProfileClassifier already labels these `technical_manual` but that profile
+is dropped at the `mmrag_v3.extract(path)` seam, so the engine routes blind.)
+
+**What NOT to do:** do NOT lower the 0.10 threshold (calibrated: AIOS non-code <=0.02, code 0.19-0.98;
+lowering floods Qwen with prose, does nothing for the image-only case). Do NOT route all image-only pages
+to Qwen (most scans are prose/forms where MinerU is right). The lever is the post-extraction quality flag.
+
+---
+
+## 2026-06-14 - WS3 render-tail PROVEN: cap1600 is BEST on the dense academic class, the n=1 break did not generalize  `[Results][Decision][Lessons]`
+
+The 2026-06-10 sweep left I6 "CONFIRMED for one page class" - cap1600 catastrophically
+broke a single dense academic `1andmore_column` page (0.004->0.95, n=1), parking the
+production render setting on a USER decision. WS3 (PLAN_FIDELITY_ORACLE_FIRST_V1 Section
+3') sized that tail properly: 12 dense `1andmore_column` English pages (mostly Putnam
+exam-math, the densest multi-column class), swept at 6 render settings via the M5
+Qwen3-VL-8B-8bit, scored against OmniDocBench ground truth.
+
+**Result (text/reading Edit_dist, LOWER=better; loops = pages that hit the 8192-token
+cap = runaway over-generation):**
+
+| setting | text ED | reading ED | repetition loops |
+|---|--:|--:|--:|
+| dpi200 (prod baseline) | 0.3666 | 0.5523 | 7/12 |
+| dpi150 | 0.3944 | 0.5603 | 7/12 |
+| **cap1600** | **0.0501** | **0.2287** | **0/12** |
+| cap1400 | 0.0611 | 0.2646 | 0/12 |
+| cap2000 | 0.2619 | 0.4766 | 3/12 |
+| cap2400 | 0.3617 | 0.5453 | 5/12 |
+
+**cap1600 is the BEST setting on the exact class it was thought to break - 7.3x better
+text-ED than dpi200 (0.0501 vs 0.3666), 2.4x better reading order.** Fidelity tracks
+repetition-loop incidence monotonically: cap1600 (0 loops) 0.0501 -> cap2000 (3) 0.2619
+-> cap2400 (5) 0.3617 -> dpi200 (7) 0.3666. The mechanism is now PROVEN end-to-end:
+oversized renders trip the VLM into repetition loops (a 32k-char transcription of one
+page IS the loop), and the repetition destroys fidelity. cap1600 is the highest
+LOOP-FREE resolution - high enough to read dense multi-column, low enough not to loop.
+
+**The higher-cap rescue hypothesis is REFUTED.** There is no middle cap that reads the
+dense class better without reviving the loop pathology; every setting above cap1600 is
+worse on BOTH cost and fidelity. The 2026-06-10 n=1 "cap1600 breaks academic-multicolumn"
+was an outlier, not a class property - at n=12 cap1600 wins the class decisively.
+
+**Decision: keep cap1600 as the production render cap (no class-conditional render).**
+This resolves the parked Phase-0B render-setting USER decision with measured proof.
+
+Lessons: (1) a worst-K n=1 signal is a HYPOTHESIS, not a finding - size it before acting
+(the n=1 break would have driven a needless class-conditional render). (2) the harness
+`score` step KeyError'd on `table.all.TEDS["all"]` for table-free pages and nulled ALL
+metrics incl. the available text/reading ED - read the metric_result.json directly
+(`text_block.page.Edit_dist.ALL` + per-layout `layout: 1andmore_column`) when the
+table key is absent. (3) same `$HOME` env-path mismatch as the smoke script - the
+omnidocbench scorer python is `/Users/Shared/...`, not `$HOME/...`; monkeypatch `ODB_PY`.
+
+
+## 2026-09-29 - IRJET-class quality audit: the gates were blind, the defects predate the cloud switch, and the instruments now exist  `[Results][Method][Lessons]`
+
+Trigger: an external verdict on one cloud-route conversion (Dashscope-intl `qwen3-vl-flash`,
+`MINERU_ENDPOINT` unset so the legacy HybridEngine ran) of `IRJET_Modeling_of_Solar_PV_system_under.pdf`.
+Plan and register: `docs/PLAN_QUALITY_REMEDIATION_V1.md` and `..._REGISTER.md`. This entry holds the data
+behind Wave 0 (instruments) and the first Wave 2 fixes; owner decisions are pending (plan Section 9).
+
+**1. The strict gate cannot see any of it.** `qa_full_conversion.py --source-pdf` on the defective output:
+`QA_PASS failures=0 warnings=0`, `furniture_chunk_ratio=0.0000` while 11 of 30 TEXT chunks contain running
+header/footer lines (the F1 filter is chunk-level, capped at 70 characters; the header chunk is 151). The
+mandatory `smoke_production.sh` "academic" lane IS this document.
+
+**2. The defects predate the cloud switch.** June runs (`vlmtest_IRJET`, `enrichtest_IRJET`,
+`icontest_IRJET_academic`, MinerU-era boxes in the correct frame) show the same 67x68 asset, 7 header-contaminated
+chunks and 12 low-priority chunks; a fresh run on the current tree (`irjet_baseline_499a5fa`) shows the same asset
+sizes and missing figures (log: "Dropped 7 icon-class image chunk(s)"). The 45 upstream commits changed none of it.
+
+**3. Regression-guard metrics over 46 local outputs (WP-0.2, `validators/structural_outcomes.py`).**
+
+| metric | median | p75 | p90 | max | outputs at 0 |
+|---|--:|--:|--:|--:|--:|
+| TEXT chunks with a heading line embedded after line 1 | 22.4% | 31.0% | 39.6% | 100% | 6/46 |
+| TEXT chunks containing a line repeating on >= 3 pages (upper bound) | 28.2% | 36.6% | 40.2% | 48.3% | 9/46 |
+| chunks with a stale next_text_snippet | 0.0% | 4.1% | 8.3% | 25.0% | 25/46 |
+| outputs with reference-class rows / order breaks / split entries | 15 / 5 / 8 of 46 | | | | |
+| outputs with a figure-caption deficit page | 14 of 46 | | | | |
+
+The snippet coverage gap reads 71-99% on outputs that predate the snippet feature (`snippets_present == 0`):
+interpret it only on fresh outputs. No threshold is set yet; thresholds follow Wave 2 (AGENT-GATE-PROGRESSION).
+
+**4. Source-anchored acceptance (WP-0.3, `scripts/qa_gold_anchor_smoke.py`) baseline before any fix.**
+`cloud_probe_irjet`: 12 anchors FAIL, 2 N/A; `irjet_baseline_499a5fa`: 11 FAIL, 1 N/A; June MinerU run: 12 FAIL, 0 N/A.
+Failing classes on all three: the source's running header/footer strings present in 6-7 chunks (5 of 5 furniture
+anchors), 2-3 of 3 reference entries split or cut mid-token (Tsai, Miyatake, Mandour), section anchors under the
+wrong parent (page-4 PSO paragraphs under "B. PSO applied to MPPT"; the conclusion under "REFERENCES" on the fresh
+run), and the abstract under "1. INTRODUCTION". N/A = the engine did not label that heading (never counted as a pass).
+
+**5. Firing rates before building (WP-M0).** Weak sentence-end cuts (a chunk ending in `)` `;` `:` continued in
+lowercase): 78 of 1,123 same-page text boundaries (6.9%) in 22 of 42 outputs (IRJET 11-20%, AIOS 10-17%). VLM-typed
+header/footer chunks: 9 chunks in 5 of 42 outputs; MinerU-era outputs carry no `source_label`, so the engine-label
+route of the furniture pass cannot be replayed offline (repetition can).
+
+**6. Bbox frame probe (WP-0.4; 6 paid page calls, production prompt and call path).** `qwen3-vl-flash` answers bboxes
+in a 0-1000 grid although the prompt asks for pixels. Raw-max / native-text-max: IRJET p2 x 0.866 y 0.617, p3 0.838
+0.615, p7 0.874 0.613 (grid expectation 0.883 / 0.625 for a 1132x1600 render; pixel answers would read 1.0);
+Schwungradspeicher p2 0.892 0.627 and p4 0.887 0.624 (expected 0.893 / 0.625); its p3 is inconclusive on y (raw boxes
+include figure regions with no text block, x 0.879). The page-7 inconsistency of the user's run did not reproduce.
+
+**7. WP-B1 replay (heading sections) on reconstructed element streams, 33 outputs.** HEADING coverage falls by
+1-2.7 points on typical documents (IRJET 100% -> 93%) because front matter before the first heading is now honestly
+null instead of carrying the NEXT section's heading. A 2-page slice of a 35-page paper (front matter 22% of its
+TEXT chunks) drops from 100% to 78%. The replay cannot emulate title-labelled elements, so it is a lower bound;
+the criterion is measured on the real fixed UIR in WP-V1, and no clause allows a sub-0.80 result to be "explained".
+
+Lessons: (1) a green strict gate proves the structural proxies only; the repo's own AGENT-INTEGRITY-01 named this and the
+F1 filter still shipped a predicate fitted to magazine folios. (2) A metric that restates its own fix is zero by
+construction: acceptance must be anchored in the source. (3) The first draft of the figure acceptance
+(`crop_prose_fraction`) scores a header-logo crop and a text-strip crop as success because neither contains prose; a
+check must be tried against the actual defect before it is trusted. (4) `git log HEAD..origin/<branch>` first: the
+working tree was 45 commits stale and a third lineage (`github/laptop-travel`) existed that no document mentioned.
+
+## 2026-09-29 (later) - IRJET-class remediation: measured predicates, a fixed-extraction A/B, and what the cloud frame still breaks  `[Results][Method][Dead-ends]`
+
+Continuation of the entry above (commits `7180aee` .. `c367b12`). Every behavior change was chosen by measurement
+or a red-first fixture; the acceptance evidence is a deterministic A/B on the FIXED extraction (UIR dump) of one
+live run, because two live IRJET extractions are only 84% identical.
+
+**1. Crop predicate study (WP-A1), 673 local IMAGE/TABLE crops, 359 replayable** (the sliced source PDFs of the
+other 314 are absent; the replay reproduces the asset's pixel size or aspect from the current B1 code). Candidate
+predicates against the current picker (P0):
+
+| predicate | crops changed | of which tables | verdict |
+|---|--:|--:|---|
+| P1 area floor (candidate >= 0.5 x VLM box) | 49 (13.6%) | 20 | rejected: turns correct no-overlap rescues into wrong-region crops on the cloud frame |
+| P2 dominance vs union of all graphics | 71 (19.8%) | 13 | rejected: breaks the Fluent Python sidebar rescues (union reference too crude) |
+| P3 page-chrome exclusion (same xref/bbox on >= 3 pages) | 5 (1.4%) | 0 | rejected: swaps the logo for another sprite, recovers no figure |
+| P4 = P2 + P3 | 68 (18.9%) | 10 | rejected with P2 |
+| **P5 graphics-evidence guard (IMAGE)** | **27 (7.5%)** | 0 | **shipped** |
+| **P6 = P5 + table text-evidence guard** | 60 with P5 | 33 | **shipped** (9 distinct table crops) |
+
+Every changed crop was viewed against the rendered page. Recovered: IRJET Figs 4/5/7 and Table I (correct-frame
+boxes), HarryPotter p7 (a raster strip inside a larger illustration) and AIOS p7 (a sub-panel raster of a vector
+diagram), AIOS p4/p9/p33 tables (find_tables had returned a neighbouring chart or a diagram fragment), Fluent
+Python's list/array table (a black header strip). Unchanged: the pinned B1 rescues over blank space, the Fluent
+sidebar rescues (VLM box on prose, real picture elsewhere), HarryPotter p2 (oversized box around one raster).
+Dead end: a "tiny rescue" floor would break the Fluent scorpion (2,419 pt^2) and lemur images.
+
+**2. Furniture rule replay (WP-B2), 40 local outputs, elements reconstructed from chunks.** Rank window k sweep:
+
+| k (top/bottom TEXT elements) | elements flagged | outputs with more headless chunks | IRJET furniture strings left (3 outputs) |
+|--:|--:|--:|--:|
+| 2 | 872 | 0 | 5 / 7 / 19 |
+| 3 | 1017 | 0 | 5 / 7 / 14 |
+| 4 (shipped) | 1111 | 0 | 5 / 7 / 0 |
+| 6 | 1245 | 0 | 5 / 7 / 1 |
+
+A stricter "same exact rank on every page" variant flags 57 fewer elements and leaves 11 more IRJET strings. The
+first design flagged AIOS's repeated sub-caption "(a) Normalized throughput. Higher is better." (5x): captions and
+footnotes are now protected; a copyright footer "(c) 2017 ..." must not match the sub-caption guard (it needs a
+letter after the marker). The raw HEADING coverage ratio dips 0.1-1.4 points on some outputs only because headed
+furniture-only chunks leave the denominator; the number of headless chunks never rises, which is the property that
+matters for the 0.80 gate.
+
+**3. Live run (WP-V1) on the current tree, cloud route, validity preconditions met.** Header: engine hybrid,
+degraded 0, fallback null, model `qwen3-vl-flash`, 7 of 7 pages served, 0 demoted, `pipeline_version` 2.16.0,
+`config_hash` set. 42 chunks (before: 30-34). Strict gate `QA_PASS`; the new guard metrics read real values:
+`furniture_line_chunks` 0, `heading_inside_body` 0, `orphan_snippet_chunks` 0, `reference_split_entries` 0,
+`figure_deficit_pages` 1 (page 3). QA-CHECK-01 reads -27.7% (logged -23.0% before; the removed furniture tokens
+now leave the source side; a warning, an error only under `--strict-qa`). `[IMAGE-DROPS] in=11 written=9
+itemized_drops=2 unaccounted=0`. Engine-label rule on the real UIR: 13 elements (6 headers, 7 footers), identical to
+the 13 the repetition rule finds on its own.
+
+**4. Fixed-UIR A/B (deterministic; base `499a5fa` chunker vs the tip on the same `UniversalDocument`).**
+
+| | text chunks | headless | headings inside body chunks | chunks with furniture strings | chunker-owned gold anchors failing |
+|---|--:|--:|--:|--:|--:|
+| base chunker | 29 | 0 | 9 | 14 | 12 |
+| tip, furniture pass off | 37 | 1 | 0 | 14 | 7 |
+| tip | 34 | 0 | 0 | 0 | 2 |
+
+The 2 remaining chunker-side anchors are not chunker-owned: the intro paragraphs are emitted by the VLM before the
+"1. INTRODUCTION" heading (reading order), and reference [9] arrives truncated inside one VLM element. Full
+source-anchored smoke on the live output: 5 failures (was 23-24): the 2 above plus Figs 3, 5, 6.
+
+**5. What the cloud frame still breaks (not fixable in the engine-agnostic layers; owner decision D-4/D-12).** The VLM
+answers bboxes in a 0-1000 grid, so page-3 boxes land 100-150 pt above the drawings: Figs 3/5/6 (vector art) and Table I
+get the header logo (67x68), two sprites (dropped as icon-class) and a header-plus-first-row crop. On page 6 the four
+figure crops pass the size band (area ratio 0.56-0.67) but show the wrong region (the advisory
+`qa_crop_fidelity.py` flags one as prose-dominated, prose fraction 0.67). A size band alone reads these as success;
+the source-vs-crop view (`human_review_page{2,3,5,6}.png` in the run directory) is what shows it.
+
+Lessons: (1) an acceptance number computed on the artifact a fix produced (size ratio, coverage ratio) can read
+success on a wrong region; only a source-anchored view or a frame-invariant sidecar shows it. (2) Measure the
+candidate predicates on the real corpus before choosing: the plausible one-line fix (area floor) was the worst
+performer. (3) A/B chunker changes on a fixed extraction: two live extractions of the same page differ enough to
+hide or fake a chunker effect. (4) Register every removal with the token-balance accountant, and say out loud that
+doing so makes the logged variance worse when the loss is upstream.

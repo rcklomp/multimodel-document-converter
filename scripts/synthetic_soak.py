@@ -120,6 +120,15 @@ MIN_CHUNK_CHARS = 150
 MAX_CODE_RATIO = 0.4
 ADVERT_KEYWORDS = ("subscribe", "buy now", "click here", "limited time", "discount")
 
+# Set from --include-code: when True, CODE chunks are eligible for sampling and the
+# MAX_CODE_RATIO text filter is bypassed, so code-answer queries are measured (the
+# default soak is BLIND to code, which is exactly the class we needed to test).
+INCLUDE_CODE = False
+# Set from --ingested-only: a set of doc_ids actually present in the target Qdrant
+# collection. Docs not in it are skipped at sample time (else they score misleading
+# zeros — "not ingested", not "retrieval failed"). None = no filter.
+INGESTED_DOC_IDS = None
+
 # Canonical doc directories. Mirrors scripts/rebuild_mmrag_v2_8_for_rc1.py.
 # v2.16 Phase 0: renamed from CANONICAL_34 → CANONICAL_DOCS and extended
 # from 34 to 38 entries (7 PDFs ingested from data/raw/; 4 passed strict
@@ -168,21 +177,58 @@ def _load_chunks(doc_name: str) -> list[dict]:
 
 
 def _is_eligible_text_chunk(chunk: dict) -> bool:
-    if chunk.get("modality") != "text":
+    modality = chunk.get("modality")
+    if INCLUDE_CODE:
+        if modality not in ("text", "code"):
+            return False
+    elif modality != "text":
         return False
     content = (chunk.get("content") or "").strip()
     if len(content) < MIN_CHUNK_CHARS:
         return False
-    # Reject mostly-code chunks (heuristic: many short indented lines)
-    lines = content.splitlines()
-    if lines:
-        code_like = sum(1 for ln in lines if ln.startswith(("    ", "\t", "  ")) or ln.strip().startswith((">>>", "...")))
-        if code_like / max(1, len(lines)) > MAX_CODE_RATIO:
-            return False
+    # Reject mostly-code chunks (heuristic: many short indented lines) UNLESS
+    # --include-code asked for code coverage.
+    if not INCLUDE_CODE:
+        lines = content.splitlines()
+        if lines:
+            code_like = sum(1 for ln in lines if ln.startswith(("    ", "\t", "  ")) or ln.strip().startswith((">>>", "...")))
+            if code_like / max(1, len(lines)) > MAX_CODE_RATIO:
+                return False
     lowered = content.lower()
     if any(kw in lowered for kw in ADVERT_KEYWORDS):
         return False
     return True
+
+
+def _fetch_ingested_doc_ids(qdrant_url: str, collection: str) -> set:
+    """Scroll the target Qdrant collection for the distinct doc_ids it actually
+    contains, so --ingested-only can skip docs that are not in the index (they
+    would otherwise score misleading zeros). Fails CLOSED-LOUD: raises on error
+    rather than silently sampling everything."""
+    import urllib.request
+
+    seen: set = set()
+    offset = None
+    url = f"{qdrant_url.rstrip('/')}/collections/{collection}/points/scroll"
+    while True:
+        body = {"limit": 1000, "with_payload": ["doc_id"], "with_vector": False}
+        if offset is not None:
+            body["offset"] = offset
+        req = urllib.request.Request(
+            url, data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+        result = data.get("result", {})
+        for pt in result.get("points", []):
+            did = (pt.get("payload") or {}).get("doc_id")
+            if did:
+                seen.add(did)
+        offset = result.get("next_page_offset")
+        if not offset:
+            break
+    return seen
 
 
 def stage_sample(seed: int, n_chunks: int, work_path: Path) -> None:
@@ -194,7 +240,13 @@ def stage_sample(seed: int, n_chunks: int, work_path: Path) -> None:
     per_doc_target = max(1, n_chunks // len(CANONICAL_DOCS))
     sampled: list[dict] = []
     for doc_name in CANONICAL_DOCS:
-        chunks = [c for c in _load_chunks(doc_name) if _is_eligible_text_chunk(c)]
+        raw = _load_chunks(doc_name)
+        if INGESTED_DOC_IDS is not None:
+            did = next((c.get("doc_id") for c in raw if c.get("doc_id")), None)
+            if did not in INGESTED_DOC_IDS:
+                print(f"    {doc_name}: not ingested (skip)")
+                continue
+        chunks = [c for c in raw if _is_eligible_text_chunk(c)]
         if not chunks:
             print(f"    {doc_name}: 0 eligible (skip)")
             continue
@@ -1095,11 +1147,32 @@ def main() -> int:
                              "REPO_ROOT/output). Sample stage looks for "
                              "<docs-root>/<canonical_name>/ingestion.jsonl. "
                              "Set to output/v3_canonical/ for the V3 soak.")
+    parser.add_argument("--include-code", action="store_true",
+                        help="Make CODE chunks eligible for sampling (and bypass the "
+                             "MAX_CODE_RATIO text filter) so code-answer retrieval is "
+                             "measured. The default soak is BLIND to code.")
+    parser.add_argument("--ingested-only", action="store_true",
+                        help="Skip docs whose doc_id is not present in the target "
+                             "Qdrant collection at sample time (avoids misleading zeros "
+                             "for not-yet-ingested docs).")
     args = parser.parse_args()
     if args.docs_root is not None:
         global DOCS_ROOT
         DOCS_ROOT = args.docs_root.resolve()
         print(f"  docs-root override: {DOCS_ROOT}")
+    if args.include_code:
+        global INCLUDE_CODE
+        INCLUDE_CODE = True
+        print("  include-code: CODE chunks ARE eligible (code retrieval measured)")
+    if args.ingested_only and args.stage in ("sample", "all"):
+        global INGESTED_DOC_IDS
+        coll = args.collection or (
+            COLLECTION_DEFAULT_DASHSCOPE if args.provider == "dashscope"
+            else COLLECTION_DEFAULT_OMLX if args.provider == "omlx"
+            else COLLECTION_DEFAULT_OLLAMA
+        )
+        INGESTED_DOC_IDS = _fetch_ingested_doc_ids(args.qdrant_url, coll)
+        print(f"  ingested-only: {len(INGESTED_DOC_IDS)} doc_ids present in {coll}")
 
     work_path = Path(args.work_path)
     report_path = Path(args.report_path)

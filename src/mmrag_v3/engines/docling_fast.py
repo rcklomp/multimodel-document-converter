@@ -110,6 +110,19 @@ def _normalize_bbox(
 ) -> Optional[List[int]]:
     if bbox_obj is None or page_w <= 0 or page_h <= 0:
         return None
+    # Docling PDF provenance is BOTTOMLEFT-origin (y grows upward); this module emits
+    # top-left-origin [0,1000] boxes. Without the conversion every box is mirrored
+    # vertically (a running header lands at y 907-949 instead of 55-91). Use the
+    # library's own conversion; a bbox that is already top-left (or a duck-typed one
+    # with no origin) is used as-is. PLAN_QUALITY_REMEDIATION WP-F1.
+    origin = getattr(bbox_obj, "coord_origin", None)
+    if getattr(origin, "name", str(origin)) == "BOTTOMLEFT" and hasattr(
+        bbox_obj, "to_top_left_origin"
+    ):
+        try:
+            bbox_obj = bbox_obj.to_top_left_origin(page_height=page_h)
+        except Exception:  # noqa: BLE001 - fall back to the raw box rather than drop it
+            pass
     try:
         l = float(getattr(bbox_obj, "l", 0))
         t = float(getattr(bbox_obj, "t", 0))

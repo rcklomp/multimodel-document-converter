@@ -272,14 +272,21 @@ def main():
 
     print(f"{BOLD}Validating {len(collections)} collection(s)...{RESET}")
 
+    crashed = []
     for col in collections:
         try:
             validation = validate_collection(col["name"])
             print_report(col["name"], validation)
         except Exception as e:
+            crashed.append(col["name"])
             print(f"\n{RED}Error validating {col['name']}: {e}{RESET}")
 
     print()
+    if crashed:
+        # A validation that crashed proved nothing: exit non-zero so a caller (CI, a shell
+        # pipeline) cannot read "validated" from exit 0. PLAN_QUALITY_REMEDIATION WP-F2.
+        print(f"{RED}Validation crashed for {len(crashed)} collection(s): {', '.join(crashed)}{RESET}", file=sys.stderr)
+        return 1
     return 0
 
 

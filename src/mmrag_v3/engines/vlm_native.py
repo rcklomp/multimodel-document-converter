@@ -21,6 +21,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -39,6 +40,7 @@ from mmrag_v2.universal.intermediate import (
     create_page,
 )
 
+from ._deadline import DeadlineExceeded, deadline_seconds, run_with_deadline
 from .vlm_provider import (
     VlmProvider,
     VlmProviderConfig,
@@ -50,6 +52,38 @@ logger = logging.getLogger(__name__)
 
 
 PAGE_RENDER_DPI = 200
+
+
+def _stall_retry_count() -> int:
+    """Retries for a stalled (deadline-exceeded) VLM page — re-issued on a FRESH
+    connection, since the server serves new requests instantly. Default 2."""
+    raw = (os.environ.get("VLM_PAGE_STALL_RETRIES") or "").strip()
+    if raw:
+        try:
+            return max(0, int(raw))
+        except ValueError:
+            pass
+    return 2
+
+# Longest-side render cap (px) for the VLM lane — INTERIM default per
+# DECISIONS.md "cap1600 interim render setting" (2026-06-10). The uncapped
+# dpi200 render (observed up to 19192 px on large-format pages) ships ~12k
+# vision tokens/page and trips the VLM into degenerate repetition on dense
+# pages: fidelity-HARMFUL in aggregate (Phase 0A n=44: text-ED 0.411 vs
+# 0.081 at cap1600, which is also ~5x cheaper). Rollback lever:
+# VLM_RENDER_MAX_PX env var; 0 disables the cap (pure-DPI rendering).
+VLM_RENDER_MAX_PX = 1600
+
+
+def _render_max_px() -> int:
+    raw = os.environ.get("VLM_RENDER_MAX_PX", "").strip()
+    if not raw:
+        return VLM_RENDER_MAX_PX
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return VLM_RENDER_MAX_PX
+
 
 # A2 (Charter Blocker A): cheap per-page output-budget estimate. The VLM's
 # JSON output size tracks the page's content volume, and the page's own
@@ -353,8 +387,15 @@ def render_page_png(
 
     The single source of truth for VLM page rendering, shared by
     ``VlmNativeEngine``, ``HybridEngine`` and ``MineruQwenHybridEngine``.
+    The longest rendered side is clamped to ``VLM_RENDER_MAX_PX`` (env
+    override; 0 disables) so a large-format page can never balloon past the
+    target resolution — small pages render at ``render_dpi`` unchanged.
     """
     zoom = render_dpi / 72.0
+    max_px = _render_max_px()
+    if max_px:
+        longest_pts = max(page.rect.width, page.rect.height) or 1.0
+        zoom = min(zoom, max_px / longest_pts)
     matrix = fitz.Matrix(zoom, zoom)
     pixmap = page.get_pixmap(matrix=matrix, alpha=False)
     buffer = io.BytesIO()
@@ -381,12 +422,50 @@ def extract_page_vlm(
     render_dpi = getattr(vlm_engine, "render_dpi", PAGE_RENDER_DPI)
     image_bytes, pixel_w, pixel_h = render_page_png(page, render_dpi)
     prompt = _build_schema_prompt(pixel_w, pixel_h)
-    payload = _describe_and_parse(
-        provider,
-        image_bytes,
-        prompt,
-        max_tokens=estimate_output_budget(page),
-    )
+    # Hard wall-clock backstop: ``requests`` timeout is not a reliable TOTAL bound
+    # (a stalled socket hung a page for 3h, 2026-06-18). Cap the whole per-page VLM
+    # call just above the configured request timeout; on overrun raise
+    # DeadlineExceeded, which the caller treats as a per-page failure (demote /
+    # fail-closed), never an infinite block. See engines/_deadline.py.
+    _req_timeout = getattr(getattr(provider, "config", None), "timeout_seconds", 600.0)
+    try:
+        _req_timeout = float(_req_timeout)
+    except (TypeError, ValueError):
+        _req_timeout = 600.0
+    _deadline = deadline_seconds("VLM_PAGE_DEADLINE_SECONDS", _req_timeout)
+    # Stall recovery (2026-06-18): mlx_vlm.server intermittently receives a request
+    # in full but its handler deadlocks BEFORE generation (TCP-proven: server Recv-Q=0
+    # request delivered, Send-Q=0 no reply, MLX threadpool idle, generation lock free)
+    # while serving every OTHER request instantly. So a stalled call is NOT a dead
+    # server: abandon it and retry on a FRESH connection (new requests.post), which
+    # the evidence shows succeeds. Only after exhausting retries do we surface the
+    # stall to the caller (router demotes the page to MinerU). Override count via
+    # ``VLM_PAGE_STALL_RETRIES`` (default 2 retries = 3 attempts).
+    _stall_retries = _stall_retry_count()
+    _budget = estimate_output_budget(page)
+    attempt = 0
+    while True:
+        try:
+            payload = run_with_deadline(
+                lambda: _describe_and_parse(provider, image_bytes, prompt, max_tokens=_budget),
+                _deadline,
+                label=f"vlm_page_{page_number}_try{attempt + 1}",
+            )
+            break
+        except DeadlineExceeded:
+            attempt += 1
+            if attempt > _stall_retries:
+                logger.warning(
+                    "VLM page %d stalled on all %d attempt(s) (server handler wedged "
+                    "per-request); surfacing to caller for fallback",
+                    page_number, _stall_retries + 1,
+                )
+                raise
+            logger.warning(
+                "VLM page %d stalled (no response in %.0fs) but the server is healthy "
+                "for fresh requests; retrying on a NEW connection (attempt %d/%d)",
+                page_number, _deadline, attempt + 1, _stall_retries + 1,
+            )
     return VlmNativeEngine._page_from_payload(
         payload,
         fallback_page_number=page_number,

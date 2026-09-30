@@ -83,7 +83,10 @@ def test_code_smuggles_as_text_promotes_to_code_modality(tmp_path):
     )
     assert ic.modality == Modality.CODE
     assert ic.metadata.chunk_type == ChunkType.CODE
-    assert ic.content == code
+    # F4 resolved contract (eeffcff, user-adjudicated 2026-06-10): code MUST be
+    # fenced at the chunker chokepoint; indentation preserved verbatim inside.
+    assert ic.content.lstrip().startswith("```")
+    assert code in ic.content
     # Provenance survives serialization into the output metadata.
     assert ic.metadata.original_vlm_type == "code"
 

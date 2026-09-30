@@ -64,6 +64,13 @@ class _FakeMinerUEngine:
         self.render_calls.append(page.number)
         return (b"img", 100, 100)
 
+    def two_step_extract(self, image):
+        # Mirror the real MineruNativeEngine public surface (Phase 0.5 added the
+        # bounded-retry wrapper; extract_page_mineru now drives the engine method,
+        # not the bare client). The double delegates straight to its client - the
+        # routing tests need the interface, not the retry behaviour.
+        return self.client.two_step_extract(image)
+
 
 def _fake_page_from_payload(payload, fallback_page_number, pixel_width, pixel_height):
     el = create_element(

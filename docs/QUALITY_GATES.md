@@ -11,22 +11,80 @@
 ## R3 — Code-Indentation Fidelity (redesigned 2026-06-05)
 
 R3 ("indentation fidelity + syntax preservation") is enforced by the shared
-metric in `scripts/_code_quality.py`, imported by `qa_conversion_audit.py` (the
-authoritative HARD gate) and `qa_semantic_fidelity.py` (advisory). It measures
+metric in `src/mmrag_v2/validators/code_quality.py` (single source of truth;
+`scripts/_code_quality.py` is a re-export shim), imported by `qa_conversion_audit.py`
+(the authoritative HARD gate), `qa_semantic_fidelity.py` (advisory), and the
+conversion-time code-repair pass in `mmrag_v3.processor`. It measures
 code over the FULL population (`modality=="code"` + legacy `modality=="text"`
 code), POSITIVELY identifies code (keywords / code punctuation / `>>>` REPL) so
 extractor-mislabelled equations are excluded, and scores indentation ONLY on
 judgeable code (multi-line `:`-suite / brace blocks; flat/single-statement and
 REPL transcripts are exempt — no nesting to assess).
 
-**Fidelity floor:** `0.90` (unchanged). **Gate verdict (Policy B):** at/above the
-floor, or fewer than 3 judgeable chunks → PASS. Below the floor → each degraded
-chunk is flagged, and the document hard-fails ONLY when judgeable-code density
-`>= 0.04`; below that density it is an advisory WARN (code is always minority
-content, so a prose document is not discarded over incidental mangled code).
+**Clean-pass floor:** `0.90` (unchanged). **Accept-with-remark floor:** `0.65`
+(user-signed 2026-06-17). **Gate verdict (Policy B):**
+- fidelity `>= 0.90`, or fewer than 3 judgeable chunks → **PASS**.
+- fidelity in `[0.65, 0.90)` → **WARN, accepted with a remark** (non-blocking): a
+  code-bearing doc degrades gracefully rather than hard-failing, and the
+  realised-quality drop is tracked for targeted follow-up. This band is accepted
+  regardless of density.
+- fidelity `< 0.65` → each degraded chunk is flagged, and the document hard-**FAIL**s
+  ONLY when judgeable-code density `>= 0.04`; below that density it is an advisory
+  WARN (code is always minority content, so a prose doc is not discarded over
+  incidental mangled code).
+
 The verdict is INDEPENDENT of `content_type`. Full rationale, anti-weakening
 note, and the rejected alternatives: `docs/DECISIONS.md` "R3 Code-Indentation
-Gate Redesign" and `docs/PLAN_R3_CODE_GATE_REDESIGN.md`.
+Gate Redesign" + "R3 Accept-With-Remark Band".
+
+## Fidelity Outcome Gate + Quality-Risk Proxies (ADVISORY; F5)
+
+Added in `PLAN_EXTRACTION_FIDELITY_V1` Phase 5 (2026-06-11) per `AGENT-GATE-PROGRESSION`
+(advisory-first; HARD gates are reserved for deterministic schema invariants).
+
+**Fidelity outcome gate (offline, ADVISORY).** The one place a true fidelity verdict
+is issued - it has labeled ground truth and runs OFFLINE, distinct from the
+conversion-time proxies below. Instrument: OmniDocBench labeled metrics (text edit
+distance, table TEDS, reading-order edit distance) via `scripts/omnidocbench_adapter.py`.
+It reports the fidelity delta versus the recorded hybrid regression baseline -
+**158-page fixed set: text-ED 0.2212 / TEDS 0.7933** (`PLAN_EXTRACTION_FIDELITY_V1`
+Phase 1). The bar is REGRESSION-against-baseline (no fidelity loss vs the selected
+baseline), NOT an absolute exact-match floor (edit-distance/TEDS penalize functionally
+equivalent formatting). Comparability: every engine-vs-baseline comparison runs on the
+SAME fixed page set; the full-755 number (0.301/0.563) is a corpus reference, never a
+subset comparator. Promotion to a HARD regression gate is gated on (a) the bake-off
+running clean end-to-end and (b) the chosen route shown stable across doc classes on
+BOTH corpora. It is NOT a per-conversion production gate (no ground truth at conversion
+time). Anti-weaken: no hard gate may be passable by dropping hard pages; it pairs with
+`PLAN_GATE_QUALITY_V1`'s retrieval-value axis so clean transcription of junk cannot pass
+both.
+
+**Conversion-time quality-risk proxies (ADVISORY signals, NOT fidelity).** No ground
+truth exists at conversion time, so these ESTIMATE risk; they are PROXIES, never a
+fidelity claim. Candidates: table-grid validity (parses to a rectangular grid),
+code-fence/indentation integrity, reading-order monotonicity, degenerate-repetition
+score, empty-region ratio. A page failing a proxy is FLAGGED (`extraction_quality_risk`),
+not declared low-fidelity. Status verified 2026-09-29: one proxy and one consumer ship.
+`mmrag_v3.extract()` stamps `extraction_quality_risk_pages` (pages with at least one
+judgeable code element that fails the R3 indentation check), and `_repair_degraded_code`
+re-extracts each such page once through the VLM (when it is reachable), swapping only when
+the VLM page has more correctly indented code, keeps at least 80% of the non-code text and no
+less table cell text (`extraction_code_repaired_pages` counts the swaps). This is shipped code whose ratification is pending (owner decisions D-22 and D-25). The other proxies
+above and their consumers remain `[PROPOSED]` (charter Sec. 4.3); for those, the ladder's
+presence test and the ladder-served page count (below) are the available signals. Do NOT
+replace `chars > 0` with `proxy_score > threshold` and call it fidelity - that is the
+false-confidence trap.
+
+**Ladder-served visibility (ADVISORY).** A green gate must say what fraction of its
+pages the primary engine actually served. `extraction_degraded_pages` (ladder-served)
+and `extraction_recovered_pages` are surfaced so a laddered-page spike is visible; a
+ladder-served ratio above the Phase 4 bound (2% of pages over 10 consecutive docs) is
+a rollback trigger (charter §4.2), not a silent `QA_PASS`. Per document (verified
+2026-09-29 in `scripts/qa_full_conversion.py`): a ladder-served fraction within 2% is the
+allowed advisory `EXTRACTION_LADDER_SERVED`, a larger fraction is a real `QA_WARN`, and a
+document with any `modality=code` chunk and any laddered page is the hard
+`EXTRACTION_DEGRADED_CODE` FAIL (see the advisory table and "Extraction-ladder hard signal
+(WS1b)" below).
 
 ## QA-CHECK-01 Tolerance Policy (Pass/Fail Source)
 
@@ -176,7 +234,8 @@ With `--source-pdf`, those pages are classified as `MISSING_PAGES_BLANK`
 ### Advisory Warning Classes (Phase G, 2026-05-11)
 
 The strict gate emits `QA_PASS_WITH_ADVISORIES` (a documented PASS
-variant for v2.9.0-rc1 and v2.10 strict-gate accounting) when
+variant introduced for v2.9.0-rc1 and v2.10 strict-gate accounting; verified
+2026-09-29 it is not version-gated and applies to every run) when
 **all** of the following hold:
 
 1. Zero `FAIL`-severity issues.
@@ -200,7 +259,20 @@ Allowed advisory codes and their rationale (per `docs/DECISIONS.md`
 | `SCRIPT_ADVISORY_FAIL` | `qa_semantic_fidelity.py` is advisory by design (exit 0); the authoritative R3 hard gate is `qa_conversion_audit.py` (Policy B, see "R3 — Code-Indentation Fidelity" above). A `SEMANTIC_FAIL` it prints — e.g. `code_indentation_fidelity` below 0.90 — is informational; the hard verdict comes from the audit. | No |
 | `MISSING_CHAPTERS` | EPUB spine coverage found missing chapters, but every missing chapter is a contiguous leading/trailing low-content structural item (for example title page, cover, copyright/colophon stub, or blank wrapper) that Docling's HTML parser stripped before chunk emission. Internal gaps or content-bearing edge chapters remain `FAIL`. | Yes (edge + low-content structural only) |
 | `VISION_HARD_FALLBACK_RATE` | Hard-fallback rate > 5 % when ALL hard_fallbacks have the F4 sentinel — documented "VLM legitimately can't describe this" cases (complex assets with terse responses after the Phase 3 detail-retry). | Yes (F4 condition above) |
-| `IMAGE_NO_VLM` | The converter ran with `--vision-provider none`, so image chunks are retained as ID-only fallbacks (asset filename, no description). This is a multimodal converter — the image asset still ships; the missing description is a documented, user-chosen no-VLM state, not a defect. The CLI warns at run time that an image-bearing document converted without a VLM has limited multimodal retrieval value. | No |
+| `IMAGE_NO_VLM` | The converter ran with `--vision-provider none`, so image chunks are retained as ID-only fallbacks (asset filename, no description). This is a multimodal converter — the image asset still ships; the missing description is a documented, user-chosen no-VLM state, not a defect. The CLI warns at run time that an image-bearing document converted without a VLM has limited multimodal retrieval value. Verified 2026-09-29: the flag does not reach `mmrag_v3.extract()`, so an image chunk that already carries the V3 page VLM's description is stamped `vision_status=done` and does not raise this code; only image chunks without a description become `no_vlm` fallbacks (`src/mmrag_v2/batch_processor.py`, `scripts/qa_full_conversion.py`). | No |
+| `EXTRACTION_LADDER_SERVED` | The fail-closed ladder served a small fraction of pages from tier-2/tier-3 (the primary engine could not). Allowed as advisory ONLY when the served fraction is within the 2% Phase-4 bound (charter §4.2); above the bound it is a real `QA_WARN`, never an advisory. A code-bearing doc with ANY laddered page is `EXTRACTION_DEGRADED_CODE` (FAIL), not this code. WS1b, `_extraction_ladder_issues`. | Yes (served fraction <= 2%) |
+| `CONTENT_EMPTY_PAGES_UNVERIFIED` | A run WITHOUT `--source-pdf` produced no chunk on more than 15% of pages (orphan pages, any modality). Blank-vs-lost is unverifiable without the source, so this is ALWAYS advisory and never a basis to FAIL; it nudges the operator to re-run with `--source-pdf` for the hard `MISSING_PAGES` verdict. With `--source-pdf` it is inert (page coverage is the authority). WS1a, `_content_emptiness_issues`. | No (always advisory; only fires without `--source-pdf`) |
+
+### Extraction-ladder hard signal (WS1b, 2026-06-13)
+
+`EXTRACTION_DEGRADED_CODE` is a HARD `QA_FAIL` (not an advisory): a code-bearing
+document whose fail-closed ladder served ANY page from tier-2 docling / tier-3
+PyMuPDF. Both tiers are vacuous on code (measured: docling `verbatim_fidelity`
+0.015 on a code-dense slice; `PLAN_FIDELITY_ORACLE_FIRST_V1` Section 1.2), so a
+laddered code page is data loss and the doc is stale — it must be re-extracted on
+the primary engine before ingest, never pass silently. Healthy runs
+(`extraction_degraded_pages == 0`) and legacy outputs (no `extraction_*` stamps)
+raise nothing, so the offline smoke (asserts `degraded == 0`) is unaffected.
 
 The PASS variant is parallel to the SCAN0013 form-aware variant
 (`GATE_PASS [form: ...]`) — both are explicit governance allowances
@@ -238,7 +310,7 @@ correctly grades their pre-existing OCR/scan imperfections).
 
 | Window | Format pin | Source of truth |
 |---|---:|---|
-| **v2.11.0** (this release) | **≥ 85%** | 89.8% actual per `docs/archive/snapshots/QUALITY_SNAPSHOT_2026-05-20_v2.11_soak_qwen3.md` |
+| **v2.11.0** (this release) | **≥ 85%** | 89.8% actual per the 2026-05-20 v2.11 soak snapshot (quarantined v2 history) |
 | **v2.11.1+** (recovery) | **≥ 95%** | Target after v2.11.x scanned/form chunk-content sanitization patch |
 | **v2.12+** (revert) | **≥ 96%** | Original pin; reinstated after two consecutive recovery soaks pass |
 

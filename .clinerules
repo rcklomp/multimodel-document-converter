@@ -1,5 +1,7 @@
 # 🚨 EXECUTION LAW: MM-Converter V2 (v2.13.0 SHIPPED 2026-05-22; v2.14 not yet scoped)
 
+> STATUS 2026-09-29: this file was last edited 2026-05-22 (commit a77758b) and describes the v2.13 era. Verified today: engine version is 2.16.0 (`src/mmrag_v2/version.py`), local tags v2.14.0, v2.15.0 and v2.16.0 exist (`git tag -l`), and `BatchProcessor.process_pdf` extracts through the V3 path (`mmrag_v3.extract()`). Current state: CLAUDE.md "Read First" (register INV-068).
+
 You are the Senior Architect. Apple Silicon (M-series) environment.
 Zero room for error. Hallucinations or ignoring documentation hierarchy
 equals failure.
@@ -16,6 +18,7 @@ equals failure.
 6. Plan history (latest first): `docs/PLAN_V2.13.md` (CLOSED v2.13.0)
    → `docs/PLAN_V2.12.md` (CLOSED v2.12.0) → `docs/PLAN_V2.11.md` (CLOSED v2.11.0)
    → `docs/PLAN_V2.10.md` (CLOSED v2.10.0). v2.14 plan not yet drafted.
+   > STATUS 2026-09-29: none of the four PLAN_V2.10-13 files exists in `docs/` (`git ls-files`); they sit in the quarantined v2 archive, which `.aiignore` blocks (register INV-068).
 7. `docs/QUALITY_GATES.md` (pass/fail thresholds)
 8. `docs/TESTING.md` (test commands)
 9. `.clinerules` (this file — emergency operational rules)
@@ -25,8 +28,9 @@ equals failure.
 Ignore any references to 2.0.0 / 2.3.0 / 2.4.1 in older examples — those
 predate the schema freeze.
 
-**Engine version:** `2.13.0` (annotated tag `v2.13.0` staged 2026-05-22
-for user push). Source of truth: `src/mmrag_v2/version.py` `__engine_version__`.
+**Engine version:** `2.16.0` (verified 2026-09-29; this line said `2.13.0`, with
+annotated tag `v2.13.0` staged 2026-05-22 for user push, when the file was written).
+Source of truth: `src/mmrag_v2/version.py` `__engine_version__`.
 
 **Tag history on GitHub + Gitea:**
 
@@ -40,11 +44,15 @@ v2.12.0      (2026-05-21, 5a2ce18)  — retrieval stack (hybrid + ModernBERT rer
 v2.13.0      (PENDING — staged 2026-05-22) — local embedder swap (omlx Qwen3-Embedding-8B) + OCR auto-routing
 ```
 
+> STATUS 2026-09-29: the local repo now also has tags v2.13.0, v2.14.0, v2.15.0 and v2.16.0 (`git tag -l`); whether they are on GitHub/Gitea was not checked (register INV-068).
+
 **Strict isolation:**
 
 - NEVER reference absolute paths like `/Users/ronald/...`; use repo-relative paths.
 - `docs/archive/` was emptied in the v2.11.0 cleanup. Old archived plans are
   recoverable via `git log --all -- docs/archive/...` but not on the active tree.
+  (Verified 2026-09-29: `docs/archive/` does not exist; v2.X history is quarantined in
+  `docs/.archive/`, which `.aiignore` blocks.)
 - Older `SRS_Multimodal_Ingestion_V2.X.md` files no longer exist on the active
   tree. The Read First chain above is the canonical source.
 
@@ -99,6 +107,8 @@ Environment variables required for production retrieval:
 - `DASHSCOPE_API_KEY` (only for soak judge + query generation, OR for
   the 30-day rollback path through 2026-06-19)
 
+> STATUS 2026-09-29: the omlx host `10.0.10.246:8000` named above did not accept a connection (`curl -m 4 http://10.0.10.246:8000/v1/models`: curl exit 7), and the 30-day rollback window stated above ended 2026-06-19; embedding and retrieval continuity is open (plan decision D-14).
+
 ## 📦 v2.13 SHIP-STATE SUMMARY
 
 v2.13.0 SHIPPED 2026-05-22. Two parallel workstreams closed:
@@ -114,8 +124,9 @@ v2.13.0 SHIPPED 2026-05-22. Two parallel workstreams closed:
    reaches Docling end-to-end (was bypassed by `layout-aware` OCR
    mode). Earthship +6.2pp Format. CarOK = judge-calibration limit.
 
-Evidence: `docs/QUALITY_SNAPSHOT_2026-05-22_v2.13_after.md` (AFTER)
-+ `..._v2.13_p1_omlx_vs_dashscope.md` (SWAP decision).
+Evidence: the 2026-05-22 v2.13 quality snapshots (AFTER, and the p1 omlx-vs-dashscope
+SWAP decision). Verified 2026-09-29: neither is at the `docs/` path this line used to cite;
+they are in the quarantined v2 archive.
 
 ## 🛠️ TESTING & VALIDATION
 

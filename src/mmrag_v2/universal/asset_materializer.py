@@ -74,6 +74,34 @@ DEFAULT_CROP_DRIFT_WARN_THRESHOLD = 0.15
 CROP_AUDIT_PASS = "CROP_AUDIT_PASS"
 QA_WARN_CROP_DRIFT = "QA_WARN_CROP_DRIFT"
 
+# WP-A1 (PLAN_QUALITY_REMEDIATION_V1): the B1 geometric pick may replace the VLM box only when
+# the VLM box is NOT itself sitting on real graphics. A graphics object counts as "in the box"
+# when at least this fraction of its own area is inside it; a raster replaces a box that holds
+# graphics only when it is at least this fraction of the bounding area of those graphics (it is
+# the dominant graphic, not a fragment such as a text-strip raster inside a vector flowchart).
+_IN_BOX_MIN_FRACTION = 0.5
+_DOMINANT_MIN_RATIO = 0.5
+# A page-sized object (full-bleed background art) says nothing about where a figure is.
+_BACKGROUND_PAGE_FRACTION = 0.8
+_MIN_GRAPHIC_SIDE_PT = 6.0
+# Above this many vector paths the drawing-cluster pass is skipped (cost guard; a dense vector
+# page then behaves as before: rasters only).
+_MAX_DRAWINGS_FOR_CLUSTERING = 3000
+
+# A TABLE chunk whose VLM box overlaps no detected table keeps the VLM box when the words under it
+# are table-like (short lines), not running prose: PyMuPDF's find_tables also fires on charts and on
+# a table's header row, and on the local corpus the box was the real table in every inspected case.
+_PROSE_LINE_MIN_WORDS = 8
+PROSE_DOMINATED_MIN_SHARE = 0.5
+
+_RectTuple = Tuple[float, float, float, float]
+
+
+def _rect_tuple(rect: "Optional[fitz.Rect]") -> "Optional[_RectTuple]":
+    if rect is None:
+        return None
+    return (round(rect.x0, 1), round(rect.y0, 1), round(rect.x1, 1), round(rect.y1, 1))
+
 
 @dataclass
 class CropHealth:
@@ -96,6 +124,33 @@ class CropHealth:
     # detection fingerprints above describe the ORIGINAL drifted crop; this
     # flag records that the persisted asset is the full-page fallback.
     reextracted: bool = False
+    # WP-A1 sidecar fields (frame-invariant, PDF points on the page the crop came from): the VLM
+    # box as projected onto the page, the rectangle actually rendered (None = full page) and the
+    # persisted asset's pixel size. ``crop_reason`` says why the B1 geometric pick was or was
+    # not used, so a wrong-object crop is auditable after the run.
+    vlm_rect_pt: "Optional[_RectTuple]" = None
+    clip_rect_pt: "Optional[_RectTuple]" = None
+    asset_px: "Optional[Tuple[int, int]]" = None
+    crop_reason: str = ""
+
+    def to_record(self) -> Dict[str, Any]:
+        """Full per-crop record for the crop_audit.json sidecar (every crop, not just suspects)."""
+        return {
+            "asset_ref": self.asset_ref,
+            "page": self.page,
+            "modality": self.modality,
+            "crop_source": self.crop_source,
+            "crop_reason": self.crop_reason,
+            "vlm_rect_pt": list(self.vlm_rect_pt) if self.vlm_rect_pt else None,
+            "clip_rect_pt": list(self.clip_rect_pt) if self.clip_rect_pt else None,
+            "asset_px": list(self.asset_px) if self.asset_px else None,
+            "mean_luminance": round(self.mean_luminance, 1),
+            "std_luminance": round(self.std_luminance, 1),
+            "is_full_page_fallback": self.is_full_page_fallback,
+            "is_edge_clamped": self.is_edge_clamped,
+            "is_low_information": self.is_low_information,
+            "reextracted": self.reextracted,
+        }
 
     @property
     def is_drift_flagged(self) -> bool:
@@ -269,6 +324,123 @@ def _pick_geometric_clip(
     return best_idx, best_rect
 
 
+def _page_graphics(page: "fitz.Page") -> List["fitz.Rect"]:
+    """Non-background graphics objects on a page: embedded rasters plus vector-drawing clusters.
+
+    Full-bleed page-sized objects are excluded (background art). Returns [] when PyMuPDF cannot
+    enumerate them, which makes the caller behave exactly as the pre-WP-A1 picker did.
+    """
+    rects: List["fitz.Rect"] = []
+    try:
+        for info in page.get_image_info():
+            bb = info.get("bbox")
+            if bb:
+                rects.append(fitz.Rect(bb))
+        paths = page.get_drawings()
+        if len(paths) <= _MAX_DRAWINGS_FOR_CLUSTERING:
+            rects.extend(fitz.Rect(r) for r in page.cluster_drawings(drawings=paths))
+    except Exception:  # pragma: no cover - defensive: PyMuPDF API drift
+        return []
+    page_area = float(page.rect.width * page.rect.height)
+    return [
+        r
+        for r in rects
+        if r.width > _MIN_GRAPHIC_SIDE_PT
+        and r.height > _MIN_GRAPHIC_SIDE_PT
+        and r.width * r.height < _BACKGROUND_PAGE_FRACTION * page_area
+    ]
+
+
+def _graphics_in_clip(graphics: List["fitz.Rect"], clip: "fitz.Rect") -> List["fitz.Rect"]:
+    """The graphics objects that sit (mostly) inside ``clip``."""
+    inside = []
+    for g in graphics:
+        inter = g & clip
+        if not inter.is_empty and inter.width * inter.height >= _IN_BOX_MIN_FRACTION * (
+            g.width * g.height
+        ):
+            inside.append(g)
+    return inside
+
+
+def _bounding_area(rects: List["fitz.Rect"]) -> float:
+    box = rects[0]
+    for r in rects[1:]:
+        box = box | r
+    return float(box.width * box.height)
+
+
+def prose_word_share(page: "fitz.Page", clip: "fitz.Rect") -> Optional[float]:
+    """Share of the text-layer words inside ``clip`` that sit on lines of >= 8 words.
+
+    Body prose is made of long lines; table cells, axis labels and figure annotations are short.
+    ``None`` when the clip holds no text-layer words at all.
+    """
+    words = page.get_text("words", clip=clip)
+    if not words:
+        return None
+    per_line: Dict[Tuple[int, int], int] = {}
+    for w in words:
+        key = (w[5], w[6])
+        per_line[key] = per_line.get(key, 0) + 1
+    prose = sum(n for n in per_line.values() if n >= _PROSE_LINE_MIN_WORDS)
+    return prose / len(words)
+
+
+def _select_crop_clip(
+    page: "fitz.Page",
+    modality: Modality,
+    candidates: List["fitz.Rect"],
+    consumed: set,
+    vlm_clip: "Optional[fitz.Rect]",
+    graphics: List["fitz.Rect"],
+) -> "Tuple[Optional[Tuple[int, fitz.Rect]], str]":
+    """B1 pick with the WP-A1 plausibility guard. Returns ``(pick, reason)``.
+
+    The pre-guard picker replaced the VLM box with ANY detected object, which on IRJET swapped a
+    vector flowchart for a text-strip raster and a vector figure for the page-header logo, and
+    which for tables returned a chart or a header-row strip that find_tables had detected instead
+    of the table under the VLM box. The guard applies to chunks that carry a VLM box.
+    TABLE: when no detected table overlaps the box and the words under the box are table-like
+    (not running prose) the VLM box is kept; over prose or blank space the rescue stands.
+    IMAGE:
+      * the box holds no graphics (whitespace or prose): the B1 rescue stands (pinned by the B1
+        tests; e.g. a hallucinated box over blank space next to the real picture);
+      * the box holds graphics and no raster overlaps it: keep the VLM box (the figure is vector
+        art the rasters know nothing about);
+      * the box holds graphics and an overlapping raster is a fragment of them: keep the VLM box;
+      * the overlapping raster is the dominant graphic (an oversized box around one picture): the
+        raster stands.
+    Design and measurements: docs/PLAN_QUALITY_REMEDIATION_V1.md WP-A1 (study of 359 replayable
+    local crops; 314 of the 673 could not be replayed because their sliced source PDFs are absent).
+    The TABLE rule changes 9 distinct local crops; 7 were confirmed against the rendered page as the
+    real table replacing a chart or a header strip, 1 (cloud frame) is wrong-object -> wrong-region.
+    """
+    pick = _pick_geometric_clip(candidates, consumed, vlm_clip)
+    if pick is None:
+        return None, "no_geometric_object"
+    if vlm_clip is None:
+        return pick, "geometric"
+    if modality == Modality.TABLE:
+        if not (pick[1] & vlm_clip).is_empty:
+            return pick, "geometric"
+        share = prose_word_share(page, vlm_clip)
+        if share is not None and share < PROSE_DOMINATED_MIN_SHARE:
+            return None, "vlm_kept_table_text_in_box"
+        return pick, "geometric_rescue"
+    if modality != Modality.IMAGE:
+        return pick, "geometric"
+    in_box = _graphics_in_clip(graphics, vlm_clip)
+    if not in_box:
+        return pick, "geometric_rescue"
+    _, rect = pick
+    if (rect & vlm_clip).is_empty:
+        return None, "vlm_kept_graphics_in_box"
+    if rect.width * rect.height >= _DOMINANT_MIN_RATIO * _bounding_area(in_box):
+        return pick, "geometric_dominant"
+    return None, "vlm_kept_raster_is_fragment"
+
+
 def materialize_visual_assets(
     uir_chunks: Sequence[Any],
     source_pdf: Path | str,
@@ -328,6 +500,7 @@ def materialize_visual_assets(
     # page offers enough of them).
     geo_cache: Dict[Tuple[int, str], List["fitz.Rect"]] = {}
     geo_consumed: Dict[Tuple[int, str], set] = {}
+    graphics_cache: Dict[int, List["fitz.Rect"]] = {}
     try:
         for c in visual:
             loc = getattr(c, "locator", None)
@@ -361,7 +534,20 @@ def materialize_visual_assets(
             if cache_key not in geo_cache:
                 geo_cache[cache_key] = _geometric_candidates(page, c.modality)
                 geo_consumed[cache_key] = set()
-            picked = _pick_geometric_clip(geo_cache[cache_key], geo_consumed[cache_key], vlm_clip)
+            if (
+                c.modality == Modality.IMAGE
+                and vlm_clip is not None
+                and page_index not in graphics_cache
+            ):
+                graphics_cache[page_index] = _page_graphics(page)
+            picked, crop_reason = _select_crop_clip(
+                page,
+                c.modality,
+                geo_cache[cache_key],
+                geo_consumed[cache_key],
+                vlm_clip,
+                graphics_cache.get(page_index, []),
+            )
 
             if picked is not None:
                 geo_idx, clip = picked
@@ -381,6 +567,7 @@ def materialize_visual_assets(
             except Exception as exc:  # pragma: no cover - defensive render guard
                 logger.warning("[V3-ASSET] pixmap render failed (page %d): %s", local_page, exc)
                 continue
+            asset_px = (int(pix.width), int(pix.height))
 
             abs_page = local_page + page_offset
             mod = "table" if c.modality == Modality.TABLE else "image"
@@ -407,9 +594,9 @@ def materialize_visual_assets(
                     exc,
                 )
                 try:
-                    png_bytes = page.get_pixmap(
-                        matrix=fitz.Matrix(zoom, zoom), clip=None
-                    ).tobytes("png")
+                    full_pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=None)
+                    png_bytes = full_pix.tobytes("png")
+                    asset_px = (int(full_pix.width), int(full_pix.height))
                     mean_lum, std_lum = _luminance_from_png(png_bytes)
                 except Exception as exc2:  # pragma: no cover - page unrenderable
                     logger.warning(
@@ -436,9 +623,8 @@ def materialize_visual_assets(
             reextracted = False
             if crop_source != "geometric" and (is_edge_clamped or is_low_information):
                 try:
-                    full_png = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=None).tobytes(
-                        "png"
-                    )
+                    full_pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=None)
+                    full_png = full_pix.tobytes("png")
                 except Exception as exc:  # pragma: no cover - defensive render guard
                     logger.warning(
                         "[V3-ASSET] B2 re-extraction render failed (page %d): %s",
@@ -447,6 +633,7 @@ def materialize_visual_assets(
                     )
                 else:
                     png_bytes = full_png
+                    asset_px = (int(full_pix.width), int(full_pix.height))
                     reextracted = True
                     logger.info(
                         "[V3-ASSET] B2 re-extraction: page %d crop drift-flagged "
@@ -475,6 +662,12 @@ def materialize_visual_assets(
                     is_low_information=is_low_information,
                     crop_source=crop_source,
                     reextracted=reextracted,
+                    vlm_rect_pt=_rect_tuple(vlm_clip),
+                    clip_rect_pt=_rect_tuple(
+                        None if is_full_page_fallback or reextracted else clip
+                    ),
+                    asset_px=asset_px,
+                    crop_reason=crop_reason,
                 )
             )
     finally:
